@@ -28,13 +28,10 @@ function MatrixWorkspace(Â::AbstractMatrix; optimize_data_structure = true)
     m ≥ n || throw(ArgumentError("Expected system with more rows than columns."))
 
     A_mat = Matrix{ComplexF64}(Â)
-    # experiments show that for m > 25 the data layout as a
-    # struct array is beneficial
-    if m > 25 && optimize_data_structure
-        return _make_matrix_workspace(StructArrays.StructArray(A_mat), A_mat, m, n)
-    else
-        return _make_matrix_workspace(A_mat, A_mat, m, n)
-    end
+    # Always use Matrix{ComplexF64} — benchmarks show StructArray is not faster
+    # on modern Julia, and using a single type eliminates the M type parameter
+    # instability that propagates through Jacobian → TrackerState → Tracker.
+    return _make_matrix_workspace(A_mat, A_mat, m, n)
 end
 
 function _make_matrix_workspace(A, A_mat::Matrix{ComplexF64}, m, n)

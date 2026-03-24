@@ -88,6 +88,8 @@ include("certification.jl")
 include("semialgebraic_sets.jl")
 include("numerical_irreducible_decomposition.jl")
 
+include("precompile.jl")
+
 function __init__()
     # Overwrite default IJulia behaviour. See
     # https://github.com/timholy/ProgressMeter.jl/issues/162

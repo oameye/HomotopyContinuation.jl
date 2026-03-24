@@ -104,8 +104,9 @@ const ComplexDF64 = Complex{DoubleF64}
 hi(x::DoubleF64) = x.hi
 lo(x::DoubleF64) = x.lo
 
-Base.isbits(::DoubleF64) = true
-Base.isbitstype(::Type{DoubleF64}) = true
+# DoubleF64 is naturally isbits (immutable struct of two Float64s).
+# Overloading Base.isbits/isbitstype is redundant and causes invalidation cascades
+# since these are compiler intrinsics called pervasively throughout Base.
 
 Base.zero(::DoubleF64) = DoubleF64(0.0, 0.0)
 Base.zero(::Type{DoubleF64}) = DoubleF64(0.0, 0.0)

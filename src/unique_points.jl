@@ -250,21 +250,23 @@ function add!(UP::UniquePoints{T,Id,M,GA}, v, id::Id, tol::Real) where {T,Id,M,G
             insert!(UP.tree, v, id; use_distances = true)
             return (id, true)
         else
+            # Use Ref to avoid captured variable boxing (found_id is reassigned in closure)
+            found_id_ref = Ref{Union{Nothing,Id}}(nothing)
             let actions = UP.group_actions::GA
                 apply_actions(actions, v) do w
                     found_id′ = search_in_radius(UP.tree, w, tol)
                     if !isnothing(found_id′)
-                        found_id = found_id′
+                        found_id_ref[] = found_id′
                         return true
                     end
                     false
                 end
             end
-            if isnothing(found_id)
+            if isnothing(found_id_ref[])
                 insert!(UP.tree, v, id)
                 return (id, true)
             else
-                return (found_id::Id, false)
+                return (found_id_ref[]::Id, false)
             end
         end
     else

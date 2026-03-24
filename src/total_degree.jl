@@ -43,7 +43,9 @@ function total_degree_variables(
     m, n = size(F)
 
     @unique_var x[1:n] t s[1:n]
-    support, coeffs = support_coefficients(System(F(x, target_parameters), x))
+    _supp_coeffs = support_coefficients(System(F(x, target_parameters), x))
+    support = _supp_coeffs[1]::Vector{Matrix{Int32}}
+    coeffs = _supp_coeffs[2]
 
     homogeneous = true
     D = zeros(Int, length(support))
@@ -59,7 +61,7 @@ function total_degree_variables(
         end
         D[k] = d
     end
-    scaling = maximum.(abs ∘ float, coeffs)
+    scaling = Float64[maximum(abs ∘ float, c) for c in coeffs]
 
     m ≥ (n - homogeneous) || throw(FiniteException(n - homogeneous - m))
 

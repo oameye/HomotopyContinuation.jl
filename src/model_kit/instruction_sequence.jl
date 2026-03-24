@@ -6,7 +6,7 @@ end
 
 struct InstructionSequence
     instructions::Vector{Instruction}
-    constants::Vector{Number}
+    constants::Vector{ComplexF64}
     constants_range::UnitRange{Int}
     parameters_range::UnitRange{Int}
     variables_range::UnitRange{Int}
@@ -142,6 +142,26 @@ function instruction_sequence(F::Union{System,Homotopy}; output_dim::Integer = l
     )
 end
 
+function _resolve_arg(arg, instr_op, i, arg_index_map, input_block_size, prev::Int32)
+    if isnothing(arg)
+        prev
+    elseif should_use_index_not_reference(instr_op, i)
+        Int32(arg)
+    elseif arg isa IRStatementRef
+        get(arg_index_map, arg, Int32(arg.i + input_block_size))
+    else
+        arg_index_map[arg]
+    end
+end
+
+function _build_instruction_args(stmt, instr_op, arg_index_map, input_block_size)
+    a1 = _resolve_arg(stmt.args[1], instr_op, 1, arg_index_map, input_block_size, Int32(1))
+    a2 = _resolve_arg(stmt.args[2], instr_op, 2, arg_index_map, input_block_size, a1)
+    a3 = _resolve_arg(stmt.args[3], instr_op, 3, arg_index_map, input_block_size, a2)
+    a4 = _resolve_arg(stmt.args[4], instr_op, 4, arg_index_map, input_block_size, a3)
+    (a1, a2, a3, a4)
+end
+
 function instruction_sequence(
     ir::IntermediateRepresentation;
     variables::Vector{Symbol},
@@ -151,14 +171,14 @@ function instruction_sequence(
     arg_index_map = Dict{IRStatementArg,Int32}()
     tape_index = 0
     # Find all constants
-    constants = Number[]
+    constants = ComplexF64[]
     for stmt in ir
         for (k, arg) in enumerate(getconstants(stmt))
             isnothing(arg) && continue
             should_use_index_not_reference(stmt.op, k) && continue
             haskey(arg_index_map, arg) && continue
 
-            push!(constants, arg)
+            push!(constants, ComplexF64(arg))
             arg_index_map[arg] = (tape_index += 1)
 
         end
@@ -193,23 +213,8 @@ function instruction_sequence(
     end
 
     instructions = map(ir) do stmt
-        prev_stmt_arg = Int32(1)
         instr_op = stmt.op
-        args = ntuple(Val(4)) do i
-            arg = stmt.args[i]
-            stmt_arg = if isnothing(arg)
-                # dummy data
-                Int32(prev_stmt_arg)
-            elseif should_use_index_not_reference(instr_op, i)
-                Int32(arg)
-            elseif arg isa IRStatementRef
-                get(arg_index_map, arg, Int32(arg.i + input_block_size))
-            else
-                arg_index_map[arg]
-            end
-            prev_stmt_arg = stmt_arg
-            return prev_stmt_arg
-        end
+        args = _build_instruction_args(stmt, instr_op, arg_index_map, input_block_size)
         target_index = get(arg_index_map, stmt.target, stmt.target.i + input_block_size)
 
         Instruction(args, instr_op, target_index)
