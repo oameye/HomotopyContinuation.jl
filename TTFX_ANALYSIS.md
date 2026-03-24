@@ -72,15 +72,27 @@ Replaced broadcasting with an explicit loop. `supports::Vector{Matrix{Int32}}` i
 concrete. Coefficients remain abstract (can be symbolic `Expression` when parameters
 are present).
 
-### 5. ModelKit internals (`src/model_kit/instruction_sequence.jl`)
+### 5. `to_number` returns `ComplexF64` (`src/model_kit/symengine.jl`)
+
+Changed `to_number(x::Basic)` from returning `Union{Int32, Int64, Float64, Rational, ...}`
+to returning `ComplexF64` for all numeric expressions. This narrows `IRStatementArg` from
+`Union{Nothing, Number, Symbol, IRStatementRef}` (unbounded) to
+`Union{Nothing, ComplexF64, Symbol, IRStatementRef}` (4 concrete types, union-splittable).
+
+Also changed `InstructionSequence.constants` from `Vector{Number}` to `Vector{ComplexF64}`.
+
+### 6. Distinct variable names in pipeline (`src/total_degree.jl`, `src/polyhedral.jl`, `src/solve.jl`)
+
+Stopped reassigning `F` through different types (`System` → `InterpretedSystem` →
+`FixedParameterSystem` → `AffineChartSystem` → `RandomizedSystem`). Each step uses
+a new variable (`F_compiled`, `F_target`, `F_chart`, `F_final`) so the compiler sees
+a single concrete type per variable.
+
+### 7. Other fixes
 
 - Fixed captured variable `prev_stmt_arg` (extracted to `_resolve_arg`)
-- Changed `constants::Vector{Number}` to `Vector{ComplexF64}` in `InstructionSequence`
-
-### 6. Other fixes
-
-- Type assertion on `ProgressMeter.tty_width` return (`src/solve.jl`)
 - Fixed captured variable `found_id` in `UniquePoints.add!` (`src/unique_points.jl`)
+- Type assertion on `ProgressMeter.tty_width` return (`src/solve.jl`)
 - Typed comprehension for `scaling` in `total_degree_variables` (`src/total_degree.jl`)
 - Precompile directives for tracker pipeline (`src/precompile.jl`)
 
@@ -97,16 +109,21 @@ are present).
 | Mods | 708 | `hash(::AbstractMod)` |
 | Others | ~4,287 | CommonWorldInvalidations, StaticArrays, FillArrays, etc. |
 
-## Remaining Type Instabilities
+## Remaining JET Reports
 
-15 non-ModelKit runtime dispatches remain (JET `@report_opt`):
-- 3 from `is_homogeneous` branching (genuine runtime polymorphism)
-- 5 from ModelKit boundary (to_number, to_dict internals)
-- 4 from FillArrays/PVector upstream
-- 3 from `fixed()` being called without `Val` in edge paths
+JET `@report_opt` on `solve(solver, starts)` — the hot path — shows **10 reports**,
+all outside our control:
 
-73 ModelKit dispatches from `to_number` returning abstract `Number` — would require
-redesigning the SymEngine binding layer. One-time cost, not in the hot loop.
+- 4 × ProgressMeter internals (`tty_width`, `tlast`, `dt` — upstream types)
+- 4 × `Result` constructor with `Union{Nothing, UInt32}` seed / `Union{Nothing, Symbol}` start_system — intentional design, Julia union-splits these efficiently
+- 1 × `MultiplicityInfo` recursive closure — JET optimization limitation
+- 1 × Dict assignment in multiplicity detection
+
+**Zero dispatches in the tracker pipeline** (`step!`, `track`, `init!`, `serial_solve`).
+
+JET crashes on paths involving `total_degree`/`polyhedral` (Taylor `@generated` functions
+trigger a JET bug with Julia 1.12's Compiler internals). Cthulhu verification confirms
+all tracker functions return concrete types on those paths too.
 
 ## Further Opportunities
 

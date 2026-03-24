@@ -118,7 +118,7 @@ function solver_startsolutions(
     F::Union{System,AbstractSystem},
     starts = nothing;
     seed = rand(UInt32),
-    start_system = isnothing(variable_groups(F)) ? :polyhedral : :total_degree,
+    start_system = isnothing(variable_groups(F)) ? Val(:polyhedral) : Val(:total_degree),
     generic_parameters = nothing,
     p₁ = generic_parameters,
     start_parameters = p₁,
@@ -158,7 +158,7 @@ function solver_startsolutions(
                 compile = compile,
                 kwargs...,
             )
-        elseif start_system == :polyhedral
+        elseif start_system isa Val{:polyhedral} || start_system == :polyhedral
             used_start_system = :polyhedral
             tracker, starts = polyhedral(
                 F;
@@ -166,7 +166,7 @@ function solver_startsolutions(
                 target_parameters = target_parameters,
                 kwargs...,
             )
-        elseif start_system == :total_degree
+        elseif start_system isa Val{:total_degree} || start_system == :total_degree
             used_start_system = :total_degree
             tracker, starts = total_degree(
                 F;
@@ -321,17 +321,15 @@ function start_target_homotopy(
 
     m, n = size(F)
 
-    G = fixed(G; compile = compile)
-    if !isnothing(start_parameters)
-        G = FixedParameterSystem(G, start_parameters)
-    end
+    G_compiled = fixed(G; compile = compile)
+    G_final = !isnothing(start_parameters) ?
+        FixedParameterSystem(G_compiled, start_parameters) : G_compiled
 
-    F = fixed(F; compile = compile)
-    if !isnothing(target_parameters)
-        F = FixedParameterSystem(F, target_parameters)
-    end
+    F_compiled = fixed(F; compile = compile)
+    F_final = !isnothing(target_parameters) ?
+        FixedParameterSystem(F_compiled, target_parameters) : F_compiled
 
-    H = StraightLineHomotopy(G, F; gamma = gamma)
+    H = StraightLineHomotopy(G_final, F_final; gamma = gamma)
     if is_homogeneous(f)
         vargroups = variable_groups(f)
         if vargroups === nothing

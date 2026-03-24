@@ -66,49 +66,52 @@ function total_degree_variables(
     overdetermined = m > n - homogeneous
     # sort by descending degree for overdetermined systems
     if overdetermined && F isa System
-        F = deepcopy(F)
+        F_sorted = deepcopy(F)
         perm = sortperm(D; rev = true)
-        permute!(F.expressions, perm)
+        permute!(F_sorted.expressions, perm)
         permute!(D, perm)
         permute!(scaling, perm)
+    else
+        F_sorted = F
     end
 
-    if F isa System
-        F = fixed(F; compile = compile)
-    end
-    if target_parameters !== nothing
-        F = fix_parameters(F, target_parameters; compile = compile)
-    end
-    # if homogeneous put on on an affine chart
+    F_compiled = F_sorted isa System ? fixed(F_sorted; compile = compile) : F_sorted
+    F_target = target_parameters !== nothing ?
+        fix_parameters(F_compiled, target_parameters; compile = compile) : F_compiled
+
+    # if homogeneous put on an affine chart
     if homogeneous && overdetermined
-        F = on_affine_chart(F)
+        F_chart = on_affine_chart(F_target)
         push!(D, 1)
         push!(scaling, 1.0)
         homogeneous = false
-        F = square_up(F)
-        scaling = [LA.I F.A] * scaling
+        F_final = square_up(F_chart)
+        scaling = [LA.I F_final.A] * scaling
         D = D[1:n]
     elseif overdetermined
-        F = square_up(F)
-        scaling = [LA.I F.A] * scaling
+        F_final = square_up(F_target)
+        scaling = [LA.I F_final.A] * scaling
         D = D[1:n]
+    else
+        F_final = F_target
     end
+
     if homogeneous
-        G = fixed(
+        G_start = fixed(
             System(s[1:n-1] .* (x[1:n-1] .^ D[1:n-1] .- x[end] .^ D[1:n-1]), x, s[1:n-1]); compile = compile,
         )
     else
-        G = fixed(System(s .* (x .^ D .- 1), x, s); compile = compile)
+        G_start = fixed(System(s .* (x .^ D .- 1), x, s); compile = compile)
     end
-    G = fix_parameters(G, scaling)
+    G_scaled = fix_parameters(G_start, scaling)
 
-    H = StraightLineHomotopy(G, F; γ = gamma)
+    H = StraightLineHomotopy(G_scaled, F_final; γ = gamma)
     if homogeneous
         H = on_affine_chart(H)
     end
     T = EndgameTracker(H, tracker_options = tracker_options, options = endgame_options)
     if overdetermined
-        T = OverdeterminedTracker(T, F::RandomizedSystem)
+        T = OverdeterminedTracker(T, F_final::RandomizedSystem)
     end
     starts = total_degree_start_solutions(D; homogeneous = homogeneous)
 
@@ -138,21 +141,22 @@ function total_degree_variable_groups(
 
     overdetermined = m > n - M * homogeneous
 
-    F = fixed(F; compile = compile)
-    if target_parameters !== nothing
-        F = fix_parameters(F, target_parameters; compile = compile)
-    end
+    F_compiled = fixed(F; compile = compile)
+    F_target = target_parameters !== nothing ?
+        fix_parameters(F_compiled, target_parameters; compile = compile) : F_compiled
 
     if homogeneous && overdetermined
-        F = on_affine_chart(F, projective_dims)
+        F_chart = on_affine_chart(F_target, projective_dims)
         D = [D LA.I]
         homogeneous = false
-        F = square_up(F)
+        F_final = square_up(F_chart)
         D = max.(D[:, 1:n], maximum(D[:, n+1:end], dims = 2))
         projective_dims .+= 1
     elseif overdetermined
-        F = square_up(F)
+        F_final = square_up(F_target)
         D = max.(D[:, 1:n], maximum(D[:, n+1:end], dims = 2))
+    else
+        F_final = F_target
     end
 
     g, C = multi_homogeneous_system(D, vargroups; homogeneous = homogeneous)
@@ -165,13 +169,13 @@ function total_degree_variable_groups(
         projective_dims;
         homogeneous = homogeneous,
     )
-    H = StraightLineHomotopy(G, F; gamma = gamma)
+    H = StraightLineHomotopy(G, F_final; gamma = gamma)
     if homogeneous
         H = on_affine_chart(H, projective_dims)
     end
     T = EndgameTracker(H, tracker_options = tracker_options, options = endgame_options)
     if overdetermined
-        T = OverdeterminedTracker(T, F::RandomizedSystem)
+        T = OverdeterminedTracker(T, F_final::RandomizedSystem)
     end
     T, starts
 end

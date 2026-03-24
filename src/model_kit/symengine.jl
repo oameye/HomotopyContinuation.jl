@@ -790,29 +790,24 @@ function to_number(x::Basic)
     cls = class(x)
 
     if cls == :Integer
-        n = convert(BigInt, x)
-        if typemin(Int32) ≤ n ≤ typemax(Int32)
-            return convert(Int32, n)
-        elseif typemin(Int64) ≤ n ≤ typemax(Int64)
-            return convert(Int64, n)
-        elseif typemin(Int128) ≤ n ≤ typemax(Int128)
-            return convert(Int128, n)
-        else
-            return n
-        end
+        return ComplexF64(convert(BigInt, x))
     elseif cls == :RealDouble
-        return convert(Float64, x)
+        return ComplexF64(convert(Float64, x))
     elseif cls == :Rational
         a, b = _numer_denom(x)
-        return to_number(a) // to_number(b)
+        return ComplexF64(convert(BigInt, a)) / ComplexF64(convert(BigInt, b))
     elseif cls == :RealMPFR
-        return convert(BigFloat, x)
+        return ComplexF64(convert(Float64, convert(BigFloat, x)))
     elseif cls == :Constant
-        return SYMENGINE_CONSTANTS[x]
+        return ComplexF64(SYMENGINE_CONSTANTS[x])
     elseif cls in COMPLEX_NUMBER_TYPES
         a, b = reim(x)
-        return complex(to_number(a), to_number(b))
+        ra = to_number(a)
+        rb = to_number(b)
+        return ComplexF64(ra isa ComplexF64 ? real(ra) : Float64(ra),
+                          rb isa ComplexF64 ? real(rb) : Float64(rb))
     else
+        # Not a number (e.g., a variable or symbolic expression) — return as-is
         return x
     end
 end

@@ -192,29 +192,27 @@ function polyhedral(
     end
     homogeneous = is_homogeneous(f)
     if homogeneous
-        F = on_affine_chart(f; compile = compile)
-        m, n = size(F)
+        F_chart = on_affine_chart(f; compile = compile)
+        m, n = size(F_chart)
         m ≥ n || throw(FiniteException(n - m))
-        if m > n
-            F = square_up(F; compile = compile)
-        end
+        F_final = m > n ? square_up(F_chart; compile = compile) : F_chart
         @var x[1:n]
-        support, target_coeffs = support_coefficients(System(F(x), x))
+        support, target_coeffs = support_coefficients(System(F_final(x), x))
     else
         m, n = size(f)
         m ≥ n || throw(FiniteException(n - m))
         if m > n
-            F = square_up(f; compile = compile)
+            F_final = square_up(f; compile = compile)
             @var x[1:n]
-            support, target_coeffs = support_coefficients(System(F(x), x))
+            support, target_coeffs = support_coefficients(System(F_final(x), x))
         else
-            F = f
+            F_final = f
             support, target_coeffs = support_coefficients(f)
         end
     end
     tracker, starts = polyhedral(support, target_coeffs; compile = compile, kwargs...)
     if m > n
-        tracker = OverdeterminedTracker(tracker, F::RandomizedSystem)
+        tracker = OverdeterminedTracker(tracker, F_final::RandomizedSystem)
     end
     tracker, starts
 end

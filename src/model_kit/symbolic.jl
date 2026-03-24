@@ -650,7 +650,10 @@ function exponents_coefficients(
         end
     end
     if unpack_coeffs
-        coeffs = to_smallest_eltype(to_number.(values(D)))
+        coeffs = map(v -> to_number(v), collect(values(D)))
+        if eltype(coeffs) === ComplexF64
+            coeffs = coeffs::Vector{ComplexF64}
+        end
     else
         coeffs = collect(values(D))
     end
@@ -715,7 +718,7 @@ function coefficients(f::Expression, vars::AbstractVector{Variable}; expanded::B
     end
 
     if make_to_number
-        permute!(to_number.(values(D)), perm)
+        permute!(ComplexF64[to_number(v)::ComplexF64 for v in values(D)], perm)
     else
         permute!(collect(values(D)), perm)
     end
@@ -1687,7 +1690,7 @@ function get_num_den(expr::Expression)
             factors = (class(den) == :Mul) ? args(den) : [den]
             for f in factors
                 base, exp =
-                    (class(f) == :Pow) ? (args(f)[1], Int(to_number(args(f)[2]))) : (f, 1)
+                    (class(f) == :Pow) ? (args(f)[1], Int(real(to_number(args(f)[2])))) : (f, 1)
                 max_powers[base] = max(get(max_powers, base, 0), exp)
             end
         end
@@ -1713,7 +1716,7 @@ function get_num_den(expr::Expression)
                 current_pwr = 0
                 for df in d_factors
                     dbase, dexp =
-                        (class(df) == :Pow) ? (args(df)[1], Int(to_number(args(df)[2]))) :
+                        (class(df) == :Pow) ? (args(df)[1], Int(real(to_number(args(df)[2])))) :
                         (df, 1)
                     if dbase == base
                         current_pwr = dexp
@@ -1745,7 +1748,7 @@ function get_num_den(expr::Expression)
     elseif cls == :Pow
         v = args(expr)
         p, q = get_num_den(v[1])
-        n = Int(to_number(v[2]))
+        n = Int(real(to_number(v[2])))
         return (n >= 0) ? (p^n, q^n) : (q^(-n), p^(-n))
 
     else # Symbol, Constant, or None

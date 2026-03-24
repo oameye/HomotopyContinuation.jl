@@ -146,7 +146,7 @@ function _resolve_arg(arg, instr_op, i, arg_index_map, input_block_size, prev::I
     if isnothing(arg)
         prev
     elseif should_use_index_not_reference(instr_op, i)
-        Int32(arg)
+        Int32(real(arg))
     elseif arg isa IRStatementRef
         get(arg_index_map, arg, Int32(arg.i + input_block_size))
     else

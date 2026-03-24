@@ -2,7 +2,7 @@ struct IRStatementRef
     i::Int
 end
 
-const IRStatementArg = Union{Nothing,Number,Symbol,IRStatementRef}
+const IRStatementArg = Union{Nothing,ComplexF64,Symbol,IRStatementRef}
 
 struct IRStatement
     op::OpType
@@ -86,10 +86,15 @@ function Base.push!(ir::IntermediateRepresentation, x::IRStatement)
     IRStatementRef(length(ir))
 end
 
-function add_op!(ir::IntermediateRepresentation, op::OpType, args::IRStatementArg...)
+# Convert any Number to ComplexF64 for IR storage
+_to_ir_arg(x::IRStatementArg) = x
+_to_ir_arg(x::Number) = ComplexF64(x)
+
+function add_op!(ir::IntermediateRepresentation, op::OpType, args...)
+    ir_args = map(_to_ir_arg, args)
     stmt = n = length(ir) + 1
     ref = IRStatementRef(n)
-    stmt = IRStatement(op, ref, args...)
+    stmt = IRStatement(op, ref, ir_args...)
     push!(ir.statements, stmt)
 
     IRStatementRef(n)
@@ -222,16 +227,17 @@ function sqr!(ir::IntermediateRepresentation, @nospecialize(a))
     add_op!(ir, OP_SQR, a)
 end
 function pow!(ir::IntermediateRepresentation, @nospecialize(a), @nospecialize(b))
-    is_zero(b) && return Int32(1)
+    is_zero(b) && return ComplexF64(1)
     is_one(b) && return a
     k = to_number(b)
-    if k isa Integer
-        k == 2 && return sqr!(ir, a)
-        k == 3 && return add_op!(ir, OP_CB, a)
-        k == -1 && return add_op!(ir, OP_INV, a)
-        k == -2 && return add_op!(ir, OP_INVSQR, a)
-        return add_op!(ir, OP_POW_INT, a, k)
-    elseif k == 1 // 2
+    if k isa ComplexF64 && iszero(imag(k)) && isinteger(real(k))
+        ki = Int(real(k))
+        ki == 2 && return sqr!(ir, a)
+        ki == 3 && return add_op!(ir, OP_CB, a)
+        ki == -1 && return add_op!(ir, OP_INV, a)
+        ki == -2 && return add_op!(ir, OP_INVSQR, a)
+        return add_op!(ir, OP_POW_INT, a, ComplexF64(ki))
+    elseif k == 0.5
         return add_op!(ir, OP_SQRT, a)
     else
         error("Cannot handle exponent: $b")
@@ -380,10 +386,10 @@ function split_into_num_denom!(ir, ex, cse, pse)
             x, k_ex = args(e)
             xref = expr_to_ir_statements!(ir, x, cse, pse)
             k = to_number(k_ex)
-            if k isa Basic
+            if !(k isa ComplexF64)
                 error("Cannot handle non-constant exponents")
             end
-            if k < 0
+            if real(k) < 0
                 push!(denoms, pow!(ir, xref, -k))
             else
                 push!(nums, pow!(ir, xref, k))

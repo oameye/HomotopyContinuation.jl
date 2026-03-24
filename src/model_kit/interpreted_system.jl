@@ -24,20 +24,19 @@ mutable struct InterpretedSystem <: AbstractSystem
     system::System
     eval_ComplexF64::Interpreter{Vector{ComplexF64}}
     eval_ComplexDF64::Interpreter{Vector{ComplexDF64}}
-    # Construct acb lazily since its often not needed
-    eval_acb::Union{Nothing,Interpreter{AcbRefVector}}
+    eval_acb::Interpreter{AcbRefVector}
     taylor_ComplexF64::TaylorInterpreters{ComplexF64}
     jac_ComplexF64::Interpreter{Vector{ComplexF64}}
-    jac_acb::Union{Nothing,Interpreter{AcbRefVector}}
+    jac_acb::Interpreter{AcbRefVector}
 end
 
 function InterpretedSystem(F::System; kwargs...)
     eval_ComplexF64 = interpreter(ComplexF64, F)
     eval_ComplexDF64 = interpreter(ComplexDF64, eval_ComplexF64)
-    eval_acb = nothing
+    eval_acb = interpreter(AcbRefVector, eval_ComplexF64)
     taylor_ComplexF64 = TaylorInterpreters{ComplexF64}()
     jac_ComplexF64 = jacobian_interpreter(ComplexF64, F)
-    jac_acb = nothing
+    jac_acb = interpreter(AcbRefVector, jac_ComplexF64)
 
     InterpretedSystem(
         F,
@@ -127,10 +126,7 @@ function evaluate!(
     p = nothing;
     prec = max(precision(first(u)), precision(first(x))),
 )
-    if isnothing(F.eval_acb)
-        F.eval_acb = interpreter(AcbRefVector, F.eval_ComplexF64)
-    end
-    I = F.eval_acb::Interpreter{AcbRefVector}
+    I = F.eval_acb
     setprecision!(I, prec)
     execute!(u, I, x, p)
 end
@@ -143,10 +139,7 @@ function evaluate_and_jacobian!(
     p = nothing;
     prec = max(precision(first(u)), precision(first(U)), precision(first(x))),
 )
-    if isnothing(F.jac_acb)
-        F.jac_acb = interpreter(AcbRefVector, F.jac_ComplexF64)
-    end
-    I = F.jac_acb::Interpreter{AcbRefVector}
+    I = F.jac_acb
     setprecision!(I, prec)
 
     execute!(u, U, I, x, p)
