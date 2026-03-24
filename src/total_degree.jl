@@ -18,7 +18,7 @@ a start system following [^Wam93] will be constructed.
 """
 function total_degree(
     F::Union{System,AbstractSystem};
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     kwargs...,
 )
     if isa(F, AbstractSystem) || isnothing(variable_groups(F))
@@ -36,16 +36,14 @@ function total_degree_variables(
     gamma = γ,
     tracker_options = TrackerOptions(),
     endgame_options = EndgameOptions(),
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     kwargs...,
 )
     unsupported_kwargs(kwargs)
     m, n = size(F)
 
     @unique_var x[1:n] t s[1:n]
-    _supp_coeffs = support_coefficients(System(F(x, target_parameters), x))
-    support = _supp_coeffs[1]::Vector{Matrix{Int32}}
-    coeffs = _supp_coeffs[2]
+    support, coeffs = support_coefficients(System(F(x, target_parameters), x))
 
     homogeneous = true
     D = zeros(Int, length(support))
@@ -61,7 +59,7 @@ function total_degree_variables(
         end
         D[k] = d
     end
-    scaling = Float64[maximum(abs ∘ float, c) for c in coeffs]
+    scaling = Float64[maximum(abs, c) for c in coeffs]
 
     m ≥ (n - homogeneous) || throw(FiniteException(n - homogeneous - m))
 
@@ -97,8 +95,7 @@ function total_degree_variables(
     end
     if homogeneous
         G = fixed(
-            System(s[1:n-1] .* (x[1:n-1] .^ D[1:n-1] .- x[end] .^ D[1:n-1]), x, s[1:n-1]);
-            compile = compile,
+            System(s[1:n-1] .* (x[1:n-1] .^ D[1:n-1] .- x[end] .^ D[1:n-1]), x, s[1:n-1]); compile = compile,
         )
     else
         G = fixed(System(s .* (x .^ D .- 1), x, s); compile = compile)
@@ -126,7 +123,7 @@ function total_degree_variable_groups(
     target_parameters = nothing,
     tracker_options = TrackerOptions(),
     endgame_options = EndgameOptions(),
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     kwargs...,
 )
     unsupported_kwargs(kwargs)

@@ -440,7 +440,7 @@ function MonodromySolver(
     F::Union{System,AbstractSystem},
     parameters;
     intrinsic = nothing,
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     tracker_options = TrackerOptions(),
     options = MonodromyOptions(),
 )
@@ -614,7 +614,7 @@ function monodromy_solve(
     tracker_options = TrackerOptions(),
     show_progress::Bool = true,
     threading::Bool = Threads.nthreads() > 1,
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     catch_interrupt::Bool = true,
     dim = nothing,
     codim = nothing,
@@ -702,7 +702,7 @@ a pair `(x₀, p₀)` and performing Newton's method in variable *and* parameter
 """
 function find_start_pair(
     F::System;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     max_tries = 1_000,
     kwargs...,
 )

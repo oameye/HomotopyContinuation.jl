@@ -142,13 +142,13 @@ julia> (g ∘ f)([x,y,z])
 compose(
     g::AbstractSystem,
     f::AbstractSystem;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
 ) = CompositionSystem(g, f)
-compose(g::AbstractSystem, f::System; compile::Union{Bool,Symbol} = COMPILE_DEFAULT[]) =
+compose(g::AbstractSystem, f::System; compile::Val = COMPILE_DEFAULT[]) =
     CompositionSystem(g, fixed(f; compile = compile))
-compose(g::System, f::AbstractSystem; compile::Union{Bool,Symbol} = COMPILE_DEFAULT[]) =
+compose(g::System, f::AbstractSystem; compile::Val = COMPILE_DEFAULT[]) =
     CompositionSystem(fixed(g; compile = compile), f)
-compose(g::System, f::System; compile::Union{Bool,Symbol} = COMPILE_DEFAULT[]) =
+compose(g::System, f::System; compile::Val = COMPILE_DEFAULT[]) =
     CompositionSystem(fixed(g; compile = compile), fixed(f; compile = compile))
 
 import Base: ∘

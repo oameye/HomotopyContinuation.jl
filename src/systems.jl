@@ -9,22 +9,22 @@ include("systems/sliced_system.jl")
 include("systems/start_pair_system.jl")
 
 """
-    fixed(F::System; compile::Union{Bool,Symbol} = $(COMPILE_DEFAULT[]))
+    fixed(F::System; compile = Val($(COMPILE_DEFAULT[])))
 
-Constructs either a [`CompiledSystem`](@ref) (if `compile = :all`), an
-[`InterpretedSystem`](@ref) (if `compile = :none`) or a [`MixedSystem`](@ref) (`compile = :mixed`).
+Constructs either a [`CompiledSystem`](@ref) (if `compile = Val(:all)` / `Val(true)`), an
+[`InterpretedSystem`](@ref) (if `compile = Val(:none)` / `Val(false)`) or a
+[`MixedSystem`](@ref) (`compile = Val(:mixed)`).
 """
-function fixed(F::System; compile::Union{Bool,Symbol} = COMPILE_DEFAULT[], kwargs...)
-    if compile == true || compile == :all
-        CompiledSystem(F; kwargs...)
-    elseif compile == false || compile == :none
-        InterpretedSystem(F; kwargs...)
-    elseif compile == :mixed
-        MixedSystem(F; kwargs...)
-    else
-        error("Unknown argument $compile for keyword `compile`.")
-    end
-end
-fixed(F::AbstractSystem; kwargs...) = F
+fixed(F::System; compile::Val = COMPILE_DEFAULT[], kwargs...) =
+    fixed(F, compile; kwargs...)
+fixed(F::AbstractSystem; compile::Val = COMPILE_DEFAULT[], kwargs...) = F
+
+# Val-dispatched methods — each returns a concrete type
+fixed(F::System, ::Val{true}; kwargs...) = CompiledSystem(F; kwargs...)
+fixed(F::System, ::Val{:all}; kwargs...) = CompiledSystem(F; kwargs...)
+fixed(F::System, ::Val{false}; kwargs...) = InterpretedSystem(F; kwargs...)
+fixed(F::System, ::Val{:none}; kwargs...) = InterpretedSystem(F; kwargs...)
+fixed(F::System, ::Val{:mixed}; kwargs...) = MixedSystem(F; kwargs...)
+fixed(F::AbstractSystem, ::Val; kwargs...) = F
 
 set_solution!(x, ::AbstractSystem, y) = (x .= y; x)

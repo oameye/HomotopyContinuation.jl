@@ -124,7 +124,7 @@ function solver_startsolutions(
     start_parameters = p₁,
     p₀ = generic_parameters,
     target_parameters = p₀,
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     start_subspace = nothing,
     target_subspace = nothing,
     intrinsic = nothing,
@@ -239,7 +239,7 @@ function parameter_homotopy(
     target_parameters = p₀,
     tracker_options = TrackerOptions(),
     endgame_options = EndgameOptions(),
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     kwargs...,
 )
     unsupported_kwargs(kwargs)
@@ -273,7 +273,7 @@ function linear_subspace_homotopy(
     F::Union{System,AbstractSystem},
     V::LinearSubspace,
     W::LinearSubspace;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     intrinsic = nothing,
     gamma = cis(2 * pi * randn()),
 )
@@ -305,7 +305,7 @@ function start_target_homotopy(
     F::Union{System,AbstractSystem};
     start_parameters = nothing,
     target_parameters = nothing,
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     γ = 1.0,
     gamma = γ,
     kwargs...,
@@ -351,7 +351,7 @@ end
 function solver_startsolutions(
     H::Union{Homotopy,AbstractHomotopy},
     starts = nothing;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     seed = nothing,
     kwargs...,
 )

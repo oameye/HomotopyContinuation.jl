@@ -11,24 +11,22 @@ include("homotopies/straight_line_homotopy.jl")
 include("homotopies/fixed_parameter_homotopy.jl")
 
 """
-    fixed(H::Homotopy; compile::Union{Bool,Symbol} = $(COMPILE_DEFAULT[]))
+    fixed(H::Homotopy; compile = Val($(COMPILE_DEFAULT[])))
 
-Constructs either a [`CompiledHomotopy`](@ref) (if `compile = :all`), an
-[`InterpretedHomotopy`](@ref) (if `compile = :none`) or a
-[`MixedHomotopy`](@ref) (`compile = :mixed`).
+Constructs either a [`CompiledHomotopy`](@ref) (if `compile = Val(:all)` / `Val(true)`), an
+[`InterpretedHomotopy`](@ref) (if `compile = Val(:none)` / `Val(false)`) or a
+[`MixedHomotopy`](@ref) (`compile = Val(:mixed)`).
 """
-function fixed(H::Homotopy; compile::Union{Bool,Symbol} = COMPILE_DEFAULT[], kwargs...)
-    if compile == true || compile == :all
-        CompiledHomotopy(H; kwargs...)
-    elseif compile == false || compile == :none
-        InterpretedHomotopy(H; kwargs...)
-    elseif compile == :mixed
-        MixedHomotopy(H; kwargs...)
-    else
-        error("Unknown argument $compile for keyword `compile`.")
-    end
-end
-fixed(H::AbstractHomotopy; kwargs...) = H
+fixed(H::Homotopy; compile::Val = COMPILE_DEFAULT[], kwargs...) =
+    fixed(H, compile; kwargs...)
+fixed(H::AbstractHomotopy; compile::Val = COMPILE_DEFAULT[], kwargs...) = H
+
+fixed(H::Homotopy, ::Val{true}; kwargs...) = CompiledHomotopy(H; kwargs...)
+fixed(H::Homotopy, ::Val{:all}; kwargs...) = CompiledHomotopy(H; kwargs...)
+fixed(H::Homotopy, ::Val{false}; kwargs...) = InterpretedHomotopy(H; kwargs...)
+fixed(H::Homotopy, ::Val{:none}; kwargs...) = InterpretedHomotopy(H; kwargs...)
+fixed(H::Homotopy, ::Val{:mixed}; kwargs...) = MixedHomotopy(H; kwargs...)
+fixed(H::AbstractHomotopy, ::Val; kwargs...) = H
 
 function set_solution!(x::AbstractVector, H::AbstractHomotopy, y::AbstractVector, t)
     x .= y

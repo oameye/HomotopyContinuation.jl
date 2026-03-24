@@ -24,7 +24,7 @@ end
 function StraightLineHomotopy(
     start::System,
     target::System;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     kwargs...,
 )
     StraightLineHomotopy(

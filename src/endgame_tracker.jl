@@ -240,7 +240,7 @@ struct EndgameTracker{H<:AbstractHomotopy,M<:AbstractMatrix{ComplexF64}} <:
     options::EndgameOptions
 end
 
-EndgameTracker(H::Homotopy; compile::Union{Bool,Symbol} = COMPILE_DEFAULT[], kwargs...) =
+EndgameTracker(H::Homotopy; compile::Val = COMPILE_DEFAULT[], kwargs...) =
     EndgameTracker(fixed(H; compile = compile); kwargs...)
 function EndgameTracker(H::AbstractHomotopy; tracker_options = TrackerOptions(), kwargs...)
     EndgameTracker(Tracker(H; options = tracker_options); kwargs...)

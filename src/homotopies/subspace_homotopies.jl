@@ -139,7 +139,7 @@ ExtrinsicSubspaceHomotopy(
     F::ModelKit.System,
     start::LinearSubspace,
     target::LinearSubspace;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     kwargs...,
 ) = ExtrinsicSubspaceHomotopy(fixed(F; compile = compile), start, target; kwargs...)
 
@@ -161,7 +161,7 @@ function ExtrinsicSubspaceHomotopy(
     system::AbstractSystem,
     start::LinearSubspace{ComplexF64},
     target::LinearSubspace{ComplexF64};
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     gamma::Union{Nothing,ComplexF64} = cis(2 * pi * rand()),
 )
 
@@ -269,7 +269,7 @@ IntrinsicSubspaceHomotopy(
     F::ModelKit.System,
     start::LinearSubspace,
     target::LinearSubspace;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     kwargs...,
 ) = IntrinsicSubspaceHomotopy(fixed(F; compile = compile), start, target; kwargs...)
 
@@ -291,7 +291,7 @@ function IntrinsicSubspaceHomotopy(
     system::AbstractSystem,
     start::LinearSubspace{ComplexF64},
     target::LinearSubspace{ComplexF64};
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     gamma::Union{Nothing,ComplexF64} = cis(2 * pi * rand()),
 )
 
@@ -387,7 +387,7 @@ IntrinsicSubspaceProjectiveHomotopy(
     F::ModelKit.System,
     start::LinearSubspace,
     target::LinearSubspace;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     kwargs...,
 ) = IntrinsicSubspaceProjectiveHomotopy(
     fixed(F; compile = compile),
@@ -414,7 +414,7 @@ function IntrinsicSubspaceProjectiveHomotopy(
     system::AbstractSystem,
     start::LinearSubspace{ComplexF64},
     target::LinearSubspace{ComplexF64};
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     gamma::Union{Nothing,ComplexF64} = cis(2 * pi * rand()),
 )
 

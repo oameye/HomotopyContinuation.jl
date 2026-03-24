@@ -32,7 +32,7 @@ end
 function RandomizedSystem(
     F::Union{AbstractSystem,System},
     k::Integer;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     identity_block = true,
 )
     n, N = size(F)
@@ -48,14 +48,14 @@ end
 RandomizedSystem(
     F::System,
     A::Matrix{ComplexF64};
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     kwargs...,
 ) = RandomizedSystem(fixed(F; compile = compile), A; kwargs...)
 
 function RandomizedSystem(
     F::AbstractSystem,
     A::Matrix{ComplexF64};
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     identity_block = true,
 )
     n, N = size(F)

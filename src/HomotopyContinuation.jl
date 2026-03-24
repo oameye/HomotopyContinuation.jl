@@ -44,7 +44,7 @@ export @polyvar
 
 using ProjectiveVectors: PVector, dims, dimension_indices
 
-const COMPILE_DEFAULT = Ref(:mixed)
+const COMPILE_DEFAULT = Ref{Val}(Val(:mixed))
 
 export set_default_compile
 
@@ -57,7 +57,7 @@ Possible values are `:mixed` (default), `:all` and `:none`.
 function set_default_compile(mode::Symbol)
     mode ∈ [:mixed, :all, :none] ||
         error("Invalid value `:$mode`, valid values are `:mixed`, `:all`, `:none`.")
-    COMPILE_DEFAULT[] = mode
+    COMPILE_DEFAULT[] = Val(mode)
 end
 
 include("utils.jl")

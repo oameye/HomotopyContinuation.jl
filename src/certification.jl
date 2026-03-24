@@ -1415,7 +1415,7 @@ function certify(
 end
 
 
-function certify(F::System, args...; compile::Union{Bool,Symbol} = false, kwargs...)
+function certify(F::System, args...; compile::Val = false, kwargs...)
     certify(fixed(F; compile = compile), args...; kwargs...)
 end
 

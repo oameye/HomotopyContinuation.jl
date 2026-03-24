@@ -25,13 +25,13 @@ idepdently from a univariate normal distribution.
 on_affine_chart(
     F::System,
     dims = nothing;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
     kwargs...,
 ) = on_affine_chart(fixed(F; compile = compile), dims)
 function on_affine_chart(
     F::AbstractSystem,
     dims = nothing;
-    compile::Union{Bool,Symbol} = true,
+    compile::Val = COMPILE_DEFAULT[],
 )
     vargroups = variable_groups(F)
     if vargroups === nothing

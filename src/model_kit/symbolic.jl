@@ -1343,8 +1343,15 @@ end
 Return the support of the system and the corresponding coefficients.
 """
 function support_coefficients(F::System)
-    supp_coeffs = exponents_coefficients.(F.expressions, Ref(F.variables))
-    first.(supp_coeffs), last.(supp_coeffs)
+    n = length(F.expressions)
+    supports = Vector{Matrix{Int32}}(undef, n)
+    coeffs = Vector(undef, n)
+    for i in 1:n
+        M, c = exponents_coefficients(F.expressions[i], F.variables)
+        supports[i] = M
+        coeffs[i] = c
+    end
+    supports, coeffs
 end
 
 """

@@ -6,14 +6,14 @@
             2.3 * x^2 + 1.2 * y^2 + 3x - 2y + 3,
             2.3 * x^2 + 1.2 * y^2 + 5x + 2y - 5,
         ])
-        @test count(is_success, track.(total_degree(affine_sqr; compile = false)...)) == 2
+        @test count(is_success, track.(total_degree(affine_sqr; compile = Val(false))...)) == 2
 
         @var x y z
         proj_square = System([
             2.3 * x^2 + 1.2 * y^2 + 3x * z - 2y * z + 3 * z^2,
             2.3 * x^2 + 1.2 * y^2 + 5x * z + 2y * z - 5 * z^2,
         ])
-        @test count(is_success, track.(total_degree(proj_square; compile = false)...)) == 4
+        @test count(is_success, track.(total_degree(proj_square; compile = Val(false))...)) == 4
 
         @var x y
         affine_ov = System([
@@ -21,7 +21,7 @@
             (x^2 + y^2 + x * y - 3) * (y - x + 2),
             2x + 5y - 3,
         ])
-        @test count(is_success, track.(total_degree(affine_ov; compile = false)...)) == 2
+        @test count(is_success, track.(total_degree(affine_ov; compile = Val(false))...)) == 2
 
         @var x y
         affine_ov_reordering = System([
@@ -29,7 +29,7 @@
             2x + 5y - 3,
             (x^2 + y^2 + x * y - 3) * (y^2 - x + 2),
         ])
-        tracker, starts = total_degree(affine_ov_reordering; compile = false)
+        tracker, starts = total_degree(affine_ov_reordering; compile = Val(false))
         @test length(starts) == 4 * 3
         @test count(is_success, track.(tracker, starts)) == 2
 
@@ -39,7 +39,7 @@
             (x^2 + y^2 + x * y - 3 * z^2) * (y - x + 2z),
             2x + 5y - 3z,
         ])
-        @test count(is_success, track.(total_degree(proj_ov; compile = false)...)) == 2
+        @test count(is_success, track.(total_degree(proj_ov; compile = Val(false))...)) == 2
 
         @var x y
         proj_ov_reordering = System([
@@ -47,7 +47,7 @@
             2x + 5y - 3z,
             (x^2 + y^2 + x * y - 3 * z^2) * (y^2 - x * z + 2 * z^2),
         ])
-        tracker, starts = total_degree(proj_ov_reordering; compile = false)
+        tracker, starts = total_degree(proj_ov_reordering; compile = Val(false))
         @test length(starts) == 4 * 3
         @test count(is_success, track.(tracker, starts)) == 2
 
@@ -63,7 +63,7 @@
     @testset "total degree (variable groups)" begin
         @var x y v w
         affine_sqr = System([x * y - 2, x^2 - 4], variable_groups = [[x], [y]])
-        tracker, starts = total_degree(affine_sqr; compile = false)
+        tracker, starts = total_degree(affine_sqr; compile = Val(false))
         @test length(collect(starts)) == 2
         @test count(is_success, track.(tracker, starts)) == 2
         @test nsolutions(solve(affine_sqr, start_system = :total_degree)) == 2
@@ -80,14 +80,14 @@
             [(x^2 - 4) * (x * y - 2), x * y - 2, x^2 - 4],
             variable_groups = [[x], [y]],
         )
-        tracker, starts = total_degree(affine_ov; compile = false)
+        tracker, starts = total_degree(affine_ov; compile = Val(false))
         @test count(is_success, track.(tracker, starts)) == 2
         @var x y v w
         proj_ov = System(
             [(x^2 - 4 * v^2) * (x * y - v * w), x * y - v * w, x^2 - v^2],
             variable_groups = [[x, v], [y, w]],
         )
-        tracker, starts = total_degree(proj_ov; compile = false)
+        tracker, starts = total_degree(proj_ov; compile = Val(false))
         @test count(is_success, track.(tracker, starts)) == 2
     end
 
@@ -97,14 +97,14 @@
             2.3 * x^2 + 1.2 * y^2 + 3x - 2y + 3,
             2.3 * x^2 + 1.2 * y^2 + 5x + 2y - 5,
         ])
-        @test count(is_success, track.(polyhedral(affine_sqr; compile = false)...)) == 2
+        @test count(is_success, track.(polyhedral(affine_sqr; compile = Val(false))...)) == 2
 
         @var x y z
         proj_square = System([
             2.3 * x^2 + 1.2 * y^2 + 3x * z - 2y * z + 3 * z^2,
             2.3 * x^2 + 1.2 * y^2 + 5x * z + 2y * z - 5 * z^2,
         ])
-        @test count(is_success, track.(polyhedral(proj_square; compile = false)...)) == 4
+        @test count(is_success, track.(polyhedral(proj_square; compile = Val(false))...)) == 4
 
         @var x y
         affine_ov = System([
@@ -112,7 +112,7 @@
             (x^2 + y^2 + x * y - 3) * (y - x + 2),
             2x + 5y - 3,
         ])
-        @test count(is_success, track.(polyhedral(affine_ov; compile = false)...)) == 2
+        @test count(is_success, track.(polyhedral(affine_ov; compile = Val(false))...)) == 2
 
         @var x y z
         proj_ov = System([
@@ -120,7 +120,7 @@
             (x^2 + y^2 + x * y - 3 * z^2) * (y - x + 2z),
             2x + 5y - 3z,
         ])
-        @test count(is_success, track.(polyhedral(proj_ov; compile = false)...)) == 2
+        @test count(is_success, track.(polyhedral(proj_ov; compile = Val(false))...)) == 2
 
         @var x y
         affine_underdetermined = System([2.3 * x^2 + 1.2 * y^2 + 3x - 2y + 3])
@@ -136,7 +136,7 @@
             res = solve(
                 minors();
                 start_system = :total_degree,
-                compile = false,
+                compile = Val(false),
                 show_progress = false,
             )
             @test count(is_success, res) == 80
@@ -150,7 +150,7 @@
         f = System([a * b - 2, a * c - 1])
         g = System([x + y, y + 3, x + 2])
 
-        res = solve(e ∘ f ∘ g; start_system = :total_degree, compile = false)
+        res = solve(e ∘ f ∘ g; start_system = :total_degree, compile = Val(false))
         @test nsolutions(res) == 2
 
         res = solve(e ∘ f ∘ g; start_system = :polyhedral)
@@ -196,7 +196,7 @@
             start_parameters = [1, 0],
             target_parameters = [2, 4],
             threading = false,
-            compile = false,
+            compile = Val(false),
         )
         @test nsolutions(res) == 1
 
@@ -288,7 +288,7 @@
         @test _solver.trackers[1].tracker.homotopy isa IntrinsicSubspaceHomotopy
 
         @var x y
-        r1 = solve(F; target_subspace = l1, compile = false)
+        r1 = solve(F; target_subspace = l1, compile = Val(false))
         @test nsolutions(r1) == 2
         r1c = solve(F; target_subspace = l1, start_system = :total_degree)
         @test nsolutions(r1c) == 2
@@ -297,7 +297,7 @@
             solutions(r1);
             start_subspace = l1,
             target_subspace = l2,
-            compile = false,
+            compile = Val(false),
             threading = false,
             intrinsic = true,
         )
@@ -307,7 +307,7 @@
             solutions(r1);
             start_subspace = l1,
             target_subspace = l2,
-            compile = false,
+            compile = Val(false),
             intrinsic = false,
         )
         @test nsolutions(r3) == 2
@@ -353,7 +353,7 @@
             parameters = [a, b],
             start_parameters = [1, 0],
             target_parameters = [2, 4],
-            compile = false,
+            compile = Val(false),
         )
         @test nsolutions(res) == 1
         res2 = solve(
@@ -363,7 +363,7 @@
             parameters = [a, b],
             start_parameters = [1, 0],
             target_parameters = [2, 4],
-            compile = false,
+            compile = Val(false),
         )
         s = solutions(res)[1]
         s2 = solutions(res2)[1]

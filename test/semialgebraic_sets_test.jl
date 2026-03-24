@@ -1,5 +1,5 @@
 @testset "SemialgebraicSets" begin
-    solver = SemialgebraicSetsHCSolver(; compile = false)
+    solver = SemialgebraicSetsHCSolver(; compile = Val(false))
     @polyvar x y
     V = SemialgebraicSets.@set x^2 == 1 && y^2 == 2 solver
     S = collect(V)
@@ -13,10 +13,10 @@
                 solver = SemialgebraicSetsHCSolver(;
                     excess_residual_tol = atol,
                     real_atol = atol,
-                    compile = false,
+                    compile = Val(false),
                 )
                 @test sprint(show, solver) ==
-                      "SemialgebraicSetsHCSolver(; excess_residual_tol = $atol, real_atol = $atol, real_rtol = 0.0, compile = false)"
+                      "SemialgebraicSetsHCSolver(; excess_residual_tol = $atol, real_atol = $atol, real_rtol = 0.0, compile = Val(false))"
                 o = 1 + ε
                 V = SemialgebraicSets.algebraicset(
                     [-x - y + o, -o * x * y + o * y^2 - y, -o * x^2 + y^2 - 2y + o],

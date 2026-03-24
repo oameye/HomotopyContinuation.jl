@@ -14,7 +14,7 @@ end
 SlicedSystem(
     F::System,
     A::LinearSubspace;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
 ) = SlicedSystem(fixed(F; compile = compile), A)
 
 """
@@ -25,12 +25,12 @@ Slice the zero set of the polynomial system `F` with the affine linear subspace 
 defined by ``Ax = b``. This constructs the system `[F(x); A x - b] = 0`.
 See also [`SlicedSystem`](@ref).
 """
-slice(F::System, A::LinearSubspace; compile::Union{Bool,Symbol} = COMPILE_DEFAULT[]) =
+slice(F::System, A::LinearSubspace; compile::Val = COMPILE_DEFAULT[]) =
     SlicedSystem(fixed(F; compile = compile), A)
 slice(
     F::AbstractSystem,
     A::LinearSubspace;
-    compile::Union{Bool,Symbol} = COMPILE_DEFAULT[],
+    compile::Val = COMPILE_DEFAULT[],
 ) = SlicedSystem(F, A)
 Base.intersect(F::Union{System,AbstractSystem}, A::LinearSubspace) = SlicedSystem(F, A)
 Base.intersect(A::LinearSubspace, F::Union{System,AbstractSystem}) = SlicedSystem(F, A)

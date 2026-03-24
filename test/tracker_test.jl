@@ -212,7 +212,7 @@
 
         G = System(vcat(gs, L); variables = xvarz_moving_frame, parameters = bvarz)
         startsolutions0 = [p0[i, k] for i in freevertices for k = 1:2]
-        tracker = Tracker(ParameterHomotopy(G, [b0], [b1]; compile = false))
+        tracker = Tracker(ParameterHomotopy(G, [b0], [b1]; compile = Val(false)))
         result = track(tracker, startsolutions0, 1, 0)
         @test is_invalid_startvalue(result)
         @test result.return_code == :terminated_invalid_startvalue_singular_jacobian

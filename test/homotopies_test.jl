@@ -74,7 +74,7 @@ end
             tvar,
         )
 
-        H = ParameterHomotopy(F, p, q; compile = false)
+        H = ParameterHomotopy(F, p, q; compile = Val(false))
 
         test_homotopy(H, h)
     end
@@ -85,7 +85,7 @@ end
         F = System(f, [x, y])
         g = [(2 * y^2 + b^2 * x^3 + 2 * a * x * y)^2, (a - c)^3 * y + x^2]
         G = System(g, [x, y])
-        H = StraightLineHomotopy(F, G; compile = false)
+        H = StraightLineHomotopy(F, G; compile = Val(false))
 
         @var t
         h = Homotopy(t .* F([x, y]) + (1 - t) .* G([x, y]), [x, y], t)
@@ -100,7 +100,7 @@ end
         F = System([f1, f2], x)
         A = rand_subspace(4; codim = 2)
         B = rand_subspace(4, codim = 2)
-        H = ExtrinsicSubspaceHomotopy(fixed(F; compile = false), A, B; gamma = nothing)
+        H = ExtrinsicSubspaceHomotopy(fixed(F; compile = Val(false)), A, B; gamma = nothing)
 
         @unpack Q, Q_cos, Θ = H.path
         a = H.a0
@@ -123,7 +123,7 @@ end
         F = System([f1, f2], x)
         A = rand_subspace(4; codim = 2)
         B = rand_subspace(4, codim = 2)
-        H = IntrinsicSubspaceHomotopy(fixed(F; compile = false), A, B; gamma = nothing)
+        H = IntrinsicSubspaceHomotopy(fixed(F; compile = Val(false)), A, B; gamma = nothing)
 
         @unpack Q, Q_cos, Θ = H.path
         a = intrinsic(H.start).b
@@ -161,7 +161,7 @@ end
         A = rand_subspace(4; codim = 2)
         B = rand_subspace(4, codim = 2)
         H = IntrinsicSubspaceProjectiveHomotopy(
-            fixed(F; compile = false),
+            fixed(F; compile = Val(false)),
             A,
             B;
             gamma = nothing,
@@ -201,7 +201,7 @@ end
 
         p = randn(ComplexF64, 2 * length(c1))
         q = randn(ComplexF64, 2 * length(c1))
-        H = CoefficientHomotopy(F, p, q; compile = false)
+        H = CoefficientHomotopy(F, p, q; compile = Val(false))
 
         @var t
         h = Homotopy(t .* F(x, p) .+ (1 - t) .* F(x, q), x, t)
