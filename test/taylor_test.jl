@@ -48,16 +48,16 @@ end
     @testset "inv: inv(b) * b ≈ (1, 0, 0)" begin
         r = taylor_op_inv(b)
         product = taylor_op_mul(r, b)
-        @test product[0] ≈ 1.0 + 0im atol = 1e-12
-        @test product[1] ≈ 0.0 + 0im atol = 1e-12
-        @test product[2] ≈ 0.0 + 0im atol = 1e-12
+        @test product[0] ≈ 1.0 + 0im atol = 1.0e-12
+        @test product[1] ≈ 0.0 + 0im atol = 1.0e-12
+        @test product[2] ≈ 0.0 + 0im atol = 1.0e-12
     end
 
     @testset "div: (a/b) * b ≈ a" begin
         r = taylor_op_div(a, b)
         product = taylor_op_mul(r, b)
         for k in 0:2
-            @test product[k] ≈ a[k] atol = 1e-12
+            @test product[k] ≈ a[k] atol = 1.0e-12
         end
     end
 
@@ -65,7 +65,7 @@ end
         r = taylor_op_sqrt(a)
         product = taylor_op_mul(r, r)
         for k in 0:2
-            @test product[k] ≈ a[k] atol = 1e-12
+            @test product[k] ≈ a[k] atol = 1.0e-12
         end
     end
 end

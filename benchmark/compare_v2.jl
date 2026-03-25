@@ -138,12 +138,14 @@ F_next_polys = [
 ]
 
 @var vx0 vx1 vx2 vx3
-F_hc_sys = System([
-    vx0 + 2vx1 + 2vx2 + 2vx3 - 1,
-    vx0^2 + 2vx1^2 + 2vx2^2 + 2vx3^2 - vx0,
-    2vx0 * vx1 + 2vx1 * vx2 + 2vx2 * vx3 - vx1,
-    vx1^2 + 2vx0 * vx2 + 2vx1 * vx3 - vx2,
-])
+F_hc_sys = System(
+    [
+        vx0 + 2vx1 + 2vx2 + 2vx3 - 1,
+        vx0^2 + 2vx1^2 + 2vx2^2 + 2vx3^2 - vx0,
+        2vx0 * vx1 + 2vx1 * vx2 + 2vx2 * vx3 - vx1,
+        vx1^2 + 2vx0 * vx2 + 2vx1 * vx3 - vx2,
+    ]
+)
 
 # Next: build_interpreter → execute!
 I_next = build_interpreter(F_next_polys)
@@ -157,7 +159,7 @@ u_hc = zeros(ComplexF64, 4)
 t_next = @belapsed Next.execute!($u_next, $I_next, $x_val)
 t_hc = @belapsed HC.ModelKit.evaluate!($u_hc, $IS_hc, $x_val)
 ratio = t_hc / t_next
-println("  katsura3 eval:  Next=$(round(t_next * 1e9; digits=1))ns  HC=$(round(t_hc * 1e9; digits=1))ns  ratio=$(round(ratio; digits=2))x")
+println("  katsura3 eval:  Next=$(round(t_next * 1.0e9; digits = 1))ns  HC=$(round(t_hc * 1.0e9; digits = 1))ns  ratio=$(round(ratio; digits = 2))x")
 
 # With Jacobian
 I_jac_next = build_jacobian_interpreter(F_next_polys)
@@ -167,7 +169,7 @@ U_hc = zeros(ComplexF64, 4, 4)
 t_next = @belapsed Next.execute!($u_next, $U_next, $I_jac_next, $x_val)
 t_hc = @belapsed HC.ModelKit.evaluate_and_jacobian!($u_hc, $U_hc, $IS_hc, $x_val)
 ratio = t_hc / t_next
-println("  katsura3 eval+jac:  Next=$(round(t_next * 1e9; digits=1))ns  HC=$(round(t_hc * 1e9; digits=1))ns  ratio=$(round(ratio; digits=2))x")
+println("  katsura3 eval+jac:  Next=$(round(t_next * 1.0e9; digits = 1))ns  HC=$(round(t_hc * 1.0e9; digits = 1))ns  ratio=$(round(ratio; digits = 2))x")
 
 # Cyclic-5
 @polyvar cy1 cy2 cy3 cy4 cy5
@@ -176,19 +178,21 @@ F_next_cyclic = [
     cy1 * cy2 + cy2 * cy3 + cy3 * cy4 + cy4 * cy5 + cy5 * cy1,
     cy1 * cy2 * cy3 + cy2 * cy3 * cy4 + cy3 * cy4 * cy5 + cy4 * cy5 * cy1 + cy5 * cy1 * cy2,
     cy1 * cy2 * cy3 * cy4 + cy2 * cy3 * cy4 * cy5 + cy3 * cy4 * cy5 * cy1 +
-    cy4 * cy5 * cy1 * cy2 + cy5 * cy1 * cy2 * cy3,
+        cy4 * cy5 * cy1 * cy2 + cy5 * cy1 * cy2 * cy3,
     cy1 * cy2 * cy3 * cy4 * cy5 - 1,
 ]
 
 @var vy1 vy2 vy3 vy4 vy5
-F_hc_cyclic = System([
-    vy1 + vy2 + vy3 + vy4 + vy5,
-    vy1 * vy2 + vy2 * vy3 + vy3 * vy4 + vy4 * vy5 + vy5 * vy1,
-    vy1 * vy2 * vy3 + vy2 * vy3 * vy4 + vy3 * vy4 * vy5 + vy4 * vy5 * vy1 + vy5 * vy1 * vy2,
-    vy1 * vy2 * vy3 * vy4 + vy2 * vy3 * vy4 * vy5 + vy3 * vy4 * vy5 * vy1 +
-    vy4 * vy5 * vy1 * vy2 + vy5 * vy1 * vy2 * vy3,
-    vy1 * vy2 * vy3 * vy4 * vy5 - 1,
-])
+F_hc_cyclic = System(
+    [
+        vy1 + vy2 + vy3 + vy4 + vy5,
+        vy1 * vy2 + vy2 * vy3 + vy3 * vy4 + vy4 * vy5 + vy5 * vy1,
+        vy1 * vy2 * vy3 + vy2 * vy3 * vy4 + vy3 * vy4 * vy5 + vy4 * vy5 * vy1 + vy5 * vy1 * vy2,
+        vy1 * vy2 * vy3 * vy4 + vy2 * vy3 * vy4 * vy5 + vy3 * vy4 * vy5 * vy1 +
+            vy4 * vy5 * vy1 * vy2 + vy5 * vy1 * vy2 * vy3,
+        vy1 * vy2 * vy3 * vy4 * vy5 - 1,
+    ]
+)
 
 I_next_cyc = build_interpreter(F_next_cyclic)
 u_next_cyc = zeros(ComplexF64, 5)
@@ -200,7 +204,7 @@ u_hc_cyc = zeros(ComplexF64, 5)
 t_next = @belapsed Next.execute!($u_next_cyc, $I_next_cyc, $x_cyc)
 t_hc = @belapsed HC.ModelKit.evaluate!($u_hc_cyc, $IS_hc_cyc, $x_cyc)
 ratio = t_hc / t_next
-println("  cyclic5 eval:  Next=$(round(t_next * 1e9; digits=1))ns  HC=$(round(t_hc * 1e9; digits=1))ns  ratio=$(round(ratio; digits=2))x")
+println("  cyclic5 eval:  Next=$(round(t_next * 1.0e9; digits = 1))ns  HC=$(round(t_hc * 1.0e9; digits = 1))ns  ratio=$(round(ratio; digits = 2))x")
 
 println("\n" * "="^72)
 println("  ratio > 1.0 means Next is faster")

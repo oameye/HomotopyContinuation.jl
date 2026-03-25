@@ -163,12 +163,12 @@ function should_use_index_not_reference(op::OpType.T, index::Int)::Bool
 end
 
 # arity 0
-op_stop() = nothing
+@inline op_stop() = nothing
 
 # arity 1
 
 # Generic fallback: 2 complex multiplications (8 real muls)
-op_cb(x) = x * x * x
+@inline op_cb(x) = x * x * x
 # Specialized for Complex: use op_sqr (2 real muls via Karatsuba) + 1 complex mul (4 real muls) = 6 real muls total
 @inline function op_cb(z::Complex)
     x, y = reim(z)
@@ -177,39 +177,39 @@ op_cb(x) = x * x * x
     return Complex(a * x - b * y, a * y + b * x)
 end
 
-op_cos(x) = cos(x)
-op_identity(x) = identity(x)
-op_inv(x) = inv(x)
-op_inv(x::Complex) = Base.FastMath.inv_fast(x)
+@inline op_cos(x) = cos(x)
+@inline op_identity(x) = identity(x)
+@inline op_inv(x) = inv(x)
+@inline op_inv(x::Complex) = Base.FastMath.inv_fast(x)
 
 """
     op_inv_not_zero(x)
 
 Invert x unless it is 0, then return 0.
 """
-op_inv_not_zero(x) = ifelse(iszero(x), x, op_inv(x))
+@inline op_inv_not_zero(x) = ifelse(iszero(x), x, op_inv(x))
 
-op_invsqr(x) = op_sqr(op_inv(x))
-op_neg(x) = -x
-op_sin(x) = sin(x)
+@inline op_invsqr(x) = op_sqr(op_inv(x))
+@inline op_neg(x) = -x
+@inline op_sin(x) = sin(x)
 
 # Generic fallback
-op_sqr(x) = x * x
+@inline op_sqr(x) = x * x
 # Specialized for Complex: Karatsuba avoids one real mul (2 real muls instead of 4)
 @inline function op_sqr(z::Complex)
     x, y = reim(z)
     return Complex((x + y) * (x - y), (x + x) * y)
 end
 
-op_sqrt(x) = sqrt(x)
+@inline op_sqrt(x) = sqrt(x)
 
 # arity 2
-op_add(a, b) = a + b
-op_div(a, b) = Base.FastMath.div_fast(a, b)
-op_mul(a, b) = a * b
-op_sub(a, b) = a - b
+@inline op_add(a, b) = a + b
+@inline op_div(a, b) = Base.FastMath.div_fast(a, b)
+@inline op_mul(a, b) = a * b
+@inline op_sub(a, b) = a - b
 
-op_pow_int(x, p::Integer) =
+@inline op_pow_int(x, p::Integer) =
     p > 0 ? Base.power_by_squaring(x, p) : op_inv(Base.power_by_squaring(x, -p))
 
 # arity 3

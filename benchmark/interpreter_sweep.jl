@@ -34,11 +34,11 @@ poly_from_spec(vars, spec) = reduce(+, (term_from_spec(vars, c, exps) for (c, ex
 
 function cyclic_specs(n)
     specs = Vector{Vector{Tuple{ComplexF64, Vector{Int}}}}()
-    for k in 1:n-1
+    for k in 1:(n - 1)
         poly = Tuple{ComplexF64, Vector{Int}}[]
         for start in 1:n
             exps = zeros(Int, n)
-            for off in 0:k-1
+            for off in 0:(k - 1)
                 exps[mod1(start + off, n)] += 1
             end
             push!(poly, (1.0 + 0im, exps))
@@ -164,8 +164,8 @@ function compare_case(name, specs)
         name,
         ": eval_ratio=", round(t_hc_eval / t_next_eval; digits = 2),
         " jac_ratio=", round(t_hc_jac / t_next_jac; digits = 2),
-        " eval_ns=", round(t_next_eval * 1e9; digits = 1), "/", round(t_hc_eval * 1e9; digits = 1),
-        " jac_ns=", round(t_next_jac * 1e9; digits = 1), "/", round(t_hc_jac * 1e9; digits = 1),
+        " eval_ns=", round(t_next_eval * 1.0e9; digits = 1), "/", round(t_hc_eval * 1.0e9; digits = 1),
+        " jac_ns=", round(t_next_jac * 1.0e9; digits = 1), "/", round(t_hc_jac * 1.0e9; digits = 1),
         " err=", max(eval_err, jac_err),
     )
     return (eval_ratio = t_hc_eval / t_next_eval, jac_ratio = t_hc_jac / t_next_jac)
@@ -184,6 +184,7 @@ function summarize(results, field)
     for idx in ord[1:min(3, length(ord))]
         println("  worst ", results[idx].name, " -> ", round(vals[idx]; digits = 2), "x")
     end
+    return
 end
 
 println("="^72)

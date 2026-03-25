@@ -78,6 +78,9 @@ export build_instruction_sequence_from_ir
 
 include("model_kit/instruction_sequence.jl")
 
+# model_kit/cse.jl — SExpr types and SymEngine-style CSE algorithm
+include("model_kit/cse.jl")
+
 # model_kit/interpreter.jl
 export Interpreter, execute!, execute_taylor!
 

@@ -38,7 +38,7 @@ function benchmark_interpreter!(SUITE::BenchmarkGroup)
         x1 * x2 + x2 * x3 + x3 * x4 + x4 * x5 + x5 * x1,
         x1 * x2 * x3 + x2 * x3 * x4 + x3 * x4 * x5 + x4 * x5 * x1 + x5 * x1 * x2,
         x1 * x2 * x3 * x4 + x2 * x3 * x4 * x5 + x3 * x4 * x5 * x1 +
-        x4 * x5 * x1 * x2 + x5 * x1 * x2 * x3,
+            x4 * x5 * x1 * x2 + x5 * x1 * x2 * x3,
         x1 * x2 * x3 * x4 * x5 - 1,
     ]
     I_cyclic = build_interpreter(F_cyclic)

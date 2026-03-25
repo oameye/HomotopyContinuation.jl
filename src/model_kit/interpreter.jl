@@ -114,14 +114,14 @@ function _build_execute_instructions_inner(level::Int = 0)
     end
 end
 
-@eval @inline function execute_instructions!(tape::AbstractVector, instructions::Vector{Instruction})
-    @inbounds begin
+@generated function execute_instructions!(tape::AbstractVector, instructions::Vector{Instruction})
+    quote
+        Base.@_propagate_inbounds_meta
         k = 0
         while true
             $(_build_execute_instructions_inner())
         end
     end
-    return nothing
 end
 
 ## execute! — evaluate system

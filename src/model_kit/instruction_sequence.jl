@@ -291,67 +291,81 @@ function _optimize_instruction_order(
     )::Vector{Instruction}
     isempty(instructions) && return instructions
 
-    # Build maps: output_index → instruction, and output_index → consumers
-    output_to_instr = Dict{Int32, Int}()    # tape index → instruction position
-    for (k, instr) in enumerate(instructions)
-        output_to_instr[instr.output] = k
+    index_to_instr = Dict{Int32, Instruction}()
+    vertices = Set{Int32}()
+    vertex_list = Int32[]
+    function register_vertex!(v::Int32)
+        if v ∉ vertices
+            push!(vertices, v)
+            push!(vertex_list, v)
+        end
+        return v
+    end
+    in_degree = Dict{Int32, Int}()
+    out_degree = Dict{Int32, Int}()
+    children = Dict{Int32, Vector{Int32}}()
+
+    for instr in instructions
+        index_to_instr[instr.output] = instr
+        register_vertex!(instr.output)
+        get!(children, instr.output, Int32[])
+        get!(in_degree, instr.output, 0)
+        get!(out_degree, instr.output, 0)
+        for k in 1:arity(instr.op)
+            should_use_index_not_reference(instr.op, k) && continue
+            input_idx = instr.input[k]
+            register_vertex!(input_idx)
+            push!(get!(children, instr.output, Int32[]), input_idx)
+            in_degree[input_idx] = get(in_degree, input_idx, 0) + 1
+            out_degree[instr.output] = get(out_degree, instr.output, 0) + 1
+            get!(out_degree, input_idx, 0)
+            get!(in_degree, instr.output, 0)
+        end
     end
 
-    # children[k] = list of instruction indices that instruction k feeds into
-    # (i.e., k's output is an input of children[k])
-    n = length(instructions)
-    children = [Int[] for _ in 1:n]
-    in_degree = zeros(Int, n)  # number of producers this instruction depends on
+    listing = Int32[]
+    sort!(vertex_list)
+    roots = Int32[v for v in vertex_list if get(in_degree, v, 0) == 0]
 
-    for (k, instr) in enumerate(instructions)
-        for arg_pos in 1:arity(instr.op)
-            should_use_index_not_reference(instr.op, arg_pos) && continue
-            input_idx = instr.input[arg_pos]
-            producer = get(output_to_instr, input_idx, 0)
-            if producer > 0
-                push!(children[producer], k)
-                in_degree[k] += 1
+    while !isempty(roots)
+        root = pop!(roots)
+        unlisted_nodes_without_parent = Int32[root]
+        while !isempty(unlisted_nodes_without_parent)
+            u = pop!(unlisted_nodes_without_parent)
+            push!(listing, u)
+            u_children = get(children, u, Int32[])
+            if u in vertices
+                delete!(vertices, u)
+            end
+            out_degree[u] = 0
+            for v in u_children
+                in_degree[v] = get(in_degree, v, 0) - 1
+                if get(in_degree, v, 0) == 0 && get(out_degree, v, 0) > 0
+                    push!(listing, v)
+                    if v in vertices
+                        delete!(vertices, v)
+                    end
+                    v_children = get(children, v, Int32[])
+                    out_degree[v] = 0
+                    for w in v_children
+                        in_degree[w] = get(in_degree, w, 0) - 1
+                    end
+                end
+            end
+
+            if isempty(unlisted_nodes_without_parent)
+                is_unlisted(v) =
+                    get(in_degree, v, 0) == 0 &&
+                    get(out_degree, v, 0) > 0 &&
+                    v ∉ roots
+                unlisted_nodes_without_parent =
+                    Int32[v for v in vertex_list if v in vertices && is_unlisted(v)]
             end
         end
     end
 
-    # Topological sort (Kahn's algorithm) — preserves dependency order
-    # with a slight priority: prefer instructions with no remaining dependents first
-    # (roots = instructions no other instruction depends on = final outputs)
-    listing = Int[]
-    sizehint!(listing, n)
-    queue = Int[]
-
-    # Seeds: instructions with in_degree == 0 (no dependencies within this block)
-    for k in 1:n
-        if in_degree[k] == 0
-            push!(queue, k)
-        end
-    end
-
-    while !isempty(queue)
-        k = pop!(queue)
-        push!(listing, k)
-        for child in children[k]
-            in_degree[child] -= 1
-            if in_degree[child] == 0
-                push!(queue, child)
-            end
-        end
-    end
-
-    # If there are cycles (shouldn't happen in a valid DAG) or disconnected nodes,
-    # append remaining in original order.
-    if length(listing) < n
-        listed = Set(listing)
-        for k in 1:n
-            if k ∉ listed
-                push!(listing, k)
-            end
-        end
-    end
-
-    return [instructions[k] for k in listing]
+    reverse!(listing)
+    return [index_to_instr[v] for v in listing if haskey(index_to_instr, v)]
 end
 
 """
