@@ -24,6 +24,10 @@ export init!, update!
 
 # primitives/linear_algebra.jl
 export MatrixWorkspace, updated!, factorize!
+export skeel_row_scaling!, apply_row_scaling!
+export residual!
+export mixed_precision_iterative_refinement!, fixed_precision_iterative_refinement!
+export inverse_inf_norm_est, inf_norm_matrix
 
 include("primitives/double_f64.jl")
 include("utils.jl")
