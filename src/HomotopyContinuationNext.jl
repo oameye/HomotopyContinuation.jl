@@ -22,8 +22,12 @@ export InfNorm, WeightedNorm, WeightedNormOptions
 export inf_norm, inf_distance, weighted_norm, weighted_distance
 export init!, update!
 
+# primitives/linear_algebra.jl
+export MatrixWorkspace, updated!, factorize!
+
 include("primitives/double_f64.jl")
 include("utils.jl")
 include("primitives/norms.jl")
+include("primitives/linear_algebra.jl")
 
 end # module
