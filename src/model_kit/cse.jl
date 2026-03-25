@@ -317,11 +317,11 @@ end
 # ── FuncArgTracker ──────────────────────────────────────────────────────────
 # Direct translation of SymEngine's FuncArgTracker class.
 
-mutable struct FuncArgTracker
-    const value_numbers::Dict{SExpr, UInt32}
-    const value_number_to_value::Vector{SExpr}
-    const arg_to_funcset::Vector{Set{UInt32}}
-    const func_to_argset::Vector{Set{UInt32}}
+struct FuncArgTracker
+    value_numbers::Dict{SExpr, UInt32}
+    value_number_to_value::Vector{SExpr}
+    arg_to_funcset::Vector{Set{UInt32}}
+    func_to_argset::Vector{Set{UInt32}}
 end
 
 function FuncArgTracker(
