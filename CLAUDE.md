@@ -49,6 +49,10 @@ Tests run via ParallelTestRunner — each file is self-contained and runs in its
 - `test/jet_test.jl` — JET.jl: `report_package` for type error and optimization analysis
 - `test/explicit_imports_test.jl` — ExplicitImports.jl: no implicit imports, no stale imports, qualified access
 
+### Quick debugging with Julia MCP
+
+Use the `julia-mcp` MCP server (tools: `julia_eval`, `julia_list_sessions`, `julia_restart`) for quick debugging and testing small snippets — e.g., checking a type, evaluating an expression, or verifying a method signature. Prefer this over spinning up a full test run when you just need a quick answer.
+
 ### Formatting
 
 Code is formatted with [Runic.jl](https://github.com/fredrikekre/Runic.jl) (available as `runic` CLI):

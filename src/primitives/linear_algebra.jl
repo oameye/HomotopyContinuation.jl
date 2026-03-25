@@ -72,8 +72,8 @@ Base.@propagate_inbounds Base.setindex!(MW::MatrixWorkspace, x, i::Integer) =
     setindex!(MW.A, x, i)
 Base.@propagate_inbounds Base.setindex!(MW::MatrixWorkspace, x, i::Integer, j::Integer) =
     setindex!(MW.A, x, i, j)
-Base.@propagate_inbounds Base.copyto!(MW::MatrixWorkspace, A::AbstractArray) =
-    copyto!(MW.A, A)
+# Note: copyto! not overloaded for MatrixWorkspace to avoid SparseArrays ambiguities.
+# Use copyto!(WS.A, data) directly.
 
 # ---------------------------------------------------------------------------
 # updated! / factorize!

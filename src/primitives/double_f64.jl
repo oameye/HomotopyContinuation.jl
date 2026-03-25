@@ -82,6 +82,9 @@ end
 
 const ComplexDF64 = Complex{DoubleF64}
 
+# Disambiguate with (::Type{T})(x::Real, r::RoundingMode) from Base.Rounding
+DoubleF64(x::Real, r::RoundingMode) = DoubleF64(round(Float64(x), r))
+
 # ---------------------------------------------------------------------------
 # Constructors
 # ---------------------------------------------------------------------------
@@ -275,6 +278,7 @@ end
 Base.:*(a::Float64, b::DoubleF64) = b * a
 Base.:*(a::Integer, b::DoubleF64) = b * float(a)
 Base.:*(a::Bool, b::DoubleF64) = b * convert(Float64, a)
+Base.:*(a::DoubleF64, b::Bool) = b ? a : zero(a)
 Base.:*(a::DoubleF64, b::Integer) = a * float(b)
 
 @inline function Base.:*(a::DoubleF64, b::DoubleF64)
@@ -349,6 +353,12 @@ Base.rem(
     r::RoundingMode{:ToZero} = RoundToZero,
 ) = a - round(a / b, r) * b
 Base.rem(a::DoubleF64, b::Union{Float64, DoubleF64}, r::RoundingMode{:Nearest}) =
+    a - round(a / b, r) * b
+Base.rem(a::DoubleF64, b::Union{Float64, DoubleF64}, r::RoundingMode{:Up}) =
+    a - round(a / b, r) * b
+Base.rem(a::DoubleF64, b::Union{Float64, DoubleF64}, r::RoundingMode{:Down}) =
+    a - round(a / b, r) * b
+Base.rem(a::DoubleF64, b::Union{Float64, DoubleF64}, r::RoundingMode{:FromZero}) =
     a - round(a / b, r) * b
 Base.rem(a::DoubleF64, b::Union{Float64, DoubleF64}, r::RoundingMode) =
     a - round(a / b, r) * b
@@ -491,6 +501,12 @@ Base.isfinite(a::DoubleF64) = isfinite(a.hi)
 # ---------------------------------------------------------------------------
 # Rounding
 # ---------------------------------------------------------------------------
+
+# Disambiguate specific RoundingModes that Base defines methods for on AbstractFloat
+Base.round(a::DoubleF64, ::RoundingMode{:NearestTiesAway}) = round(a, RoundNearest) # fallback
+Base.round(a::DoubleF64, ::RoundingMode{:NearestTiesUp}) = round(a, RoundNearest) # fallback
+Base.round(a::DoubleF64, ::RoundingMode{:FromZero}) =
+    a >= zero(a) ? floor(a + DoubleF64(0.5)) : ceil(a - DoubleF64(0.5))
 
 @inline function Base.round(a::DoubleF64, r::RoundingMode = RoundNearest)
     hi = round(a.hi, r)

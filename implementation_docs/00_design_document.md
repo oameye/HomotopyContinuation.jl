@@ -186,7 +186,7 @@ src/
 ├── HomotopyContinuationNext.jl
 │
 ├── primitives/
-│   ├── double_double.jl            # DoubleF64, ComplexDF64
+│   ├── double_f64.jl               # DoubleF64, ComplexDF64
 │   ├── norms.jl                    # InfNorm, WeightedNorm
 │   ├── linear_algebra.jl           # MatrixWorkspace, LU, QR, condition est.
 │   ├── voronoi_tree.jl             # Proximity search
