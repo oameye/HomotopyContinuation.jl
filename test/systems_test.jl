@@ -61,7 +61,7 @@ end
         @var x y a b
         f = System([y^2 + 2x + 3, x - 1])
         g = System([(x^4 + y * a)^3 - 3y, x - 1 * b^2], parameters = [a, b])
-        comp = compose(g, f; compile = Val(false))
+        comp = compose(g, f; compile = Val(:none))
 
         test_system(comp, System(comp))
     end

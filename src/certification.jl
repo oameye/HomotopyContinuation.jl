@@ -1415,7 +1415,7 @@ function certify(
 end
 
 
-function certify(F::System, args...; compile::Val = false, kwargs...)
+function certify(F::System, args...; compile::Val = Val(:none), kwargs...)
     certify(fixed(F; compile = compile), args...; kwargs...)
 end
 

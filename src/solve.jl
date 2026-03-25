@@ -118,7 +118,7 @@ function solver_startsolutions(
     F::Union{System,AbstractSystem},
     starts = nothing;
     seed = rand(UInt32),
-    start_system = isnothing(variable_groups(F)) ? Val(:polyhedral) : Val(:total_degree),
+    start_system::Val = isnothing(variable_groups(F)) ? Val(:polyhedral) : Val(:total_degree),
     generic_parameters = nothing,
     p₁ = generic_parameters,
     start_parameters = p₁,
@@ -158,7 +158,7 @@ function solver_startsolutions(
                 compile = compile,
                 kwargs...,
             )
-        elseif start_system isa Val{:polyhedral} || start_system == :polyhedral
+        elseif start_system isa Val{:polyhedral}
             used_start_system = :polyhedral
             tracker, starts = polyhedral(
                 F;
@@ -166,7 +166,7 @@ function solver_startsolutions(
                 target_parameters = target_parameters,
                 kwargs...,
             )
-        elseif start_system isa Val{:total_degree} || start_system == :total_degree
+        elseif start_system isa Val{:total_degree}
             used_start_system = :total_degree
             tracker, starts = total_degree(
                 F;

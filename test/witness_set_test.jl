@@ -28,7 +28,7 @@
 
         F = System([x^2 + y^2 - 5z^2], [x, y, z])
 
-        W = witness_set(F; compile = Val(false))
+        W = witness_set(F; compile = Val(:none))
 
         @test dim(W) == 1
         @test codim(W) == 2
@@ -38,19 +38,19 @@
         @test trace_test(W) < 1e-8
 
         L = LinearSubspace([1 1 1])
-        W_L = witness_set(W, L; compile = Val(false))
+        W_L = witness_set(W, L; compile = Val(:none))
         @test degree(W_L) == 2
 
         L = rand_subspace(3; codim = 1, affine = false)
-        W_L = witness_set(W, L; compile = Val(false))
+        W_L = witness_set(W, L; compile = Val(:none))
         @test degree(W_L) == 2
 
         L = rand_subspace([x, y, z]; codim = 1, affine = false)
-        W_L = witness_set(W, L; compile = Val(false))
+        W_L = witness_set(W, L; compile = Val(:none))
         @test degree(W_L) == 2
 
         L = rand_subspace(3; codim = 1, affine = true)
-        @test_throws ErrorException witness_set(W, L; compile = Val(false))
+        @test_throws ErrorException witness_set(W, L; compile = Val(:none))
     end
 
     @testset "dim / codim" begin
@@ -66,9 +66,9 @@
 
         # quadratic_surface = rand_poly([x,y,z,w], 2; homogeneous = true)
         # sextic_curve = System([cubic_surface, quadratic_surface])
-        @test degree(witness_set(f; dim = 1, compile = Val(false))) == 16
-        @test degree(witness_set(f; codim = 4, compile = Val(false))) == 16
-        @test degree(witness_set(f; compile = Val(false))) == 16
+        @test degree(witness_set(f; dim = 1, compile = Val(:none))) == 16
+        @test degree(witness_set(f; codim = 4, compile = Val(:none))) == 16
+        @test degree(witness_set(f; compile = Val(:none))) == 16
 
         homogeneous = false
         f = System([
@@ -79,9 +79,9 @@
         ])
         # quadratic_surface = rand_poly([x,y,z,w], 2; homogeneous = true)
         # sextic_curve = System([cubic_surface, quadratic_surface])
-        @test degree(witness_set(f; dim = 2, compile = Val(false))) == 16
-        @test degree(witness_set(f; codim = 4, compile = Val(false))) == 16
-        @test degree(witness_set(f; compile = Val(false))) == 16
+        @test degree(witness_set(f; dim = 2, compile = Val(:none))) == 16
+        @test degree(witness_set(f; codim = 4, compile = Val(:none))) == 16
+        @test degree(witness_set(f; compile = Val(:none))) == 16
     end
 
     @var x, y, z

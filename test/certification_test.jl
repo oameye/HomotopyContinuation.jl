@@ -155,8 +155,8 @@
     @testset "positive" begin
         @var x y
         f = System([x^2 + y^2 - 1, x - y])
-        res = solve(f; compile = Val(false), start_system = :total_degree)
-        cert = certify(f, res, compile = Val(false))
+        res = solve(f; compile = Val(:none), start_system = :total_degree)
+        cert = certify(f, res, compile = Val(:none))
         @test count(is_positive, certificates(cert)) == 1
         @test count(s -> is_positive(s, 1), certificates(cert)) == 1
         @test count(is_real, certificates(cert)) == 2
@@ -197,12 +197,12 @@
             1 // 1,
         ]
         real_sols = read_solutions(joinpath(@__DIR__, "data/3264_real_sols.txt"))
-        cert = certify(F, real_sols, real_conics; compile = Val(true))
+        cert = certify(F, real_sols, real_conics; compile = Val(:all))
         @test ndistinct_real_certified(cert) == 3264
-        cert = certify(F, real_sols, real_conics; compile = Val(false))
+        cert = certify(F, real_sols, real_conics; compile = Val(:none))
         @test ndistinct_real_certified(cert) == 3264
-        @test_throws ArgumentError certify(F, real_sols; compile = Val(false))
-        @test_throws ArgumentError certify(F, real_sols; compile = Val(true))
+        @test_throws ArgumentError certify(F, real_sols; compile = Val(:none))
+        @test_throws ArgumentError certify(F, real_sols; compile = Val(:all))
 
         dcs = DistinctCertifiedSolutions(F, real_conics)
         for s in real_sols

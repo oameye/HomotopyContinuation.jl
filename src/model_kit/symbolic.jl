@@ -650,9 +650,11 @@ function exponents_coefficients(
         end
     end
     if unpack_coeffs
-        coeffs = map(v -> to_number(v), collect(values(D)))
-        if eltype(coeffs) === ComplexF64
-            coeffs = coeffs::Vector{ComplexF64}
+        coeffs_any = map(to_number, collect(values(D)))
+        coeffs = if all(v -> v isa ComplexF64, coeffs_any)
+            convert(Vector{ComplexF64}, coeffs_any)
+        else
+            coeffs_any
         end
     else
         coeffs = collect(values(D))
@@ -1348,10 +1350,24 @@ Return the support of the system and the corresponding coefficients.
 function support_coefficients(F::System)
     n = length(F.expressions)
     supports = Vector{Matrix{Int32}}(undef, n)
-    coeffs = Vector(undef, n)
+    coeffs_typed = Vector{Vector{ComplexF64}}(undef, n)
+    all_numeric = true
     for i in 1:n
         M, c = exponents_coefficients(F.expressions[i], F.variables)
         supports[i] = M
+        if c isa Vector{ComplexF64}
+            coeffs_typed[i] = c
+        else
+            all_numeric = false
+        end
+    end
+    if all_numeric
+        return supports, coeffs_typed
+    end
+    # Fallback: re-collect with untyped vector for parametric systems
+    coeffs = Vector(undef, n)
+    for i in 1:n
+        _, c = exponents_coefficients(F.expressions[i], F.variables)
         coeffs[i] = c
     end
     supports, coeffs

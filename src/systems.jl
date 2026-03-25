@@ -11,8 +11,8 @@ include("systems/start_pair_system.jl")
 """
     fixed(F::System; compile = Val($(COMPILE_DEFAULT[])))
 
-Constructs either a [`CompiledSystem`](@ref) (if `compile = Val(:all)` / `Val(true)`), an
-[`InterpretedSystem`](@ref) (if `compile = Val(:none)` / `Val(false)`) or a
+Constructs either a [`CompiledSystem`](@ref) (if `compile = Val(:all)`), an
+[`InterpretedSystem`](@ref) (if `compile = Val(:none)`) or a
 [`MixedSystem`](@ref) (`compile = Val(:mixed)`).
 """
 fixed(F::System; compile::Val = COMPILE_DEFAULT[], kwargs...) =
@@ -20,9 +20,7 @@ fixed(F::System; compile::Val = COMPILE_DEFAULT[], kwargs...) =
 fixed(F::AbstractSystem; compile::Val = COMPILE_DEFAULT[], kwargs...) = F
 
 # Val-dispatched methods — each returns a concrete type
-fixed(F::System, ::Val{true}; kwargs...) = CompiledSystem(F; kwargs...)
 fixed(F::System, ::Val{:all}; kwargs...) = CompiledSystem(F; kwargs...)
-fixed(F::System, ::Val{false}; kwargs...) = InterpretedSystem(F; kwargs...)
 fixed(F::System, ::Val{:none}; kwargs...) = InterpretedSystem(F; kwargs...)
 fixed(F::System, ::Val{:mixed}; kwargs...) = MixedSystem(F; kwargs...)
 fixed(F::AbstractSystem, ::Val; kwargs...) = F

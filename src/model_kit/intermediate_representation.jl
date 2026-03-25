@@ -90,14 +90,16 @@ end
 _to_ir_arg(x::IRStatementArg) = x
 _to_ir_arg(x::Number) = ComplexF64(x)
 
-function add_op!(ir::IntermediateRepresentation, op::OpType, args...)
-    ir_args = map(_to_ir_arg, args)
-    stmt = n = length(ir) + 1
+function add_op!(ir::IntermediateRepresentation, op::OpType, args::IRStatementArg...)
+    n = length(ir) + 1
     ref = IRStatementRef(n)
-    stmt = IRStatement(op, ref, ir_args...)
+    stmt = IRStatement(op, ref, args...)
     push!(ir.statements, stmt)
-
     IRStatementRef(n)
+end
+# Accept Number args by converting to ComplexF64
+function add_op!(ir::IntermediateRepresentation, op::OpType, args...)
+    add_op!(ir, op, map(_to_ir_arg, args)...)
 end
 
 
@@ -270,7 +272,9 @@ function split_into_positives_negatives(ex)
     positives, negatives
 end
 
-function reduce_to_at_most_two_multiplicants!(ir, ex, cse, pse)
+const IRPair = Tuple{IRStatementArg, IRStatementArg}
+
+function reduce_to_at_most_two_multiplicants!(ir, ex, cse, pse)::IRPair
     if class(ex) === :Mul
         v = args(ex)
         if length(v) == 2
@@ -288,12 +292,12 @@ function reduce_to_at_most_two_multiplicants!(ir, ex, cse, pse)
     return (expr_to_ir_statements!(ir, ex, cse, pse), nothing)
 end
 
-function sum_products!(ir, tuples::Vector)
+function sum_products!(ir, tuples::Vector{IRPair})::IRStatementArg
     if isempty(tuples)
         return nothing
     end
-    singles = convert(Vector{IRStatementArg}, first.(filter(t -> isnothing(t[2]), tuples)))
-    pairs = filter(t -> !isnothing(t[2]), tuples)
+    singles = IRStatementArg[t[1] for t in tuples if isnothing(t[2])]
+    pairs = IRPair[t for t in tuples if !isnothing(t[2])]
     n = length(pairs)
     for k = 1:2:(n-1)
         (a, b) = pairs[k]
@@ -343,8 +347,8 @@ end
 function process_sum!(ir, ex::Basic, cse, pse)
     @assert class(ex) == :Add
     pos, neg = split_into_positives_negatives(ex)
-    pos_reduced = map(e -> reduce_to_at_most_two_multiplicants!(ir, e, cse, pse), pos)
-    neg_reduced = map(e -> reduce_to_at_most_two_multiplicants!(ir, e, cse, pse), neg)
+    pos_reduced = IRPair[reduce_to_at_most_two_multiplicants!(ir, e, cse, pse) for e in pos]
+    neg_reduced = IRPair[reduce_to_at_most_two_multiplicants!(ir, e, cse, pse) for e in neg]
 
 
     if length(pos_reduced) == 1 && length(neg_reduced) == 1

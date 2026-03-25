@@ -225,7 +225,7 @@ function RegenerationCache(u, f, F, h, codim, EO, TO, progress)
     RegenerationCache(A, b, x0, y0, y, f, F, h, u, 0, codim, EO, TO, progress)
 end
 function update_Fᵢ!(cache, fᵢ, vars)
-    Fᵢ = fixed(System(fᵢ, variables = vars), compile = Val(false))
+    Fᵢ = fixed(System(fᵢ, variables = vars), compile = Val(:none))
     cache.fᵢ = fᵢ
     cache.Fᵢ = Fᵢ
     m = length(Fᵢ)
@@ -356,7 +356,7 @@ function _regeneration(
     end
 
     # Initialize a cache
-    Fᵢ = fixed(System(f[1:1], variables = vars), compile = Val(false))
+    Fᵢ = fixed(System(f[1:1], variables = vars), compile = Val(:none))
     cache = RegenerationCache(
         u,
         f[1:1],
@@ -430,7 +430,7 @@ function _regeneration(
         ws = map(out) do W
             update_progress!(progress)
             P, L = u_transform(W)
-            WitnessSet(fixed(F, compile = Val(false)), L, P)
+            WitnessSet(fixed(F, compile = Val(:none)), L, P)
         end
     else
         return ws = Vector{WitnessSet}()
@@ -491,7 +491,7 @@ function initialize_hypersurfaces(
     out = Vector{WitnessSet}(undef, c)
     for i = 1:c
         fᵢ = f[i]
-        h = fixed(System([fᵢ], variables = vars), compile = Val(false))
+        h = fixed(System([fᵢ], variables = vars), compile = Val(:none))
         pᵢ, qᵢ = get_num_den(fᵢ) # fᵢ = pᵢ / qᵢ
         res = solve(
             System([pᵢ], variables = vars),
@@ -772,8 +772,8 @@ function set_up_u_homotopy(W, f, X, H, h, vars, u)
     L = linear_subspace_u(W)
     K = linear_subspace(X)
 
-    F₀ = slice(System([f; h0], variables = vars), L; compile = Val(false))
-    G₀ = slice(System([f; h], variables = vars), K; compile = Val(false))
+    F₀ = slice(System([f; h0], variables = vars), L; compile = Val(:none))
+    G₀ = slice(System([f; h], variables = vars), K; compile = Val(:none))
     Hom = StraightLineHomotopy(F₀, G₀; gamma = cis(2 * pi * rand()))
 
     return Hom, d
@@ -992,7 +992,7 @@ function decompose_with_monodromy!(
     if dim(L) < n
         update_progress!(progress; is_monodromy = true)
 
-        MS = MonodromySolver(G, L; compile = Val(false), options = options)
+        MS = MonodromySolver(G, L; compile = Val(:none), options = options)
         res = monodromy_solve(
             MS,
             P,
@@ -1966,7 +1966,7 @@ function _intersect(
     fill_up!([W₁; W₂], monodromy_options, cache, show_monodromy_progress, threading)
 
     # return data 
-    G = fixed(System([f; h], variables = vars); compile = Val(false))
+    G = fixed(System([f; h], variables = vars); compile = Val(:none))
     P1, L1 = u_transform(W₁)
     out = [WitnessSet(G, L1, P1)]
     if !isnothing(W₂)
@@ -2008,8 +2008,8 @@ function prepare_for_u_homotopy(H::WitnessSet, W::WitnessSet, vars::Vector{Varia
         W₂ = WitnessPoints(flagW[2][1], flagW[2][2], Vector{Vector{ComplexF64}}())
     end
     Hᵤ =
-        WitnessSet(fixed(FH; compile = Val(false)), flagH[1][1], map(x -> [x; cH], solutions(H)))
+        WitnessSet(fixed(FH; compile = Val(:none)), flagH[1][1], map(x -> [x; cH], solutions(H)))
 
-    W₁, W₂, Hᵤ, f, fixed(FW; compile = Val(false)), first(h), vars_u
+    W₁, W₂, Hᵤ, f, fixed(FW; compile = Val(:none)), first(h), vars_u
 end
 get_c(flag) = extrinsic((flag[1][1])).b[1] # the first entry of b is the right-hand side of "u=c"

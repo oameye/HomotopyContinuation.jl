@@ -13,17 +13,15 @@ include("homotopies/fixed_parameter_homotopy.jl")
 """
     fixed(H::Homotopy; compile = Val($(COMPILE_DEFAULT[])))
 
-Constructs either a [`CompiledHomotopy`](@ref) (if `compile = Val(:all)` / `Val(true)`), an
-[`InterpretedHomotopy`](@ref) (if `compile = Val(:none)` / `Val(false)`) or a
+Constructs either a [`CompiledHomotopy`](@ref) (if `compile = Val(:all)`), an
+[`InterpretedHomotopy`](@ref) (if `compile = Val(:none)`) or a
 [`MixedHomotopy`](@ref) (`compile = Val(:mixed)`).
 """
 fixed(H::Homotopy; compile::Val = COMPILE_DEFAULT[], kwargs...) =
     fixed(H, compile; kwargs...)
 fixed(H::AbstractHomotopy; compile::Val = COMPILE_DEFAULT[], kwargs...) = H
 
-fixed(H::Homotopy, ::Val{true}; kwargs...) = CompiledHomotopy(H; kwargs...)
 fixed(H::Homotopy, ::Val{:all}; kwargs...) = CompiledHomotopy(H; kwargs...)
-fixed(H::Homotopy, ::Val{false}; kwargs...) = InterpretedHomotopy(H; kwargs...)
 fixed(H::Homotopy, ::Val{:none}; kwargs...) = InterpretedHomotopy(H; kwargs...)
 fixed(H::Homotopy, ::Val{:mixed}; kwargs...) = MixedHomotopy(H; kwargs...)
 fixed(H::AbstractHomotopy, ::Val; kwargs...) = H

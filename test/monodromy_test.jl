@@ -293,13 +293,13 @@
         @var x[1:4]
         f1 = rand_poly(x, 6; homogeneous = true)
         F = System([f1], x)
-        res = monodromy_solve(F; dim = 2, compile = Val(false))
+        res = monodromy_solve(F; dim = 2, compile = Val(:none))
         @test nsolutions(res) == 6
         @test trace(res) < 1e-6
         @test is_success(res)
 
         F = System([f1, rand_poly(x, 3), rand_poly(x, 4)], x)
-        res = monodromy_solve(F; codim = 3, compile = Val(false))
+        res = monodromy_solve(F; codim = 3, compile = Val(:none))
         @test nsolutions(res) == 72
         @test trace(res) < 1e-6
         @test is_success(res)
@@ -313,13 +313,13 @@
         F = System([f1, f2], variables = [x, y], parameters = u[1:4])
         r1 = monodromy_solve(
             F,
-            compile = Val(true),
+            compile = Val(:all),
             target_solutions_count = 4,
             max_loops_no_progress = 100,
         )
         r2 = monodromy_solve(
             F,
-            compile = Val(false),
+            compile = Val(:none),
             target_solutions_count = 4,
             max_loops_no_progress = 100,
         )
@@ -337,7 +337,7 @@
         )
         r = monodromy_solve(
             F,
-            compile = Val(false),
+            compile = Val(:none),
             max_loops_no_progress = 100,
             target_solutions_count = 6,
         )
@@ -372,24 +372,24 @@
             sys,
             solutions(res),
             [1, 2, 3],
-            monodromy_options = (compile = Val(false),),
-            parameter_homotopy_options = (compile = Val(false),),
+            monodromy_options = (compile = Val(:none),),
+            parameter_homotopy_options = (compile = Val(:none),),
             show_progress = false,
         )
         @test false == verify_solution_completeness(
             sys,
             solutions(res)[1:1],
             [1, 2, 3],
-            monodromy_options = (compile = Val(false),),
-            parameter_homotopy_options = (compile = Val(false),),
+            monodromy_options = (compile = Val(:none),),
+            parameter_homotopy_options = (compile = Val(:none),),
             show_progress = true,
         )
         @test false == verify_solution_completeness(
             sys,
             solutions(res),
             [1, 2, 3],
-            monodromy_options = (compile = Val(false),),
-            parameter_homotopy_options = (compile = Val(false),),
+            monodromy_options = (compile = Val(:none),),
+            parameter_homotopy_options = (compile = Val(:none),),
             show_progress = false,
             trace_tol = 1e-60,
         )
@@ -449,7 +449,7 @@
             [b₁],
             params,
             distance = dist,
-            compile = Val(false),
+            compile = Val(:none),
             unique_points_rtol = 1e-8,
             unique_points_atol = 1e-14,
             target_solutions_count = 305,

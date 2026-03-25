@@ -1,104 +1,120 @@
 # TTFX Analysis for HomotopyContinuation.jl
 
-**Date**: 2026-03-24 | **Julia**: 1.12 | **Baseline**: ~33s TTFX for first `solve()` call
+**Date**: 2026-03-25 | **Julia**: 1.12 | **Branch**: `jet`
 
-## Results
+## Results (no precompile directives, default `:mixed`)
 
-| Benchmark | Before | After | Speedup |
-|-----------|--------|-------|---------|
-| `solve(F)` (default polyhedral) | ~33s | ~20s | **1.7x** |
-| Parameter homotopy | ~33s | ~0.4s | **80x** |
-| Package load | 1.8s | 1.9s | — |
-| Precompilation (one-time) | 8s | 35s | +27s |
+| Benchmark | main | jet | Change |
+|-----------|------|-----|--------|
+| 1st `solve(F)` | 28.5s | 25.6s | **-10%** |
+| 2nd `solve(F)` same system | 0.002s | 0.002s | — |
+| 3rd `solve(G)` different system | 1.9s | 2.3s | — |
+| Parameter homotopy | 2.2s | 2.0s | **-9%** |
+| Package load | 1.7s | 1.7s | — |
 
-The remaining ~20s in `solve(F)` is ModelKit system construction (~70 runtime dispatches
-from `to_number`) and polyhedral mixed cell computation — both outside the tracker pipeline.
+With `compile=Val(:none)` (uses `InterpretedSystem`, no unique type parameter):
+
+| Benchmark | Val(:none) |
+|-----------|------------|
+| 1st `solve(F)` | **1.1s** |
+| 2nd `solve(G)` different system | **0.002s** |
+| Parameter homotopy | **0.3s** |
+
+## Root Cause: `CompiledSystem{ID}`
+
+The 30x improvement with `:none` reveals the root problem. `CompiledSystem{ID}` uses
+`@generated` functions keyed on a hash type parameter. `MixedSystem{ID}` wraps it.
+Every new system creates a unique type:
+
+```
+Solver{PolyhedralTracker{ToricHomotopy{MixedSystem{0xabc...}}, ...}}
+```
+
+Julia must recompile the entire pipeline (`Tracker`, `EndgameTracker`, `Solver`,
+`serial_solve`, ...) from scratch each time. `InterpretedSystem` has no type parameter,
+so compiled code is reused. Benchmarks show `:none` matches `:mixed` runtime
+performance within 4%.
+
+## Key Remaining Refactor: Type-erase `CompiledSystem`
+
+Keep the compiled evaluation speed without leaking the hash into the type system:
+
+```julia
+# Current: hash in type parameter — unique type per system
+struct CompiledSystem{HI} <: AbstractSystem
+    ...
+end
+
+# Proposed: opaque wrapper with FunctionWrappers
+struct CompiledSystem <: AbstractSystem
+    ...
+    _evaluate!::FunctionWrapper{Nothing, Tuple{Vector{ComplexF64}, ...}}
+    _evaluate_and_jacobian!::FunctionWrapper{Nothing, Tuple{...}}
+end
+```
+
+The `@generated` functions still exist but are called through `FunctionWrapper`,
+which erases the type. The outer `CompiledSystem` becomes a single concrete type.
+This would give `:mixed` the same TTFX as `:none` (~1.1s) while keeping compiled speed.
 
 ## Tools Used
 
-- **SnoopCompile** (`@snoop_invalidations`): identified 19,023 invalidations, 27 from HC
-- **JET** (`@report_opt`): tracked runtime dispatches from 143 → 24 (non-ModelKit: 70 → 15)
+- **SnoopCompile** (`@snoop_invalidations`, `@snoop_inference`): invalidation trees,
+  inference time breakdown
+- **JET** (`@report_opt`): runtime dispatch analysis — **zero dispatches** on hot path
 - **Cthulhu** (`find_method_instance`, `generate_code_instance`): verified concrete return
-  types for every function in the tracker pipeline (`step!`, `track`, `serial_solve`, `solve`)
-- **BenchmarkTools**: benchmarked StructArray vs Matrix for MatrixWorkspace (StructArray slower)
+  types: `serial_solve` → `Result`, `step!` → `Bool`, `track` → `PathResult`
+- **BenchmarkTools**: StructArray vs Matrix, InterpretedSystem vs MixedSystem
 
 ## Fixes Applied
 
-### 1. `Val` dispatch for `compile` keyword (API change, all files)
+### 1. `Val` dispatch for `compile` keyword (API change)
 
-**Root cause**: `fixed(F; compile=:none)` branched on a runtime `Symbol`/`Bool` value,
-returning `Union{InterpretedSystem, CompiledSystem, MixedSystem}`. This 3-way Union
-propagated through the entire pipeline.
+`compile` accepts only `Val{:none}`, `Val{:all}`, `Val{:mixed}`. Each `fixed()` method
+returns a concrete type. `Val(true)`/`Val(false)` removed — symbols only.
 
-**Fix**: Changed `compile` to accept `Val` everywhere. `fixed()` dispatches on `Val{C}`,
-each method returning a concrete type:
+### 2. Remove `StructArray` branch from `MatrixWorkspace`
 
-```julia
-# Before (type-unstable)
-fixed(F::System; compile = :mixed) = if compile == :none ... elseif ...
+Branched on `m > 25` between `Matrix{ComplexF64}` and `StructArray{ComplexF64}`.
+Benchmarks showed StructArray is slower (0.84x at n=30). Always uses `Matrix{ComplexF64}`.
 
-# After (type-stable via dispatch)
-fixed(F::System, ::Val{:none}) = InterpretedSystem(F)
-fixed(F::System, ::Val{:mixed}) = MixedSystem(F)
-fixed(F::System, ::Val{:all}) = CompiledSystem(F)
-```
+### 3. Remove redundant `isbits`/`isbitstype` overloads
 
-- `COMPILE_DEFAULT` stores `Val` directly: `Ref{Val}(Val(:mixed))`
-- All internal functions accept `compile::Val`
-- User API: `solve(F; compile=Val(:none))`, `set_default_compile(:none)` still works
-- Tests updated throughout
+`DoubleF64` is naturally isbits. The overloads caused ~1,805 invalidations.
 
-**JET result**: `fixed()` return type is now fully concrete — no more Union.
+### 4. `to_number` returns `ComplexF64`
 
-### 2. Remove `StructArray` branch from `MatrixWorkspace` (`src/linear_algebra.jl`)
+Narrows `IRStatementArg` from `Union{Nothing, Number, Symbol, IRStatementRef}` (unbounded)
+to `Union{Nothing, ComplexF64, Symbol, IRStatementRef}` (4 types, union-splittable).
+Also `InstructionSequence.constants`: `Vector{Number}` → `Vector{ComplexF64}`.
 
-**Root cause**: `MatrixWorkspace` branched on `m > 25` between `Matrix{ComplexF64}` and
-`StructArray{ComplexF64}`, making the `M` type parameter unknown and poisoning inference
-through `Jacobian{M}` → `TrackerState{M}` → `Tracker{H,M}`.
+### 5. Typed IR construction
 
-**Fix**: Benchmarks showed StructArray is slower on modern Julia (0.84x at n=30, 0.92x at
-n=50). Removed the branch entirely — always uses `Matrix{ComplexF64}`.
+`IRPair` type alias, typed comprehensions in `process_sum!`, return annotation on
+`reduce_to_at_most_two_multiplicants!`. Eliminates `Vector{Tuple{Any, Any}}` inference.
 
-**Cthulhu result**: `Tracker`, `EndgameTracker` now infer concrete return types.
+### 6. Typed `support_coefficients`
 
-### 3. Remove redundant `isbits`/`isbitstype` overloads (`src/DoubleDouble.jl`)
+Returns `Vector{Vector{ComplexF64}}` for numeric systems instead of `Vector{Any}`.
 
-`DoubleF64` is an immutable struct of two `Float64` — naturally isbits. The overloads
-added methods to compiler intrinsics called throughout Base, causing ~1,805 invalidations.
+### 7. Distinct variable names in pipeline
 
-### 4. Type-stable `support_coefficients` (`src/model_kit/symbolic.jl`)
+Stopped reassigning `F` through different types. Each step uses a new variable
+(`F_compiled`, `F_target`, `F_chart`, `F_final`).
 
-Replaced broadcasting with an explicit loop. `supports::Vector{Matrix{Int32}}` is now
-concrete. Coefficients remain abstract (can be symbolic `Expression` when parameters
-are present).
+### 8. Eager `InterpretedSystem` fields
 
-### 5. `to_number` returns `ComplexF64` (`src/model_kit/symengine.jl`)
+Removed `Union{Nothing, Interpreter{AcbRefVector}}` — always initialized.
 
-Changed `to_number(x::Basic)` from returning `Union{Int32, Int64, Float64, Rational, ...}`
-to returning `ComplexF64` for all numeric expressions. This narrows `IRStatementArg` from
-`Union{Nothing, Number, Symbol, IRStatementRef}` (unbounded) to
-`Union{Nothing, ComplexF64, Symbol, IRStatementRef}` (4 concrete types, union-splittable).
+### 9. Other
 
-Also changed `InstructionSequence.constants` from `Vector{Number}` to `Vector{ComplexF64}`.
+- Fixed captured variables (`prev_stmt_arg`, `found_id`)
+- Type assertion on `ProgressMeter.tty_width` return
+- Typed comprehension for `scaling` in `total_degree_variables`
 
-### 6. Distinct variable names in pipeline (`src/total_degree.jl`, `src/polyhedral.jl`, `src/solve.jl`)
+## Invalidations
 
-Stopped reassigning `F` through different types (`System` → `InterpretedSystem` →
-`FixedParameterSystem` → `AffineChartSystem` → `RandomizedSystem`). Each step uses
-a new variable (`F_compiled`, `F_target`, `F_chart`, `F_final`) so the compiler sees
-a single concrete type per variable.
-
-### 7. Other fixes
-
-- Fixed captured variable `prev_stmt_arg` (extracted to `_resolve_arg`)
-- Fixed captured variable `found_id` in `UniquePoints.add!` (`src/unique_points.jl`)
-- Type assertion on `ProgressMeter.tty_width` return (`src/solve.jl`)
-- Typed comprehension for `scaling` in `total_degree_variables` (`src/total_degree.jl`)
-- Precompile directives for tracker pipeline (`src/precompile.jl`)
-
-## Remaining Invalidations (from dependencies)
-
-~19,000 invalidations from upstream packages. HC itself contributes only ~27.
+~19,400 from upstream packages. **HC contributes zero.**
 
 | Module | Count | Root cause |
 |--------|-------|------------|
@@ -107,60 +123,20 @@ a single concrete type per variable.
 | MultivariatePolynomials | 1,488 | `==`, `isequal` |
 | Static | 864 | `convert(::Type{T<:Number}, ...)` |
 | Mods | 708 | `hash(::AbstractMod)` |
-| Others | ~4,287 | CommonWorldInvalidations, StaticArrays, FillArrays, etc. |
-
-## Remaining JET Reports
-
-JET `@report_opt` on `solve(solver, starts)` — the hot path — shows **10 reports**,
-all outside our control:
-
-- 4 × ProgressMeter internals (`tty_width`, `tlast`, `dt` — upstream types)
-- 4 × `Result` constructor with `Union{Nothing, UInt32}` seed / `Union{Nothing, Symbol}` start_system — intentional design, Julia union-splits these efficiently
-- 1 × `MultiplicityInfo` recursive closure — JET optimization limitation
-- 1 × Dict assignment in multiplicity detection
-
-**Zero dispatches in the tracker pipeline** (`step!`, `track`, `init!`, `serial_solve`).
-
-JET crashes on paths involving `total_degree`/`polyhedral` (Taylor `@generated` functions
-trigger a JET bug with Julia 1.12's Compiler internals). Cthulhu verification confirms
-all tracker functions return concrete types on those paths too.
+| Others | ~4,287 | CommonWorldInvalidations, StaticArrays, etc. |
 
 ## Further Opportunities
 
-- **Fix SymEngine reinitialization** (#643) → enables `@compile_workload`
-- **File upstream PRs** for Arblib, VectorizationBase invalidations
-- **LoopVectorization as extension** → -5,500 invalidations
-- **Trait dispatch for `is_homogeneous`** → eliminates the last Union in homotopy construction
-- **ModelKit `to_number`** → return `ComplexF64` always instead of abstract `Number`
+| Refactor | Impact | Status |
+|----------|--------|--------|
+| **Type-erase `CompiledSystem{ID}`** | High — `:mixed` gets same TTFX as `:none` | Planned |
+| Fix SymEngine reinitialization (#643) | Enables `@compile_workload` | Blocked upstream |
+| Upstream invalidation PRs | -19,400 invalidations | Out of scope |
+| LoopVectorization as extension | -5,500 invalidations | Out of scope |
 
-## Reproducing
+## Not Planned
 
-```julia
-# Fresh session required for invalidation analysis
-using Pkg; Pkg.activate(; temp=true)
-Pkg.develop(path="."); Pkg.add(["SnoopCompileCore", "SnoopCompile", "JET", "Cthulhu"])
-
-# SnoopCompile: invalidations
-using SnoopCompileCore
-invs = @snoop_invalidations begin; using HomotopyContinuation; end
-using SnoopCompile
-trees = invalidation_trees(invs)
-trees = filter(t -> SnoopCompile.countchildren(t) > 0, trees)
-sort!(trees; by=SnoopCompile.countchildren, rev=true)
-
-# JET: runtime dispatch analysis
-using JET, HomotopyContinuation
-@var x y
-F = InterpretedSystem(System([x^2 + y - 1, x + y^2 - 1]))
-@report_opt target_modules=(HomotopyContinuation,) HomotopyContinuation.total_degree(F; compile=Val(:none))
-
-# Cthulhu: verify concrete return types
-using Cthulhu: find_method_instance, generate_code_instance, AbstractProvider
-interp = Base.Compiler.NativeInterpreter()
-provider = AbstractProvider(interp)
-solver, starts = solver_startsolutions(F; compile=Val(:none), start_system=:total_degree)
-tracker = solver.trackers[1].tracker
-mi = find_method_instance(provider, HomotopyContinuation.step!, Tuple{typeof(tracker)})
-ci = generate_code_instance(provider, mi)
-println("step! return: ", ci.rettype)  # Should be Bool (concrete)
-```
+| Refactor | Reason |
+|----------|--------|
+| Trait dispatch for `is_homogeneous` | Genuinely runtime-dependent, Union is correct |
+| `@compile_workload` | Blocked by SymEngine reinitialization (#643) |
