@@ -11,6 +11,7 @@ const MP = MultivariatePolynomials
 const FSVec{T} = FixedSizeVector{T}
 const FSMat{T} = FixedSizeMatrix{T}
 
+include("primitives/double_f64.jl")
 include("utils.jl")
 
 end # module
