@@ -33,12 +33,12 @@ Base.length(w::WeightedNorm) = length(w.weights)
 # ---------------------------------------------------------------------------
 
 """
-    inf_norm(x::AbstractVector)::Float64
+    inf_norm(x::AbstractVector)
 
 Compute the infinity norm ``\\max_i |x_i|``.
 Uses `abs2` for speed; falls back to `abs` if overflow is detected.
 """
-function inf_norm(x::AbstractVector)::Float64
+@inline function inf_norm(x::AbstractVector)
     n = length(x)
     @inbounds dmax = abs2(x[1])
     for i in 2:n
@@ -62,11 +62,11 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    inf_distance(x::AbstractVector, y::AbstractVector)::Float64
+    inf_distance(x::AbstractVector, y::AbstractVector)
 
 Compute the infinity-norm distance ``\\max_i |x_i - y_i|``.
 """
-function inf_distance(x::AbstractVector, y::AbstractVector)::Float64
+@inline function inf_distance(x::AbstractVector, y::AbstractVector)
     n = length(x)
     @inbounds dmax = abs2(x[1] - y[1])
     for i in 2:n
@@ -90,11 +90,11 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    weighted_norm(x::AbstractVector, w::WeightedNorm)::Float64
+    weighted_norm(x::AbstractVector, w::WeightedNorm)
 
 Compute ``||D^{-1}x||_\\infty = \\max_i |x_i / w_i|``.
 """
-function weighted_norm(x::AbstractVector, w::WeightedNorm)::Float64
+@inline function weighted_norm(x::AbstractVector, w::WeightedNorm)
     n = length(x)
     weights = w.weights
     @inbounds dmax = abs2(x[1] / weights[1])
@@ -119,15 +119,15 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    weighted_distance(x::AbstractVector, y::AbstractVector, w::WeightedNorm)::Float64
+    weighted_distance(x::AbstractVector, y::AbstractVector, w::WeightedNorm)
 
 Compute ``||D^{-1}(x-y)||_\\infty = \\max_i |(x_i - y_i) / w_i|``.
 """
-function weighted_distance(
+@inline function weighted_distance(
         x::AbstractVector,
         y::AbstractVector,
         w::WeightedNorm,
-    )::Float64
+    )
     n = length(x)
     weights = w.weights
     @inbounds dmax = abs2((x[1] - y[1]) / weights[1])

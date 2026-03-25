@@ -1,10 +1,10 @@
 ## Interpreter: tape-based execution engine for InstructionSequence
 
-mutable struct Interpreter{V <: AbstractVector}
-    const sequence::InstructionSequence
-    const tape::V
-    const variables::Vector{Symbol}
-    const parameters::Vector{Symbol}
+struct Interpreter{V <: AbstractVector}
+    sequence::InstructionSequence
+    tape::V
+    variables::Vector{Symbol}
+    parameters::Vector{Symbol}
 end
 
 function Base.show(io::IO, I::Interpreter{V}) where {V}
@@ -50,11 +50,12 @@ function _build_execute_instructions_inner(level::Int = 0)
     arity3 = filter(op -> arity(op) == 3, op_types)
     arity4 = filter(op -> arity(op) == 4, op_types)
 
+    # Order branches by frequency in polynomial evaluation:
+    # MUL, MULADD, MULMULADD, ADD dominate typical tapes.
+    # Put high-frequency ops first to minimize branch comparisons.
+    # Priority order: arity2 (MUL, ADD, SUB) → arity3 (MULADD, MULSUB) →
+    #                 arity4 (MULMULADD) → arity1 (SQR, CB, NEG) → POW_INT
     branches = [
-        map(arity1) do op
-            (:(op == $(op)), :(tape[i] = $(op_call(op))(t_1)))
-        end
-        [(:(op == $(OpType.OP_POW_INT)), :(tape[i] = $(op_call(OpType.OP_POW_INT))(t_1, arg_2)))]
         map(arity2) do op
             (
                 :(op == $(op)), quote
@@ -82,6 +83,10 @@ function _build_execute_instructions_inner(level::Int = 0)
                 end,
             )
         end
+        map(arity1) do op
+            (:(op == $(op)), :(tape[i] = $(op_call(op))(t_1)))
+        end
+        [(:(op == $(OpType.OP_POW_INT)), :(tape[i] = $(op_call(OpType.OP_POW_INT))(t_1, arg_2)))]
     ]
 
     # Add one level of instruction recursion to reduce loop overhead
@@ -109,7 +114,7 @@ function _build_execute_instructions_inner(level::Int = 0)
     end
 end
 
-@eval function execute_instructions!(tape::AbstractVector, instructions::Vector{Instruction})
+@eval @inline function execute_instructions!(tape::AbstractVector, instructions::Vector{Instruction})
     @inbounds begin
         k = 0
         while true
@@ -120,6 +125,28 @@ end
 end
 
 ## execute! — evaluate system
+
+Base.@propagate_inbounds function execute!(
+        u::AbstractVector,
+        I::Interpreter,
+        x::AbstractVector,
+    )
+    isempty(I.sequence.parameters_range) ||
+        error("Interpreter expects parameters; call execute!(u, I, x, p)")
+
+    vars_range = I.sequence.variables_range
+    @inbounds for (i, k) in enumerate(vars_range)
+        I.tape[k] = x[i]
+    end
+    @inbounds execute_instructions!(I.tape, I.sequence.instructions)
+
+    I.sequence.all_u_assigned || fill!(u, zero(eltype(u)))
+    @inbounds for (i, k) in I.sequence.u_assignments
+        u[i] = I.tape[k]
+    end
+
+    return u
+end
 
 Base.@propagate_inbounds function execute!(
         u::AbstractVector,
@@ -137,6 +164,35 @@ Base.@propagate_inbounds function execute!(
         I.tape[k] = x[i]
     end
     @inbounds execute_instructions!(I.tape, I.sequence.instructions)
+
+    I.sequence.all_u_assigned || fill!(u, zero(eltype(u)))
+    @inbounds for (i, k) in I.sequence.u_assignments
+        u[i] = I.tape[k]
+    end
+
+    return u
+end
+
+Base.@propagate_inbounds function execute!(
+        u::AbstractVector,
+        U::AbstractMatrix,
+        I::Interpreter,
+        x::AbstractVector,
+    )
+    isempty(I.sequence.parameters_range) ||
+        error("Interpreter expects parameters; call execute!(u, U, I, x, p)")
+
+    vars_range = I.sequence.variables_range
+    @inbounds for (i, k) in enumerate(vars_range)
+        I.tape[k] = x[i]
+    end
+    @inbounds execute_instructions!(I.tape, I.sequence.instructions)
+
+    I.sequence.all_U_assigned || fill!(U, zero(eltype(U)))
+    idx = CartesianIndices((I.sequence.output_dim, size(U, 2)))
+    @inbounds for (j, k) in I.sequence.U_assignments
+        U[idx[j]] = I.tape[k]
+    end
 
     I.sequence.all_u_assigned || fill!(u, zero(eltype(u)))
     @inbounds for (i, k) in I.sequence.u_assignments
@@ -197,23 +253,8 @@ function _build_execute_taylor_instructions_inner()
     arity3 = filter(op -> arity(op) == 3, op_types)
     arity4 = filter(op -> arity(op) == 4, op_types)
 
+    # Same frequency-based ordering as execute_instructions!
     branches = [
-        map(arity1) do op
-            (
-                :(op == $(op)), quote
-                    t_1 = tape[arg_1]
-                    tape[i] = $(taylor_op_call(op))(t_1)
-                end,
-            )
-        end
-        [
-            (
-                :(op == $(OpType.OP_POW_INT)), quote
-                    t_1 = tape[arg_1]
-                    tape[i] = $(taylor_op_call(OpType.OP_POW_INT))(t_1, arg_2)
-                end,
-            ),
-        ]
         map(arity2) do op
             (
                 :(op == $(op)), quote
@@ -244,6 +285,22 @@ function _build_execute_taylor_instructions_inner()
                 end,
             )
         end
+        map(arity1) do op
+            (
+                :(op == $(op)), quote
+                    t_1 = tape[arg_1]
+                    tape[i] = $(taylor_op_call(op))(t_1)
+                end,
+            )
+        end
+        [
+            (
+                :(op == $(OpType.OP_POW_INT)), quote
+                    t_1 = tape[arg_1]
+                    tape[i] = $(taylor_op_call(OpType.OP_POW_INT))(t_1, arg_2)
+                end,
+            ),
+        ]
     ]
 
     return quote
@@ -263,7 +320,7 @@ function _build_execute_taylor_instructions_inner()
     end
 end
 
-@eval function execute_taylor_instructions!(
+@eval @inline function execute_taylor_instructions!(
         tape::AbstractVector,
         instructions::Vector{Instruction},
     )

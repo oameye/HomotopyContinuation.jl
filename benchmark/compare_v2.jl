@@ -154,7 +154,7 @@ x_val = ComplexF64.(randn(4))
 IS_hc = InterpretedSystem(F_hc_sys)
 u_hc = zeros(ComplexF64, 4)
 
-t_next = @belapsed Next.execute!($u_next, $I_next, $x_val, $(ComplexF64[]))
+t_next = @belapsed Next.execute!($u_next, $I_next, $x_val)
 t_hc = @belapsed HC.ModelKit.evaluate!($u_hc, $IS_hc, $x_val)
 ratio = t_hc / t_next
 println("  katsura3 eval:  Next=$(round(t_next * 1e9; digits=1))ns  HC=$(round(t_hc * 1e9; digits=1))ns  ratio=$(round(ratio; digits=2))x")
@@ -164,7 +164,7 @@ I_jac_next = build_jacobian_interpreter(F_next_polys)
 U_next = zeros(ComplexF64, 4, 4)
 U_hc = zeros(ComplexF64, 4, 4)
 
-t_next = @belapsed Next.execute!($u_next, $U_next, $I_jac_next, $x_val, $(ComplexF64[]))
+t_next = @belapsed Next.execute!($u_next, $U_next, $I_jac_next, $x_val)
 t_hc = @belapsed HC.ModelKit.evaluate_and_jacobian!($u_hc, $U_hc, $IS_hc, $x_val)
 ratio = t_hc / t_next
 println("  katsura3 eval+jac:  Next=$(round(t_next * 1e9; digits=1))ns  HC=$(round(t_hc * 1e9; digits=1))ns  ratio=$(round(ratio; digits=2))x")
@@ -197,7 +197,7 @@ x_cyc = ComplexF64.(randn(5))
 IS_hc_cyc = InterpretedSystem(F_hc_cyclic)
 u_hc_cyc = zeros(ComplexF64, 5)
 
-t_next = @belapsed Next.execute!($u_next_cyc, $I_next_cyc, $x_cyc, $(ComplexF64[]))
+t_next = @belapsed Next.execute!($u_next_cyc, $I_next_cyc, $x_cyc)
 t_hc = @belapsed HC.ModelKit.evaluate!($u_hc_cyc, $IS_hc_cyc, $x_cyc)
 ratio = t_hc / t_next
 println("  cyclic5 eval:  Next=$(round(t_next * 1e9; digits=1))ns  HC=$(round(t_hc * 1e9; digits=1))ns  ratio=$(round(ratio; digits=2))x")
