@@ -9,6 +9,9 @@ const SUITE = BenchmarkGroup()
 include("primitives.jl")
 benchmark_primitives!(SUITE)
 
+include("interpreter.jl")
+benchmark_interpreter!(SUITE)
+
 BenchmarkTools.tune!(SUITE)
 results = BenchmarkTools.run(SUITE; verbose = true)
 display(median(results))
