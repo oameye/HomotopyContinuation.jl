@@ -28,6 +28,7 @@ export skeel_row_scaling!, apply_row_scaling!
 export residual!
 export mixed_precision_iterative_refinement!, fixed_precision_iterative_refinement!
 export inverse_inf_norm_est, inf_norm_matrix
+export Jacobian
 
 include("primitives/double_f64.jl")
 include("utils.jl")

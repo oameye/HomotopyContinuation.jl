@@ -10,7 +10,10 @@ using HomotopyContinuationNext:
     mixed_precision_iterative_refinement!,
     fixed_precision_iterative_refinement!,
     residual!,
-    inverse_inf_norm_est
+    inverse_inf_norm_est,
+    Jacobian,
+    WeightedNorm,
+    init!
 
 const LA = LinearAlgebra
 const FSVec{T} = FixedSizeVector{T}
@@ -174,4 +177,75 @@ end
 
     cond = LA.cond(WS)
     @test 1.0 ≤ cond < 1.0e6
+end
+
+@testset "Jacobian wrapper" begin
+    @testset "construction and counters" begin
+        n = 3
+        J = Jacobian(MatrixWorkspace(n, n))
+        @test J.factorizations[] == 0
+        @test J.ldivs[] == 0
+        @test size(J.workspace) == (3, 3)
+    end
+
+    @testset "updated! and init!" begin
+        n = 3
+        J = Jacobian(MatrixWorkspace(n, n))
+        A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
+        copyto!(J.workspace.A, A_data)
+        updated!(J)
+        @test J.workspace.factorized == false
+
+        J.factorizations[] = 5
+        J.ldivs[] = 10
+        init!(J)
+        @test J.factorizations[] == 0
+        @test J.ldivs[] == 0
+    end
+
+    @testset "ldiv!" begin
+        n = 4
+        A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
+        x_true = rand(ComplexF64, n)
+        b_data = A_data * x_true
+
+        J = Jacobian(MatrixWorkspace(n, n))
+        copyto!(J.workspace.A, A_data)
+        updated!(J)
+
+        x = FSVec{ComplexF64}(zeros(ComplexF64, n))
+        LA.ldiv!(x, J, FSVec{ComplexF64}(b_data))
+        @test LA.norm(Vector(x) - x_true) < 1.0e-10
+        @test J.factorizations[] >= 1
+        @test J.ldivs[] >= 1
+    end
+
+    @testset "ldiv! with WeightedNorm" begin
+        n = 4
+        A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
+        x_true = rand(ComplexF64, n)
+        b_data = A_data * x_true
+
+        J = Jacobian(MatrixWorkspace(n, n))
+        copyto!(J.workspace.A, A_data)
+        updated!(J)
+
+        w = WeightedNorm(n)
+        init!(w, FSVec{ComplexF64}(x_true))
+
+        x = FSVec{ComplexF64}(zeros(ComplexF64, n))
+        LA.ldiv!(x, J, FSVec{ComplexF64}(b_data), w)
+        @test LA.norm(Vector(x) - x_true) < 1.0e-10
+    end
+
+    @testset "cond delegation" begin
+        n = 3
+        J = Jacobian(MatrixWorkspace(n, n))
+        A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
+        copyto!(J.workspace.A, A_data)
+        updated!(J)
+
+        c = LA.cond(J)
+        @test 1.0 ≤ c < 1.0e6
+    end
 end

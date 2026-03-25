@@ -802,3 +802,93 @@ function LA.cond(WS::MatrixWorkspace)
     end
     return inf_norm_matrix(WS) * inverse_inf_norm_est(WS)
 end
+
+# ---------------------------------------------------------------------------
+# Jacobian wrapper
+# ---------------------------------------------------------------------------
+
+"""
+    Jacobian
+
+Wraps a `MatrixWorkspace` with factorization and solve counters.
+Used by the Newton corrector and tracker to track solver statistics.
+
+**Mutable justification:** `factorizations` and `ldivs` are counters that
+are incremented on each solve. They use `Base.RefValue{Int}` fields so that `Jacobian`
+itself remains an immutable struct.
+"""
+struct Jacobian
+    workspace::MatrixWorkspace
+    factorizations::Base.RefValue{Int}
+    ldivs::Base.RefValue{Int}
+end
+
+Jacobian(workspace::MatrixWorkspace) = Jacobian(workspace, Ref(0), Ref(0))
+
+"""
+    updated!(J::Jacobian)
+
+Forward the `updated!` call to the underlying `MatrixWorkspace`.
+"""
+function updated!(J::Jacobian)
+    updated!(J.workspace)
+    return J
+end
+
+"""
+    init!(J::Jacobian)
+
+Reset the factorization and solve counters to zero.
+"""
+function init!(J::Jacobian)
+    J.factorizations[] = 0
+    J.ldivs[] = 0
+    return J
+end
+
+Base.size(J::Jacobian) = size(J.workspace)
+
+"""
+    LA.ldiv!(x, J, b)
+
+Solve `J x = b` using the underlying `MatrixWorkspace` and increment counters.
+"""
+function LA.ldiv!(
+        x::AbstractVector{ComplexF64}, J::Jacobian, b::AbstractVector{ComplexF64},
+    )
+    LA.ldiv!(x, J.workspace, b)
+    J.ldivs[] += 1
+    J.factorizations[] += 1
+    return x
+end
+
+"""
+    LA.ldiv!(x, J, b, w)
+
+Solve `J x = b` with automatic Skeel row scaling based on the weights of
+`w::WeightedNorm`. For square systems, applies `skeel_row_scaling!` and
+`apply_row_scaling!` before solving.
+"""
+function LA.ldiv!(
+        x::AbstractVector{ComplexF64},
+        J::Jacobian,
+        b::AbstractVector{ComplexF64},
+        w::WeightedNorm,
+    )
+    m, n = size(J.workspace)
+    if m == n
+        skeel_row_scaling!(J.workspace, w.weights)
+        apply_row_scaling!(J.workspace)
+    end
+    LA.ldiv!(x, J.workspace, b)
+    J.ldivs[] += 1
+    J.factorizations[] += 1
+    return x
+end
+
+"""
+    LA.cond(J::Jacobian)
+
+Delegate condition number estimation to the underlying `MatrixWorkspace`.
+"""
+LA.cond(J::Jacobian) = LA.cond(J.workspace)
