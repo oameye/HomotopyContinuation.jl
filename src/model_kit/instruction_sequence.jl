@@ -413,6 +413,8 @@ function _index_compactification_mapping(
     )
     used_indices = Set{Int32}()
     unused_indices = Vector{Int32}()
+    next_reg = Int32(input_block_size)  # next fresh register to allocate
+    max_reg = Int32(input_block_size)   # high-water mark for scratch registers
 
     index_map = Dict{Int32, Int32}()
     for idx in Int32(1):Int32(input_block_size)
@@ -421,8 +423,10 @@ function _index_compactification_mapping(
 
     get_register!() = begin
         if isempty(unused_indices)
-            r = Int32(input_block_size + length(used_indices) + 1)
+            next_reg += Int32(1)
+            r = next_reg
             push!(used_indices, r)
+            max_reg = max(max_reg, r)
             return r
         end
         r = pop!(unused_indices)
@@ -464,12 +468,12 @@ function _index_compactification_mapping(
         end
     end
 
-    max_scratch = length(unused_indices)
-    # Assignment slots come after scratch space
+    # Assignment slots come after all scratch registers (using high-water mark)
+    num_scratch = Int(max_reg) - input_block_size
     updated_assignments =
-        range(input_block_size + max_scratch + 1; length = length(assignments))
+        range(input_block_size + num_scratch + 1; length = length(assignments))
     for (k, orig_idx) in enumerate(assignments)
-        index_map[Int32(orig_idx)] = Int32(input_block_size + max_scratch + k)
+        index_map[Int32(orig_idx)] = Int32(input_block_size + num_scratch + k)
     end
 
     tape_space_needed = last(updated_assignments)

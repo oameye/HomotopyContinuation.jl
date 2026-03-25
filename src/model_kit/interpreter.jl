@@ -20,7 +20,10 @@ Allocate a zero-initialized tape of the correct size and pre-load constants.
 """
 function create_tape(::Type{V}, seq::InstructionSequence) where {V <: AbstractVector}
     T = eltype(V)
-    tape = V(zeros(T, seq.tape_space_needed))
+    tape = V(undef, seq.tape_space_needed)
+    @inbounds for j in eachindex(tape)
+        tape[j] = zero(T)
+    end
     @inbounds for (i, k) in enumerate(seq.constants_range)
         tape[k] = convert(T, seq.constants[i])
     end

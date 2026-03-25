@@ -187,7 +187,7 @@ end
 
 Invert x unless it is 0, then return 0.
 """
-@inline op_inv_not_zero(x) = ifelse(iszero(x), x, op_inv(x))
+@inline op_inv_not_zero(x) = iszero(x) ? x : op_inv(x)
 
 @inline op_invsqr(x) = op_sqr(op_inv(x))
 @inline op_neg(x) = -x
