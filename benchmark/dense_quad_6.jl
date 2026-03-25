@@ -35,6 +35,7 @@ function print_histogram(label, seq)
     for (op, count) in op_histogram(seq)
         println("  ", lpad(string(op), 18), " : ", count)
     end
+    return
 end
 
 F_next = dense_quad_6_next()

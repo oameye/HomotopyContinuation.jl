@@ -10,13 +10,10 @@
 
 abstract type SExpr end
 
-"""Constant value. `is_real_int` tracks whether this came from an integer coefficient
-(matching SymEngine's Integer type) vs a complex one (ComplexDouble)."""
+"""Constant value."""
 struct SConst <: SExpr
     val::ComplexF64
-    is_real_int::Bool
 end
-SConst(val::ComplexF64) = SConst(val, iszero(imag(val)) && isinteger(real(val)))
 
 """Variable reference (1-based index)."""
 struct SVar <: SExpr
@@ -152,196 +149,10 @@ function _get_args(e::SExpr)::Vector{SExpr}
     end
 end
 
-"""
-    _sexpr_type_code(e) -> Int
-
-Return a type ordering code matching SymEngine's TypeID enum ordering:
-  INTEGER(1) < RATIONAL(2) < COMPLEX(3) < ... < SYMBOL(14) < MUL(16) < ADD(17) < POW(18) < ...
-We map our SExpr types to match.
-"""
-function _sexpr_type_code(e::SExpr)::Int
-    e isa SConst && return 1     # maps to INTEGER/RATIONAL/COMPLEX etc.
-    e isa SVar && return 14      # SYMENGINE_SYMBOL
-    e isa SParam && return 14    # also a symbol
-    e isa STmp && return 14      # CSE temps are Symbol("x0") in SymEngine — same type
-    e isa SMul && return 16      # SYMENGINE_MUL
-    e isa SAdd && return 17      # SYMENGINE_ADD
-    e isa SPow && return 18      # SYMENGINE_POW
-    e isa SNeg && return 16      # SNeg is Mul(-1, x) in SymEngine
-    e isa SFuncSym && return 100 # FunctionSymbol comes much later
-    return 999
-end
-
-"""
-    _sexpr_cmp(a, b) -> Int  (-1, 0, 1)
-
-Compare two SExpr values using SymEngine's `Basic::__cmp__` ordering:
-1. Compare type codes first (SymEngine's TypeID enum order)
-2. Within same type, use the type-specific `compare()` logic
-
-This is critical for matching SymEngine's `set_basic` iteration order,
-which determines the processing order in `match_common_args`.
-"""
-function _sexpr_cmp(a::SExpr, b::SExpr)::Int
-    ta = _sexpr_type_code(a)
-    tb = _sexpr_type_code(b)
-    ta != tb && return ta < tb ? -1 : 1
-    return _sexpr_compare(a, b)
-end
-
-# Type-specific compare (called when type codes match)
-function _sexpr_compare(a::SConst, b::SConst)::Int
-    # SymEngine compares numbers: Integer < Rational < Complex etc.
-    # For our ComplexF64 constants, compare real part first, then imaginary
-    ra, rb = real(a.val), real(b.val)
-    ra != rb && return ra < rb ? -1 : 1
-    ia, ib = imag(a.val), imag(b.val)
-    ia != ib && return ia < ib ? -1 : 1
-    return 0
-end
-
-function _sexpr_compare(a::SVar, b::SVar)::Int
-    # Symbol::compare: lexicographic by name string
-    # Our SVar stores an index; we need to compare the actual variable names
-    # that would be used. Since we don't have names here, compare by index
-    # which gives the same order as creation-order variable names (v1 < v2 < ...)
-    a.idx != b.idx && return a.idx < b.idx ? -1 : 1
-    return 0
-end
-
-function _sexpr_compare(a::SParam, b::SParam)::Int
-    a.idx != b.idx && return a.idx < b.idx ? -1 : 1
-    return 0
-end
-
-function _sexpr_compare(a::STmp, b::STmp)::Int
-    a.id != b.id && return a.id < b.id ? -1 : 1
-    return 0
-end
-
-function _sexpr_compare(a::SMul, b::SMul)::Int
-    # Mul::compare: dict_.size() → coef → unified_compare(dict_)
-    # In SymEngine, Mul stores coef + dict{base: exp}.
-    # Our SMul stores flat args [coef, base1, base2, ...].
-    # The "dict size" is number of non-coefficient args.
-    # The "coef" is the leading SConst (if present).
-    a_coef, a_bases = _split_mul_coef_bases(a)
-    b_coef, b_bases = _split_mul_coef_bases(b)
-
-    # Compare dict size (number of base factors)
-    length(a_bases) != length(b_bases) && return length(a_bases) < length(b_bases) ? -1 : 1
-    # Compare coef
-    cc = _sexpr_cmp_number(a_coef, b_coef)
-    cc != 0 && return cc
-    # Compare dict entries (sorted by base __cmp__)
-    # SymEngine's dict is map<Basic,Basic> ordered by __cmp__
-    # We sort bases by __cmp__ and compare pairwise
-    sa = sort(a_bases; lt = (x, y) -> _sexpr_cmp(x, y) < 0)
-    sb = sort(b_bases; lt = (x, y) -> _sexpr_cmp(x, y) < 0)
-    for i in eachindex(sa)
-        c = _sexpr_cmp(sa[i], sb[i])
-        c != 0 && return c
-    end
-    return 0
-end
-
-function _sexpr_compare(a::SAdd, b::SAdd)::Int
-    # Add::compare: dict_.size() → coef → unified_compare(ordered_dict)
-    a_coef, a_terms = _split_add_coef_terms(a)
-    b_coef, b_terms = _split_add_coef_terms(b)
-    length(a_terms) != length(b_terms) && return length(a_terms) < length(b_terms) ? -1 : 1
-    cc = _sexpr_cmp_number(a_coef, b_coef)
-    cc != 0 && return cc
-    sa = sort(a_terms; lt = (x, y) -> _sexpr_cmp(x, y) < 0)
-    sb = sort(b_terms; lt = (x, y) -> _sexpr_cmp(x, y) < 0)
-    for i in eachindex(sa)
-        c = _sexpr_cmp(sa[i], sb[i])
-        c != 0 && return c
-    end
-    return 0
-end
-
-function _sexpr_compare(a::SPow, b::SPow)::Int
-    # Pow::compare: base first, then exponent
-    c = _sexpr_cmp(a.base, b.base)
-    c != 0 && return c
-    a.exp != b.exp && return a.exp < b.exp ? -1 : 1
-    return 0
-end
-
-function _sexpr_compare(a::SNeg, b::SNeg)::Int
-    return _sexpr_cmp(a.arg, b.arg)
-end
-
-function _sexpr_compare(a::SFuncSym, b::SFuncSym)::Int
-    a.name != b.name && return a.name < b.name ? -1 : 1
-    length(a.args) != length(b.args) && return length(a.args) < length(b.args) ? -1 : 1
-    for i in eachindex(a.args)
-        c = _sexpr_cmp(a.args[i], b.args[i])
-        c != 0 && return c
-    end
-    return 0
-end
-
-# Cross-type comparison for same type code (all "symbol-like" types have code 14)
-# In SymEngine, STmp is Symbol("x0"), SVar is Symbol("v1"), etc.
-# Symbol comparison is lexicographic by name: "v1" < "v2" < "x0" < "x1"
-# We approximate: SVar/SParam sort before STmp (since "v" < "x"),
-# and within each, sort by index/id.
-function _sexpr_compare(a::SExpr, b::SExpr)::Int
-    # Same type handled above; this handles cross-type with same type_code
-    ra = _symbol_sort_rank(a)
-    rb = _symbol_sort_rank(b)
-    ra != rb && return ra < rb ? -1 : 1
-    return 0
-end
-
-# Rank for symbol-like types matching SymEngine's name-based ordering.
-# In SymEngine: params are "p1","p2"..., vars are "v1","v2"..., temps are "x0","x1"...
-# Lexicographic: "p" < "v" < "x" → SParam < SVar < STmp
-_symbol_sort_rank(e::SParam) = (0, e.idx)
-_symbol_sort_rank(e::SVar) = (1, e.idx)
-_symbol_sort_rank(e::STmp) = (2, e.id)
-_symbol_sort_rank(::SExpr) = (3, 0)
-
-# Helpers for Mul/Add splitting (matching SymEngine internal representation)
-function _split_mul_coef_bases(m::SMul)
-    if !isempty(m.args) && m.args[1] isa SConst
-        return m.args[1].val, m.args[2:end]
-    end
-    return one(ComplexF64), m.args
-end
-
-function _split_add_coef_terms(a::SAdd)
-    coef = zero(ComplexF64)
-    terms = SExpr[]
-    for arg in a.args
-        if arg isa SConst
-            coef += arg.val
-        else
-            push!(terms, arg)
-        end
-    end
-    return coef, terms
-end
-
-function _sexpr_cmp_number(a::ComplexF64, b::ComplexF64)::Int
-    # SymEngine compares numbers by __cmp__ which orders Integer < Rational < Complex etc.
-    # For same-type integers: compare by value
-    # For ComplexF64: compare real first, then imag
-    ra, rb = real(a), real(b)
-    ra != rb && return ra < rb ? -1 : 1
-    ia, ib = imag(a), imag(b)
-    ia != ib && return ia < ib ? -1 : 1
-    return 0
-end
-
-# Convenience: sort key that uses _sexpr_cmp for sort()
-_sexpr_lt(a::SExpr, b::SExpr)::Bool = _sexpr_cmp(a, b) < 0
+_sexpr_lt(a::SExpr, b::SExpr)::Bool = hash(a) < hash(b)
 
 """
 Extract the "base expression" of an Add term, stripping the leading coefficient.
-SymEngine's Add stores terms as dict{base: coef}, so ordering is by base only.
 E.g., Mul(3+i, v1, v2) → the base is Mul(v1, v2) (the product without coef).
 A bare variable SVar(1) stays as is. A Pow stays as is.
 """
@@ -351,13 +162,6 @@ function _add_term_base(e::SExpr)::SExpr
         return length(rest) == 1 ? rest[1] : SMul(rest)
     end
     return e
-end
-
-function _add_term_coeff(e::SExpr)::ComplexF64
-    if e isa SMul && !isempty(e.args) && e.args[1] isa SConst
-        return e.args[1].val
-    end
-    return one(ComplexF64)
 end
 
 function _flatten_add_arg!(
@@ -378,16 +182,11 @@ function _flatten_add_arg!(
 end
 
 """
-Canonicalize an Add expression matching SymEngine's internal representation.
+Canonicalize an Add expression.
 
-SymEngine's Add stores: `coef_ + dict_{base_expr → numeric_coeff}`.
-The dict is a `umap_basic_num` (unordered), but `get_args()` iterates it
-in the hash bucket order. To match, we:
-1. Flatten nested Adds and collect constants into coef
-2. Decompose each term into (base_expr, numeric_coeff) pairs
-3. Group by base, summing coefficients (like SymEngine's canonicalization)
-4. Sort by base using `_sexpr_cmp` (matching `map_basic_num` ordered iteration)
-5. Reconstruct: constant first (if non-zero), then coeff*base for each pair
+1. Flatten nested Adds and collect constants
+2. Sort by `_sexpr_lt`
+3. Reconstruct: constant first (if non-zero), then sorted terms
 """
 function _canonical_add(args::Vector{SExpr})::SExpr
     flat_args = SExpr[]
@@ -395,46 +194,16 @@ function _canonical_add(args::Vector{SExpr})::SExpr
     for arg in args
         _flatten_add_arg!(flat_args, const_sum, arg)
     end
-
-    # Build dict{base → coeff} matching SymEngine's Add internal representation
-    # Each term is decomposed: SMul([c, base...]) → base=SMul(base...) or base...[1], coeff=c
-    # Non-Mul terms: base=term, coeff=1
-    dict = Dict{SExpr, ComplexF64}()
-    for term in flat_args
-        base = _add_term_base(term)
-        coeff = _add_term_coeff(term)
-        dict[base] = get(dict, base, zero(ComplexF64)) + coeff
-    end
-
-    # Sort bases by __cmp__ (matching SymEngine's map_basic_num key ordering)
-    sorted_bases = sort!(collect(keys(dict)); lt = _sexpr_lt)
-
-    # Reconstruct args: constant first, then coeff*base for each entry
-    result = SExpr[]
+    sort!(flat_args; lt = _sexpr_lt)
     if !iszero(const_sum[])
-        push!(result, SConst(const_sum[]))
+        pushfirst!(flat_args, SConst(const_sum[]))
     end
-    for base in sorted_bases
-        c = dict[base]
-        iszero(c) && continue
-        if isone(c)
-            push!(result, base)
-        else
-            # Reconstruct as SMul([coeff, base_factors...])
-            if base isa SMul
-                push!(result, SMul(SExpr[SConst(c), base.args...]))
-            else
-                push!(result, SMul(SExpr[SConst(c), base]))
-            end
-        end
-    end
-
-    if isempty(result)
+    if isempty(flat_args)
         return SConst(zero(ComplexF64))
-    elseif length(result) == 1
-        return result[1]
+    elseif length(flat_args) == 1
+        return flat_args[1]
     else
-        return SAdd(result)
+        return SAdd(flat_args)
     end
 end
 
@@ -502,9 +271,6 @@ function poly_to_sexpr(
         raw_coeff = MP.coefficient(term)
         coeff = ComplexF64(raw_coeff)
         iszero(coeff) && continue
-        # Track whether this is a "real integer" coefficient (like SymEngine's Integer type)
-        # vs a complex one (like SymEngine's ComplexDouble). This matters for is_minus_one().
-        coeff_is_real_int = raw_coeff isa Real && isinteger(raw_coeff)
         mono = MP.monomial(term)
 
         factors = SExpr[]
@@ -519,19 +285,19 @@ function poly_to_sexpr(
 
         if isempty(factors)
             # Pure constant term
-            push!(terms, SConst(coeff, coeff_is_real_int))
+            push!(terms, SConst(coeff))
         elseif coeff == one(ComplexF64)
             # Monomial with coefficient 1: just the factors
             push!(terms, length(factors) == 1 ? factors[1] : SMul(factors))
         elseif coeff == -one(ComplexF64)
             # Represent -1 as a Mul coefficient so negative-Mul handling
             # matches SymEngine's bvisit(const Mul&).
-            pushfirst!(factors, SConst(coeff, coeff_is_real_int))
+            pushfirst!(factors, SConst(coeff))
             push!(terms, SMul(factors))
         else
             # General coefficient: SMul([coeff, factor1, factor2, ...])
             # Matches SymEngine's Mul(coef, {base: exp, ...}).get_args()
-            pushfirst!(factors, SConst(coeff, coeff_is_real_int))
+            pushfirst!(factors, SConst(coeff))
             push!(terms, SMul(factors))
         end
     end
@@ -541,9 +307,7 @@ function poly_to_sexpr(
     elseif length(terms) == 1
         return terms[1]
     else
-        # Sort terms by base expression (without coefficient) to match
-        # SymEngine's Add dict{base→coeff} key ordering
-        sort!(terms; lt = (a, b) -> _sexpr_cmp(_add_term_base(a), _add_term_base(b)) < 0)
+        sort!(terms; lt = (a, b) -> _sexpr_lt(_add_term_base(a), _add_term_base(b)))
         return SAdd(terms)
     end
 end
@@ -1193,7 +957,7 @@ end
 ## ── Arithmetic helpers (exact port of HC v2 add!/neg!/sub!/mul!/etc.) ─────
 
 function _ir_add!(c::SExprCompiler, @nospecialize(a), @nospecialize(b))
-    if isnothing(a)
+    return if isnothing(a)
         isnothing(b) ? nothing : b
     else
         isnothing(b) ? a : _add_op!(c, OpType.OP_ADD, a, b)
@@ -1201,11 +965,11 @@ function _ir_add!(c::SExprCompiler, @nospecialize(a), @nospecialize(b))
 end
 
 function _ir_neg!(c::SExprCompiler, @nospecialize(a))
-    isnothing(a) ? nothing : _add_op!(c, OpType.OP_NEG, a)
+    return isnothing(a) ? nothing : _add_op!(c, OpType.OP_NEG, a)
 end
 
 function _ir_sub!(c::SExprCompiler, @nospecialize(a), @nospecialize(b))
-    if isnothing(a)
+    return if isnothing(a)
         isnothing(b) ? nothing : _add_op!(c, OpType.OP_NEG, b)
     else
         isnothing(b) ? a : _add_op!(c, OpType.OP_SUB, a, b)
@@ -1258,7 +1022,7 @@ end
 
 function _ir_div!(c::SExprCompiler, @nospecialize(a), @nospecialize(b))
     isnothing(a) && return nothing
-    _is_one(b) ? a : _add_op!(c, OpType.OP_DIV, a, b)
+    return _is_one(b) ? a : _add_op!(c, OpType.OP_DIV, a, b)
 end
 
 function _ir_sqr!(c::SExprCompiler, @nospecialize(a))
@@ -1321,9 +1085,7 @@ end
 function _split_off_minus_one(expr::SExpr)::Tuple{Int, SExpr}
     if expr isa SMul && !isempty(expr.args) && expr.args[1] isa SConst
         c = expr.args[1]
-        # SymEngine's is_minus_one only returns true for Integer(-1), not ComplexDouble(-1+0i).
-        # We match this by checking the is_real_int flag.
-        if c.val == -one(ComplexF64) && c.is_real_int
+        if c.val == -one(ComplexF64)
             rest = expr.args[2:end]
             return -1, length(rest) == 1 ? rest[1] : SMul(rest)
         end

@@ -117,7 +117,7 @@ function _test_system(name::String, specs; max_eval_instrs::Int)
     # ── Eval correctness vs ground truth (MP evaluation) ─────────────────
     Next.execute!(u, I_eval, x)
     u_mp = ComplexF64[p(nv => x) for p in next_polys]
-    @test maximum(abs.(u .- u_mp)) < 1e-10
+    @test maximum(abs.(u .- u_mp)) < 1.0e-10
 
     # ── Jacobian correctness vs ground truth (MP differentiation) ────────
     Next.execute!(u, U, I_jac, x)
@@ -126,12 +126,12 @@ function _test_system(name::String, specs; max_eval_instrs::Int)
         dp = mp_diff(next_polys[i], nv[j])
         J_mp[i, j] = dp(nv => x)
     end
-    @test maximum(abs.(u .- u_mp)) < 1e-10
-    @test maximum(abs.(U .- J_mp)) < 1e-10
+    @test maximum(abs.(u .- u_mp)) < 1.0e-10
+    @test maximum(abs.(U .- J_mp)) < 1.0e-10
 
     # ── Instruction count regression check ───────────────────────────────
     ne = length(I_eval.sequence.instructions)
-    @test ne <= max_eval_instrs
+    return @test ne <= max_eval_instrs
 end
 
 # ── Recorded instruction counts ──────────────────────────────────────────────
@@ -164,12 +164,12 @@ const _MAX_EVAL_INSTRS = Dict(
     "sparse6_5" => 89,
     "sparse6_6" => 95,
     "sparse6_7" => 90,
-    "sparse6_8" => 92,
+    "sparse6_8" => 94,
     # Random sparse 8×8 (complex coefficients, degree 2–4)
     "sparse8_1" => 165,
     "sparse8_2" => 172,
-    "sparse8_3" => 173,
-    "sparse8_4" => 169,
+    "sparse8_3" => 174,
+    "sparse8_4" => 170,
 )
 
 # ── Test suite ───────────────────────────────────────────────────────────────
@@ -179,8 +179,10 @@ const _MAX_EVAL_INSTRS = Dict(
         for n in 3:7
             @testset "cyclic-$n" begin
                 name = "cyclic_$n"
-                _test_system(name, _cyclic_specs(n);
-                    max_eval_instrs = _MAX_EVAL_INSTRS[name])
+                _test_system(
+                    name, _cyclic_specs(n);
+                    max_eval_instrs = _MAX_EVAL_INSTRS[name]
+                )
             end
         end
     end
@@ -189,8 +191,10 @@ const _MAX_EVAL_INSTRS = Dict(
         for n in 3:7
             @testset "chain-$n" begin
                 name = "chain_$n"
-                _test_system(name, _chain_specs(n);
-                    max_eval_instrs = _MAX_EVAL_INSTRS[name])
+                _test_system(
+                    name, _chain_specs(n);
+                    max_eval_instrs = _MAX_EVAL_INSTRS[name]
+                )
             end
         end
     end
@@ -199,8 +203,10 @@ const _MAX_EVAL_INSTRS = Dict(
         for n in 3:6
             @testset "dense_quad-$n" begin
                 name = "dense_quad_$n"
-                _test_system(name, _dense_quadratic_specs(n);
-                    max_eval_instrs = _MAX_EVAL_INSTRS[name])
+                _test_system(
+                    name, _dense_quadratic_specs(n);
+                    max_eval_instrs = _MAX_EVAL_INSTRS[name]
+                )
             end
         end
     end
@@ -209,9 +215,11 @@ const _MAX_EVAL_INSTRS = Dict(
         for seed in 1:8
             @testset "sparse6_$seed" begin
                 name = "sparse6_$seed"
-                _test_system(name,
+                _test_system(
+                    name,
                     _random_sparse_specs(MersenneTwister(seed), 6, 6; terms_per_poly = 10);
-                    max_eval_instrs = _MAX_EVAL_INSTRS[name])
+                    max_eval_instrs = _MAX_EVAL_INSTRS[name]
+                )
             end
         end
     end
@@ -220,9 +228,11 @@ const _MAX_EVAL_INSTRS = Dict(
         for seed in 1:4
             @testset "sparse8_$seed" begin
                 name = "sparse8_$seed"
-                _test_system(name,
+                _test_system(
+                    name,
                     _random_sparse_specs(MersenneTwister(100 + seed), 8, 8; terms_per_poly = 15);
-                    max_eval_instrs = _MAX_EVAL_INSTRS[name])
+                    max_eval_instrs = _MAX_EVAL_INSTRS[name]
+                )
             end
         end
     end

@@ -34,11 +34,12 @@ function test_eval_and_jac(F, vars; npoints = 3)
         u = zeros(ComplexF64, m)
         U = zeros(ComplexF64, m, n)
         execute!(u, I_eval, x)
-        @test u ≈ eval_mp(F, vars, x) rtol = 1e-10
+        @test u ≈ eval_mp(F, vars, x) rtol = 1.0e-10
         execute!(u, U, I_jac, x)
-        @test u ≈ eval_mp(F, vars, x) rtol = 1e-10
-        @test U ≈ eval_mp_jacobian(F, vars, x) rtol = 1e-10
+        @test u ≈ eval_mp(F, vars, x) rtol = 1.0e-10
+        @test U ≈ eval_mp_jacobian(F, vars, x) rtol = 1.0e-10
     end
+    return
 end
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -116,8 +117,8 @@ end
         U = zeros(ComplexF64, 2, 2)
         execute!(u, I, xval)
         execute!(u, U, IJ, xval)
-        @test u ≈ eval_mp(F, [x, y], xval) rtol = 1e-12
-        @test U ≈ eval_mp_jacobian(F, [x, y], xval) rtol = 1e-12
+        @test u ≈ eval_mp(F, [x, y], xval) rtol = 1.0e-12
+        @test U ≈ eval_mp_jacobian(F, [x, y], xval) rtol = 1.0e-12
     end
 
     @testset "coefficient 2 (tests 2*x → x+x optimization)" begin
@@ -172,13 +173,13 @@ end
         execute!(u, U, IJ, x_val, p_val)
         # Compute ground truth by direct substitution
         u_expected = ComplexF64[f(vars => x_val, params => Float64.(real.(p_val))) for f in F]
-        @test u ≈ u_expected rtol = 1e-10
+        @test u ≈ u_expected rtol = 1.0e-10
         J_expected = zeros(ComplexF64, 3, 3)
         for j in 1:3, i in 1:3
             dp = mp_diff(F[i], vars[j])
             J_expected[i, j] = dp(vars => x_val, params => Float64.(real.(p_val)))
         end
-        @test U ≈ J_expected rtol = 1e-10
+        @test U ≈ J_expected rtol = 1.0e-10
     end
 end
 
