@@ -905,173 +905,201 @@ function cse(exprs::Vector{SExpr})::Tuple{Vector{Pair{SExpr, SExpr}}, Vector{SEx
     return tree_cse(exprs, opt_subs)
 end
 
-## ── SExpr → IR compilation ──────────────────────────────────────────────────
-
-## ── SExpr → IR compilation (1:1 port of HC v2 intermediate_representation.jl) ─
+## ── SExpr → Instruction compilation (TapeCompiler) ──────────────────────────
 
 """
-State for compiling SExpr trees to IR instructions.
-Mirrors HC v2's IntermediateRepresentation builder.
+State for compiling SExpr trees directly to `Instruction` values with tape indices.
 """
-mutable struct SExprCompiler
-    const ir_stmts::Vector{IRStatement}
-    ref_counter::Int
-    const constants_list::Vector{ComplexF64}
-    const constants_map::Dict{ComplexF64, ComplexF64}
-    # CSE temp id → definition (compiled lazily on first use)
-    const cse_defs::Dict{Int, SExpr}
-    # CSE temp id → compiled ref (memoized)
-    const cse_compiled::Dict{Int, IRStatementArg}
-    const var_syms::Vector{Symbol}
-    const param_syms::Vector{Symbol}
+mutable struct TapeCompiler
+    const instructions::Vector{Instruction}
+    const constants::Vector{ComplexF64}
+    const constants_map::Dict{ComplexF64, Int32}  # value → tape slot
+    const var_slots::Vector{Int32}                 # var index → tape slot
+    const param_slots::Vector{Int32}               # param index → tape slot
+    const cse_defs::Dict{Int, SExpr}               # STmp id → definition
+    const cse_slots::Dict{Int, Int32}              # STmp id → tape slot (memoized)
+    next_slot::Int32
+    # Known constant slots for optimization
+    one_slot::Int32
+    minus_one_slot::Int32
+    two_slot::Int32
 end
 
-function SExprCompiler(var_syms::Vector{Symbol}, param_syms::Vector{Symbol})
-    return SExprCompiler(
-        IRStatement[],
-        0,
+const _SLOT_NONE = Int32(0)
+
+function TapeCompiler(nvars::Int, nparams::Int)
+    return TapeCompiler(
+        Instruction[],
         ComplexF64[],
-        Dict{ComplexF64, ComplexF64}(),
+        Dict{ComplexF64, Int32}(),
+        Vector{Int32}(undef, nvars),
+        Vector{Int32}(undef, nparams),
         Dict{Int, SExpr}(),
-        Dict{Int, IRStatementArg}(),
-        var_syms,
-        param_syms,
+        Dict{Int, Int32}(),
+        Int32(0),
+        _SLOT_NONE,
+        _SLOT_NONE,
+        _SLOT_NONE,
     )
 end
 
-function _get_constant!(c::SExprCompiler, val::ComplexF64)::ComplexF64
-    if !haskey(c.constants_map, val)
-        push!(c.constants_list, val)
-        c.constants_map[val] = val
+## ── Core helpers ────────────────────────────────────────────────────────────
+
+"""Register a constant and return its tape slot (1-based, relative to constants block)."""
+function _get_constant_slot!(c::TapeCompiler, val::ComplexF64)::Int32
+    slot = get(c.constants_map, val, _SLOT_NONE)
+    slot != _SLOT_NONE && return slot
+    push!(c.constants, val)
+    slot = Int32(length(c.constants))
+    c.constants_map[val] = slot
+    if val == one(ComplexF64)
+        c.one_slot = slot
+    elseif val == -one(ComplexF64)
+        c.minus_one_slot = slot
+    elseif val == ComplexF64(2)
+        c.two_slot = slot
     end
-    return val
+    return slot
 end
 
-function _add_op!(c::SExprCompiler, op::OpType.T, args::IRStatementArg...)::IRStatementRef
-    c.ref_counter += 1
-    ref = IRStatementRef(c.ref_counter)
-    push!(c.ir_stmts, IRStatement(op, ref, args...))
-    return ref
+"""Emit an instruction and return the output tape slot."""
+function _emit!(c::TapeCompiler, op::OpType.T, a1::Int32)::Int32
+    c.next_slot += Int32(1)
+    slot = c.next_slot
+    push!(c.instructions, Instruction((a1, a1, a1, a1), op, slot))
+    return slot
 end
 
-## ── Arithmetic helpers (exact port of HC v2 add!/neg!/sub!/mul!/etc.) ─────
-
-function _ir_add!(c::SExprCompiler, @nospecialize(a), @nospecialize(b))
-    return if isnothing(a)
-        isnothing(b) ? nothing : b
-    else
-        isnothing(b) ? a : _add_op!(c, OpType.OP_ADD, a, b)
-    end
+function _emit!(c::TapeCompiler, op::OpType.T, a1::Int32, a2::Int32)::Int32
+    c.next_slot += Int32(1)
+    slot = c.next_slot
+    push!(c.instructions, Instruction((a1, a2, a2, a2), op, slot))
+    return slot
 end
 
-function _ir_neg!(c::SExprCompiler, @nospecialize(a))
-    return isnothing(a) ? nothing : _add_op!(c, OpType.OP_NEG, a)
+function _emit!(c::TapeCompiler, op::OpType.T, a1::Int32, a2::Int32, a3::Int32)::Int32
+    c.next_slot += Int32(1)
+    slot = c.next_slot
+    push!(c.instructions, Instruction((a1, a2, a3, a3), op, slot))
+    return slot
 end
 
-function _ir_sub!(c::SExprCompiler, @nospecialize(a), @nospecialize(b))
-    return if isnothing(a)
-        isnothing(b) ? nothing : _add_op!(c, OpType.OP_NEG, b)
-    else
-        isnothing(b) ? a : _add_op!(c, OpType.OP_SUB, a, b)
-    end
+function _emit!(
+        c::TapeCompiler, op::OpType.T, a1::Int32, a2::Int32, a3::Int32, a4::Int32,
+    )::Int32
+    c.next_slot += Int32(1)
+    slot = c.next_slot
+    push!(c.instructions, Instruction((a1, a2, a3, a4), op, slot))
+    return slot
 end
 
-_is_one(a::ComplexF64)::Bool = a == one(ComplexF64)
-_is_one(a::IRStatementRef)::Bool = false
-_is_one(::Nothing)::Bool = false
-_is_one(::Symbol)::Bool = false
+## ── Slot-based predicates ───────────────────────────────────────────────────
 
-_is_minus_one(a::ComplexF64)::Bool = a == -one(ComplexF64)
-_is_minus_one(a::IRStatementRef)::Bool = false
-_is_minus_one(::Nothing)::Bool = false
-_is_minus_one(::Symbol)::Bool = false
+_is_one_slot(c::TapeCompiler, s::Int32)::Bool =
+    c.one_slot != _SLOT_NONE && s == c.one_slot
+_is_minus_one_slot(c::TapeCompiler, s::Int32)::Bool =
+    c.minus_one_slot != _SLOT_NONE && s == c.minus_one_slot
+_is_two_slot(c::TapeCompiler, s::Int32)::Bool =
+    c.two_slot != _SLOT_NONE && s == c.two_slot
 
-_is_zero(a::ComplexF64)::Bool = iszero(a)
-_is_zero(::IRStatementRef)::Bool = false
-_is_zero(::Nothing)::Bool = false
-_is_zero(::Symbol)::Bool = false
+## ── Arithmetic helpers ──────────────────────────────────────────────────────
 
-function _ir_mul!(c::SExprCompiler, @nospecialize(a), @nospecialize(b))
-    (isnothing(a) || isnothing(b)) && return nothing
-    if _is_one(a)
-        return b
-    elseif _is_one(b)
+function _tape_add!(c::TapeCompiler, a::Int32, b::Int32)::Int32
+    return _emit!(c, OpType.OP_ADD, a, b)
+end
+
+function _tape_neg!(c::TapeCompiler, a::Int32)::Int32
+    return _emit!(c, OpType.OP_NEG, a)
+end
+
+function _tape_sub!(c::TapeCompiler, a::Int32, b::Int32)::Int32
+    return _emit!(c, OpType.OP_SUB, a, b)
+end
+
+function _tape_mul!(c::TapeCompiler, a::Int32, b::Int32)::Int32
+    _is_one_slot(c, a) && return b
+    _is_one_slot(c, b) && return a
+    _is_minus_one_slot(c, a) && return _emit!(c, OpType.OP_NEG, b)
+    _is_minus_one_slot(c, b) && return _emit!(c, OpType.OP_NEG, a)
+    _is_two_slot(c, a) && return _emit!(c, OpType.OP_ADD, b, b)
+    return _emit!(c, OpType.OP_MUL, a, b)
+end
+
+function _tape_muladd!(c::TapeCompiler, a::Int32, b::Int32, d::Int32)::Int32
+    _is_one_slot(c, a) && return _tape_add!(c, b, d)
+    _is_one_slot(c, b) && return _tape_add!(c, a, d)
+    return _emit!(c, OpType.OP_MULADD, a, b, d)
+end
+
+function _tape_mulmuladd!(
+        c::TapeCompiler, a::Int32, b::Int32, d::Int32, e::Int32,
+    )::Int32
+    return _emit!(c, OpType.OP_MULMULADD, a, b, d, e)
+end
+
+function _tape_div!(c::TapeCompiler, a::Int32, b::Int32)::Int32
+    return _is_one_slot(c, b) ? a : _emit!(c, OpType.OP_DIV, a, b)
+end
+
+function _tape_sqr!(c::TapeCompiler, a::Int32)::Int32
+    return _emit!(c, OpType.OP_SQR, a)
+end
+
+function _tape_pow!(c::TapeCompiler, a::Int32, k::Int)::Int32
+    if k == 0
+        return _get_constant_slot!(c, one(ComplexF64))
+    elseif k == 1
         return a
-    elseif _is_minus_one(a)
-        return _add_op!(c, OpType.OP_NEG, b)
-    elseif _is_minus_one(b)
-        return _add_op!(c, OpType.OP_NEG, a)
-    elseif a isa ComplexF64 && a == ComplexF64(2)
-        return _add_op!(c, OpType.OP_ADD, b, b)
+    elseif k == 2
+        return _tape_sqr!(c, a)
+    elseif k == 3
+        return _emit!(c, OpType.OP_CB, a)
+    elseif k == -1
+        return _emit!(c, OpType.OP_INV, a)
+    elseif k == -2
+        return _emit!(c, OpType.OP_INVSQR, a)
+    else
+        # OP_POW_INT: second arg is the integer exponent stored directly
+        c.next_slot += Int32(1)
+        slot = c.next_slot
+        push!(
+            c.instructions,
+            Instruction((a, Int32(k), Int32(k), Int32(k)), OpType.OP_POW_INT, slot),
+        )
+        return slot
     end
-    return _add_op!(c, OpType.OP_MUL, a, b)
 end
 
-function _ir_muladd!(c::SExprCompiler, @nospecialize(a), @nospecialize(b), @nospecialize(d))
-    (isnothing(a) || isnothing(b)) && return d
-    isnothing(d) && return _ir_mul!(c, a, b)
-    _is_one(a) && return _ir_add!(c, b, d)
-    _is_one(b) && return _ir_add!(c, a, d)
-    return _add_op!(c, OpType.OP_MULADD, a, b, d)
-end
+## ── Main dispatcher ─────────────────────────────────────────────────────────
 
-
-function _ir_mulmuladd!(c::SExprCompiler, a, b, d, e)
-    return _add_op!(c, OpType.OP_MULMULADD, a, b, d, e)
-end
-
-function _ir_div!(c::SExprCompiler, @nospecialize(a), @nospecialize(b))
-    isnothing(a) && return nothing
-    return _is_one(b) ? a : _add_op!(c, OpType.OP_DIV, a, b)
-end
-
-function _ir_sqr!(c::SExprCompiler, @nospecialize(a))
-    isnothing(a) && return nothing
-    return _add_op!(c, OpType.OP_SQR, a)
-end
-
-function _ir_pow!(c::SExprCompiler, @nospecialize(a), k::Int)
-    k == 0 && return (_get_constant!(c, one(ComplexF64)); one(ComplexF64))
-    k == 1 && return a
-    k == 2 && return _ir_sqr!(c, a)
-    k == 3 && return _add_op!(c, OpType.OP_CB, a)
-    k == -1 && return _add_op!(c, OpType.OP_INV, a)
-    k == -2 && return _add_op!(c, OpType.OP_INVSQR, a)
-    return _add_op!(c, OpType.OP_POW_INT, a, ComplexF64(k))
-end
-
-## ── Main dispatcher (mirrors HC v2's expr_to_ir_statements!) ──────────────
-
-function _sexpr_to_ir!(c::SExprCompiler, expr::SExpr)::IRStatementArg
+"""Compile an SExpr to a tape slot, returning the Int32 slot index."""
+function _compile!(c::TapeCompiler, expr::SExpr)::Int32
     if expr isa SConst
-        _get_constant!(c, expr.val)
-        return expr.val
+        return _get_constant_slot!(c, expr.val)
     elseif expr isa SVar
-        return c.var_syms[expr.idx]
+        return c.var_slots[expr.idx]
     elseif expr isa SParam
-        return c.param_syms[expr.idx]
+        return c.param_slots[expr.idx]
     elseif expr isa STmp
-        cached = get(c.cse_compiled, expr.id, nothing)
-        cached !== nothing && return cached
-        val = _sexpr_to_ir!(c, c.cse_defs[expr.id])
-        if val isa IRStatementRef
-            c.cse_compiled[expr.id] = val
-        end
-        return val
+        cached = get(c.cse_slots, expr.id, _SLOT_NONE)
+        cached != _SLOT_NONE && return cached
+        slot = _compile!(c, c.cse_defs[expr.id])
+        c.cse_slots[expr.id] = slot
+        return slot
     elseif expr isa SPow
-        base = _sexpr_to_ir!(c, expr.base)
-        return _ir_pow!(c, base, expr.exp)
+        base = _compile!(c, expr.base)
+        return _tape_pow!(c, base, expr.exp)
     elseif expr isa SMul
-        return _process_mul!(c, expr)
+        return _compile_mul!(c, expr)
     elseif expr isa SAdd
-        return _process_sum!(c, expr)
+        return _compile_sum!(c, expr)
     elseif expr isa SNeg
-        return _ir_neg!(c, _sexpr_to_ir!(c, expr.arg))
+        return _tape_neg!(c, _compile!(c, expr.arg))
     elseif expr isa SFuncSym
         if expr.name == "add"
-            return _process_sum!(c, SAdd(expr.args))
+            return _compile_sum!(c, SAdd(expr.args))
         elseif expr.name == "mul"
-            return _process_mul!(c, SMul(expr.args))
+            return _compile_mul!(c, SMul(expr.args))
         else
             error("Unknown SFuncSym: $(expr.name)")
         end
@@ -1080,12 +1108,12 @@ function _sexpr_to_ir!(c::SExprCompiler, expr::SExpr)::IRStatementArg
     end
 end
 
-## ── Mul processing (mirrors HC v2's process_mul! + split_into_num_denom! + prod_parts!) ─
+## ── Mul processing ──────────────────────────────────────────────────────────
 
 function _split_off_minus_one(expr::SExpr)::Tuple{Int, SExpr}
     if expr isa SMul && !isempty(expr.args) && expr.args[1] isa SConst
-        c = expr.args[1]
-        if c.val == -one(ComplexF64)
+        cv = expr.args[1]
+        if cv.val == -one(ComplexF64)
             rest = expr.args[2:end]
             return -1, length(rest) == 1 ? rest[1] : SMul(rest)
         end
@@ -1093,59 +1121,60 @@ function _split_off_minus_one(expr::SExpr)::Tuple{Int, SExpr}
     return 1, expr
 end
 
-function _split_into_num_denom!(c::SExprCompiler, expr::SMul)
-    nums = Any[]
-    denoms = Any[]
+function _compile_split_into_num_denom!(c::TapeCompiler, expr::SMul)
+    nums = Int32[]
+    denoms = Int32[]
     for arg in expr.args
         if arg isa SPow && arg.exp < 0
-            push!(denoms, _ir_pow!(c, _sexpr_to_ir!(c, arg.base), -arg.exp))
+            push!(denoms, _tape_pow!(c, _compile!(c, arg.base), -arg.exp))
         elseif arg isa SPow
-            push!(nums, _ir_pow!(c, _sexpr_to_ir!(c, arg.base), arg.exp))
+            push!(nums, _tape_pow!(c, _compile!(c, arg.base), arg.exp))
         else
-            push!(nums, _sexpr_to_ir!(c, arg))
+            push!(nums, _compile!(c, arg))
         end
     end
     return nums, denoms
 end
 
-function _prod_parts!(c::SExprCompiler, exs::Vector)
-    isempty(exs) && return nothing
-    # Multiply from reverse to detect 2*x (constants are in front)
-    parts = reverse(Any[e for e in exs])
+function _compile_prod_parts!(c::TapeCompiler, exs::Vector{Int32})::Int32
+    isempty(exs) && return _SLOT_NONE
+    parts = reverse(copy(exs))
     while length(parts) > 1
         if length(parts) >= 4
             a = pop!(parts); b = pop!(parts); d = pop!(parts); e = pop!(parts)
-            push!(parts, _add_op!(c, OpType.OP_MUL4, a, b, d, e))
+            push!(parts, _emit!(c, OpType.OP_MUL4, a, b, d, e))
         elseif length(parts) == 3
             a = pop!(parts); b = pop!(parts); d = pop!(parts)
-            push!(parts, _add_op!(c, OpType.OP_MUL3, a, b, d))
+            push!(parts, _emit!(c, OpType.OP_MUL3, a, b, d))
         elseif length(parts) == 2
             a = pop!(parts); b = pop!(parts)
-            push!(parts, _ir_mul!(c, a, b))
+            push!(parts, _tape_mul!(c, a, b))
         end
     end
     return parts[1]
 end
 
-function _process_mul!(c::SExprCompiler, expr::SMul)::IRStatementArg
+function _compile_mul!(c::TapeCompiler, expr::SMul)::Int32
     (m, expr2) = _split_off_minus_one(expr)
+    m_slot = _get_constant_slot!(c, ComplexF64(m))
     if !(expr2 isa SMul)
-        return _ir_mul!(c, ComplexF64(m), _sexpr_to_ir!(c, expr2))
+        return _tape_mul!(c, m_slot, _compile!(c, expr2))
     end
-    nums, denoms = _split_into_num_denom!(c, expr2)
-    num_prod = _prod_parts!(c, nums)
-    denom_prod = _prod_parts!(c, denoms)
-    if isnothing(num_prod)
-        ref = _add_op!(c, OpType.OP_INV, denom_prod)
-    elseif isnothing(denom_prod)
+    nums, denoms = _compile_split_into_num_denom!(c, expr2)
+    num_prod = _compile_prod_parts!(c, nums)
+    denom_prod = _compile_prod_parts!(c, denoms)
+    local ref::Int32
+    if num_prod == _SLOT_NONE
+        ref = _emit!(c, OpType.OP_INV, denom_prod)
+    elseif denom_prod == _SLOT_NONE
         ref = num_prod
     else
-        ref = _ir_div!(c, num_prod, denom_prod)
+        ref = _tape_div!(c, num_prod, denom_prod)
     end
-    return _ir_mul!(c, ComplexF64(m), ref)
+    return _tape_mul!(c, m_slot, ref)
 end
 
-## ── Add processing (mirrors HC v2's process_sum! + reduce_to_at_most_two_multiplicants! + sum_products!) ─
+## ── Add processing ──────────────────────────────────────────────────────────
 
 function _split_into_positives_negatives(expr::SAdd)
     positives = SExpr[]
@@ -1161,121 +1190,285 @@ function _split_into_positives_negatives(expr::SAdd)
     return positives, negatives
 end
 
-function _reduce_to_at_most_two_multiplicants!(c::SExprCompiler, expr::SExpr)
+function _compile_reduce_to_at_most_two!(
+        c::TapeCompiler, expr::SExpr,
+    )::Tuple{Int32, Int32}
     if expr isa SMul
         args = expr.args
         if length(args) == 2
-            return (
-                _sexpr_to_ir!(c, args[1]),
-                _sexpr_to_ir!(c, args[2]),
-            )
+            return (_compile!(c, args[1]), _compile!(c, args[2]))
         elseif length(args) == 1
-            return (_sexpr_to_ir!(c, args[1]), nothing)
+            return (_compile!(c, args[1]), _SLOT_NONE)
         elseif length(args) > 2
             prefix = SMul(args[1:(end - 1)])
-            v2 = _sexpr_to_ir!(c, prefix)
-            return (_sexpr_to_ir!(c, args[end]), v2)
+            v2 = _compile!(c, prefix)
+            return (_compile!(c, args[end]), v2)
         end
     end
-    return (_sexpr_to_ir!(c, expr), nothing)
+    return (_compile!(c, expr), _SLOT_NONE)
 end
 
-function _sum_products!(c::SExprCompiler, tuples::Vector)
-    isempty(tuples) && return nothing
+function _compile_sum_products!(
+        c::TapeCompiler, tuples::Vector{Tuple{Int32, Int32}},
+    )::Int32
+    isempty(tuples) && return _SLOT_NONE
 
-    singles = IRStatementArg[first(t) for t in tuples if isnothing(t[2])]
-    pairs = [t for t in tuples if !isnothing(t[2])]
+    singles = Int32[first(t) for t in tuples if t[2] == _SLOT_NONE]
+    pairs = [t for t in tuples if t[2] != _SLOT_NONE]
     n = length(pairs)
 
     for k in 1:2:(n - 1)
         (a, b) = pairs[k]
         (d, e) = pairs[k + 1]
-        push!(singles, _ir_mulmuladd!(c, a, b, d, e))
+        push!(singles, _tape_mulmuladd!(c, a, b, d, e))
     end
 
     if isodd(n)
         if isempty(singles)
-            return _ir_mul!(c, pairs[n][1], pairs[n][2])
+            return _tape_mul!(c, pairs[n][1], pairs[n][2])
         end
         (a, b) = pairs[n]
         d = pop!(singles)
-        push!(singles, _ir_muladd!(c, a, b, d))
+        push!(singles, _tape_muladd!(c, a, b, d))
     end
 
     while length(singles) > 1
         if length(singles) >= 4
             a = pop!(singles); b = pop!(singles); d = pop!(singles); e = pop!(singles)
-            push!(singles, _add_op!(c, OpType.OP_ADD4, a, b, d, e))
+            push!(singles, _emit!(c, OpType.OP_ADD4, a, b, d, e))
         elseif length(singles) == 3
             a = pop!(singles); b = pop!(singles); d = pop!(singles)
-            push!(singles, _add_op!(c, OpType.OP_ADD3, a, b, d))
+            push!(singles, _emit!(c, OpType.OP_ADD3, a, b, d))
         elseif length(singles) == 2
             a = pop!(singles); b = pop!(singles)
-            push!(singles, _add_op!(c, OpType.OP_ADD, a, b))
+            push!(singles, _emit!(c, OpType.OP_ADD, a, b))
         end
     end
     return singles[1]
 end
 
-function _process_sum!(c::SExprCompiler, expr::SAdd)::IRStatementArg
+function _compile_sum!(c::TapeCompiler, expr::SAdd)::Int32
     pos, neg = _split_into_positives_negatives(expr)
-    pos_reduced = [_reduce_to_at_most_two_multiplicants!(c, e) for e in pos]
-    neg_reduced = [_reduce_to_at_most_two_multiplicants!(c, e) for e in neg]
+    pos_reduced =
+        Tuple{Int32, Int32}[_compile_reduce_to_at_most_two!(c, e) for e in pos]
+    neg_reduced =
+        Tuple{Int32, Int32}[_compile_reduce_to_at_most_two!(c, e) for e in neg]
 
     if length(pos_reduced) == 1 && length(neg_reduced) == 1
         (a, b) = pos_reduced[1]
         (d, e) = neg_reduced[1]
-        if !isnothing(b) && !isnothing(e)
-            return _add_op!(c, OpType.OP_MULMULSUB, a, b, d, e)
-        elseif !isnothing(b)
-            return _add_op!(c, OpType.OP_MULSUB, a, b, d)
-        elseif !isnothing(e)
-            return _add_op!(c, OpType.OP_SUBMUL, d, e, a)
+        if b != _SLOT_NONE && e != _SLOT_NONE
+            return _emit!(c, OpType.OP_MULMULSUB, a, b, d, e)
+        elseif b != _SLOT_NONE
+            return _emit!(c, OpType.OP_MULSUB, a, b, d)
+        elseif e != _SLOT_NONE
+            return _emit!(c, OpType.OP_SUBMUL, d, e, a)
         else
-            return _add_op!(c, OpType.OP_SUB, a, d)
+            return _emit!(c, OpType.OP_SUB, a, d)
         end
     elseif length(neg_reduced) == 1
-        a = _sum_products!(c, pos_reduced)
+        a = _compile_sum_products!(c, pos_reduced)
         (d, e) = neg_reduced[1]
-        if !isnothing(e)
-            return _add_op!(c, OpType.OP_SUBMUL, d, e, a)
+        if e != _SLOT_NONE
+            return _emit!(c, OpType.OP_SUBMUL, d, e, a)
         else
-            return _add_op!(c, OpType.OP_SUB, a, d)
+            return _emit!(c, OpType.OP_SUB, a, d)
         end
     end
 
-    pos_sum = _sum_products!(c, pos_reduced)
-    neg_sum = _sum_products!(c, neg_reduced)
-    return _ir_sub!(c, pos_sum, neg_sum)
+    pos_sum = _compile_sum_products!(c, pos_reduced)
+    neg_sum = _compile_sum_products!(c, neg_reduced)
+    if pos_sum == _SLOT_NONE
+        return neg_sum == _SLOT_NONE ? _SLOT_NONE : _tape_neg!(c, neg_sum)
+    elseif neg_sum == _SLOT_NONE
+        return pos_sum
+    else
+        return _tape_sub!(c, pos_sum, neg_sum)
+    end
 end
 
-## ── Full compilation pipeline ───────────────────────────────────────────────
+## ── Entry point ─────────────────────────────────────────────────────────────
 
 """
-    compile_cse_to_ir(replacements, reduced_exprs, var_syms, param_syms)
-        -> (ir_stmts, constants_list, result_refs)
+    compile_to_instructions(replacements, reduced_exprs;
+        nvars, nparams, output_dim, npolys,
+        continuation_parameter_index=nothing) -> InstructionSequence
 
-Compile CSE output to IR instructions. 1:1 port of HC v2 logic.
+Compile CSE output directly to an optimized `InstructionSequence`.
+
+Tape layout: constants | params | [cont_param] | variables | scratch | assignments
 """
-function compile_cse_to_ir(
+function compile_to_instructions(
         replacements::Vector{Pair{SExpr, SExpr}},
-        reduced_exprs::Vector{SExpr},
-        var_syms::Vector{Symbol},
-        param_syms::Vector{Symbol},
-    )::Tuple{Vector{IRStatement}, Vector{ComplexF64}, Vector{IRStatementArg}}
-    compiler = SExprCompiler(var_syms, param_syms)
+        reduced_exprs::Vector{SExpr};
+        nvars::Int,
+        nparams::Int,
+        output_dim::Int,
+        npolys::Int,
+        continuation_parameter_index::Union{Nothing, Int} = nothing,
+    )::InstructionSequence
+    compiler = TapeCompiler(nvars, nparams)
 
-    # Register CSE definitions (compiled lazily on first use, like HC v2's pse)
+    # Register CSE definitions (compiled lazily on first use)
     for (tmp, definition) in replacements
         @assert tmp isa STmp
         compiler.cse_defs[tmp.id] = definition
     end
 
-    # Compile reduced expressions
-    result_refs = IRStatementArg[]
-    for expr in reduced_exprs
-        push!(result_refs, _sexpr_to_ir!(compiler, expr))
+    # Use a two-pass approach with placeholder slots.
+    # During compilation, constant slots use temporary 1-based indices.
+    # Var/param slots use negative placeholders. Scratch uses high offsets.
+    # After compilation, we remap everything to the final tape layout.
+
+    scratch_offset = Int32(10000)
+
+    # Assign placeholder slots for params and vars (negative indices)
+    for i in 1:nparams
+        compiler.param_slots[i] = Int32(-i)
+    end
+    for i in 1:nvars
+        compiler.var_slots[i] = Int32(-(nparams + i))
+    end
+    compiler.next_slot = scratch_offset
+
+    # Compile all reduced expressions
+    result_slots = Int32[_compile!(compiler, expr) for expr in reduced_exprs]
+
+    # Build final tape layout
+    nconstants = length(compiler.constants)
+    has_cont = !isnothing(continuation_parameter_index) ? 1 : 0
+    input_block_size = nconstants + nparams + has_cont + nvars
+
+    # Build remapping: old slot → new slot
+    remap = Dict{Int32, Int32}()
+
+    # Constants: temporary slot k → final slot k (identity for 1:nconstants)
+    constants_range = 1:nconstants
+    for k in 1:nconstants
+        remap[Int32(k)] = Int32(k)
     end
 
-    return compiler.ir_stmts, compiler.constants_list, result_refs
+    # Parameters: placeholder -i → nconstants + i
+    parameters_range = (nconstants + 1):(nconstants + nparams)
+    for i in 1:nparams
+        remap[Int32(-i)] = Int32(nconstants + i)
+    end
+
+    # Continuation parameter
+    local cont_param_tape_index::Union{Nothing, Int}
+    if has_cont == 1
+        cont_param_tape_index = nconstants + nparams + 1
+    else
+        cont_param_tape_index = nothing
+    end
+
+    # Variables: placeholder -(nparams+i) → nconstants + nparams + has_cont + i
+    variables_start = nconstants + nparams + has_cont + 1
+    variables_range = variables_start:(variables_start + nvars - 1)
+    for i in 1:nvars
+        remap[Int32(-(nparams + i))] = Int32(variables_start + i - 1)
+    end
+
+    # Scratch: (scratch_offset + k) → (input_block_size + k)
+    nscratch = Int(compiler.next_slot - scratch_offset)
+    for k in 1:nscratch
+        remap[Int32(scratch_offset + k)] = Int32(input_block_size + k)
+    end
+
+    # Create assignment slots as a contiguous range after scratch.
+    nassignments = length(result_slots)
+    assignments_start = input_block_size + nscratch + 1
+    assignments_range = range(assignments_start; length = nassignments)
+
+    # For first-use scratch outputs that are assignment results: override the remap
+    # so the instruction writes directly to the assignment slot (no IDENTITY needed).
+    # For duplicates or non-scratch results (constants/vars/params): add IDENTITY.
+    scratch_output_set = Set{Int32}(instr.output for instr in compiler.instructions)
+    claimed_slots = Dict{Int32, Int}()  # raw result_slot → use count
+    identity_instructions = Instruction[]
+
+    for (k, raw_slot) in enumerate(result_slots)
+        target_slot = Int32(assignments_start + k - 1)
+        seen = get(claimed_slots, raw_slot, 0)
+        is_scratch_output = raw_slot ∈ scratch_output_set
+
+        if is_scratch_output && seen == 0
+            # First use: remap this scratch output directly to the assignment slot
+            claimed_slots[raw_slot] = 1
+            remap[raw_slot] = target_slot
+        else
+            # Need IDENTITY: non-scratch (constant/var/param) or duplicate
+            claimed_slots[raw_slot] = seen + 1
+            remapped_source = get(remap, raw_slot, raw_slot)
+            push!(
+                identity_instructions, Instruction(
+                    (remapped_source, remapped_source, remapped_source, remapped_source),
+                    OpType.OP_IDENTITY, target_slot,
+                )
+            )
+        end
+    end
+
+    # Now remap all core instructions using the final remap
+    nstmts = length(compiler.instructions)
+    core_instructions = Vector{Instruction}(undef, nstmts + length(identity_instructions))
+    for (idx, instr) in enumerate(compiler.instructions)
+        new_input = ntuple(Val(4)) do k
+            if should_use_index_not_reference(instr.op, k)
+                instr.input[k]
+            else
+                get(remap, instr.input[k], instr.input[k])
+            end
+        end
+        new_output = get(remap, instr.output, instr.output)
+        core_instructions[idx] = Instruction(new_input, instr.op, new_output)
+    end
+
+    # Append IDENTITY instructions (these already use remapped source slots)
+    for (j, id_instr) in enumerate(identity_instructions)
+        core_instructions[nstmts + j] = id_instr
+    end
+
+    # Run optimizer and register allocator
+    instructions_opt = _optimize_instruction_order(core_instructions)
+    instructions_final, space_needed, updated_assignments_range =
+        _reduce_space(instructions_opt, input_block_size, assignments_range)
+
+    # Build final assignments: (output_index, tape_slot)
+    updated_assignments = Vector{Tuple{Int, Int}}(undef, nassignments)
+    for (k, tape_idx) in enumerate(updated_assignments_range)
+        updated_assignments[k] = (k, Int(tape_idx))
+    end
+
+    # Add STOP instruction
+    n = space_needed
+    push!(
+        instructions_final, Instruction(
+            (Int32(n), Int32(n), Int32(n), Int32(n)), OpType.OP_STOP, Int32(n),
+        )
+    )
+
+    # Split assignments into u (function values) and U (Jacobian entries)
+    u_assignments = Tuple{Int, Int}[
+        (i, k) for (i, k) in updated_assignments if i <= output_dim
+    ]
+    U_assignments = Tuple{Int, Int}[
+        (i - output_dim, k) for (i, k) in updated_assignments if i > output_dim
+    ]
+
+    return InstructionSequence(
+        instructions_final,
+        copy(compiler.constants),
+        constants_range,
+        parameters_range,
+        variables_range,
+        cont_param_tape_index,
+        updated_assignments,
+        output_dim,
+        space_needed,
+        u_assignments,
+        U_assignments,
+        length(u_assignments) == output_dim,
+        length(U_assignments) == output_dim * nvars,
+    )
 end

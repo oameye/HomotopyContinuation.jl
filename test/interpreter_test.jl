@@ -1,7 +1,7 @@
 using Test
 using HomotopyContinuationNext: Interpreter, InstructionSequence, Instruction,
-    IRStatementRef, IRStatement, IntermediateRepresentation,
-    OpType, execute!, execute_taylor!, build_instruction_sequence_from_ir,
+    OpType, execute!, execute_taylor!,
+    compile_to_instructions, SExpr, SVar, SParam, SConst, SAdd, SMul, SPow, cse,
     TruncatedTaylorSeries, TaylorVector,
     DoubleF64, ComplexDF64
 using FixedSizeArrays: FixedSizeArray
@@ -11,44 +11,31 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 # Helper: f(x1,x2) = x1*x2 + x1
 function make_test_sequence()
-    stmts = [
-        IRStatement(OpType.OP_MUL, IRStatementRef(1), :x1, :x2),
-        IRStatement(OpType.OP_ADD, IRStatementRef(2), IRStatementRef(1), :x1),
-    ]
-    assignments = [(1, IRStatementRef(2))]
-    ir = IntermediateRepresentation(stmts, assignments, 1)
-    return build_instruction_sequence_from_ir(
-        ir; nvars = 2, nparams = 0, nconstants = 0, constants = ComplexF64[],
-        variables = [:x1, :x2],
+    exprs = SExpr[SAdd([SMul([SVar(1), SVar(2)]), SVar(1)])]
+    replacements, reduced = cse(exprs)
+    return compile_to_instructions(
+        replacements, reduced;
+        nvars = 2, nparams = 0, output_dim = 1, npolys = 1,
     )
 end
 
 # Helper: f(x1,x2; p1) = p1*x1^2 + x2
 function make_param_sequence()
-    stmts = [
-        IRStatement(OpType.OP_SQR, IRStatementRef(1), :x1),
-        IRStatement(OpType.OP_MUL, IRStatementRef(2), :p1, IRStatementRef(1)),
-        IRStatement(OpType.OP_ADD, IRStatementRef(3), IRStatementRef(2), :x2),
-    ]
-    assignments = [(1, IRStatementRef(3))]
-    ir = IntermediateRepresentation(stmts, assignments, 1)
-    return build_instruction_sequence_from_ir(
-        ir; nvars = 2, nparams = 1, nconstants = 0, constants = ComplexF64[],
-        variables = [:x1, :x2], parameters = [:p1],
+    exprs = SExpr[SAdd([SMul([SParam(1), SPow(SVar(1), 2)]), SVar(2)])]
+    replacements, reduced = cse(exprs)
+    return compile_to_instructions(
+        replacements, reduced;
+        nvars = 2, nparams = 1, output_dim = 1, npolys = 1,
     )
 end
 
 # Helper: f1=x1*x2, f2=x1+x2
 function make_two_output_sequence()
-    stmts = [
-        IRStatement(OpType.OP_MUL, IRStatementRef(1), :x1, :x2),
-        IRStatement(OpType.OP_ADD, IRStatementRef(2), :x1, :x2),
-    ]
-    assignments = [(1, IRStatementRef(1)), (2, IRStatementRef(2))]
-    ir = IntermediateRepresentation(stmts, assignments, 2)
-    return build_instruction_sequence_from_ir(
-        ir; nvars = 2, nparams = 0, nconstants = 0, constants = ComplexF64[],
-        variables = [:x1, :x2],
+    exprs = SExpr[SMul([SVar(1), SVar(2)]), SAdd([SVar(1), SVar(2)])]
+    replacements, reduced = cse(exprs)
+    return compile_to_instructions(
+        replacements, reduced;
+        nvars = 2, nparams = 0, output_dim = 2, npolys = 2,
     )
 end
 

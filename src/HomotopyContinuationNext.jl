@@ -71,10 +71,7 @@ export op_add4, op_mul4, op_mulmuladd, op_mulmulsub
 include("model_kit/operations.jl")
 
 # model_kit/instruction_sequence.jl
-export IRStatementRef, IRStatement, IRStatementArg
-export IntermediateRepresentation
 export Instruction, InstructionSequence
-export build_instruction_sequence_from_ir
 
 include("model_kit/instruction_sequence.jl")
 

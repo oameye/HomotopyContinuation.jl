@@ -129,7 +129,7 @@ end
 """
     _build_instruction_sequence(polys, variables, parameters; include_jacobian)
 
-Core pipeline: convert polynomials to SExpr trees → run CSE → compile to IR → build InstructionSequence.
+Core pipeline: convert polynomials to SExpr trees → run CSE → compile to InstructionSequence.
 """
 function _build_instruction_sequence(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
@@ -140,9 +140,6 @@ function _build_instruction_sequence(
     nvars = length(variables)
     nparams = length(parameters)
     npolys = length(polys)
-
-    var_syms = Symbol[Symbol(v) for v in variables]
-    param_syms = Symbol[Symbol(p) for p in parameters]
 
     # Build variable/parameter index maps for poly_to_sexpr
     var_to_idx = Dict{Symbol, Int}()
@@ -172,58 +169,12 @@ function _build_instruction_sequence(
     all_exprs = vcat(f_exprs, jac_exprs)
     replacements, reduced_exprs = cse(all_exprs)
 
-    # Compile CSE output to IR
-    ir_stmts, constants_list, result_refs = compile_cse_to_ir(
-        replacements, reduced_exprs, var_syms, param_syms,
-    )
-
-    # Split result refs into F and Jacobian
-    f_refs = result_refs[1:npolys]
-    jac_refs = result_refs[(npolys + 1):end]
-
-    # Ensure all result refs are IRStatementRefs (wrap constants/symbols in OP_IDENTITY)
-    ref_counter = isempty(ir_stmts) ? 0 : maximum(s.target.i for s in ir_stmts)
-    assigned_stmt_refs = Dict{IRStatementRef, Int}()
-
-    function ensure_stmt_ref(ref::IRStatementArg)::IRStatementRef
-        if ref isa IRStatementRef
-            seen = get(assigned_stmt_refs, ref, 0)
-            if seen == 0
-                assigned_stmt_refs[ref] = 1
-                return ref
-            end
-            assigned_stmt_refs[ref] = seen + 1
-            ref_counter += 1
-            r = IRStatementRef(ref_counter)
-            push!(ir_stmts, IRStatement(OpType.OP_IDENTITY, r, ref))
-            return r
-        end
-        # Wrap constant or symbol in an OP_IDENTITY instruction
-        ref_counter += 1
-        r = IRStatementRef(ref_counter)
-        push!(ir_stmts, IRStatement(OpType.OP_IDENTITY, r, ref))
-        return r
-    end
-
-    # Build assignments
-    assignments = Tuple{Int, IRStatementArg}[]
-    for (i, ref) in enumerate(f_refs)
-        push!(assignments, (i, ensure_stmt_ref(ref)))
-    end
-    for (k, ref) in enumerate(jac_refs)
-        push!(assignments, (npolys + k, ensure_stmt_ref(ref)))
-    end
-
-    ir = IntermediateRepresentation(ir_stmts, assignments, npolys)
-
-    # Compile IR to InstructionSequence
-    return build_instruction_sequence_from_ir(
-        ir;
+    # Compile directly to InstructionSequence
+    return compile_to_instructions(
+        replacements, reduced_exprs;
         nvars = nvars,
         nparams = nparams,
-        nconstants = length(constants_list),
-        constants = constants_list,
-        variables = var_syms,
-        parameters = param_syms,
+        output_dim = npolys,
+        npolys = npolys,
     )
 end
