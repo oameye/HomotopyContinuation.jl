@@ -11,7 +11,7 @@ Read `implementation_docs/00_design_document.md` for the full architecture and `
 Key design decisions:
 - **Interpreter-first**: tape-based evaluator handles eval, jacobian, Taylor, DF64 — no Symbolics.jl in core
 - **FunctionWrapper type firewall**: `SystemEvaluator`/`HomotopyEvaluator` wrap any system into a single concrete type — the tracker is monomorphic
-- **FixedSizeArrays**: all pre-allocated scratch buffers use `FSVec`/`FSMat` (size is runtime, not a type parameter)
+- **FixedSizeArrays**: all pre-allocated scratch buffers use `FSVec`/`FSMat` (size is runtime, not a type parameter). **CRITICAL:** `FixedSizeVector{T}` is NOT concrete — the `Mem` parameter is free. Use `FixedSizeArray{T,N,Memory{T}}` for struct fields (see type aliases in main module).
 - **DynamicPolynomials input**: users provide polynomials via `@polyvar`, internal pipeline uses `MP.differentiate` for Jacobian
 - **Immutable by default**: mutable structs require justification, use `const` fields for buffer references
 
@@ -27,6 +27,10 @@ src/solving/                         # solve(), total degree, polyhedral, result
 src/utils.jl                         # SegmentStepper, fast_abs, etc.
 ```
 
+## Git policy
+
+**Never commit or push.** Neither Claude nor any subagent may run `git commit`, `git push`, or any git command that modifies history. All commits are made by the user. Claude's job is to write code, run tests, and report results — the user decides when to commit.
+
 ## Development workflow
 
 All common tasks go through the Makefile:
@@ -35,6 +39,7 @@ All common tasks go through the Makefile:
 make test          # run all tests in parallel (ParallelTestRunner, 10 jobs)
 make test-serial   # run all tests serially (for debugging)
 make benchmark     # run TTFX + steady-state benchmarks
+make compare       # compare primitives against HomotopyContinuation v2
 make format        # format all Julia files with Runic
 make deps          # instantiate all environments
 make update        # update all environments
@@ -90,7 +95,7 @@ Before merging any PR:
 - **`RefValue` for cache scalars in immutable structs.** Homotopy types are immutable; use `Base.RefValue{T}` for cached values that need mutation.
 - **`NTuple{N,T}` for small fixed-size collections.** When the count is known at compile time and small (e.g., `tx_norm::NTuple{4,Float64}`).
 - **Enums over Symbols.** Use `EnumX.@enumx` for return codes and state machine states — scoped (`MyEnum.Value`), type-safe, faster than Symbol comparison.
-- **`FSVec{T}` / `FSMat{T}` for pre-allocated buffers.** These are `FixedSizeVector{T}` / `FixedSizeMatrix{T}` — same concrete type regardless of size, cannot be resized.
+- **`FSVec{T}` / `FSMat{T}` for pre-allocated buffers.** Defined as `FixedSizeArray{T,1,Memory{T}}` / `FixedSizeArray{T,2,Memory{T}}` — same concrete type regardless of size, cannot be resized. **WARNING:** `FixedSizeVector{T}` and `FixedSizeMatrix{T}` are NOT concrete types (the `Mem` parameter is free). Always use `FSVec{T}` / `FSMat{T}` from the main module for struct fields, never `FixedSizeVector{T}` directly.
 - **`AbstractVector` / `AbstractMatrix` in user-facing interfaces.** The `AbstractSystem`/`AbstractHomotopy` contracts use abstract types so users don't need to import FixedSizeArrays.
 
 ### Performance

@@ -3,13 +3,17 @@
 Implementation reference. All types listed here are concrete (no abstract-typed fields on hot paths).
 
 **Convention:** Pre-allocated buffers with fixed size (known at construction, never resized) use
-`FixedSizeVector`/`FixedSizeMatrix` from FixedSizeArrays.jl. Size is NOT a type parameter —
-`FixedSizeVector{ComplexF64}` is the same concrete type regardless of length.
+`FixedSizeArray` from FixedSizeArrays.jl. Size is NOT a type parameter —
+`FSVec{ComplexF64}` is the same concrete type regardless of length.
+
+**CRITICAL:** `FixedSizeVector{T}` is NOT a concrete type — its `Mem` type parameter is free.
+Using it as a struct field type causes type instability and ~30x performance loss.
+Always use the fully concrete aliases below:
 
 ```julia
-using FixedSizeArrays: FixedSizeVector, FixedSizeMatrix
-const FSVec{T} = FixedSizeVector{T}       # shorthand
-const FSMat{T} = FixedSizeMatrix{T}       # shorthand
+using FixedSizeArrays: FixedSizeArray
+const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}   # concrete vector type
+const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}   # concrete matrix type
 ```
 
 ---

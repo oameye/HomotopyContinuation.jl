@@ -15,46 +15,43 @@ end
 - `copy` implemented (copies parent storage)
 - `Mem` defaults to `Memory{T}` on Julia 1.11+, `Vector{T}` on 1.10
 
-## Verified Compatible
+## CRITICAL: Concrete Type Aliases
 
-- Standard indexing (`getindex`, `setindex!`)
-- Broadcasting (custom `FixedSizeArrayBroadcastStyle`)
-- `copy`, `copyto!`, `similar`, `reshape`
-- `parent` access to underlying memory
-- Iteration
+**`FixedSizeVector{T}` and `FixedSizeMatrix{T}` are NOT concrete types** — the `Mem`
+type parameter is free. Using them as struct field types causes type instability
+and ~30x performance degradation (getindex returns `Any`).
 
-## Verification Needed (Phase 1)
-
-Before using `FSMat` in `MatrixWorkspace`, verify these work:
+Always use the fully concrete aliases:
 
 ```julia
-using FixedSizeArrays, LinearAlgebra
-
-A = FixedSizeMatrix{ComplexF64}(rand(ComplexF64, 4, 4))
-b = FixedSizeVector{ComplexF64}(rand(ComplexF64, 4))
-
-# Critical for MatrixWorkspace:
-F = lu!(A)           # Does LAPACK.getrf! work on FSMat?
-ldiv!(F, b)          # Does triangular solve work?
-Q = qr!(A)           # Does LAPACK.geqrf! work?
-mul!(b, A, b)        # Does BLAS.gemv! work?
-strides(A)           # Does strides() return correct values?
-
-# Critical for FunctionWrapper compatibility:
-using FunctionWrappers
-fw = FunctionWrapper{Nothing, Tuple{FixedSizeVector{Float64}}}(x -> nothing)
-fw(FixedSizeVector{Float64}(ones(3)))  # Does FW accept FSVec?
+using FixedSizeArrays: FixedSizeArray
+const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}   # concrete on Julia 1.11+
+const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}   # concrete on Julia 1.11+
 ```
 
-If `lu!` or `qr!` fail on `FSMat`, fallback options:
-1. Use `parent(A)` to get the underlying `Memory`/`Vector` and wrap in a view
-2. Keep `MatrixWorkspace.A` as regular `Matrix{ComplexF64}` (only the scratch buffers use FSVec)
-3. Implement `strides(::FixedSizeArray)` ourselves if missing
+Verification:
+```julia
+julia> isconcretetype(FixedSizeVector{Float64})
+false   # ← BAD for struct fields
+
+julia> isconcretetype(FixedSizeArray{Float64, 1, Memory{Float64}})
+true    # ← GOOD
+```
+
+## Verified Compatible (Phase 1)
+
+Tested in `test/fixedsizearrays_compat_test.jl`:
+
+- `strides(A)` returns `(1, n)` — correct column-major layout
+- `lu!(FSMat)` works — returns `LU{ComplexF64, FSMat{ComplexF64}, FSVec{Int64}}`
+- `ldiv!(FSVec, LU, FSVec)` works
+- `mul!(FSVec, FSMat, FSVec)` works
+- `copyto!` between FSMat and Matrix works
+- `qr!(FSMat)` returns `QRCompactWY` (LAPACK blocked), NOT `QR`
+  → use `Matrix{ComplexF64}` with `LinearAlgebra.qrfactUnblocked!` for custom QR
 
 ## Notes
 
-- `strides()` is NOT explicitly defined in the source. Since `DenseArray` implies
-  contiguous column-major storage, Julia may provide a default. But LAPACK routines
-  often check `strides` explicitly. Must test.
 - `BoundsErrorLight` instead of `BoundsError` for escape analysis optimization.
 - Size is runtime value in `NTuple{N,Int}` field — NOT a type parameter.
+- LU ipiv type is `FSVec{Int64}` when factoring an `FSMat`, not `Vector{BlasInt}`.

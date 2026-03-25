@@ -26,7 +26,7 @@ const FSMat{T} = FixedSizeMatrix{T}
         @test eltype(F.ipiv) == Int64
         b = rand(ComplexF64, n)
         x = F \ b
-        @test LA.norm(Matrix(A_orig) * x - b) < 1e-12
+        @test LA.norm(Matrix(A_orig) * x - b) < 1.0e-12
     end
 
     @testset "ldiv! with FSVec" begin
@@ -36,7 +36,7 @@ const FSMat{T} = FixedSizeMatrix{T}
         b = FSVec{ComplexF64}(rand(ComplexF64, n))
         x = FSVec{ComplexF64}(zeros(ComplexF64, n))
         LA.ldiv!(x, F, b)
-        @test LA.norm(Matrix(A_orig) * Vector(x) - Vector(b)) < 1e-12
+        @test LA.norm(Matrix(A_orig) * Vector(x) - Vector(b)) < 1.0e-12
     end
 
     @testset "mul! with FSMat and FSVec" begin

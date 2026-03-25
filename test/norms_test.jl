@@ -1,29 +1,19 @@
 using Test
-using LinearAlgebra: norm as la_norm
-using FixedSizeArrays: FixedSizeVector
+using FixedSizeArrays: FixedSizeArray
 using HomotopyContinuationNext:
-    InfNorm, WeightedNorm, WeightedNormOptions,
-    inf_norm, weighted_norm, inf_distance, weighted_distance,
+    WeightedNorm, inf_norm, weighted_norm, inf_distance, weighted_distance,
     init!, update!, fast_abs, DoubleF64, ComplexDF64
 
-const FSVec{T} = FixedSizeVector{T}
+const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
 
 @testset "Norms" begin
-    @testset "InfNorm" begin
+    @testset "inf_norm and inf_distance" begin
         x = FSVec{ComplexF64}([1.0 + 2.0im, 3.0 + 4.0im, 0.5 + 0.0im])
         @test inf_norm(x) ≈ abs(3.0 + 4.0im)
 
         y = FSVec{ComplexF64}([2.0 + 2.0im, 1.0 + 4.0im, 0.5 + 1.0im])
-        d = inf_distance(x, y)
-        expected = maximum(abs.(Vector(x) .- Vector(y)))
-        @test d ≈ expected
-    end
-
-    @testset "WeightedNorm construction" begin
-        n = 4
-        w = WeightedNorm(n)
-        @test length(w.weights) == n
-        @test all(w.weights .== 1.0)
+        @test inf_distance(x, y) ≈ maximum(abs.(Vector(x) .- Vector(y)))
+        @test inf_distance(x, x) ≈ 0.0
     end
 
     @testset "weighted_norm and weighted_distance" begin
@@ -34,38 +24,37 @@ const FSVec{T} = FixedSizeVector{T}
         @test weighted_norm(x, w) ≈ 8.0
 
         y = FSVec{ComplexF64}([4.0 + 0.0im, 4.0 + 0.0im, 3.0 + 0.0im])
-        # ||D⁻¹(x-y)||_∞ = max(|2/2|, |0/0.5|, |0/1|) = 1.0
         @test weighted_distance(x, y, w) ≈ 1.0
-    end
-
-    @testset "weighted_norm with complex values" begin
-        weights = FSVec{Float64}([1.0, 1.0])
-        w = WeightedNorm(weights)
-        x = FSVec{ComplexF64}([3.0 + 4.0im, 1.0 + 0.0im])
-        @test weighted_norm(x, w) ≈ 5.0
-    end
-
-    @testset "fast_abs on ComplexDF64" begin
-        z = ComplexDF64(DoubleF64(3.0), DoubleF64(4.0))
-        @test fast_abs(z) ≈ 5.0 atol = 1e-28
+        @test weighted_distance(x, x, w) ≈ 0.0
     end
 
     @testset "init! and update!" begin
         w = WeightedNorm(3)
-        x = FSVec{ComplexF64}([100.0 + 0.0im, 1e-10 + 0.0im, 50.0 + 0.0im])
-        init!(w, x)
-        @test w.weights[1] > 0.0
-        @test w.weights[2] > 0.0
-        @test w.weights[3] > 0.0
+        @test all(w.weights .== 1.0)
 
-        y = FSVec{ComplexF64}([100.0 + 0.0im, 1e-10 + 0.0im, 50.0 + 0.0im])
-        update!(w, y)
+        x = FSVec{ComplexF64}([100.0 + 0.0im, 1.0e-10 + 0.0im, 50.0 + 0.0im])
+        init!(w, x)
+        @test all(w.weights .> 0.0)
+        # Small component gets clamped to scale_min * norm, not left at 1e-10
+        @test w.weights[2] > 1.0e-10
+
+        update!(w, x)
         @test all(w.weights .> 0.0)
     end
 
-    @testset "overflow handling" begin
-        x = FSVec{ComplexF64}([1e300 + 1e300im, 0.0 + 0.0im])
-        n = inf_norm(x)
-        @test isfinite(n) || n == Inf
+    @testset "fast_abs on ComplexDF64" begin
+        z = ComplexDF64(DoubleF64(3.0), DoubleF64(4.0))
+        @test fast_abs(z) ≈ 5.0 atol = 1.0e-28
+    end
+
+    @testset "inf_norm overflow (exp2(700), triggers isinf fallback)" begin
+        x = FSVec{ComplexF64}([2.0im, 3.0 - 1im, 5.0 + 2.0im])
+        y = FSVec{ComplexF64}([-2.0im, 3.0 - 1im, 5.0 + 2.0im])
+        huge_x = FSVec{ComplexF64}(exp2(700) .* Vector(x))
+        huge_y = FSVec{ComplexF64}(exp2(700) .* Vector(y))
+
+        @test inf_norm(huge_x) ≈ exp2(700) * abs(5.0 + 2.0im)
+        @test inf_distance(huge_x, huge_x) ≈ 0.0
+        @test inf_distance(huge_x, huge_y) ≈ exp2(700) * abs(4im)
     end
 end

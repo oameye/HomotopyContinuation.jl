@@ -1,5 +1,6 @@
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 FixedSizeArrays = "3821ddf9-e5b5-40d5-8e25-6813ab96b5e2"
+HomotopyContinuation = "f213a82b-91d6-5c5d-acf7-10f1c761b327"
 HomotopyContinuationNext = "ec87e138-eaf4-4d78-a098-49d58d8a59d7"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"

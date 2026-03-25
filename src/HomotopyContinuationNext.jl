@@ -5,14 +5,17 @@ using Random: Random
 using Printf: Printf
 
 using MultivariatePolynomials: MultivariatePolynomials
-using FixedSizeArrays: FixedSizeVector, FixedSizeMatrix
+using FixedSizeArrays: FixedSizeArray
 
 const MP = MultivariatePolynomials
-const FSVec{T} = FixedSizeVector{T}
-const FSMat{T} = FixedSizeMatrix{T}
+# Concrete type aliases — FixedSizeVector{T} alone is NOT concrete because
+# the Mem parameter is free. On Julia 1.11+ the backing is Memory{T}.
+const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
+const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 # primitives/double_f64.jl
 export DoubleF64, ComplexDF64
+export wide_add, wide_sub, wide_mul, wide_div, wide_square, wide_sqrt
 
 # utils.jl
 export fast_abs

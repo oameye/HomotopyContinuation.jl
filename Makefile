@@ -14,7 +14,10 @@ test-serial: ## Run all tests serially (for debugging)
 	$(JULIA) --project=test test/runtests.jl --jobs=1
 
 benchmark: ## Run benchmarks
-	$(JULIA) --project=benchmark benchmark/benchmarks.jl
+	$(JULIA) --project=benchmark benchmark/runbenchmarks.jl
+
+compare: ## Compare primitives against HomotopyContinuation v2
+	$(JULIA) --project=benchmark benchmark/compare_v2.jl
 
 format: ## Format all Julia files with Runic
 	runic --inplace src/ test/ benchmark/

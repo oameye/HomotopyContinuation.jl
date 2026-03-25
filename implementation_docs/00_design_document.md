@@ -285,9 +285,11 @@ FixedSizeArrays.
 
 ```julia
 using FunctionWrappers: FunctionWrapper
-using FixedSizeArrays: FixedSizeVector, FixedSizeMatrix
-const FSVec{T} = FixedSizeVector{T}
-const FSMat{T} = FixedSizeMatrix{T}
+using FixedSizeArrays: FixedSizeArray
+# CRITICAL: FixedSizeVector{T} is NOT concrete (Mem param is free).
+# Must pin Memory{T} for struct fields to be type-stable.
+const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
+const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 # System FunctionWrapper signatures (see doc 01 for full list)
 const SysEvalFW = FunctionWrapper{Nothing, Tuple{
@@ -741,7 +743,7 @@ HomotopyContinuationNext.jl
 | MultivariatePolynomials | `variables`, `effective_variables`, `terms`, `exponents`, `coefficient`, `coefficients`, `differentiate`, `maxdegree`, `nvariables`, `monomials`, `polynomial` |
 | DynamicPolynomials | `@polyvar`, `ishomogeneous`, `homogenize`, `subs` |
 | FunctionWrappers | `FunctionWrapper` for SystemEvaluator / HomotopyEvaluator |
-| FixedSizeArrays | `FixedSizeVector`, `FixedSizeMatrix` — all pre-allocated scratch buffers and FW argument types. Size is runtime, not a type parameter. |
+| FixedSizeArrays | `FixedSizeArray{T,N,Memory{T}}` via `FSVec{T}`/`FSMat{T}` aliases — all pre-allocated scratch buffers and FW argument types. Size is runtime, not a type parameter. Note: `FixedSizeVector{T}` is NOT concrete. |
 | MixedSubdivisions | `mixed_volume`, `fine_mixed_cells` |
 
 **Not in core (future extensions):**

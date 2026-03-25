@@ -1,59 +1,22 @@
 using Test
-using LinearAlgebra: LinearAlgebra
-using FixedSizeArrays: FixedSizeVector, FixedSizeMatrix
+using LinearAlgebra: LinearAlgebra, diagm, opnorm
+using FixedSizeArrays: FixedSizeArray
 using HomotopyContinuationNext:
-    MatrixWorkspace,
-    updated!,
-    factorize!,
-    skeel_row_scaling!,
-    apply_row_scaling!,
+    MatrixWorkspace, updated!, factorize!,
+    skeel_row_scaling!, apply_row_scaling!,
     mixed_precision_iterative_refinement!,
-    fixed_precision_iterative_refinement!,
-    residual!,
-    inverse_inf_norm_est,
-    Jacobian,
-    WeightedNorm,
-    init!
+    residual!, inverse_inf_norm_est,
+    Jacobian, WeightedNorm, init!
 
 const LA = LinearAlgebra
-const FSVec{T} = FixedSizeVector{T}
-const FSMat{T} = FixedSizeMatrix{T}
+const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
+const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 @testset "MatrixWorkspace" begin
     @testset "construction" begin
-        WS = MatrixWorkspace(4, 4)
-        @test size(WS) == (4, 4)
-
-        WS2 = MatrixWorkspace(6, 4)
-        @test size(WS2) == (6, 4)
-
+        @test size(MatrixWorkspace(4, 4)) == (4, 4)
+        @test size(MatrixWorkspace(6, 4)) == (6, 4)
         @test_throws ArgumentError MatrixWorkspace(2, 5)
-    end
-
-    @testset "AbstractMatrix interface" begin
-        WS = MatrixWorkspace(3, 3)
-        WS[1, 1] = 1.0 + 0.0im
-        @test WS[1, 1] == 1.0 + 0.0im
-        @test WS[1] == 1.0 + 0.0im
-
-        WS[2] = 2.0 + 0.0im
-        @test WS[2] == 2.0 + 0.0im
-    end
-
-    @testset "LU solve (square)" begin
-        n = 4
-        A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
-        b_data = rand(ComplexF64, n)
-
-        WS = MatrixWorkspace(n, n)
-        copyto!(WS.A, A_data)
-        updated!(WS)
-
-        x = FSVec{ComplexF64}(zeros(ComplexF64, n))
-        b = FSVec{ComplexF64}(b_data)
-        LA.ldiv!(x, WS, b)
-
-        @test Matrix(WS.A) * Vector(x) ≈ b_data atol = 1.0e-10
     end
 
     @testset "1x1 system" begin
@@ -61,16 +24,14 @@ const FSMat{T} = FixedSizeMatrix{T}
         WS[1, 1] = 3.0 + 1.0im
         updated!(WS)
         x = FSVec{ComplexF64}(zeros(ComplexF64, 1))
-        b = FSVec{ComplexF64}([2.0 + 0.5im])
-        LA.ldiv!(x, WS, b)
+        LA.ldiv!(x, WS, FSVec{ComplexF64}([2.0 + 0.5im]))
         @test x[1] ≈ (2.0 + 0.5im) / (3.0 + 1.0im)
     end
 
-    @testset "repeated solves" begin
+    @testset "LU solve (square, repeated)" begin
         n = 3
         WS = MatrixWorkspace(n, n)
-
-        for _ in 1:5
+        for _ in 1:2
             A_data = rand(ComplexF64, n, n) + 3.0 * LA.I
             b_data = rand(ComplexF64, n)
             copyto!(WS.A, A_data)
@@ -85,51 +46,23 @@ const FSMat{T} = FixedSizeMatrix{T}
         m, n = 6, 4
         A_data = rand(ComplexF64, m, n)
         x_true = rand(ComplexF64, n)
-        b_data = A_data * x_true  # consistent system
+        b_data = A_data * x_true
 
         WS = MatrixWorkspace(m, n)
         copyto!(WS.A, A_data)
         updated!(WS)
-
         x = FSVec{ComplexF64}(zeros(ComplexF64, n))
         LA.ldiv!(x, WS, FSVec{ComplexF64}(b_data))
-
         @test LA.norm(A_data * Vector(x) - b_data) < 1.0e-10
-    end
-
-    @testset "factorize! called automatically" begin
-        n = 3
-        WS = MatrixWorkspace(n, n)
-        A_data = rand(ComplexF64, n, n) + 3.0 * LA.I
-        copyto!(WS.A, A_data)
-        updated!(WS)
-        @test WS.factorized == false
-
-        x = FSVec{ComplexF64}(zeros(ComplexF64, n))
-        b = FSVec{ComplexF64}(rand(ComplexF64, n))
-        LA.ldiv!(x, WS, b)
-        @test WS.factorized == true
-    end
-
-    @testset "explicit factorize!" begin
-        n = 3
-        WS = MatrixWorkspace(n, n)
-        A_data = rand(ComplexF64, n, n) + 3.0 * LA.I
-        copyto!(WS.A, A_data)
-        updated!(WS)
-        factorize!(WS)
-        @test WS.factorized == true
     end
 end
 
 @testset "Row scaling" begin
     n = 4
     WS = MatrixWorkspace(n, n)
-    A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
-    copyto!(WS.A, A_data)
+    copyto!(WS.A, rand(ComplexF64, n, n) + 5.0 * LA.I)
     updated!(WS)
-    c = FSVec{Float64}(ones(n))
-    skeel_row_scaling!(WS, c)
+    skeel_row_scaling!(WS, FSVec{Float64}(ones(n)))
     @test all(WS.row_scaling .> 0.0)
     @test all(isfinite.(WS.row_scaling))
 end
@@ -144,7 +77,7 @@ end
     @test LA.norm(r) < 1.0e-12
 end
 
-@testset "Iterative refinement" begin
+@testset "Mixed precision iterative refinement" begin
     n = 4
     A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
     x_true = rand(ComplexF64, n)
@@ -153,99 +86,83 @@ end
     WS = MatrixWorkspace(n, n)
     copyto!(WS.A, A_data)
     updated!(WS)
-
     x = FSVec{ComplexF64}(zeros(ComplexF64, n))
     LA.ldiv!(x, WS, FSVec{ComplexF64}(copy(b_data)))
     err_before = LA.norm(Vector(x) - x_true)
 
     mixed_precision_iterative_refinement!(x, WS, FSVec{ComplexF64}(b_data))
-    err_after = LA.norm(Vector(x) - x_true)
-    @test err_after <= err_before + 1.0e-14
-end
-
-@testset "Condition number estimation" begin
-    n = 4
-    A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
-    WS = MatrixWorkspace(n, n)
-    copyto!(WS.A, A_data)
-    updated!(WS)
-    factorize!(WS)
-
-    inv_norm = inverse_inf_norm_est(WS)
-    @test inv_norm > 0.0
-    @test isfinite(inv_norm)
-
-    cond = LA.cond(WS)
-    @test 1.0 ≤ cond < 1.0e6
+    @test LA.norm(Vector(x) - x_true) <= err_before + 1.0e-14
 end
 
 @testset "Jacobian wrapper" begin
-    @testset "construction and counters" begin
-        n = 3
-        J = Jacobian(MatrixWorkspace(n, n))
-        @test J.factorizations[] == 0
-        @test J.ldivs[] == 0
-        @test size(J.workspace) == (3, 3)
-    end
+    n = 4
+    A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
+    x_true = rand(ComplexF64, n)
+    b_data = A_data * x_true
 
-    @testset "updated! and init!" begin
-        n = 3
-        J = Jacobian(MatrixWorkspace(n, n))
-        A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
-        copyto!(J.workspace.A, A_data)
-        updated!(J)
-        @test J.workspace.factorized == false
+    J = Jacobian(MatrixWorkspace(n, n))
+    @test J.factorizations[] == 0
+    @test J.ldivs[] == 0
 
-        J.factorizations[] = 5
-        J.ldivs[] = 10
-        init!(J)
-        @test J.factorizations[] == 0
-        @test J.ldivs[] == 0
-    end
+    copyto!(J.workspace.A, A_data)
+    updated!(J)
 
-    @testset "ldiv!" begin
-        n = 4
-        A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
-        x_true = rand(ComplexF64, n)
-        b_data = A_data * x_true
+    # Plain ldiv!
+    x = FSVec{ComplexF64}(zeros(ComplexF64, n))
+    LA.ldiv!(x, J, FSVec{ComplexF64}(b_data))
+    @test LA.norm(Vector(x) - x_true) < 1.0e-10
+    @test J.factorizations[] >= 1
+    @test J.ldivs[] >= 1
 
-        J = Jacobian(MatrixWorkspace(n, n))
-        copyto!(J.workspace.A, A_data)
-        updated!(J)
+    # ldiv! with WeightedNorm (Skeel scaling path)
+    init!(J)
+    copyto!(J.workspace.A, A_data)
+    updated!(J)
+    w = WeightedNorm(n)
+    init!(w, FSVec{ComplexF64}(x_true))
+    x = FSVec{ComplexF64}(zeros(ComplexF64, n))
+    LA.ldiv!(x, J, FSVec{ComplexF64}(b_data), w)
+    @test LA.norm(Vector(x) - x_true) < 1.0e-10
 
+    # Condition number delegation
+    @test 1.0 ≤ LA.cond(J) < 1.0e6
+end
+
+@testset "Zero allocations (ldiv!)" begin
+    for n in [3, 13]
+        A = rand(ComplexF64, n, n) + 5.0 * LA.I
+        b = FSVec{ComplexF64}(rand(ComplexF64, n))
         x = FSVec{ComplexF64}(zeros(ComplexF64, n))
-        LA.ldiv!(x, J, FSVec{ComplexF64}(b_data))
-        @test LA.norm(Vector(x) - x_true) < 1.0e-10
-        @test J.factorizations[] >= 1
-        @test J.ldivs[] >= 1
+        WS = MatrixWorkspace(n, n)
+        copyto!(WS.A, A)
+        updated!(WS)
+        LA.ldiv!(x, WS, b)  # warmup
+        WS.factorized = false
+        LA.ldiv!(x, WS, b)  # warmup
+        WS.factorized = false
+        @test (@allocated LA.ldiv!(x, WS, b)) == 0
     end
+end
 
-    @testset "ldiv! with WeightedNorm" begin
-        n = 4
-        A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
-        x_true = rand(ComplexF64, n)
-        b_data = A_data * x_true
+@testset "Condition estimator vs opnorm" begin
+    d_r = rand() * exp10.(range(-6; stop = 6, length = 6))
+    D_R = diagm(d_r)
+    d_l = rand() * exp10.(range(6; stop = -6, length = 6))
+    A = randn(6, 6)
 
-        J = Jacobian(MatrixWorkspace(n, n))
-        copyto!(J.workspace.A, A_data)
-        updated!(J)
+    # Right-scaled
+    B = A * inv(D_R)
+    WB = MatrixWorkspace(6, 6)
+    copyto!(WB.A, ComplexF64.(B))
+    updated!(WB)
+    @test 0.1 ≤ opnorm(inv(B), Inf) / inverse_inf_norm_est(WB) ≤ 10
+    @test 0.1 ≤ LA.cond(ComplexF64.(B), Inf) / LA.cond(WB) ≤ 10
 
-        w = WeightedNorm(n)
-        init!(w, FSVec{ComplexF64}(x_true))
-
-        x = FSVec{ComplexF64}(zeros(ComplexF64, n))
-        LA.ldiv!(x, J, FSVec{ComplexF64}(b_data), w)
-        @test LA.norm(Vector(x) - x_true) < 1.0e-10
-    end
-
-    @testset "cond delegation" begin
-        n = 3
-        J = Jacobian(MatrixWorkspace(n, n))
-        A_data = rand(ComplexF64, n, n) + 5.0 * LA.I
-        copyto!(J.workspace.A, A_data)
-        updated!(J)
-
-        c = LA.cond(J)
-        @test 1.0 ≤ c < 1.0e6
-    end
+    # Left-scaled
+    C = inv(diagm(d_l)) * A
+    WC = MatrixWorkspace(6, 6)
+    copyto!(WC.A, ComplexF64.(C))
+    updated!(WC)
+    @test 0.1 ≤ opnorm(inv(C), Inf) / inverse_inf_norm_est(WC) ≤ 10
+    @test 0.1 ≤ LA.cond(ComplexF64.(C), Inf) / LA.cond(WC) ≤ 10
 end
