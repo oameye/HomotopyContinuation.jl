@@ -1,0 +1,133 @@
+# CLAUDE.md — HomotopyContinuationNext.jl
+
+## What is this?
+
+A ground-up rewrite of HomotopyContinuation.jl for solving polynomial systems via homotopy continuation. The design prioritizes type stability, minimal TTFX, and zero runtime dispatch on hot paths.
+
+## Architecture
+
+Read `implementation_docs/00_design_document.md` for the full architecture and `implementation_docs/01_type_signatures.md` for concrete type signatures.
+
+Key design decisions:
+- **Interpreter-first**: tape-based evaluator handles eval, jacobian, Taylor, DF64 — no Symbolics.jl in core
+- **FunctionWrapper type firewall**: `SystemEvaluator`/`HomotopyEvaluator` wrap any system into a single concrete type — the tracker is monomorphic
+- **FixedSizeArrays**: all pre-allocated scratch buffers use `FSVec`/`FSMat` (size is runtime, not a type parameter)
+- **DynamicPolynomials input**: users provide polynomials via `@polyvar`, internal pipeline uses `MP.differentiate` for Jacobian
+- **Immutable by default**: mutable structs require justification, use `const` fields for buffer references
+
+## Package layout
+
+```
+src/HomotopyContinuationNext.jl     # Main module
+src/primitives/                      # DoubleF64, norms, linear algebra, voronoi tree
+src/model_kit/                       # Operations, instruction sequence, interpreter, Taylor
+src/core/                            # AbstractSystem/Homotopy, SystemEvaluator, homotopy types
+src/tracking/                        # Predictor, Newton, Tracker, Endgame
+src/solving/                         # solve(), total degree, polyhedral, result types
+src/utils.jl                         # SegmentStepper, fast_abs, etc.
+```
+
+## Development workflow
+
+All common tasks go through the Makefile:
+
+```sh
+make test          # run all tests in parallel (ParallelTestRunner, 10 jobs)
+make test-serial   # run all tests serially (for debugging)
+make benchmark     # run TTFX + steady-state benchmarks
+make format        # format all Julia files with Runic
+make deps          # instantiate all environments
+make update        # update all environments
+make help          # show all available targets
+```
+
+### Test structure
+
+Tests run via ParallelTestRunner — each file is self-contained and runs in its own worker:
+
+- `test/aqua_test.jl` — Aqua.jl: unbound args, undefined exports, stale deps, compat, piracy
+- `test/jet_test.jl` — JET.jl: `report_package` for type error and optimization analysis
+- `test/explicit_imports_test.jl` — ExplicitImports.jl: no implicit imports, no stale imports, qualified access
+
+### Formatting
+
+Code is formatted with [Runic.jl](https://github.com/fredrikekre/Runic.jl) (available as `runic` CLI):
+
+```sh
+make format
+```
+
+### Quality gates
+
+Before merging any PR:
+1. `make test` passes (all 3 quality test suites + any unit tests)
+2. JET reports zero issues on the package
+3. TTFX benchmark: first `solve(F)` < 5s
+4. No `Any`-typed fields in any struct
+5. Every `mutable struct` has documented justification and `const` on fixed fields
+
+## Coding rules
+
+### Function signatures
+
+- **Use the most restrictive signature type possible.** This lets JET catch unintended errors. When prototyping it's fine to start loose, but committed code should have tight type declarations. When AI agents suggest code, make sure argument types are clearly specified. When in doubt, use the most restrictive type you can think of.
+- **Explicit `;` for keyword arguments.** Always use an explicit semicolon before keyword arguments for clarity:
+  ```julia
+  # Good
+  Position(; line = i - 1, character = m.match.offset - 1)
+  # Bad
+  Position(line = i - 1, character = m.match.offset - 1)
+  ```
+
+### Type system
+
+- **No abstract-typed fields on hot paths.** Every struct field must be concretely typed.
+- **`const` on buffer fields in mutable structs.** If a field holds a pre-allocated buffer (FSVec, FSMat, TaylorVector) that is never reassigned, mark it `const`.
+- **`RefValue` for cache scalars in immutable structs.** Homotopy types are immutable; use `Base.RefValue{T}` for cached values that need mutation.
+- **`NTuple{N,T}` for small fixed-size collections.** When the count is known at compile time and small (e.g., `tx_norm::NTuple{4,Float64}`).
+- **Enums over Symbols.** Use `EnumX.@enumx` for return codes and state machine states — scoped (`MyEnum.Value`), type-safe, faster than Symbol comparison.
+- **`FSVec{T}` / `FSMat{T}` for pre-allocated buffers.** These are `FixedSizeVector{T}` / `FixedSizeMatrix{T}` — same concrete type regardless of size, cannot be resized.
+- **`AbstractVector` / `AbstractMatrix` in user-facing interfaces.** The `AbstractSystem`/`AbstractHomotopy` contracts use abstract types so users don't need to import FixedSizeArrays.
+
+### Performance
+
+For full reference, see the `julia-perf` skill (`.claude/skills/julia-perf/`) and the `julia-ttfx` skill (`.claude/skills/julia-ttfx/`) for TTFX/invalidation diagnosis.
+
+- **Zero allocations on hot paths.** The tracker step, Newton corrector, and predictor must not allocate. Pre-allocate all buffers at construction time and mutate in-place via `!` functions.
+- **Column-major access.** First index varies fastest. Inner loops over `i` (rows), outer loops over `j` (columns): `for j in 1:n, i in 1:m`.
+- **No kwargs in hot paths.** Keyword arguments prevent specialization and can allocate. Expose kwargs at the API boundary (`solve(F; tol=1e-8)`), forward to positional-arg inner functions (`_solve(F, tol)`).
+- **No kwargs splatting.** Never forward `kwargs...` — it blocks inference. Explicitly name and forward each keyword.
+- **Fuse broadcasts.** Use `@.` or dot syntax to avoid temporary arrays. Use in-place fused assignment: `y .= @. 3x^2 + 4x`.
+- **`@views` for slices.** Array slicing copies; use `@view` or `@views` to avoid allocation.
+- **`@inbounds` with `eachindex`.** Use `@inbounds` only when indices are provably valid. Prefer `eachindex(x)` over `1:length(x)`.
+- **`@fastmath` where safe.** Acceptable in custom LU pivot selection, norm computation, and other places where IEEE edge cases (inf/nan) are handled separately. Never in certification or interval arithmetic.
+- **`abs2(z)` over `abs(z)^2`.** Avoids intermediate allocation for complex numbers. Similarly use `fld`, `cld`, `div` over `floor(x/y)` etc.
+- **Avoid string interpolation in I/O.** Use `println(file, a, " ", b)` not `println(file, "$a $b")`.
+
+### Imports and style
+
+- **No `using X` without explicit imports.** Use `using X: func1, func2` or `import X`. ExplicitImports.jl enforces this.
+- **Format with Runic.** Run `make format` before committing.
+
+## Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| MultivariatePolynomials | Abstract polynomial interface, differentiation, exponent access |
+| FixedSizeArrays | Non-resizable vectors/matrices (size not in type parameter) |
+| LinearAlgebra | stdlib |
+
+Dependencies added as needed during implementation (not yet in Project.toml):
+- DynamicPolynomials — `@polyvar`, concrete polynomial types
+- FunctionWrappers — type-stable function erasure for SystemEvaluator/HomotopyEvaluator
+- MixedSubdivisions — BKK mixed volume computation
+- ProgressMeter — progress bars
+
+## Implementation phases
+
+1. **Primitives**: DoubleF64, WeightedNorm, MatrixWorkspace, LU, utils
+2. **Interpreter pipeline**: OpType, extract supports via MP, instruction sequence, interpreter, Taylor
+3. **Core types**: AbstractSystem/Homotopy, SystemEvaluator, HomotopyEvaluator, homotopy types
+4. **Path tracking**: Newton, predictor, tracker, valuation, endgame
+5. **Solve**: total degree, polyhedral, solve(), result types
+6. **Testing & validation**: benchmarks, JET verification, TTFX measurement

@@ -9,4 +9,6 @@ docs/build/
 **/**/tmp_params.txt
 **/**/tmp_sols.txt
 **/**/tmp_cert.txt
+benchmarks_output.json
+.DS_Store
 .claude/*
