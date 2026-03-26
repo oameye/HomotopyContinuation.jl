@@ -302,22 +302,28 @@ end
 
 ---
 
-## 4. Polynomial System Metadata
+## 4. System — User-Facing Compiled Polynomial System
 
-No `PolynomialSystem <: AbstractSystem` type. Polynomial systems produce a `SystemEvaluator`
-directly via `system_eval()`. Metadata is stored separately:
+`System` is the user-facing type that caches the compiled interpreter pipeline. It merges
+what was previously `PolynomialSystemInfo` + `SystemEvaluator` into a single struct.
+Constructed once from DynamicPolynomials, reused across multiple `solve` calls.
 
 ```julia
-struct PolynomialSystemInfo
+struct System
+    evaluator::SystemEvaluator
     degrees::Vector{Int}
     nvars::Int
     nparams::Int
-    variable_groups::Union{Nothing, Vector{Vector{Int}}}
+    variable_groups::Vector{Vector{Int}}
     is_homogeneous::Bool
-    # Prevent GC of objects captured by FW closures
-    _seq::InstructionSequence
+    support::Vector{Matrix{Int32}}
+    coefficients::Vector{Vector{ComplexF64}}
+    # GC roots — interpreters must stay alive for FunctionWrapper closures
+    _seq_eval::InstructionSequence
+    _seq_jac::InstructionSequence
     _interp_f64::Interpreter{Vector{ComplexF64}}
     _interp_df64::Interpreter{Vector{ComplexDF64}}
+    _interp_jac::Interpreter{Vector{ComplexF64}}
     _interp_t1::Interpreter{Vector{TruncatedTaylorSeries{2,ComplexF64}}}
     _interp_t2::Interpreter{Vector{TruncatedTaylorSeries{3,ComplexF64}}}
     _interp_t3::Interpreter{Vector{TruncatedTaylorSeries{4,ComplexF64}}}
@@ -326,8 +332,14 @@ end
 
 ### Construction from MP polynomials
 
-`system_eval()` produces both `PolynomialSystemInfo` and `SystemEvaluator` directly from
-DynamicPolynomials input. No intermediate `AbstractSystem` subtype — no double-wrapping.
+The `System()` constructor compiles the full pipeline from DynamicPolynomials input:
+
+```julia
+F = System(polys; parameters=[], variables=...)
+```
+
+It extracts supports/coefficients, builds interpreters, wires FunctionWrappers, and stores
+everything for reuse. `solve` only accepts `System`, not raw polynomial vectors.
 
 MP functions used:
 - `MP.effective_variables(polys)` — variables that actually appear

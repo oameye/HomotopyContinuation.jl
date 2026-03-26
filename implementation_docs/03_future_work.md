@@ -10,14 +10,13 @@ deferred, and what's needed to add it.
 
 These extend `solve()` with additional start system strategies and user-facing APIs.
 
-### Parameter homotopy (user API)
+### ~~Parameter homotopy (user API)~~ — DONE
 
-**What:** Track solutions as parameters vary: `solve(F; start_parameters=p₀, target_parameters=p₁)`.
-Uses `ParameterHomotopy` which interpolates `F(x; t·p₀ + (1-t)·p₁)`.
+Implemented. Uses `CoefficientHomotopy` (which interpolates `F(x; t·p_start + (1-t)·p_target)`):
 
-**Why deferred:** Core solve with total degree and polyhedral must work first.
-
-**What's needed:** `ParameterHomotopy` struct (stores `SystemEvaluator`, start/target parameter vectors, interpolation scratch), `start_parameters!`/`target_parameters!` already in `HomotopyEvaluator` interface.
+```julia
+solve(F, starts; start_parameters=p₁, target_parameters=p₀)
+```
 
 ### Multi-homogeneous (variable groups)
 

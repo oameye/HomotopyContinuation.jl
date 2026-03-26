@@ -431,23 +431,41 @@ function HomotopyEvaluator(H::AbstractHomotopy)
 end
 ```
 
-### 6.4 Polynomial System Metadata
+### 6.4 System — User-Facing Compiled Polynomial System
+
+`System` replaces the old `PolynomialSystemInfo` + `SystemEvaluator` tuple. It is the sole
+entry point to `solve` — users construct it once and reuse across multiple solves.
 
 ```julia
-struct PolynomialSystemInfo
+struct System
+    evaluator::SystemEvaluator
     degrees::Vector{Int}
     nvars::Int
     nparams::Int
-    variable_groups::Union{Nothing, Vector{Vector{Int}}}
+    variable_groups::Vector{Vector{Int}}
     is_homogeneous::Bool
-    # Keep interpreters alive (FW closures capture them by reference)
-    _seq::InstructionSequence
+    support::Vector{Matrix{Int32}}
+    coefficients::Vector{Vector{ComplexF64}}
+    # GC roots — interpreters must stay alive for FunctionWrapper closures
+    _seq_eval::InstructionSequence
+    _seq_jac::InstructionSequence
     _interp_f64::Interpreter{Vector{ComplexF64}}
     _interp_df64::Interpreter{Vector{ComplexDF64}}
+    _interp_jac::Interpreter{Vector{ComplexF64}}
     _interp_t1::Interpreter{Vector{TruncatedTaylorSeries{2,ComplexF64}}}
     _interp_t2::Interpreter{Vector{TruncatedTaylorSeries{3,ComplexF64}}}
     _interp_t3::Interpreter{Vector{TruncatedTaylorSeries{4,ComplexF64}}}
 end
+
+# Construction:
+F = System([x^2 + y - 1, x*y - 2])
+F = System([x^2 + a*y, x*y - b]; parameters=[a, b])
+
+# Accessors:
+size(F)          # (neqs, nvars)
+degrees(F)       # Vector{Int}
+nvariables(F)    # Int
+nparameters(F)   # Int
 ```
 
 ### 6.5 Homotopy Types
@@ -663,62 +681,57 @@ This keeps Symbolics.jl out of the core dependency tree and its load time out of
 
 ### 8.1 solve() dispatch
 
+`solve` requires a `System` — no raw polynomial vectors. Algorithm structs (`TotalDegree`,
+`Polyhedral`) accept flattened tracker kwargs for ergonomics.
+
 ```julia
-function solve(
-    F::AbstractVector{<:MP.AbstractPolynomialLike};
-    start_system = :polyhedral,
-    parameters = eltype(MP.variables(F))[],
-    target_parameters = ComplexF64[],
-    variable_groups = nothing,
-    threading = Threads.nthreads() > 1,
-    seed = rand(UInt32),
-    show_progress = true,
-    kwargs...
-)
-    # 1. Build SystemEvaluator from polynomials
-    info, sys_eval = system_eval(F; variables=MP.effective_variables(F), parameters)
+# Start-system homotopies (start solutions computed automatically)
+solve(F::System, alg::TotalDegree = TotalDegree())::Result
+solve(F::System, alg::Polyhedral)::Result
 
-    # 2. Dispatch on start system
-    if start_system == :polyhedral
-        tracker, starts = polyhedral_start(sys_eval, info; kwargs...)
-    elseif start_system == :total_degree
-        tracker, starts = total_degree_start(sys_eval, info; kwargs...)
-    end
-
-    # 3. Track all paths
-    if threading
-        threaded_solve(tracker, starts; seed, show_progress)
-    else
-        serial_solve(tracker, starts; seed, show_progress)
-    end
-end
-
-# Also accept AbstractSystem directly
-function solve(F::AbstractSystem; kwargs...)
-    sys_eval = SystemEvaluator(F)
-    ...
-end
+# Parameter homotopy (user provides start solutions)
+solve(F::System, starts::AbstractVector{<:AbstractVector{<:Number}};
+      start_parameters::AbstractVector{<:Number},
+      target_parameters::AbstractVector{<:Number},
+      seed::UInt32 = ...,
+      tracker_options::TrackerOptions = TrackerOptions())::Result
 ```
+
+All three paths go through CommonSolve: `solve(F, ...) = solve!(init(F, ...))`.
 
 ### 8.2 Total Degree
 
 Start system: `gᵢ(x) = xᵢ^{dᵢ} - 1`, start solutions: roots of unity, paths: `∏ dᵢ`.
 
 ```julia
-function total_degree_start(sys_eval, info; kwargs...)
-    start_eval = build_total_degree_evaluator(info.degrees, info.nvars)
-    γ = cis(2π * rand())
-    homotopy = StraightLineHomotopy(start_eval, sys_eval, γ)
-    hom_eval = HomotopyEvaluator(homotopy)
-    tracker = Tracker(hom_eval; kwargs...)
-    starts = TotalDegreeIterator(info.degrees)
-    return tracker, starts
+function CommonSolve.init(F::System, alg::TotalDegree)::SolveCache
+    sys_G = _total_degree_startsystem(F.degrees)
+    starts = _total_degree_solutions(F.degrees)
+    γ = cis(2π * rand(MersenneTwister(alg.seed)))
+    H = StraightLineHomotopy(sys_G.evaluator, F.evaluator; γ = γ)
+    tracker = Tracker(HomotopyEvaluator(H); options = alg.tracker_options)
+    return SolveCache(tracker, starts, alg.seed)
 end
 ```
 
 ### 8.3 Polyhedral (BKK)
 
-Two-phase: toric degeneration (binomial start → generic coefficients) then coefficient homotopy (generic → target coefficients).
+Two-phase: toric degeneration (binomial start → generic coefficients) then coefficient
+homotopy (generic → target coefficients). Support and coefficients come from `F.support`
+and `F.coefficients` (cached in `System` at construction time).
+
+### 8.4 Parameter Homotopy
+
+Tracks known solutions from one parameter value to another using `CoefficientHomotopy`:
+`H(x,t) = F(x; t·p_start + (1-t)·p_target)`.
+
+```julia
+function CommonSolve.init(F::System, starts; start_parameters, target_parameters, ...)::SolveCache
+    H = CoefficientHomotopy(F.evaluator, ComplexF64.(start_parameters), ComplexF64.(target_parameters))
+    tracker = Tracker(HomotopyEvaluator(H); options = tracker_options)
+    return SolveCache(tracker, starts, seed)
+end
+```
 
 ---
 
