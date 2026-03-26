@@ -9,46 +9,43 @@
 struct TruncatedTaylorSeries{N, T}
     val::NTuple{N, T}
 end
+const TTS{N, T} = TruncatedTaylorSeries{N, T}
 
 # Construct from tuple (promotes element types)
-TruncatedTaylorSeries(v::Tuple) = TruncatedTaylorSeries(promote(v...))
+TTS(v::Tuple) = TTS(promote(v...))
 
 # Construct order-0 series from a scalar (N=1 inferred from value)
-TruncatedTaylorSeries(x::Number) = TruncatedTaylorSeries((x,))
+TTS(x::Number) = TTS((x,))
 
 # Construct fixed-N series from a scalar: TruncatedTaylorSeries{N,T}(x)
 # places x at order 0 and fills remaining orders with zero(T).
-function TruncatedTaylorSeries{N, T}(x::S) where {N, T, S <: Number}
-    return convert(TruncatedTaylorSeries{N, T}, x)
+function TTS{N, T}(x::S) where {N, T, S <: Number}
+    return convert(TTS{N, T}, x)
 end
 
 Base.show(io::IO, x::TruncatedTaylorSeries) = show(io, x.val)
-Base.eltype(::TruncatedTaylorSeries{N, T}) where {N, T} = T
-Base.length(x::TruncatedTaylorSeries{N, T}) where {N, T} = N
+Base.eltype(::TTS{N, T}) where {N, T} = T
+Base.length(::TTS{N, T}) where {N, T} = N
 
 # 0-indexed externally
-Base.getindex(x::TruncatedTaylorSeries{N, T}, k::Integer) where {N, T} = x.val[k + 1]
+Base.getindex(x::TTS{N, T}, k::Integer) where {N, T} = x.val[k + 1]
 
 Base.iterate(x::TruncatedTaylorSeries) = iterate(x.val)
 Base.iterate(x::TruncatedTaylorSeries, s) = iterate(x.val, s)
 
 Base.:(==)(tx::TruncatedTaylorSeries, ty::TruncatedTaylorSeries) = tx.val == ty.val
 
-Base.zero(::TruncatedTaylorSeries{N, T}) where {N, T} =
-    convert(TruncatedTaylorSeries{N, T}, zero(T))
-Base.zero(::Type{TruncatedTaylorSeries{N, T}}) where {N, T} =
-    convert(TruncatedTaylorSeries{N, T}, zero(T))
-Base.one(::TruncatedTaylorSeries{N, T}) where {N, T} =
-    convert(TruncatedTaylorSeries{N, T}, one(T))
-Base.one(::Type{TruncatedTaylorSeries{N, T}}) where {N, T} =
-    convert(TruncatedTaylorSeries{N, T}, one(T))
+Base.zero(::TTS{N, T}) where {N, T} = convert(TTS{N, T}, zero(T))
+Base.zero(::Type{TTS{N, T}}) where {N, T} = convert(TTS{N, T}, zero(T))
+Base.one(::TTS{N, T}) where {N, T} = convert(TTS{N, T}, one(T))
+Base.one(::Type{TTS{N, T}}) where {N, T} = convert(TTS{N, T}, one(T))
 
 # Convert from same-or-smaller TTS (zero-padding) or scalar
 function Base.convert(
-        ::Type{TruncatedTaylorSeries{N, T}},
-        x::TruncatedTaylorSeries{K, S},
+        ::Type{TTS{N, T}},
+        x::TTS{K, S},
     ) where {N, T, K, S}
-    return TruncatedTaylorSeries(
+    return TTS(
         ntuple(Val(N)) do i
             if i <= K
                 convert(T, x.val[i])
@@ -60,10 +57,10 @@ function Base.convert(
 end
 
 function Base.convert(
-        ::Type{TruncatedTaylorSeries{N, T}},
+        ::Type{TTS{N, T}},
         x::S,
     ) where {N, T, S <: Number}
-    return TruncatedTaylorSeries(
+    return TTS(
         ntuple(Val(N)) do i
             if i == 1
                 convert(T, x)
@@ -75,24 +72,18 @@ function Base.convert(
 end
 
 function Base.convert(
-        ::Type{TruncatedTaylorSeries{N, T}},
+        ::Type{TTS{N, T}},
         x::Tuple,
     ) where {N, T}
-    return convert(TruncatedTaylorSeries{N, T}, TruncatedTaylorSeries(x))
+    return convert(TTS{N, T}, TTS(x))
 end
 
 # Arithmetic with scalars
-Base.:*(c::Number, x::TruncatedTaylorSeries{N, T}) where {N, T} =
-    TruncatedTaylorSeries(ntuple(i -> c * x.val[i], Val(N)))
-Base.:*(x::TruncatedTaylorSeries{N, T}, c::Number) where {N, T} =
-    TruncatedTaylorSeries(ntuple(i -> x.val[i] * c, Val(N)))
-
-Base.:+(x::TruncatedTaylorSeries{N, T}, y::TruncatedTaylorSeries{N, T}) where {N, T} =
-    TruncatedTaylorSeries(ntuple(i -> x.val[i] + y.val[i], Val(N)))
-Base.:-(x::TruncatedTaylorSeries{N, T}, y::TruncatedTaylorSeries{N, T}) where {N, T} =
-    TruncatedTaylorSeries(ntuple(i -> x.val[i] - y.val[i], Val(N)))
-Base.:-(x::TruncatedTaylorSeries{N, T}) where {N, T} =
-    TruncatedTaylorSeries(ntuple(i -> -x.val[i], Val(N)))
+Base.:*(c::Number, x::TTS{N, T}) where {N, T} = TTS(ntuple(i -> c * x.val[i], Val(N)))
+Base.:*(x::TTS{N, T}, c::Number) where {N, T} = TTS(ntuple(i -> x.val[i] * c, Val(N)))
+Base.:+(x::TTS{N, T}, y::TTS{N, T}) where {N, T} = TTS(ntuple(i -> x.val[i] + y.val[i], Val(N)))
+Base.:-(x::TTS{N, T}, y::TTS{N, T}) where {N, T} = TTS(ntuple(i -> x.val[i] - y.val[i], Val(N)))
+Base.:-(x::TTS{N, T}) where {N, T} = TTS(ntuple(i -> -x.val[i], Val(N)))
 
 ## TaylorVector
 
@@ -104,7 +95,7 @@ A vector of `TruncatedTaylorSeries{N,T}` backed by an `FSMat{T}`.
 The backing matrix has shape `N × n`: `N` rows for Taylor coefficient orders
 (0 to N-1) and `n` columns for vector elements.
 """
-struct TaylorVector{N, T} <: AbstractVector{TruncatedTaylorSeries{N, T}}
+struct TaylorVector{N, T} <: AbstractVector{TTS{N, T}}
     data::FSMat{T}
 end
 
@@ -120,9 +111,8 @@ end
 
 Base.length(tv::TaylorVector) = size(tv.data, 2)
 Base.size(tv::TaylorVector) = (length(tv),)
-Base.eltype(::Type{TaylorVector{N, T}}) where {N, T} = TruncatedTaylorSeries{N, T}
+Base.eltype(::Type{TaylorVector{N, T}}) where {N, T} = TTS{N, T}
 Base.IndexStyle(::Type{<:TaylorVector}) = IndexLinear()
-
 Base.fill!(tv::TaylorVector, x) = (fill!(tv.data, x); tv)
 
 """
@@ -139,17 +129,17 @@ end
     return quote
         Base.@_propagate_inbounds_meta
         x = tv.data
-        TruncatedTaylorSeries($(Expr(:tuple, (:(x[$k, i]) for k in 1:N)...)))
+        TTS($(Expr(:tuple, (:(x[$k, i]) for k in 1:N)...)))
     end
 end
 
 function Base.setindex!(tv::TaylorVector{N, T}, x, i::Integer) where {N, T}
-    return setindex!(tv, convert(TruncatedTaylorSeries{N, T}, x), i)
+    return setindex!(tv, convert(TTS{N, T}, x), i)
 end
 
 @generated function Base.setindex!(
         tv::TaylorVector{N, T},
-        x::TruncatedTaylorSeries{N, T},
+        x::TTS{N, T},
         i::Integer,
     ) where {N, T}
     return quote
@@ -168,67 +158,44 @@ end
 # Convolution-based ops (mul, div, inv, sqrt, pow_int) use recurrence relations.
 
 # OP_IDENTITY # a
-@inline function taylor_op_identity(
-        a::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
+@inline function taylor_op_identity(a::TTS{N, T}) where {N, T}
     return a
 end
 
 # OP_NEG # -a
-@generated function taylor_op_neg(a::TruncatedTaylorSeries{N, T}) where {N, T}
+@generated function taylor_op_neg(a::TTS{N, T}) where {N, T}
     terms = Expr[:(-(a.val[$k])) for k in 1:N]
     return quote
         Base.@_inline_meta
-        TruncatedTaylorSeries($(Expr(:tuple, terms...)))
+        TTS($(Expr(:tuple, terms...)))
     end
 end
 
 # OP_ADD # a + b
-@generated function taylor_op_add(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
+@generated function taylor_op_add(a::TTS{N, T}, b::TTS{N, T}) where {N, T}
     terms = Expr[:(a.val[$k] + b.val[$k]) for k in 1:N]
     return quote
         Base.@_inline_meta
-        TruncatedTaylorSeries($(Expr(:tuple, terms...)))
+        TTS($(Expr(:tuple, terms...)))
     end
 end
 
 # OP_SUB # a - b
-@generated function taylor_op_sub(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
+@generated function taylor_op_sub(a::TTS{N, T}, b::TTS{N, T}) where {N, T}
     terms = Expr[:(a.val[$k] - b.val[$k]) for k in 1:N]
     return quote
         Base.@_inline_meta
-        TruncatedTaylorSeries($(Expr(:tuple, terms...)))
+        TTS($(Expr(:tuple, terms...)))
     end
 end
 
 # OP_MUL # a * b  (Cauchy product)
 # c[k] = Σ_{j=0}^{k} a[j] * b[k-j]  (0-indexed), i.e., val[k+1] = Σ_{j=1}^{k+1} a.val[j]*b.val[k+2-j]
-@generated function taylor_op_mul(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
-    exprs = Vector{Expr}(undef, N)
-    for k in 1:N
-        # k-th 1-indexed coefficient = Σ_{j=1}^{k} a.val[j] * b.val[k+1-j]
-        terms = Expr[]
-        for j in 1:k
-            push!(terms, :(a.val[$j] * b.val[$(k + 1 - j)]))
-        end
-        acc = terms[1]
-        for i in 2:length(terms)
-            acc = :($(acc) + $(terms[i]))
-        end
-        exprs[k] = acc
-    end
+@generated function taylor_op_mul(a::TTS{N, T}, b::TTS{N, T}) where {N, T}
+    exprs = _cauchy_product_exprs(N)
     return quote
         Base.@_inline_meta
-        TruncatedTaylorSeries($(Expr(:tuple, exprs...)))
+        TTS($(Expr(:tuple, exprs...)))
     end
 end
 
@@ -241,13 +208,21 @@ function _expr_sum(terms::Vector{Expr})::Expr
     return acc
 end
 
+# Helper: generate Cauchy product expressions for orders 1..N (1-indexed)
+# Returns Vector{Expr} where exprs[k] = Σ_{j=1}^{k} a.val[j] * b.val[k+1-j]
+function _cauchy_product_exprs(N::Int)::Vector{Expr}
+    exprs = Vector{Expr}(undef, N)
+    for k in 1:N
+        terms = Expr[:(a.val[$j] * b.val[$(k + 1 - j)]) for j in 1:k]
+        exprs[k] = _expr_sum(terms)
+    end
+    return exprs
+end
+
 # OP_DIV # a / b  (quotient rule recurrence)
 # c[0] = a[0] / b[0]
 # c[k] = (a[k] - Σ_{j=0}^{k-1} c[j] * b[k-j]) / b[0]
-@generated function taylor_op_div(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
+@generated function taylor_op_div(a::TTS{N, T}, b::TTS{N, T}) where {N, T}
     # Build sequential computation: c1, c2, ..., cN
     stmts = Expr[]
     push!(stmts, :(c1 = a.val[1] / b.val[1]))
@@ -264,14 +239,14 @@ end
     return quote
         Base.@_inline_meta
         $(stmts...)
-        TruncatedTaylorSeries($(Expr(:tuple, cvars...)))
+        TTS($(Expr(:tuple, cvars...)))
     end
 end
 
 # OP_INV # 1 / a  (special case of div with numerator = 1)
 # c[0] = 1 / a[0]
 # c[k] = -(Σ_{j=0}^{k-1} c[j] * a[k-j]) / a[0]  for k >= 1
-@generated function taylor_op_inv(a::TruncatedTaylorSeries{N, T}) where {N, T}
+@generated function taylor_op_inv(a::TTS{N, T}) where {N, T}
     stmts = Expr[]
     push!(stmts, :(c1 = inv(a.val[1])))
     for k in 2:N
@@ -287,14 +262,14 @@ end
     return quote
         Base.@_inline_meta
         $(stmts...)
-        TruncatedTaylorSeries($(Expr(:tuple, cvars...)))
+        TTS($(Expr(:tuple, cvars...)))
     end
 end
 
 # OP_SQR # a^2  (optimized Cauchy product exploiting symmetry)
 # c[k] = Σ_{j=0}^{k} a[j]*a[k-j]
 #       = 2 * Σ_{j=0}^{floor((k-1)/2)} a[j]*a[k-j]  + (iseven(k) ? a[k/2]^2 : 0)
-@generated function taylor_op_sqr(a::TruncatedTaylorSeries{N, T}) where {N, T}
+@generated function taylor_op_sqr(a::TTS{N, T}) where {N, T}
     exprs = Vector{Expr}(undef, N)
     for k in 1:N
         # k is 1-indexed, so 0-indexed order is ord = k-1
@@ -334,23 +309,23 @@ end
     end
     return quote
         Base.@_inline_meta
-        TruncatedTaylorSeries($(Expr(:tuple, exprs...)))
+        TTS($(Expr(:tuple, exprs...)))
     end
 end
 
 # OP_CB # a^3 = sqr(a) * a
-@inline function taylor_op_cb(a::TruncatedTaylorSeries{N, T}) where {N, T}
+@inline function taylor_op_cb(a::TTS{N, T}) where {N, T}
     return taylor_op_mul(taylor_op_sqr(a), a)
 end
 
 # OP_INV_NOT_ZERO # a ≠ 0 ? 1/a : a
-@inline function taylor_op_inv_not_zero(a::TruncatedTaylorSeries{N, T}) where {N, T}
+@inline function taylor_op_inv_not_zero(a::TTS{N, T}) where {N, T}
     iszero(a.val[1]) && return a
     return taylor_op_inv(a)
 end
 
 # OP_INVSQR # 1 / a^2
-@inline function taylor_op_invsqr(a::TruncatedTaylorSeries{N, T}) where {N, T}
+@inline function taylor_op_invsqr(a::TTS{N, T}) where {N, T}
     return taylor_op_inv(taylor_op_sqr(a))
 end
 
@@ -358,7 +333,7 @@ end
 # c[0] = sqrt(a[0])
 # c[1] = a[1] / (2 * c[0])
 # c[k] = (a[k] - Σ_{j=1}^{k-1} c[j]*c[k-j]) / (2*c[0])  for k >= 2
-@generated function taylor_op_sqrt(a::TruncatedTaylorSeries{N, T}) where {N, T}
+@generated function taylor_op_sqrt(a::TTS{N, T}) where {N, T}
     stmts = Expr[]
     push!(stmts, :(c1 = sqrt(a.val[1])))
     push!(stmts, :(two_c1 = c1 + c1))
@@ -379,7 +354,7 @@ end
     return quote
         Base.@_inline_meta
         $(stmts...)
-        TruncatedTaylorSeries($(Expr(:tuple, cvars...)))
+        TTS($(Expr(:tuple, cvars...)))
     end
 end
 
@@ -388,10 +363,7 @@ end
 # w[0] = a[0]^r
 # w[k] = (1/k) * (1/a[0]) * Σ_{j=1}^{k} (r*j - (k-j)) * a[j] * w[k-j]
 # This is the standard recurrence from Griewank & Walther (Chapter 13).
-@generated function taylor_op_pow_int(
-        a::TruncatedTaylorSeries{N, T},
-        r::I,
-    ) where {N, T, I <: Integer}
+@generated function taylor_op_pow_int(a::TTS{N, T}, r::I) where {N, T, I <: Integer}
     stmts = Expr[]
     push!(stmts, :(w1 = op_pow_int(a.val[1], r)))
     if N >= 2
@@ -418,7 +390,7 @@ end
     return quote
         Base.@_inline_meta
         $(stmts...)
-        TruncatedTaylorSeries($(Expr(:tuple, wvars...)))
+        TTS($(Expr(:tuple, wvars...)))
     end
 end
 
@@ -427,7 +399,7 @@ end
 # s[0] = sin(a[0]),  c[0] = cos(a[0])
 # s[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * c[k-j]
 # c[k] = -(1/k) * Σ_{j=1}^{k} j * a[j] * s[k-j]
-@generated function taylor_op_sin(a::TruncatedTaylorSeries{N, T}) where {N, T}
+@generated function taylor_op_sin(a::TTS{N, T}) where {N, T}
     stmts = Expr[]
     if N == 1
         push!(stmts, :(s1 = sin(a.val[1])))
@@ -456,11 +428,11 @@ end
     return quote
         Base.@_inline_meta
         $(stmts...)
-        TruncatedTaylorSeries($(Expr(:tuple, svars...)))
+        TTS($(Expr(:tuple, svars...)))
     end
 end
 
-@generated function taylor_op_cos(a::TruncatedTaylorSeries{N, T}) where {N, T}
+@generated function taylor_op_cos(a::TTS{N, T}) where {N, T}
     stmts = Expr[]
     if N == 1
         push!(stmts, :(c1 = cos(a.val[1])))
@@ -485,137 +457,50 @@ end
     return quote
         Base.@_inline_meta
         $(stmts...)
-        TruncatedTaylorSeries($(Expr(:tuple, cvars...)))
+        TTS($(Expr(:tuple, cvars...)))
     end
 end
 
 # OP_MULADD # a * b + c
-@generated function taylor_op_muladd(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-        c::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
-    exprs = Vector{Expr}(undef, N)
-    for k in 1:N
-        # Cauchy product at order k (1-indexed), then add c.val[k]
-        terms = Expr[]
-        for j in 1:k
-            push!(terms, :(a.val[$j] * b.val[$(k + 1 - j)]))
-        end
-        acc = terms[1]
-        for i in 2:length(terms)
-            acc = :($(acc) + $(terms[i]))
-        end
-        exprs[k] = :($(acc) + c.val[$k])
-    end
+@generated function taylor_op_muladd(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T}
+    cp = _cauchy_product_exprs(N)
+    exprs = Expr[:($(cp[k]) + c.val[$k]) for k in 1:N]
     return quote
         Base.@_inline_meta
-        TruncatedTaylorSeries($(Expr(:tuple, exprs...)))
+        TTS($(Expr(:tuple, exprs...)))
     end
 end
 
 # OP_MULSUB # a * b - c
-@generated function taylor_op_mulsub(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-        c::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
-    exprs = Vector{Expr}(undef, N)
-    for k in 1:N
-        terms = Expr[]
-        for j in 1:k
-            push!(terms, :(a.val[$j] * b.val[$(k + 1 - j)]))
-        end
-        acc = terms[1]
-        for i in 2:length(terms)
-            acc = :($(acc) + $(terms[i]))
-        end
-        exprs[k] = :($(acc) - c.val[$k])
-    end
+@generated function taylor_op_mulsub(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T}
+    cp = _cauchy_product_exprs(N)
+    exprs = Expr[:($(cp[k]) - c.val[$k]) for k in 1:N]
     return quote
         Base.@_inline_meta
-        TruncatedTaylorSeries($(Expr(:tuple, exprs...)))
+        TTS($(Expr(:tuple, exprs...)))
     end
 end
 
 # OP_SUBMUL # c - a * b
-@generated function taylor_op_submul(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-        c::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
-    exprs = Vector{Expr}(undef, N)
-    for k in 1:N
-        terms = Expr[]
-        for j in 1:k
-            push!(terms, :(a.val[$j] * b.val[$(k + 1 - j)]))
-        end
-        acc = terms[1]
-        for i in 2:length(terms)
-            acc = :($(acc) + $(terms[i]))
-        end
-        exprs[k] = :(c.val[$k] - $(acc))
-    end
+@generated function taylor_op_submul(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T}
+    cp = _cauchy_product_exprs(N)
+    exprs = Expr[:(c.val[$k] - $(cp[k])) for k in 1:N]
     return quote
         Base.@_inline_meta
-        TruncatedTaylorSeries($(Expr(:tuple, exprs...)))
+        TTS($(Expr(:tuple, exprs...)))
     end
 end
 
-# OP_ADD3 # a + b + c
-@inline function taylor_op_add3(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-        c::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
-    return taylor_op_add(taylor_op_add(a, b), c)
-end
-
-# OP_ADD4 # a + b + c + d
-@inline function taylor_op_add4(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-        c::TruncatedTaylorSeries{N, T},
-        d::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
-    return taylor_op_add(taylor_op_add(a, b), taylor_op_add(c, d))
-end
-
-# OP_MUL3 # a * b * c
-@inline function taylor_op_mul3(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-        c::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
-    return taylor_op_mul(taylor_op_mul(a, b), c)
-end
-
-# OP_MUL4 # a * b * c * d
-@inline function taylor_op_mul4(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-        c::TruncatedTaylorSeries{N, T},
-        d::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
-    return taylor_op_mul(taylor_op_mul(a, b), taylor_op_mul(c, d))
-end
-
-# OP_MULMULADD # a * b + c * d
-@inline function taylor_op_mulmuladd(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-        c::TruncatedTaylorSeries{N, T},
-        d::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
-    return taylor_op_add(taylor_op_mul(a, b), taylor_op_mul(c, d))
-end
-
-# OP_MULMULSUB # a * b - c * d
-@inline function taylor_op_mulmulsub(
-        a::TruncatedTaylorSeries{N, T},
-        b::TruncatedTaylorSeries{N, T},
-        c::TruncatedTaylorSeries{N, T},
-        d::TruncatedTaylorSeries{N, T},
-    ) where {N, T}
-    return taylor_op_sub(taylor_op_mul(a, b), taylor_op_mul(c, d))
-end
+# Composite ops — all delegate to the primitive taylor_op_add/sub/mul
+@inline taylor_op_add3(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T} =
+    taylor_op_add(taylor_op_add(a, b), c)
+@inline taylor_op_add4(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}, d::TTS{N, T}) where {N, T} =
+    taylor_op_add(taylor_op_add(a, b), taylor_op_add(c, d))
+@inline taylor_op_mul3(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T} =
+    taylor_op_mul(taylor_op_mul(a, b), c)
+@inline taylor_op_mul4(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}, d::TTS{N, T}) where {N, T} =
+    taylor_op_mul(taylor_op_mul(a, b), taylor_op_mul(c, d))
+@inline taylor_op_mulmuladd(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}, d::TTS{N, T}) where {N, T} =
+    taylor_op_add(taylor_op_mul(a, b), taylor_op_mul(c, d))
+@inline taylor_op_mulmulsub(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}, d::TTS{N, T}) where {N, T} =
+    taylor_op_sub(taylor_op_mul(a, b), taylor_op_mul(c, d))
