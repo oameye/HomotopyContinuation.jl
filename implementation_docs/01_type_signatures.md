@@ -162,34 +162,14 @@ end
 end
 ```
 
-### Intermediate Representation
-
-```julia
-struct IRStatementRef
-    i::Int
-end
-
-const IRStatementArg = Union{Nothing, ComplexF64, Symbol, IRStatementRef}
-
-struct IRStatement
-    op::OpType
-    target::IRStatementRef
-    args::NTuple{4, IRStatementArg}
-end
-
-struct IntermediateRepresentation
-    statements::Vector{IRStatement}
-    assignments::Vector{Tuple{Int, IRStatementArg}}
-    output_dim::Int
-end
-```
-
 ### Instruction Sequence
+
+No separate IR — SExpr trees compile directly to `Instruction` values via `TapeCompiler`.
 
 ```julia
 struct Instruction
     input::NTuple{4, Int32}
-    op::OpType
+    op::OpType.T
     output::Int32
 end
 
@@ -199,12 +179,12 @@ struct InstructionSequence
     constants_range::UnitRange{Int}
     parameters_range::UnitRange{Int}
     variables_range::UnitRange{Int}
-    continuation_parameter_index::Union{Nothing, Int}
-    assignments::Vector{Tuple{Int,Int}}
     output_dim::Int
     tape_space_needed::Int
-    u_assignments::Vector{Tuple{Int,Int}}
-    U_assignments::Vector{Tuple{Int,Int}}
+    u_assignments::Vector{Tuple{Int, Int}}
+    U_assignments::Vector{Tuple{Int, Int}}
+    all_u_assigned::Bool
+    all_U_assigned::Bool
 end
 ```
 

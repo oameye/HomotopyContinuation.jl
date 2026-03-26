@@ -26,15 +26,17 @@ Entry points: `build_interpreter`, `build_jacobian_interpreter`, `build_taylor_i
 
 | File | Lines | Role |
 |------|------:|------|
-| `operations.jl` | 230 | `OpType` enum (27 ops, arity 0-4) and `@inline` scalar `op_*` implementations |
-| `taylor.jl` | 622 | `TruncatedTaylorSeries{N,T}`, `TaylorVector{N,T}`, `@generated` `taylor_op_*` recurrences |
-| `instruction_sequence.jl` | 238 | `Instruction`, `InstructionSequence`, DAG reorder, linear-scan register allocator |
-| `cse.jl` | 1587 | SExpr types, SymEngine CSE port, `TapeCompiler`, `compile_to_instructions` |
-| `interpreter.jl` | 385 | `Interpreter{V}`, `execute!` (4 overloads), `execute_taylor!`, code-generated dispatch |
-| `polynomial_input.jl` | 181 | User API, MP variable discovery, pipeline orchestrator |
-| **Total** | **3243** | |
+| `operations.jl` | 157 | `OpType` enum (25 ops, arity 0-4), `nested_ifs` codegen helper, `@inline` scalar `op_*` implementations |
+| `taylor.jl` | 513 | `TruncatedTaylorSeries{N,T}` (aliased as `TTS`), `TaylorVector{N,T}`, `@generated` `taylor_op_*` recurrences, `_cauchy_product_exprs` shared helper |
+| `sexpr.jl` | 290 | SExpr type hierarchy, hash/==, `_canonical_add`/`_canonical_mul`, `_wrap_args` helper, `poly_to_sexpr` |
+| `cse.jl` | 561 | SymEngine CSE port: `FuncArgTracker`, `opt_cse`, `tree_cse`, `cse` |
+| `tape_compiler.jl` | 598 | `TapeCompiler`, `_compile!`, instruction fusion, `_tree_reduce!` shared helper, `compile_to_instructions` |
+| `instruction_sequence.jl` | 245 | `Instruction`, `InstructionSequence`, `_remap_instruction`, DAG reorder, linear-scan register allocator |
+| `interpreter.jl` | 407 | `Interpreter{V}`, `execute!` (4 overloads), `execute_taylor!`, code-generated dispatch |
+| `polynomial_input.jl` | 186 | User API, MP variable discovery, pipeline orchestrator |
+| **Total** | **~2960** | |
 
-## SExpr types (`cse.jl`)
+## SExpr types (`sexpr.jl`)
 
 ```
 SExpr (abstract)
@@ -42,14 +44,14 @@ SExpr (abstract)
   SVar     — variable reference (1-based index)
   SParam   — parameter reference (1-based index)
   STmp     — CSE temporary (assigned by tree_cse)
-  SAdd     — n-ary sum (args::Vector{SExpr})
-  SMul     — n-ary product (args::Vector{SExpr})
-  SPow     — integer power (base::SExpr, exp::Int)
-  SNeg     — negation (arg::SExpr)
-  SFuncSym — unevaluated function placeholder (only used inside opt_cse)
+  SAdd     — n-ary sum (args::Vector{SExpr}), cached hash, constructor copies args
+  SMul     — n-ary product (args::Vector{SExpr}), cached hash, constructor copies args
+  SPow     — integer power (base::SExpr, exp::Int), cached hash
+  SNeg     — negation (arg::SExpr), cached hash
+  SFuncSym — unevaluated function placeholder (only used inside opt_cse), SFuncKind enum
 ```
 
-All types have custom `hash`/`==` for use as Dict/Set keys. `SAdd`/`SMul` args are canonicalized (flattened, constants collected, sorted by `_sexpr_lt = hash(a) < hash(b)`) via `_canonical_add`/`_canonical_mul`.
+Constructors accept `Vector{<:SExpr}` (not `AbstractVector`). All compound types cache `_hash::UInt` at construction via `_fold_hash`. Equality uses hash-first short-circuit. `_wrap_args` helper handles the 0/1/many pattern shared by `_canonical_add`, `_canonical_mul`, and `poly_to_sexpr`.
 
 ## CSE algorithm (`cse.jl`)
 
@@ -61,13 +63,17 @@ Direct port of SymEngine's `cse.cpp`, two phases:
 
 Output: `(replacements::Vector{Pair{SExpr,SExpr}}, reduced_exprs::Vector{SExpr})`.
 
-## Compilation (`cse.jl` — TapeCompiler)
+## Compilation (`tape_compiler.jl`)
 
 `compile_to_instructions` converts CSE output to `InstructionSequence`.
 
-**Tape layout:** `[ constants | params | (cont_param?) | variables | scratch | assignments ]`
+**Tape layout:** `[ constants | params | variables | scratch | assignments ]`
 
-**Two-pass slot scheme:** During compilation, constants get temporary 1-based slots, params get negative indices `-i`, variables get `-(nparams+i)`, scratch starts at offset `10001`. After compilation, everything is remapped to the final contiguous layout.
+**Two-pass slot scheme:** During compilation, constants get temporary 1-based slots, params get negative indices `-i`, variables get `-(nparams+i)`, scratch starts at offset `10001`. After compilation, `_build_slot_remap` remaps everything to the final contiguous layout.
+
+**`_emit!`** — single function with default args (`a2=a1, a3=a2, a4=a3`) replaces 4 overloads.
+
+**`_tree_reduce!`** — shared helper for the pop-4/3/2 tree reduction pattern, used by both `_compile_prod_parts!` (MUL4/MUL3/MUL) and `_compile_sum_products!` (ADD4/ADD3/ADD).
 
 **Instruction fusion** (`_compile_sum!`): Splits terms into positive/negative groups:
 - Case 1 (1+, 1-): MULMULSUB / MULSUB / SUBMUL / SUB
@@ -75,11 +81,9 @@ Output: `(replacements::Vector{Pair{SExpr,SExpr}}, reduced_exprs::Vector{SExpr})
 - Case 3 (1+, N-): sum_products(neg) + MULSUB / SUB
 - Case 4 (N+, N-): pairs pos/neg products for MULMULSUB, leftovers via sum_products + SUB
 
-`_compile_mul!`: Splits num/denom, reduces via MUL3/MUL4, elides multiply-by-1/-1.
+`_compile_mul!`: Splits num/denom, reduces via `_tree_reduce!`, elides multiply-by-1/-1.
 
-`_compile_sum_products!`: Pairs products into MULMULADD(a*b + c*d), remainders via MULADD/ADD4/ADD3/ADD.
-
-**Assignment handling:** Scratch results get dedicated assignment slots. Non-scratch results (constants/vars/params, e.g. Jacobian entries that are 0 or 1) skip IDENTITY — assignments point directly to the input-block slot.
+**`_remap_instruction`** — shared helper (in `instruction_sequence.jl`) used by both `_remap_instructions` in tape_compiler and `_reduce_space` in instruction_sequence.
 
 **Post-compilation:** `_optimize_instruction_order` (DAG topological sort), then `_reduce_space` (linear-scan register allocation).
 
@@ -87,9 +91,11 @@ Output: `(replacements::Vector{Pair{SExpr,SExpr}}, reduced_exprs::Vector{SExpr})
 
 `Interpreter{V}` is parameterized by tape type: `Vector{ComplexF64}`, `Vector{ComplexDF64}`, or `Vector{TruncatedTaylorSeries{N,ComplexF64}}`.
 
-`execute_instructions!` is `@generated` — builds a nested-if dispatch chain at compile time, opcodes tested in frequency order. One level of "instruction recursion" (next instruction's dispatch inlined after each body) halves loop overhead.
+Internal helpers (`_load_inputs!`, `_extract_u!`, `_extract_U!`) take `I::Interpreter` directly — the tape type is constrained by the struct parameter, not `AbstractVector`. User-facing `execute!` methods keep `AbstractVector` for `u`, `x`, `p` since callers may pass `Vector` or `FSVec`.
 
-`execute_taylor_instructions!` uses `@eval` instead of `@generated` due to Julia 1.12 world-age constraints (`@generated` can't call helpers defined in the same compilation unit).
+`execute_instructions_eval!` and `execute_instructions_jac!` are `@generated` — build nested-if dispatch chains at compile time with opcodes tested in frequency order (different orderings for eval vs jac workloads). One level of "instruction recursion" (next instruction inlined after each body) halves loop overhead.
+
+`execute_taylor_instructions!` uses `@eval` instead of `@generated` due to Julia 1.12 world-age constraints.
 
 Outputs extracted via `u_assignments`/`U_assignments` — `Vector{Tuple{Int,Int}}` mapping `(output_index, tape_slot)`.
 
@@ -105,73 +111,61 @@ Outputs extracted via `u_assignments`/`U_assignments` — `Vector{Tuple{Int,Int}
 
 ## Taylor arithmetic (`taylor.jl`)
 
-`TruncatedTaylorSeries{N,T}` wraps `NTuple{N,T}`. All `taylor_op_*` are `@generated`, unrolling completely for compile-time `N`. Key recurrences: Cauchy product (mul), quotient rule (div), logarithmic differentiation (pow), coupled sin/cos. Higher-arity ops decompose into binary pairs (`@inline`).
+`TruncatedTaylorSeries{N,T}` (aliased as `TTS{N,T}`) wraps `NTuple{N,T}`. All `taylor_op_*` are `@generated`, unrolling completely for compile-time `N`.
+
+**`_cauchy_product_exprs(N)`** — shared helper generates the Cauchy product expressions for orders 1..N, used by `taylor_op_mul`, `taylor_op_muladd`, `taylor_op_mulsub`, `taylor_op_submul`.
+
+Key recurrences: Cauchy product (mul), quotient rule (div), logarithmic differentiation (pow), coupled sin/cos.
+
+Composite ops (`add3`, `add4`, `mul3`, `mul4`, `mulmuladd`, `mulmulsub`) are one-line `@inline` delegations to primitive ops.
 
 `TaylorVector{N,T}` stores `n` series as `FSMat{T}` of shape `N x n`. `vectors()` is `@generated` to return a tuple of views per order.
 
 ## Performance (2026-03-26)
 
-### Build time (CSE dominates)
+### Steady-state execution
 
-| System | CSE % | poly_to_sexpr % | compile % | Total |
-|--------|------:|----------------:|----------:|------:|
-| cyclic6 eval (6 exprs) | 74% | 13% | 13% | 196 us |
-| cyclic6 jac (42 exprs) | 73% | 13% | 14% | 810 us |
-| densequad6 eval | 77% | 12% | 11% | 1384 us |
-| sparse6_2 eval | 77% | 11% | 12% | 698 us |
+| Benchmark | Time |
+|---|---|
+| eval_katsura3 (4×4) | 57 ns |
+| eval_cyclic7 (7×7) | 132 ns |
+| jac_katsura3 (4×4) | 104 ns |
+| jac_cyclic7 (7×7) | 419 ns |
+| taylor_katsura3 (order 3) | 107 ns |
+
+### Build time
+
+| Benchmark | Time |
+|---|---|
+| build_jac_katsura3 | 155 μs |
 
 ### Runtime vs HC v2 (ratio > 1.0 = Next faster)
 
-| Case | Eval | Jac |
-|------|-----:|----:|
-| cyclic6 | 1.50 | 1.19 |
-| cyclic7 | 1.36 | 1.40 |
-| chain6 | 0.96 | 1.17 |
-| densequad6 | 1.01 | 1.01 |
-| sparse6_2 | 1.02 | 1.01 |
-| sparse6_4 | 1.00 | 1.22 |
-| **Median** | **1.02** | **1.19** |
-| **Worst** | **0.96** | **1.01** |
+| Metric | Min | Median | Max |
+|--------|----:|-------:|----:|
+| Eval | 0.88x | 1.04x | 1.94x |
+| Jac | 0.96x | 1.24x | 1.79x |
+| Build | 7.2x | 10.0x | 15.3x |
 
-Execution is zero-allocation, dominated by arithmetic + `getindex`/`setindex!`. No case below 0.96x eval or 1.01x jac.
+Execution is zero-allocation, dominated by arithmetic + `getindex`/`setindex!`.
 
-### Instruction counts (cyclic-6)
+## Design decisions and what was tried
 
-| | Next eval | HC v2 eval | Next jac | HC v2 jac |
-|-|-------:|-------:|-------:|-------:|
-| Instructions | 27 | 29 | 53 | 61 |
-| IDENTITY ops | 0 | 0 | 0 | 9 |
+**1. `opt_cse` bypass for small systems — REVERTED.** Threshold of 50 expressions tested. Instruction counts regressed 30-65%. `opt_cse` is essential regardless of system size.
 
-## What was tried (2026-03-26)
+**2. Eliminating IDENTITY instructions — SHIPPED.** Non-scratch results point directly to their input-block slot instead of emitting IDENTITY copies.
 
-**1. Bypassing `opt_cse` for small systems — REVERTED.** Threshold of 50 expressions tested. Instruction counts regressed 30-65% (cyclic-7: 40 -> 66). `opt_cse` is essential regardless of system size.
+**3. MULMULSUB interleaving — SHIPPED.** Case 3 (1 pos, N neg) and Case 4 (interleave pos/neg for MULMULSUB pairing) in `_compile_sum!`.
 
-**2. Eliminating IDENTITY instructions — SHIPPED.** Old code forced all assignments into a contiguous tape range, emitting IDENTITY copies. Fix: non-scratch results point directly to their input-block slot. Chain-6 jac: 71 instructions (18 IDENTITY) -> 53 instructions (0 IDENTITY).
+**4. Cauchy product deduplication — SHIPPED.** `_cauchy_product_exprs(N)` helper shared by mul/muladd/mulsub/submul. Saved ~60 lines in taylor.jl.
 
-**3. MULMULSUB interleaving in `_compile_sum!` — SHIPPED.** Added Case 3 (1 pos, N neg) and Case 4 (interleave pos/neg products for MULMULSUB pairing).
+**5. Tree-reduce helper — SHIPPED.** `_tree_reduce!` shared by prod and sum reduction. Eliminates duplicated pop-4/3/2 pattern.
 
-## Recommended refactoring (priority order)
-
-**1. Split `cse.jl` into three files.** Zero risk, pure cleanup:
-
-| New file | Content | ~Lines |
-|----------|---------|-------:|
-| `sexpr.jl` | SExpr types, hash/==, canonicalization, `poly_to_sexpr` | 310 |
-| `cse.jl` | `FuncArgTracker`, `opt_cse`, `tree_cse`, `cse` | 600 |
-| `tape_compiler.jl` | `TapeCompiler`, `_compile_*`, `compile_to_instructions` | 680 |
-
-**2. Deduplicate wrappers.** Four `build_*_interpreter` functions differ only in the type parameter — collapse to `_build_interpreter(V, polys; ...)`. Four `execute!` overloads share identical bodies — compose as `_load_inputs!` + `_extract_outputs!` + `_extract_jacobian!`.
-
-**3. Fix `_empty_vars` double variable collection.** Default `parameters` arg calls `_empty_vars` -> `_collect_variables`, then `_effective_variables` calls `_collect_variables` again. Call it once.
-
-**4. Replace `_sexpr_lt` hash ordering.** `_sexpr_lt = hash(a) < hash(b)` drives canonicalization throughout the pipeline. Hash ordering differs from SymEngine's structural `__cmp__`, causing suboptimal grouping on some systems. A structural comparator (type tag, then depth/size, then content) could close the remaining 0.96x-1.00x eval gaps. **Medium risk** — affects all canonicalization and CSE grouping. Use the instruction count regression test as safety net.
-
-**5. Polynomial-specific DAG (longer term).** Replace SExpr with monomial-level value numbering. Would remove ~800 lines but must replicate `opt_cse`'s cross-expression sharing quality. Prototype separately.
-
-**6. Replace `SFuncSym` string dispatch.** `SFuncSym("add"/mul"/pow")` in `_compile!` and `_rebuild_children` dispatches on `name::String`. Replace with `SFuncAdd`/`SFuncMul` concrete subtypes. Low risk.
+**6. `_remap_instruction` helper — SHIPPED.** Shared between `_remap_instructions` (tape_compiler) and `_reduce_space` (instruction_sequence).
 
 ## Known limitations
 
 1. **Magic constant 10000**: Scratch slot placeholder base. Systems with >10000 constants+params+vars would collide (unlikely in practice).
 2. **DynamicPolynomials introspection**: `_variable_creation_id` uses `hasfield`/`getfield` reflection into `variable_order.order.id` for deterministic ordering. Fragile across DP versions.
 3. **No compiled mode**: Next is interpreter-only. HC v2 has both interpreted and compiled. The interpreter is within ~5% of compiled for most systems.
+4. **No exports**: All symbols accessed via `HomotopyContinuationNext.foo` or explicit `using HomotopyContinuationNext: foo`. Exports will be chosen later.

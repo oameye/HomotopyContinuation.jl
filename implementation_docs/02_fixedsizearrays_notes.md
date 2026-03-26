@@ -38,11 +38,10 @@ julia> isconcretetype(FixedSizeArray{Float64, 1, Memory{Float64}})
 true    # ← GOOD
 ```
 
-## Verified Compatible (Phase 1)
+## Verified Compatible
 
-Tested in `test/fixedsizearrays_compat_test.jl`:
+Tested in `test/linear_algebra_test.jl`:
 
-- `strides(A)` returns `(1, n)` — correct column-major layout
 - `lu!(FSMat)` works — returns `LU{ComplexF64, FSMat{ComplexF64}, FSVec{Int64}}`
 - `ldiv!(FSVec, LU, FSVec)` works
 - `mul!(FSVec, FSMat, FSVec)` works
