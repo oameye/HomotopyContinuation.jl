@@ -23,7 +23,7 @@ end
 
 is_success(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_SUCCESS
 
-function is_real(r::PathResult; tol::Float64 = 1.0e-6)::Bool
+function is_real(r::PathResult; tol::Float64 = DEFAULT_REAL_TOL)::Bool
     return is_success(r) && all(x -> abs(imag(x)) < tol * max(1.0, abs(x)), r.solution)
 end
 

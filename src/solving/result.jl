@@ -18,7 +18,7 @@ function Base.show(io::IO, r::Result)
     return nothing
 end
 
-function solutions(r::Result; only_real::Bool = false, real_tol::Float64 = 1.0e-6)::Vector{Vector{ComplexF64}}
+function solutions(r::Result; only_real::Bool = false, real_tol::Float64 = DEFAULT_REAL_TOL)::Vector{Vector{ComplexF64}}
     filter_fn = if only_real
         pr -> is_success(pr) && is_real(pr; tol = real_tol)
     else
@@ -27,7 +27,7 @@ function solutions(r::Result; only_real::Bool = false, real_tol::Float64 = 1.0e-
     return [pr.solution for pr in r.path_results if filter_fn(pr)]
 end
 
-function real_solutions(r::Result; tol::Float64 = 1.0e-6)::Vector{Vector{Float64}}
+function real_solutions(r::Result; tol::Float64 = DEFAULT_REAL_TOL)::Vector{Vector{Float64}}
     return [
         Float64.(real.(pr.solution)) for pr in r.path_results
             if is_success(pr) && is_real(pr; tol = tol)
@@ -36,5 +36,5 @@ end
 
 nsolutions(r::Result)::Int = count(is_success, r.path_results)
 
-nreal(r::Result; tol::Float64 = 1.0e-6)::Int =
+nreal(r::Result; tol::Float64 = DEFAULT_REAL_TOL)::Int =
     count(pr -> is_success(pr) && is_real(pr; tol = tol), r.path_results)

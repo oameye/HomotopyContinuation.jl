@@ -1,6 +1,8 @@
 fast_abs(z::Complex) = sqrt(abs2(z))
 fast_abs(x::Real) = abs(x)
 
+const DEFAULT_REAL_TOL = 1.0e-6
+
 nanmin(a, b) = isnan(a) ? b : (isnan(b) ? a : min(a, b))
 nanmax(a, b) = isnan(a) ? b : (isnan(b) ? a : max(a, b))
 

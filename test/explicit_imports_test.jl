@@ -35,6 +35,8 @@ using HomotopyContinuationNext
             :FastMath, :div_fast, :inv_fast, :power_by_squaring,
             # CommonSolve interface (not declared public in CommonSolve.jl):
             :init, Symbol("solve!"), :solve,
+            # Checked arithmetic for HNF in binomial_system.jl:
+            :checked_add, :checked_mul,
         ),
     ) == nothing
     @test check_no_self_qualified_accesses(HomotopyContinuationNext) == nothing

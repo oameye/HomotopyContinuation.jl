@@ -84,3 +84,31 @@ function solve(
         CommonSolve.init(polys, alg; parameters = parameters, variables = variables),
     )
 end
+
+"""
+    solve(polynomials, ::Polyhedral; parameters=[], variables=...)
+
+Solve a polynomial system using polyhedral homotopy continuation.
+Tracks `mixed_volume` paths (BKK bound), which is at most the Bezout bound.
+
+The algorithm proceeds in two phases per path:
+1. **Toric phase**: Track from binomial start solutions through `ToricHomotopy` (t: 0 -> 1)
+2. **Coefficient phase**: Track from generic system to target through `CoefficientHomotopy` (t: 1 -> 0)
+
+# Examples
+```julia
+@polyvar x y
+result = solve([x^2 + y - 1, x*y - 2], Polyhedral())
+solutions(result)
+```
+"""
+function solve(
+        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+        alg::Polyhedral;
+        parameters::AbstractVector = _empty_vars(polys),
+        variables::AbstractVector = _effective_variables(polys, parameters),
+    )::Result
+    return CommonSolve.solve!(
+        CommonSolve.init(polys, alg; parameters = parameters, variables = variables),
+    )
+end
