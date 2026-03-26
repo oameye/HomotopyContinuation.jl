@@ -16,7 +16,7 @@ function make_test_sequence()
     replacements, reduced = cse(exprs)
     return compile_to_instructions(
         replacements, reduced;
-        nvars = 2, nparams = 0, output_dim = 1, npolys = 1,
+        nvars = 2, nparams = 0, output_dim = 1,
     )
 end
 
@@ -26,7 +26,7 @@ function make_param_sequence()
     replacements, reduced = cse(exprs)
     return compile_to_instructions(
         replacements, reduced;
-        nvars = 2, nparams = 1, output_dim = 1, npolys = 1,
+        nvars = 2, nparams = 1, output_dim = 1,
     )
 end
 
@@ -36,7 +36,7 @@ function make_two_output_sequence()
     replacements, reduced = cse(exprs)
     return compile_to_instructions(
         replacements, reduced;
-        nvars = 2, nparams = 0, output_dim = 2, npolys = 2,
+        nvars = 2, nparams = 0, output_dim = 2,
     )
 end
 

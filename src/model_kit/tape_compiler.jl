@@ -459,14 +459,172 @@ end
 
 ## ── Entry point ─────────────────────────────────────────────────────────────
 
+const _SCRATCH_OFFSET = Int32(10000)
+
+function _initialize_placeholder_slots!(
+        compiler::TapeCompiler,
+        nvars::Int,
+        nparams::Int,
+    )::Nothing
+    for i in 1:nparams
+        compiler.param_slots[i] = Int32(-i)
+    end
+    for i in 1:nvars
+        compiler.var_slots[i] = Int32(-(nparams + i))
+    end
+    compiler.next_slot = _SCRATCH_OFFSET
+    return nothing
+end
+
+function _build_slot_remap(
+        nconstants::Int,
+        nparams::Int,
+        nvars::Int,
+        nscratch::Int,
+    )
+    input_block_size = nconstants + nparams + nvars
+    remap = Dict{Int32, Int32}()
+
+    constants_range = 1:nconstants
+    for k in constants_range
+        remap[Int32(k)] = Int32(k)
+    end
+
+    parameters_range = (nconstants + 1):(nconstants + nparams)
+    for i in 1:nparams
+        remap[Int32(-i)] = Int32(nconstants + i)
+    end
+
+    variables_start = nconstants + nparams + 1
+    variables_range = variables_start:(variables_start + nvars - 1)
+    for i in 1:nvars
+        remap[Int32(-(nparams + i))] = Int32(variables_start + i - 1)
+    end
+
+    for k in 1:nscratch
+        remap[Int32(_SCRATCH_OFFSET + k)] = Int32(input_block_size + k)
+    end
+
+    return (
+        remap = remap,
+        constants_range = constants_range,
+        parameters_range = parameters_range,
+        variables_range = variables_range,
+        input_block_size = input_block_size,
+    )
+end
+
+function _plan_assignment_slots!(
+        remap::Dict{Int32, Int32},
+        result_slots::Vector{Int32},
+        instructions::Vector{Instruction},
+        input_block_size::Int,
+        nscratch::Int,
+    )
+    scratch_output_set = Set{Int32}(instr.output for instr in instructions)
+    claimed_slots = Dict{Int32, Int}()
+    direct_assignments = Tuple{Int, Int32}[]
+    scratch_assignment_indices = Int[]
+
+    for (k, raw_slot) in enumerate(result_slots)
+        claimed_slots[raw_slot] = get(claimed_slots, raw_slot, 0) + 1
+        if raw_slot ∈ scratch_output_set
+            push!(scratch_assignment_indices, k)
+        else
+            push!(direct_assignments, (k, Int32(get(remap, raw_slot, raw_slot))))
+        end
+    end
+
+    assignments_start = input_block_size + nscratch + 1
+    scratch_assignments_range =
+        range(assignments_start; length = length(scratch_assignment_indices))
+    identity_instructions = Instruction[]
+    empty!(claimed_slots)
+
+    for (scratch_assign_k, output_k) in enumerate(scratch_assignment_indices)
+        raw_slot = result_slots[output_k]
+        seen = get(claimed_slots, raw_slot, 0)
+        claimed_slots[raw_slot] = seen + 1
+        target_slot = Int32(assignments_start + scratch_assign_k - 1)
+
+        if seen == 0
+            remap[raw_slot] = target_slot
+        else
+            remapped_source = get(remap, raw_slot, raw_slot)
+            push!(
+                identity_instructions,
+                Instruction(
+                    (remapped_source, remapped_source, remapped_source, remapped_source),
+                    OpType.OP_IDENTITY,
+                    target_slot,
+                ),
+            )
+        end
+    end
+
+    return (
+        direct_assignments = direct_assignments,
+        scratch_assignment_indices = scratch_assignment_indices,
+        scratch_assignments_range = scratch_assignments_range,
+        identity_instructions = identity_instructions,
+        nassignments = length(result_slots),
+    )
+end
+
+function _remap_instructions(
+        instructions::Vector{Instruction},
+        remap::Dict{Int32, Int32},
+        identity_instructions::Vector{Instruction},
+    )::Vector{Instruction}
+    nstmts = length(instructions)
+    core_instructions = Vector{Instruction}(undef, nstmts + length(identity_instructions))
+
+    for (idx, instr) in enumerate(instructions)
+        new_input = ntuple(Val(4)) do k
+            if should_use_index_not_reference(instr.op, k)
+                instr.input[k]
+            else
+                get(remap, instr.input[k], instr.input[k])
+            end
+        end
+        new_output = get(remap, instr.output, instr.output)
+        core_instructions[idx] = Instruction(new_input, instr.op, new_output)
+    end
+
+    for (j, id_instr) in enumerate(identity_instructions)
+        core_instructions[nstmts + j] = id_instr
+    end
+
+    return core_instructions
+end
+
+function _build_assignments(
+        nassignments::Int,
+        updated_scratch_range,
+        scratch_assignment_indices::Vector{Int},
+        direct_assignments::Vector{Tuple{Int, Int32}},
+    )::Vector{Tuple{Int, Int}}
+    updated_assignments = Vector{Tuple{Int, Int}}(undef, nassignments)
+
+    for (j, tape_idx) in enumerate(updated_scratch_range)
+        output_k = scratch_assignment_indices[j]
+        updated_assignments[output_k] = (output_k, Int(tape_idx))
+    end
+
+    for (output_k, tape_slot) in direct_assignments
+        updated_assignments[output_k] = (output_k, Int(tape_slot))
+    end
+
+    return updated_assignments
+end
+
 """
     compile_to_instructions(replacements, reduced_exprs;
-        nvars, nparams, output_dim, npolys,
-        continuation_parameter_index=nothing) -> InstructionSequence
+        nvars, nparams, output_dim) -> InstructionSequence
 
 Compile CSE output directly to an optimized `InstructionSequence`.
 
-Tape layout: constants | params | [cont_param] | variables | scratch | assignments
+Tape layout: constants | params | variables | scratch | assignments
 """
 function compile_to_instructions(
         replacements::Vector{Pair{SExpr, SExpr}},
@@ -474,8 +632,6 @@ function compile_to_instructions(
         nvars::Int,
         nparams::Int,
         output_dim::Int,
-        npolys::Int,
-        continuation_parameter_index::Union{Nothing, Int} = nothing,
     )::InstructionSequence
     compiler = TapeCompiler(nvars, nparams)
 
@@ -490,167 +646,40 @@ function compile_to_instructions(
     # Var/param slots use negative placeholders. Scratch uses high offsets.
     # After compilation, we remap everything to the final tape layout.
 
-    scratch_offset = Int32(10000)
-
-    # Assign placeholder slots for params and vars (negative indices)
-    for i in 1:nparams
-        compiler.param_slots[i] = Int32(-i)
-    end
-    for i in 1:nvars
-        compiler.var_slots[i] = Int32(-(nparams + i))
-    end
-    compiler.next_slot = scratch_offset
+    _initialize_placeholder_slots!(compiler, nvars, nparams)
 
     # Compile all reduced expressions
     result_slots = Int32[_compile!(compiler, expr) for expr in reduced_exprs]
 
-    # Build final tape layout
     nconstants = length(compiler.constants)
-    has_cont = !isnothing(continuation_parameter_index) ? 1 : 0
-    input_block_size = nconstants + nparams + has_cont + nvars
-
-    # Build remapping: old slot → new slot
-    remap = Dict{Int32, Int32}()
-
-    # Constants: temporary slot k → final slot k (identity for 1:nconstants)
-    constants_range = 1:nconstants
-    for k in 1:nconstants
-        remap[Int32(k)] = Int32(k)
-    end
-
-    # Parameters: placeholder -i → nconstants + i
-    parameters_range = (nconstants + 1):(nconstants + nparams)
-    for i in 1:nparams
-        remap[Int32(-i)] = Int32(nconstants + i)
-    end
-
-    # Continuation parameter
-    local cont_param_tape_index::Union{Nothing, Int}
-    if has_cont == 1
-        cont_param_tape_index = nconstants + nparams + 1
-    else
-        cont_param_tape_index = nothing
-    end
-
-    # Variables: placeholder -(nparams+i) → nconstants + nparams + has_cont + i
-    variables_start = nconstants + nparams + has_cont + 1
-    variables_range = variables_start:(variables_start + nvars - 1)
-    for i in 1:nvars
-        remap[Int32(-(nparams + i))] = Int32(variables_start + i - 1)
-    end
-
-    # Scratch: (scratch_offset + k) → (input_block_size + k)
-    nscratch = Int(compiler.next_slot - scratch_offset)
-    for k in 1:nscratch
-        remap[Int32(scratch_offset + k)] = Int32(input_block_size + k)
-    end
-
-    # Build assignment slots.
-    # Non-scratch results (constants/vars/params) → use source slot directly (no IDENTITY).
-    # First-use scratch outputs → remap to dedicated assignment slot.
-    # Duplicate scratch outputs → IDENTITY to copy into a new assignment slot.
-    nassignments = length(result_slots)
-    scratch_output_set = Set{Int32}(instr.output for instr in compiler.instructions)
-    claimed_slots = Dict{Int32, Int}()  # raw result_slot → use count
-    identity_instructions = Instruction[]
-
-    # Track which assignments need scratch-based dedicated slots vs direct references
-    direct_assignments = Tuple{Int, Int32}[]       # (output_index, input_block_slot)
-    scratch_assignment_count = 0
-    scratch_assignment_indices = Int[]              # which output indices use scratch slots
-
-    for (k, raw_slot) in enumerate(result_slots)
-        seen = get(claimed_slots, raw_slot, 0)
-        is_scratch_output = raw_slot ∈ scratch_output_set
-
-        if is_scratch_output && seen == 0
-            # First use of a scratch output: gets a dedicated assignment slot
-            claimed_slots[raw_slot] = 1
-            scratch_assignment_count += 1
-            push!(scratch_assignment_indices, k)
-        elseif is_scratch_output
-            # Duplicate scratch output: needs IDENTITY to copy
-            claimed_slots[raw_slot] = seen + 1
-            scratch_assignment_count += 1
-            push!(scratch_assignment_indices, k)
-        else
-            # Non-scratch output (constant/var/param): direct reference, no IDENTITY
-            claimed_slots[raw_slot] = seen + 1
-            remapped_source = Int32(get(remap, raw_slot, raw_slot))
-            push!(direct_assignments, (k, remapped_source))
-        end
-    end
-
-    # Assign contiguous scratch assignment slots
-    assignments_start = input_block_size + nscratch + 1
-    scratch_assignments_range = range(assignments_start; length = scratch_assignment_count)
-
-    # Now emit remaps and IDENTITYs for scratch-based assignments
-    claimed_slots_2 = Dict{Int32, Int}()
-    scratch_assign_k = 0
-    for output_k in scratch_assignment_indices
-        raw_slot = result_slots[output_k]
-        seen = get(claimed_slots_2, raw_slot, 0)
-        scratch_assign_k += 1
-        target_slot = Int32(assignments_start + scratch_assign_k - 1)
-
-        if seen == 0
-            # First use: remap scratch output directly to assignment slot
-            claimed_slots_2[raw_slot] = 1
-            remap[raw_slot] = target_slot
-        else
-            # Duplicate: emit IDENTITY
-            claimed_slots_2[raw_slot] = seen + 1
-            remapped_source = get(remap, raw_slot, raw_slot)
-            push!(
-                identity_instructions, Instruction(
-                    (remapped_source, remapped_source, remapped_source, remapped_source),
-                    OpType.OP_IDENTITY, target_slot,
-                ),
-            )
-        end
-    end
-
-    # Now remap all core instructions using the final remap
-    nstmts = length(compiler.instructions)
-    core_instructions = Vector{Instruction}(undef, nstmts + length(identity_instructions))
-    for (idx, instr) in enumerate(compiler.instructions)
-        new_input = ntuple(Val(4)) do k
-            if should_use_index_not_reference(instr.op, k)
-                instr.input[k]
-            else
-                get(remap, instr.input[k], instr.input[k])
-            end
-        end
-        new_output = get(remap, instr.output, instr.output)
-        core_instructions[idx] = Instruction(new_input, instr.op, new_output)
-    end
-
-    # Append IDENTITY instructions (these already use remapped source slots)
-    for (j, id_instr) in enumerate(identity_instructions)
-        core_instructions[nstmts + j] = id_instr
-    end
+    nscratch = Int(compiler.next_slot - _SCRATCH_OFFSET)
+    layout = _build_slot_remap(nconstants, nparams, nvars, nscratch)
+    remap = layout.remap
+    assignment_plan = _plan_assignment_slots!(
+        remap, result_slots, compiler.instructions, layout.input_block_size, nscratch,
+    )
+    core_instructions = _remap_instructions(
+        compiler.instructions,
+        remap,
+        assignment_plan.identity_instructions,
+    )
 
     # Run optimizer and register allocator
     instructions_opt = _optimize_instruction_order(core_instructions)
     instructions_final, space_needed, updated_scratch_range, updated_direct =
         _reduce_space(
-        instructions_opt, input_block_size, scratch_assignments_range, direct_assignments,
+        instructions_opt,
+        layout.input_block_size,
+        assignment_plan.scratch_assignments_range,
+        assignment_plan.direct_assignments,
     )
 
-    # Build final assignments: combine scratch-based and direct assignments
-    updated_assignments = Vector{Tuple{Int, Int}}(undef, nassignments)
-
-    # Fill in scratch-based assignments from updated range
-    for (j, tape_idx) in enumerate(updated_scratch_range)
-        output_k = scratch_assignment_indices[j]
-        updated_assignments[output_k] = (output_k, Int(tape_idx))
-    end
-
-    # Fill in direct assignments (these point to input-block slots, no remapping needed)
-    for (output_k, tape_slot) in updated_direct
-        updated_assignments[output_k] = (output_k, Int(tape_slot))
-    end
+    updated_assignments = _build_assignments(
+        assignment_plan.nassignments,
+        updated_scratch_range,
+        assignment_plan.scratch_assignment_indices,
+        updated_direct,
+    )
 
     # Add STOP instruction
     n = space_needed
@@ -671,11 +700,9 @@ function compile_to_instructions(
     return InstructionSequence(
         instructions_final,
         copy(compiler.constants),
-        constants_range,
-        parameters_range,
-        variables_range,
-        cont_param_tape_index,
-        updated_assignments,
+        layout.constants_range,
+        layout.parameters_range,
+        layout.variables_range,
         output_dim,
         space_needed,
         u_assignments,

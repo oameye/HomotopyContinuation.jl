@@ -8,7 +8,7 @@ using HomotopyContinuationNext: Instruction, InstructionSequence, OpType,
     replacements, reduced = cse(exprs)
     seq = compile_to_instructions(
         replacements, reduced;
-        nvars = 2, nparams = 0, output_dim = 1, npolys = 1,
+        nvars = 2, nparams = 0, output_dim = 1,
     )
     @test seq.output_dim == 1
     @test seq.tape_space_needed > 0
@@ -22,7 +22,7 @@ end
     replacements, reduced = cse(exprs)
     seq = compile_to_instructions(
         replacements, reduced;
-        nvars = 1, nparams = 0, output_dim = 1, npolys = 1,
+        nvars = 1, nparams = 0, output_dim = 1,
     )
     @test seq.output_dim == 1
     @test length(seq.constants) >= 1
@@ -35,7 +35,7 @@ end
     replacements, reduced = cse(exprs)
     seq = compile_to_instructions(
         replacements, reduced;
-        nvars = 1, nparams = 1, output_dim = 1, npolys = 1,
+        nvars = 1, nparams = 1, output_dim = 1,
     )
     @test length(seq.parameters_range) == 1
     @test length(seq.variables_range) == 1
@@ -48,7 +48,7 @@ end
     replacements, reduced = cse(exprs)
     seq = compile_to_instructions(
         replacements, reduced;
-        nvars = 2, nparams = 0, output_dim = 2, npolys = 2,
+        nvars = 2, nparams = 0, output_dim = 2,
     )
     @test seq.output_dim == 2
     @test seq.all_u_assigned

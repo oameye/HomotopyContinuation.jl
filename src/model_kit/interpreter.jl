@@ -102,41 +102,69 @@ const _EXECUTE_OP_ORDER_JAC = (
     OpType.OP_POW_INT,
 )
 
-function _execute_branch(op::OpType.T)
+function _execute_branch(
+        op::OpType.T,
+        call_resolver::Function;
+        preload_t_1::Bool,
+    )
     cond = :(op == $(op))
+    call = call_resolver(op)
+    t_1_expr = preload_t_1 ? :t_1 : :(tape[arg_1])
     code = if op == OpType.OP_POW_INT
-        :(tape[i] = $(op_call(op))(t_1, arg_2))
+        :(tape[i] = $call($t_1_expr, arg_2))
     elseif arity(op) == 1
-        :(tape[i] = $(op_call(op))(t_1))
+        :(tape[i] = $call($t_1_expr))
     elseif arity(op) == 2
         quote
             t_2 = tape[arg_2]
-            tape[i] = $(op_call(op))(t_1, t_2)
+            tape[i] = $call($t_1_expr, t_2)
         end
     elseif arity(op) == 3
         quote
             t_2 = tape[arg_2]
             t_3 = tape[arg_3]
-            tape[i] = $(op_call(op))(t_1, t_2, t_3)
+            tape[i] = $call($t_1_expr, t_2, t_3)
         end
     else
         quote
             t_2 = tape[arg_2]
             t_3 = tape[arg_3]
             t_4 = tape[arg_4]
-            tape[i] = $(op_call(op))(t_1, t_2, t_3, t_4)
+            tape[i] = $call($t_1_expr, t_2, t_3, t_4)
         end
     end
     return cond, code
 end
 
-function _build_execute_instructions_inner(op_order, level::Int = 0)
-    branches = [_execute_branch(op) for op in op_order]
+function _build_execute_instructions_inner(
+        op_order,
+        call_resolver::Function;
+        preload_t_1::Bool,
+        recursion_levels::Int,
+        level::Int = 0,
+    )
+    branches = [
+        _execute_branch(op, call_resolver; preload_t_1 = preload_t_1) for op in op_order
+    ]
 
     # Add one level of instruction recursion to reduce loop overhead
-    if level < 1
+    if level < recursion_levels
         branches = map(branches) do (cond, code)
-            (cond, :($code; $(_build_execute_instructions_inner(op_order, level + 1))))
+            (
+                cond,
+                :(
+                    $code;
+                    $(
+                        _build_execute_instructions_inner(
+                            op_order,
+                            call_resolver;
+                            preload_t_1 = preload_t_1,
+                            recursion_levels = recursion_levels,
+                            level = level + 1,
+                        )
+                    )
+                ),
+            )
         end
     end
 
@@ -146,7 +174,7 @@ function _build_execute_instructions_inner(op_order, level::Int = 0)
         op = instr.op
         arg_1, arg_2, arg_3, arg_4 = instr.input
         i = instr.output
-        t_1 = tape[arg_1]
+        $(preload_t_1 ? :(t_1 = tape[arg_1]) : nothing)
         $(
             nested_ifs(
                 [
@@ -158,30 +186,35 @@ function _build_execute_instructions_inner(op_order, level::Int = 0)
     end
 end
 
-@generated function execute_instructions_eval!(
-        tape::AbstractVector,
-        instructions::Vector{Instruction},
-    )
+function _build_execute_instructions_function(op_order)
     return quote
         Base.@_propagate_inbounds_meta
         k = 0
         while true
-            $(_build_execute_instructions_inner(_EXECUTE_OP_ORDER_EVAL))
+            $(
+                _build_execute_instructions_inner(
+                    op_order,
+                    op_call;
+                    preload_t_1 = true,
+                    recursion_levels = 1,
+                )
+            )
         end
     end
+end
+
+@generated function execute_instructions_eval!(
+        tape::AbstractVector,
+        instructions::Vector{Instruction},
+    )
+    return _build_execute_instructions_function(_EXECUTE_OP_ORDER_EVAL)
 end
 
 @generated function execute_instructions_jac!(
         tape::AbstractVector,
         instructions::Vector{Instruction},
     )
-    return quote
-        Base.@_propagate_inbounds_meta
-        k = 0
-        while true
-            $(_build_execute_instructions_inner(_EXECUTE_OP_ORDER_JAC))
-        end
-    end
+    return _build_execute_instructions_function(_EXECUTE_OP_ORDER_JAC)
 end
 
 ## execute! helpers
@@ -239,6 +272,26 @@ end
 
 ## execute! — evaluate system
 
+Base.@propagate_inbounds function _execute_eval!(
+        u::AbstractVector,
+        I::Interpreter,
+    )
+    @inbounds execute_instructions_eval!(I.tape, I.sequence.instructions)
+    _extract_u!(u, I.tape, I.sequence)
+    return u
+end
+
+Base.@propagate_inbounds function _execute_jac!(
+        u::AbstractVector,
+        U::AbstractMatrix,
+        I::Interpreter,
+    )
+    @inbounds execute_instructions_jac!(I.tape, I.sequence.instructions)
+    _extract_U!(U, I.tape, I.sequence)
+    _extract_u!(u, I.tape, I.sequence)
+    return u
+end
+
 Base.@propagate_inbounds function execute!(
         u::AbstractVector,
         I::Interpreter,
@@ -247,9 +300,7 @@ Base.@propagate_inbounds function execute!(
     isempty(I.sequence.parameters_range) ||
         error("Interpreter expects parameters; call execute!(u, I, x, p)")
     _load_inputs!(I.tape, I.sequence, x)
-    @inbounds execute_instructions_eval!(I.tape, I.sequence.instructions)
-    _extract_u!(u, I.tape, I.sequence)
-    return u
+    return _execute_eval!(u, I)
 end
 
 Base.@propagate_inbounds function execute!(
@@ -259,9 +310,7 @@ Base.@propagate_inbounds function execute!(
         p::AbstractVector,
     )
     _load_inputs!(I.tape, I.sequence, x, p)
-    @inbounds execute_instructions_eval!(I.tape, I.sequence.instructions)
-    _extract_u!(u, I.tape, I.sequence)
-    return u
+    return _execute_eval!(u, I)
 end
 
 Base.@propagate_inbounds function execute!(
@@ -273,10 +322,7 @@ Base.@propagate_inbounds function execute!(
     isempty(I.sequence.parameters_range) ||
         error("Interpreter expects parameters; call execute!(u, U, I, x, p)")
     _load_inputs!(I.tape, I.sequence, x)
-    @inbounds execute_instructions_jac!(I.tape, I.sequence.instructions)
-    _extract_U!(U, I.tape, I.sequence)
-    _extract_u!(u, I.tape, I.sequence)
-    return u
+    return _execute_jac!(u, U, I)
 end
 
 Base.@propagate_inbounds function execute!(
@@ -287,10 +333,7 @@ Base.@propagate_inbounds function execute!(
         p::AbstractVector,
     )
     _load_inputs!(I.tape, I.sequence, x, p)
-    @inbounds execute_instructions_jac!(I.tape, I.sequence.instructions)
-    _extract_U!(U, I.tape, I.sequence)
-    _extract_u!(u, I.tape, I.sequence)
-    return u
+    return _execute_jac!(u, U, I)
 end
 
 ## Taylor execution — code generation
@@ -305,61 +348,13 @@ function taylor_op_call(op::OpType.T)::Symbol
     return Symbol(:taylor_, op_call(op))
 end
 
-function _execute_taylor_branch(op::OpType.T)
-    cond = :(op == $(op))
-    code = if op == OpType.OP_POW_INT
-        quote
-            t_1 = tape[arg_1]
-            tape[i] = $(taylor_op_call(op))(t_1, arg_2)
-        end
-    elseif arity(op) == 1
-        quote
-            t_1 = tape[arg_1]
-            tape[i] = $(taylor_op_call(op))(t_1)
-        end
-    elseif arity(op) == 2
-        quote
-            t_1 = tape[arg_1]
-            t_2 = tape[arg_2]
-            tape[i] = $(taylor_op_call(op))(t_1, t_2)
-        end
-    elseif arity(op) == 3
-        quote
-            t_1 = tape[arg_1]
-            t_2 = tape[arg_2]
-            t_3 = tape[arg_3]
-            tape[i] = $(taylor_op_call(op))(t_1, t_2, t_3)
-        end
-    else
-        quote
-            t_1 = tape[arg_1]
-            t_2 = tape[arg_2]
-            t_3 = tape[arg_3]
-            t_4 = tape[arg_4]
-            tape[i] = $(taylor_op_call(op))(t_1, t_2, t_3, t_4)
-        end
-    end
-    return cond, code
-end
-
 function _build_execute_taylor_instructions_inner()
-    branches = [_execute_taylor_branch(op) for op in _EXECUTE_OP_ORDER_EVAL]
-
-    return quote
-        Base.@_propagate_inbounds_meta
-        instr = instructions[k += 1]
-        op = instr.op
-        arg_1, arg_2, arg_3, arg_4 = instr.input
-        i = instr.output
-        $(
-            nested_ifs(
-                [
-                    branches
-                    [(:(op == $(OpType.OP_STOP)), :(break))]
-                ]
-            )
-        )
-    end
+    return _build_execute_instructions_inner(
+        _EXECUTE_OP_ORDER_EVAL,
+        taylor_op_call;
+        preload_t_1 = false,
+        recursion_levels = 0,
+    )
 end
 
 @eval @inline function execute_taylor_instructions!(

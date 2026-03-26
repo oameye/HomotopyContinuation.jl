@@ -28,18 +28,24 @@ struct STmp <: SExpr
     id::Int
 end
 
+_collect_args(args::AbstractVector) = collect(SExpr, args)
+
+function _fold_hash(seed, args)::UInt
+    h = hash(seed, zero(UInt))
+    for a in args
+        h = hash(a, h)
+    end
+    return h
+end
+
 """Addition: sum of args (n-ary, n >= 2). Hash is cached at construction."""
 struct SAdd <: SExpr
     args::Vector{SExpr}
     _hash::UInt
 end
 function SAdd(args::AbstractVector)
-    vargs = collect(SExpr, args)
-    h = hash(:SAdd, zero(UInt))
-    for a in vargs
-        h = hash(a, h)
-    end
-    return SAdd(vargs, h)
+    vargs = _collect_args(args)
+    return SAdd(vargs, _fold_hash(:SAdd, vargs))
 end
 
 """Multiplication: product of args (n-ary, n >= 2). Hash is cached at construction."""
@@ -48,12 +54,8 @@ struct SMul <: SExpr
     _hash::UInt
 end
 function SMul(args::AbstractVector)
-    vargs = collect(SExpr, args)
-    h = hash(:SMul, zero(UInt))
-    for a in vargs
-        h = hash(a, h)
-    end
-    return SMul(vargs, h)
+    vargs = _collect_args(args)
+    return SMul(vargs, _fold_hash(:SMul, vargs))
 end
 
 """Integer power: base^exp where exp is a positive integer. Hash is cached at construction."""
@@ -97,12 +99,8 @@ struct SFuncSym <: SExpr
     _hash::UInt
 end
 function SFuncSym(kind::SFuncKind.T, args::AbstractVector{<:SExpr})
-    vargs = collect(SExpr, args)
-    h = hash(kind, hash(:SFuncSym, zero(UInt)))
-    for a in vargs
-        h = hash(a, h)
-    end
-    return SFuncSym(kind, vargs, h)
+    vargs = _collect_args(args)
+    return SFuncSym(kind, vargs, _fold_hash((:SFuncSym, kind), vargs))
 end
 
 ## ── Hashing and equality ────────────────────────────────────────────────────
@@ -141,46 +139,45 @@ Base.:(==)(a::SParam, b::SParam) = a.idx == b.idx
 Base.:(==)(a::STmp, b::STmp) = a.id == b.id
 Base.:(==)(a::SPow, b::SPow) = a._hash == b._hash && a.exp == b.exp && a.base == b.base
 Base.:(==)(a::SNeg, b::SNeg) = a._hash == b._hash && a.arg == b.arg
-function Base.:(==)(a::SAdd, b::SAdd)
-    a._hash == b._hash || return false
-    length(a.args) == length(b.args) || return false
-    return all(i -> a.args[i] == b.args[i], eachindex(a.args))
+
+function _same_args(args_a::Vector{SExpr}, args_b::Vector{SExpr})::Bool
+    length(args_a) == length(args_b) || return false
+    return all(i -> args_a[i] == args_b[i], eachindex(args_a))
 end
-function Base.:(==)(a::SMul, b::SMul)
-    a._hash == b._hash || return false
-    length(a.args) == length(b.args) || return false
-    return all(i -> a.args[i] == b.args[i], eachindex(a.args))
-end
-function Base.:(==)(a::SFuncSym, b::SFuncSym)
-    a._hash == b._hash || return false
-    a.kind == b.kind || return false
-    length(a.args) == length(b.args) || return false
-    return all(i -> a.args[i] == b.args[i], eachindex(a.args))
-end
+
+Base.:(==)(a::SAdd, b::SAdd) = a._hash == b._hash && _same_args(a.args, b.args)
+Base.:(==)(a::SMul, b::SMul) = a._hash == b._hash && _same_args(a.args, b.args)
+Base.:(==)(a::SFuncSym, b::SFuncSym) =
+    a._hash == b._hash && a.kind == b.kind && _same_args(a.args, b.args)
 Base.:(==)(::SExpr, ::SExpr) = false
 
 ## ── SExpr helpers ───────────────────────────────────────────────────────────
 
 _is_atom(e::SExpr)::Bool = e isa SConst || e isa SVar || e isa SParam || e isa STmp
 
-"""
-Get the arguments (children) of a compound expression.
-Corresponds to SymEngine's get_args().
-"""
-function _get_args(e::SExpr)::Vector{SExpr}
-    if e isa SAdd
-        return e.args
-    elseif e isa SMul
-        return e.args
-    elseif e isa SPow
-        return SExpr[e.base]
-    elseif e isa SNeg
-        return SExpr[e.arg]
-    elseif e isa SFuncSym
-        return e.args
-    else
-        return SExpr[]
+"""Get the arguments (children) of a compound expression."""
+_get_args(::SExpr)::Vector{SExpr} = SExpr[]
+_get_args(e::SAdd)::Vector{SExpr} = e.args
+_get_args(e::SMul)::Vector{SExpr} = e.args
+_get_args(e::SPow)::Vector{SExpr} = SExpr[e.base]
+_get_args(e::SNeg)::Vector{SExpr} = SExpr[e.arg]
+_get_args(e::SFuncSym)::Vector{SExpr} = e.args
+
+_rebuild_expr(expr::SExpr, ::Vector{SExpr})::SExpr = expr
+_rebuild_expr(::SAdd, args::Vector{SExpr})::SExpr = _canonical_add(args)
+_rebuild_expr(::SMul, args::Vector{SExpr})::SExpr = _canonical_mul(args)
+_rebuild_expr(expr::SPow, args::Vector{SExpr})::SExpr = SPow(args[1], expr.exp)
+_rebuild_expr(::SNeg, args::Vector{SExpr})::SExpr = SNeg(args[1])
+
+function _rebuild_expr(expr::SFuncSym, args::Vector{SExpr})::SExpr
+    if expr.kind == SFuncKind.SFUNC_ADD
+        return _canonical_add(args)
+    elseif expr.kind == SFuncKind.SFUNC_MUL
+        return _canonical_mul(args)
+    elseif expr.kind == SFuncKind.SFUNC_POW && length(args) == 2 && args[2] isa SConst
+        return SPow(args[1], Int(real(args[2].val)))
     end
+    return SFuncSym(expr.kind, args)
 end
 
 _sexpr_lt(a::SExpr, b::SExpr)::Bool = hash(a) < hash(b)

@@ -12,8 +12,6 @@ struct InstructionSequence
     constants_range::UnitRange{Int}
     parameters_range::UnitRange{Int}
     variables_range::UnitRange{Int}
-    continuation_parameter_index::Union{Nothing, Int}
-    assignments::Vector{Tuple{Int, Int}}
     output_dim::Int
     tape_space_needed::Int
     u_assignments::Vector{Tuple{Int, Int}}

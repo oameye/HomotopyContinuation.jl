@@ -291,14 +291,14 @@ function _opts_cse_visit!(
 
     if expr isa SAdd
         # bvisit(const Add &x)
-        for a in expr.args
+        for a in _get_args(expr)
             _opts_cse_visit!(a, adds, muls, opt_subs, seen)
         end
         push!(adds, expr)
 
     elseif expr isa SMul
         # bvisit(const Mul &x)
-        for a in expr.args
+        for a in _get_args(expr)
             _opts_cse_visit!(a, adds, muls, opt_subs, seen)
         end
         # Check for negative coefficient
@@ -356,7 +356,7 @@ function _opts_cse_visit!(
 
     elseif expr isa SFuncSym
         # bvisit(const Basic &x) — generic case for compound expressions
-        for a in expr.args
+        for a in _get_args(expr)
             _opts_cse_visit!(a, adds, muls, opt_subs, seen)
         end
     end
@@ -395,38 +395,27 @@ end
 ## ── Phase 2: tree_cse ───────────────────────────────────────────────────────
 
 """
-    _find_repeated!(expr, seen, to_eliminate, opt_subs, excluded_symbols)
+    _find_repeated!(expr, seen, to_eliminate, opt_subs)
 
 Walk expression tree, applying opt_subs, and mark expressions seen 2+ times.
 Direct translation of SymEngine's find_repeated lambda in tree_cse.
 
 Key logic (matching SymEngine exactly):
 1. Skip atoms (Numbers)
-2. Track symbols (for name collision avoidance)
-3. If already seen → mark for elimination, return
-4. Add to seen
-5. Replace expr with opt_subs[expr] if present
-6. Get args of (possibly replaced) expr and recurse into each
+2. If already seen → mark for elimination, return
+3. Add to seen
+4. Replace expr with opt_subs[expr] if present
+5. Get args of (possibly replaced) expr and recurse into each
 """
 function _find_repeated!(
         expr::SExpr,
         seen::Set{SExpr},
         to_eliminate::Set{SExpr},
         opt_subs::Dict{SExpr, SExpr},
-        excluded_symbols::Set{SExpr},
     )::Nothing
     # SymEngine: if (is_a_Number(*expr) ...) return;
     if expr isa SConst
         return nothing
-    end
-
-    # SymEngine: if (is_a<Symbol>(*expr)) { excluded_symbols.insert(expr); }
-    # Note: SymEngine does NOT return here — symbols can be CSE'd.
-    # But for our use case, variables are direct slot reads in the interpreter,
-    # so CSE-ing them would just add useless IDENTITY instructions.
-    # We return early as an optimization.
-    if expr isa SVar || expr isa SParam
-        push!(excluded_symbols, expr)
     end
 
     if expr isa STmp
@@ -450,7 +439,7 @@ function _find_repeated!(
     # SymEngine: vec_basic args = expr->get_args();
     #            for (auto &arg : args) { find_repeated(arg); }
     for arg in _get_args(actual)
-        _find_repeated!(arg, seen, to_eliminate, opt_subs, excluded_symbols)
+        _find_repeated!(arg, seen, to_eliminate, opt_subs)
     end
 
     return nothing
@@ -519,38 +508,11 @@ function _rebuild_children(
     )::SExpr
     if _is_atom(expr)
         return expr
-    elseif expr isa SAdd
-        new_args = SExpr[_rebuild(a, to_eliminate, opt_subs, subs, replacements, next_id) for a in expr.args]
-        return _canonical_add(new_args)
-    elseif expr isa SMul
-        new_args = SExpr[_rebuild(a, to_eliminate, opt_subs, subs, replacements, next_id) for a in expr.args]
-        return _canonical_mul(new_args)
-    elseif expr isa SPow
-        new_base = _rebuild(expr.base, to_eliminate, opt_subs, subs, replacements, next_id)
-        return SPow(new_base, expr.exp)
-    elseif expr isa SNeg
-        new_arg = _rebuild(expr.arg, to_eliminate, opt_subs, subs, replacements, next_id)
-        return SNeg(new_arg)
-    elseif expr isa SFuncSym
-        # SymEngine's RebuildVisitor::bvisit(const FunctionSymbol &x)
-        # Rebuild args, then evaluate the function symbol back to a real expression
-        new_args = SExpr[_rebuild(a, to_eliminate, opt_subs, subs, replacements, next_id) for a in expr.args]
-        if expr.kind == SFuncKind.SFUNC_ADD
-            return _canonical_add(new_args)
-        elseif expr.kind == SFuncKind.SFUNC_MUL
-            return _canonical_mul(new_args)
-        elseif expr.kind == SFuncKind.SFUNC_POW && length(new_args) == 2
-            # SymEngine: result_ = pow(newargs[0], newargs[1]);
-            if new_args[2] isa SConst
-                return SPow(new_args[1], Int(real(new_args[2].val)))
-            end
-            return SFuncSym(expr.kind, new_args)
-        else
-            return SFuncSym(expr.kind, new_args)
-        end
-    else
-        return expr
     end
+    new_args = SExpr[
+        _rebuild(a, to_eliminate, opt_subs, subs, replacements, next_id) for a in _get_args(expr)
+    ]
+    return _rebuild_expr(expr, new_args)
 end
 
 """
@@ -565,10 +527,9 @@ function tree_cse(
     )::Tuple{Vector{Pair{SExpr, SExpr}}, Vector{SExpr}}
     to_eliminate = Set{SExpr}()
     seen = Set{SExpr}()
-    excluded_symbols = Set{SExpr}()
 
     for e in exprs
-        _find_repeated!(e, seen, to_eliminate, opt_subs, excluded_symbols)
+        _find_repeated!(e, seen, to_eliminate, opt_subs)
     end
 
     subs = Dict{SExpr, SExpr}()

@@ -151,7 +151,7 @@ function _build_instruction_sequence(
     )::InstructionSequence
     nvars = length(variables)
     nparams = length(parameters)
-    npolys = length(polys)
+    output_dim = length(polys)
 
     # Build variable/parameter index maps for poly_to_sexpr
     var_to_idx = Dict{Symbol, Int}()
@@ -186,7 +186,6 @@ function _build_instruction_sequence(
         replacements, reduced_exprs;
         nvars = nvars,
         nparams = nparams,
-        output_dim = npolys,
-        npolys = npolys,
+        output_dim = output_dim,
     )
 end

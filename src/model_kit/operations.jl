@@ -56,110 +56,38 @@ end
     OP_MULMULSUB # a * b - c * d
 end
 
-function arity(op::OpType.T)::Int
-    op_val = op
-    return if op_val === OpType.OP_STOP
-        0
-    elseif op_val == OpType.OP_CB ||
-            op_val == OpType.OP_COS ||
-            op_val == OpType.OP_IDENTITY ||
-            op_val == OpType.OP_INV ||
-            op_val == OpType.OP_INV_NOT_ZERO ||
-            op_val == OpType.OP_INVSQR ||
-            op_val == OpType.OP_NEG ||
-            op_val == OpType.OP_SIN ||
-            op_val == OpType.OP_SQR ||
-            op_val == OpType.OP_SQRT
-        1
-    elseif op_val == OpType.OP_ADD ||
-            op_val == OpType.OP_DIV ||
-            op_val == OpType.OP_MUL ||
-            op_val == OpType.OP_SUB ||
-            op_val == OpType.OP_POW_INT
-        2
-    elseif op_val == OpType.OP_ADD3 ||
-            op_val == OpType.OP_MUL3 ||
-            op_val == OpType.OP_MULADD ||
-            op_val == OpType.OP_MULSUB ||
-            op_val == OpType.OP_SUBMUL
-        3
-    elseif op_val == OpType.OP_ADD4 ||
-            op_val == OpType.OP_MUL4 ||
-            op_val == OpType.OP_MULMULADD ||
-            op_val == OpType.OP_MULMULSUB
-        4
-    else
-        error("Unexpected OpType $(op_val)")
-    end
-end
+const _OP_ARITY = (
+    0,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    2, 2, 2, 2, 2,
+    3, 3, 3, 3, 3,
+    4, 4, 4, 4,
+)
 
-function op_call(op::OpType.T)::Symbol
-    op_val = op
-    return if op_val == OpType.OP_STOP
-        :op_stop
+const _OP_CALL = (
+    :op_stop,
+    :op_cb, :op_cos, :op_inv, :op_inv_not_zero, :op_invsqr, :op_neg, :op_sin, :op_sqr,
+    :op_sqrt, :op_identity,
+    :op_add, :op_div, :op_mul, :op_sub, :op_pow_int,
+    :op_add3, :op_mul3, :op_muladd, :op_mulsub, :op_submul,
+    :op_add4, :op_mul4, :op_mulmuladd, :op_mulmulsub,
+)
 
-        # Arity 1
-    elseif op_val == OpType.OP_CB
-        :op_cb
-    elseif op_val == OpType.OP_COS
-        :op_cos
-    elseif op_val == OpType.OP_IDENTITY
-        :op_identity
-    elseif op_val == OpType.OP_INV
-        :op_inv
-    elseif op_val == OpType.OP_INV_NOT_ZERO
-        :op_inv_not_zero
-    elseif op_val == OpType.OP_INVSQR
-        :op_invsqr
-    elseif op_val == OpType.OP_NEG
-        :op_neg
-    elseif op_val == OpType.OP_SIN
-        :op_sin
-    elseif op_val == OpType.OP_SQR
-        :op_sqr
-    elseif op_val == OpType.OP_SQRT
-        :op_sqrt
+const _OP_IMMEDIATE_INPUT = (
+    0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 2,
+    0, 0, 0, 0, 0,
+    0, 0, 0, 0,
+)
 
-        # Arity 2
-    elseif op_val == OpType.OP_ADD
-        :op_add
-    elseif op_val == OpType.OP_DIV
-        :op_div
-    elseif op_val == OpType.OP_MUL
-        :op_mul
-    elseif op_val == OpType.OP_SUB
-        :op_sub
-    elseif op_val == OpType.OP_POW_INT
-        :op_pow_int
+@inline _op_index(op::OpType.T) = Int(op) + 1
 
-        # Arity 3
-    elseif op_val == OpType.OP_ADD3
-        :op_add3
-    elseif op_val == OpType.OP_MUL3
-        :op_mul3
-    elseif op_val == OpType.OP_MULADD
-        :op_muladd
-    elseif op_val == OpType.OP_MULSUB
-        :op_mulsub
-    elseif op_val == OpType.OP_SUBMUL
-        :op_submul
+@inline arity(op::OpType.T)::Int = @inbounds _OP_ARITY[_op_index(op)]
+@inline op_call(op::OpType.T)::Symbol = @inbounds _OP_CALL[_op_index(op)]
 
-        # Arity 4
-    elseif op_val == OpType.OP_ADD4
-        :op_add4
-    elseif op_val == OpType.OP_MUL4
-        :op_mul4
-    elseif op_val == OpType.OP_MULMULADD
-        :op_mulmuladd
-    elseif op_val == OpType.OP_MULMULSUB
-        :op_mulmulsub
-    else
-        error("Unexpected OpType $(op_val)")
-    end
-end
-
-function should_use_index_not_reference(op::OpType.T, index::Int)::Bool
-    return op == OpType.OP_POW_INT && index == 2
+@inline function should_use_index_not_reference(op::OpType.T, index::Int)::Bool
+    return @inbounds _OP_IMMEDIATE_INPUT[_op_index(op)] == index
 end
 
 # arity 0
