@@ -154,14 +154,8 @@ function _build_instruction_sequence(
     output_dim = length(polys)
 
     # Build variable/parameter index maps for poly_to_sexpr
-    var_to_idx = Dict{Symbol, Int}()
-    for (i, v) in enumerate(variables)
-        var_to_idx[Symbol(v)] = i
-    end
-    param_to_idx = Dict{Symbol, Int}()
-    for (i, p) in enumerate(parameters)
-        param_to_idx[Symbol(p)] = i
-    end
+    var_to_idx = Dict{Symbol, Int}(Symbol(v) => i for (i, v) in enumerate(variables))
+    param_to_idx = Dict{Symbol, Int}(Symbol(p) => i for (i, p) in enumerate(parameters))
 
     # Convert F polynomials to SExpr trees
     f_exprs = SExpr[poly_to_sexpr(p, var_to_idx, param_to_idx) for p in polys]

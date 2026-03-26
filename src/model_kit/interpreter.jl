@@ -102,11 +102,7 @@ const _EXECUTE_OP_ORDER_JAC = (
     OpType.OP_POW_INT,
 )
 
-function _execute_branch(
-        op::OpType.T,
-        call_resolver::Function;
-        preload_t_1::Bool,
-    )
+function _execute_branch(op::OpType.T, call_resolver::Function; preload_t_1::Bool)
     cond = :(op == $(op))
     call = call_resolver(op)
     t_1_expr = preload_t_1 ? :t_1 : :(tape[arg_1])
@@ -144,7 +140,7 @@ function _build_execute_instructions_inner(
         level::Int = 0,
     )
     branches = [
-        _execute_branch(op, call_resolver; preload_t_1 = preload_t_1) for op in op_order
+        _execute_branch(op, call_resolver; preload_t_1) for op in op_order
     ]
 
     # Add one level of instruction recursion to reduce loop overhead
@@ -158,8 +154,8 @@ function _build_execute_instructions_inner(
                         _build_execute_instructions_inner(
                             op_order,
                             call_resolver;
-                            preload_t_1 = preload_t_1,
-                            recursion_levels = recursion_levels,
+                            preload_t_1,
+                            recursion_levels,
                             level = level + 1,
                         )
                     )
@@ -220,119 +216,90 @@ end
 ## execute! helpers
 
 Base.@propagate_inbounds function _load_inputs!(
-        tape::AbstractVector,
-        seq::InstructionSequence,
-        x::AbstractVector,
+        I::Interpreter, x::AbstractVector,
     )::Nothing
-    @inbounds for (i, k) in enumerate(seq.variables_range)
-        tape[k] = x[i]
+    @inbounds for (i, k) in enumerate(I.sequence.variables_range)
+        I.tape[k] = x[i]
     end
     return nothing
 end
 
 Base.@propagate_inbounds function _load_inputs!(
-        tape::AbstractVector,
-        seq::InstructionSequence,
-        x::AbstractVector,
-        p::AbstractVector,
+        I::Interpreter, x::AbstractVector, p::AbstractVector,
     )::Nothing
-    @inbounds for (i, k) in enumerate(seq.parameters_range)
-        tape[k] = p[i]
+    @inbounds for (i, k) in enumerate(I.sequence.parameters_range)
+        I.tape[k] = p[i]
     end
-    @inbounds for (i, k) in enumerate(seq.variables_range)
-        tape[k] = x[i]
+    @inbounds for (i, k) in enumerate(I.sequence.variables_range)
+        I.tape[k] = x[i]
     end
     return nothing
 end
 
-Base.@propagate_inbounds function _extract_u!(
-        u::AbstractVector,
-        tape::AbstractVector,
-        seq::InstructionSequence,
-    )::Nothing
-    seq.all_u_assigned || fill!(u, zero(eltype(u)))
-    @inbounds for (i, k) in seq.u_assignments
-        u[i] = tape[k]
+Base.@propagate_inbounds function _extract_u!(u::AbstractVector, I::Interpreter)::Nothing
+    I.sequence.all_u_assigned || fill!(u, zero(eltype(u)))
+    @inbounds for (i, k) in I.sequence.u_assignments
+        u[i] = I.tape[k]
     end
     return nothing
 end
 
-Base.@propagate_inbounds function _extract_U!(
-        U::AbstractMatrix,
-        tape::AbstractVector,
-        seq::InstructionSequence,
-    )::Nothing
-    seq.all_U_assigned || fill!(U, zero(eltype(U)))
-    idx = CartesianIndices((seq.output_dim, size(U, 2)))
-    @inbounds for (j, k) in seq.U_assignments
-        U[idx[j]] = tape[k]
+Base.@propagate_inbounds function _extract_U!(U::AbstractMatrix, I::Interpreter)::Nothing
+    I.sequence.all_U_assigned || fill!(U, zero(eltype(U)))
+    idx = CartesianIndices((I.sequence.output_dim, size(U, 2)))
+    @inbounds for (j, k) in I.sequence.U_assignments
+        U[idx[j]] = I.tape[k]
     end
     return nothing
 end
 
 ## execute! — evaluate system
 
-Base.@propagate_inbounds function _execute_eval!(
-        u::AbstractVector,
-        I::Interpreter,
-    )
+Base.@propagate_inbounds function _execute_eval!(u::AbstractVector, I::Interpreter)
     @inbounds execute_instructions_eval!(I.tape, I.sequence.instructions)
-    _extract_u!(u, I.tape, I.sequence)
+    _extract_u!(u, I)
     return u
 end
 
 Base.@propagate_inbounds function _execute_jac!(
-        u::AbstractVector,
-        U::AbstractMatrix,
-        I::Interpreter,
+        u::AbstractVector, U::AbstractMatrix, I::Interpreter,
     )
     @inbounds execute_instructions_jac!(I.tape, I.sequence.instructions)
-    _extract_U!(U, I.tape, I.sequence)
-    _extract_u!(u, I.tape, I.sequence)
+    _extract_U!(U, I)
+    _extract_u!(u, I)
     return u
 end
 
 Base.@propagate_inbounds function execute!(
-        u::AbstractVector,
-        I::Interpreter,
-        x::AbstractVector,
+        u::AbstractVector, I::Interpreter, x::AbstractVector,
     )
     isempty(I.sequence.parameters_range) ||
         error("Interpreter expects parameters; call execute!(u, I, x, p)")
-    _load_inputs!(I.tape, I.sequence, x)
+    _load_inputs!(I, x)
     return _execute_eval!(u, I)
 end
 
 Base.@propagate_inbounds function execute!(
-        u::AbstractVector,
-        I::Interpreter,
-        x::AbstractVector,
-        p::AbstractVector,
+        u::AbstractVector, I::Interpreter, x::AbstractVector, p::AbstractVector,
     )
-    _load_inputs!(I.tape, I.sequence, x, p)
+    _load_inputs!(I, x, p)
     return _execute_eval!(u, I)
 end
 
 Base.@propagate_inbounds function execute!(
-        u::AbstractVector,
-        U::AbstractMatrix,
-        I::Interpreter,
-        x::AbstractVector,
+        u::AbstractVector, U::AbstractMatrix, I::Interpreter, x::AbstractVector,
     )
     isempty(I.sequence.parameters_range) ||
         error("Interpreter expects parameters; call execute!(u, U, I, x, p)")
-    _load_inputs!(I.tape, I.sequence, x)
+    _load_inputs!(I, x)
     return _execute_jac!(u, U, I)
 end
 
 Base.@propagate_inbounds function execute!(
-        u::AbstractVector,
-        U::AbstractMatrix,
-        I::Interpreter,
-        x::AbstractVector,
-        p::AbstractVector,
+        u::AbstractVector, U::AbstractMatrix, I::Interpreter,
+        x::AbstractVector, p::AbstractVector,
     )
-    _load_inputs!(I.tape, I.sequence, x, p)
+    _load_inputs!(I, x, p)
     return _execute_jac!(u, U, I)
 end
 
@@ -348,15 +315,6 @@ function taylor_op_call(op::OpType.T)::Symbol
     return Symbol(:taylor_, op_call(op))
 end
 
-function _build_execute_taylor_instructions_inner()
-    return _build_execute_instructions_inner(
-        _EXECUTE_OP_ORDER_EVAL,
-        taylor_op_call;
-        preload_t_1 = false,
-        recursion_levels = 0,
-    )
-end
-
 @eval @inline function execute_taylor_instructions!(
         tape::AbstractVector,
         instructions::Vector{Instruction},
@@ -364,7 +322,12 @@ end
     @inbounds begin
         k = 0
         while true
-            $(_build_execute_taylor_instructions_inner())
+            $(
+                _build_execute_instructions_inner(
+                    _EXECUTE_OP_ORDER_EVAL, taylor_op_call;
+                    preload_t_1 = false, recursion_levels = 0,
+                )
+            )
         end
     end
     return nothing
@@ -396,11 +359,11 @@ Base.@propagate_inbounds function execute_taylor!(
     ) where {K}
     vars_range = I.sequence.variables_range
     params_range = I.sequence.parameters_range
-    TTS = eltype(I.tape)
+    TapeEltype = eltype(I.tape)
 
     # Load parameters as order-0 Taylor series
     @inbounds for (i, k) in enumerate(params_range)
-        I.tape[k] = convert(TTS, p[i])
+        I.tape[k] = convert(TapeEltype, p[i])
     end
     # Load variables as full Taylor series
     @inbounds for (i, k) in enumerate(vars_range)

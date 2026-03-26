@@ -28,8 +28,6 @@ struct STmp <: SExpr
     id::Int
 end
 
-_collect_args(args::AbstractVector) = collect(SExpr, args)
-
 function _fold_hash(seed, args)::UInt
     h = hash(seed, zero(UInt))
     for a in args
@@ -43,8 +41,8 @@ struct SAdd <: SExpr
     args::Vector{SExpr}
     _hash::UInt
 end
-function SAdd(args::AbstractVector)
-    vargs = _collect_args(args)
+function SAdd(args::Vector{<:SExpr})
+    vargs = collect(SExpr, args)
     return SAdd(vargs, _fold_hash(:SAdd, vargs))
 end
 
@@ -53,8 +51,8 @@ struct SMul <: SExpr
     args::Vector{SExpr}
     _hash::UInt
 end
-function SMul(args::AbstractVector)
-    vargs = _collect_args(args)
+function SMul(args::Vector{<:SExpr})
+    vargs = collect(SExpr, args)
     return SMul(vargs, _fold_hash(:SMul, vargs))
 end
 
@@ -98,40 +96,22 @@ struct SFuncSym <: SExpr
     args::Vector{SExpr}
     _hash::UInt
 end
-function SFuncSym(kind::SFuncKind.T, args::AbstractVector{<:SExpr})
-    vargs = _collect_args(args)
+function SFuncSym(kind::SFuncKind.T, args::Vector{<:SExpr})
+    vargs = collect(SExpr, args)
     return SFuncSym(kind, vargs, _fold_hash((:SFuncSym, kind), vargs))
 end
 
 ## ── Hashing and equality ────────────────────────────────────────────────────
 
-function Base.hash(e::SConst, h::UInt)::UInt
-    return hash(e.val, hash(:SConst, h))
-end
-function Base.hash(e::SVar, h::UInt)::UInt
-    return hash(e.idx, hash(:SVar, h))
-end
-function Base.hash(e::SParam, h::UInt)::UInt
-    return hash(e.idx, hash(:SParam, h))
-end
-function Base.hash(e::STmp, h::UInt)::UInt
-    return hash(e.id, hash(:STmp, h))
-end
-function Base.hash(e::SAdd, h::UInt)::UInt
-    return hash(e._hash, h)
-end
-function Base.hash(e::SMul, h::UInt)::UInt
-    return hash(e._hash, h)
-end
-function Base.hash(e::SPow, h::UInt)::UInt
-    return hash(e._hash, h)
-end
-function Base.hash(e::SNeg, h::UInt)::UInt
-    return hash(e._hash, h)
-end
-function Base.hash(e::SFuncSym, h::UInt)::UInt
-    return hash(e._hash, h)
-end
+Base.hash(e::SConst, h::UInt)::UInt = hash(e.val, hash(:SConst, h))
+Base.hash(e::SVar, h::UInt)::UInt = hash(e.idx, hash(:SVar, h))
+Base.hash(e::SParam, h::UInt)::UInt = hash(e.idx, hash(:SParam, h))
+Base.hash(e::STmp, h::UInt)::UInt = hash(e.id, hash(:STmp, h))
+Base.hash(e::SAdd, h::UInt)::UInt = hash(e._hash, h)
+Base.hash(e::SMul, h::UInt)::UInt = hash(e._hash, h)
+Base.hash(e::SPow, h::UInt)::UInt = hash(e._hash, h)
+Base.hash(e::SNeg, h::UInt)::UInt = hash(e._hash, h)
+Base.hash(e::SFuncSym, h::UInt)::UInt = hash(e._hash, h)
 
 Base.:(==)(a::SConst, b::SConst) = a.val == b.val
 Base.:(==)(a::SVar, b::SVar) = a.idx == b.idx
@@ -140,15 +120,10 @@ Base.:(==)(a::STmp, b::STmp) = a.id == b.id
 Base.:(==)(a::SPow, b::SPow) = a._hash == b._hash && a.exp == b.exp && a.base == b.base
 Base.:(==)(a::SNeg, b::SNeg) = a._hash == b._hash && a.arg == b.arg
 
-function _same_args(args_a::Vector{SExpr}, args_b::Vector{SExpr})::Bool
-    length(args_a) == length(args_b) || return false
-    return all(i -> args_a[i] == args_b[i], eachindex(args_a))
-end
-
-Base.:(==)(a::SAdd, b::SAdd) = a._hash == b._hash && _same_args(a.args, b.args)
-Base.:(==)(a::SMul, b::SMul) = a._hash == b._hash && _same_args(a.args, b.args)
+Base.:(==)(a::SAdd, b::SAdd) = a._hash == b._hash && a.args == b.args
+Base.:(==)(a::SMul, b::SMul) = a._hash == b._hash && a.args == b.args
 Base.:(==)(a::SFuncSym, b::SFuncSym) =
-    a._hash == b._hash && a.kind == b.kind && _same_args(a.args, b.args)
+    a._hash == b._hash && a.kind == b.kind && a.args == b.args
 Base.:(==)(::SExpr, ::SExpr) = false
 
 ## ── SExpr helpers ───────────────────────────────────────────────────────────
@@ -181,6 +156,13 @@ function _rebuild_expr(expr::SFuncSym, args::Vector{SExpr})::SExpr
 end
 
 _sexpr_lt(a::SExpr, b::SExpr)::Bool = hash(a) < hash(b)
+
+"""Return `empty_val` for 0 args, the single arg for 1, or `constructor(args)` for many."""
+function _wrap_args(args::Vector{SExpr}, empty_val::SExpr, constructor::F)::SExpr where {F}
+    isempty(args) && return empty_val
+    length(args) == 1 && return args[1]
+    return constructor(args)
+end
 
 """
 Extract the "base expression" of an Add term, stripping the leading coefficient.
@@ -226,16 +208,8 @@ function _canonical_add(args::Vector{SExpr})::SExpr
         _flatten_add_arg!(flat_args, const_sum, arg)
     end
     sort!(flat_args; lt = _sexpr_lt)
-    if !iszero(const_sum[])
-        pushfirst!(flat_args, SConst(const_sum[]))
-    end
-    if isempty(flat_args)
-        return SConst(zero(ComplexF64))
-    elseif length(flat_args) == 1
-        return flat_args[1]
-    else
-        return SAdd(flat_args)
-    end
+    !iszero(const_sum[]) && pushfirst!(flat_args, SConst(const_sum[]))
+    return _wrap_args(flat_args, SConst(zero(ComplexF64)), SAdd)
 end
 
 function _flatten_mul_arg!(
@@ -264,21 +238,10 @@ function _canonical_mul(args::Vector{SExpr})::SExpr
     for arg in args
         _flatten_mul_arg!(flat_args, coeff, arg)
     end
-
     iszero(coeff[]) && return SConst(zero(ComplexF64))
-
     sort!(flat_args; lt = _sexpr_lt)
-    if coeff[] != one(ComplexF64)
-        pushfirst!(flat_args, SConst(coeff[]))
-    end
-
-    if isempty(flat_args)
-        return SConst(one(ComplexF64))
-    elseif length(flat_args) == 1
-        return flat_args[1]
-    else
-        return SMul(flat_args)
-    end
+    coeff[] != one(ComplexF64) && pushfirst!(flat_args, SConst(coeff[]))
+    return _wrap_args(flat_args, SConst(one(ComplexF64)), SMul)
 end
 
 ## ── Polynomial → SExpr conversion ──────────────────────────────────────────
@@ -315,30 +278,16 @@ function poly_to_sexpr(
         end
 
         if isempty(factors)
-            # Pure constant term
             push!(terms, SConst(coeff))
         elseif coeff == one(ComplexF64)
-            # Monomial with coefficient 1: just the factors
             push!(terms, length(factors) == 1 ? factors[1] : SMul(factors))
-        elseif coeff == -one(ComplexF64)
-            # Represent -1 as a Mul coefficient so negative-Mul handling
-            # matches SymEngine's bvisit(const Mul&).
-            pushfirst!(factors, SConst(coeff))
-            push!(terms, SMul(factors))
         else
-            # General coefficient: SMul([coeff, factor1, factor2, ...])
-            # Matches SymEngine's Mul(coef, {base: exp, ...}).get_args()
+            # Non-unit coefficient (including -1): SMul([coeff, factors...])
             pushfirst!(factors, SConst(coeff))
             push!(terms, SMul(factors))
         end
     end
 
-    if isempty(terms)
-        return SConst(zero(ComplexF64))
-    elseif length(terms) == 1
-        return terms[1]
-    else
-        sort!(terms; lt = (a, b) -> _sexpr_lt(_add_term_base(a), _add_term_base(b)))
-        return SAdd(terms)
-    end
+    length(terms) > 1 && sort!(terms; lt = (a, b) -> _sexpr_lt(_add_term_base(a), _add_term_base(b)))
+    return _wrap_args(terms, SConst(zero(ComplexF64)), SAdd)
 end
