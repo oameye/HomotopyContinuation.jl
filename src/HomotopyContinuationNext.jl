@@ -75,8 +75,14 @@ export Instruction, InstructionSequence
 
 include("model_kit/instruction_sequence.jl")
 
-# model_kit/cse.jl — SExpr types and SymEngine-style CSE algorithm
+# model_kit/sexpr.jl — SExpr types, hash/==, canonicalization, poly_to_sexpr
+include("model_kit/sexpr.jl")
+
+# model_kit/cse.jl — SymEngine-style CSE algorithm (opt_cse + tree_cse)
 include("model_kit/cse.jl")
+
+# model_kit/tape_compiler.jl — TapeCompiler, compile_to_instructions
+include("model_kit/tape_compiler.jl")
 
 # model_kit/interpreter.jl
 export Interpreter, execute!, execute_taylor!

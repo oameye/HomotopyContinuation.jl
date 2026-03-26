@@ -127,6 +127,59 @@ end
     end
 end
 
+## execute! helpers
+
+Base.@propagate_inbounds function _load_inputs!(
+        tape::AbstractVector,
+        seq::InstructionSequence,
+        x::AbstractVector,
+    )::Nothing
+    @inbounds for (i, k) in enumerate(seq.variables_range)
+        tape[k] = x[i]
+    end
+    return nothing
+end
+
+Base.@propagate_inbounds function _load_inputs!(
+        tape::AbstractVector,
+        seq::InstructionSequence,
+        x::AbstractVector,
+        p::AbstractVector,
+    )::Nothing
+    @inbounds for (i, k) in enumerate(seq.parameters_range)
+        tape[k] = p[i]
+    end
+    @inbounds for (i, k) in enumerate(seq.variables_range)
+        tape[k] = x[i]
+    end
+    return nothing
+end
+
+Base.@propagate_inbounds function _extract_u!(
+        u::AbstractVector,
+        tape::AbstractVector,
+        seq::InstructionSequence,
+    )::Nothing
+    seq.all_u_assigned || fill!(u, zero(eltype(u)))
+    @inbounds for (i, k) in seq.u_assignments
+        u[i] = tape[k]
+    end
+    return nothing
+end
+
+Base.@propagate_inbounds function _extract_U!(
+        U::AbstractMatrix,
+        tape::AbstractVector,
+        seq::InstructionSequence,
+    )::Nothing
+    seq.all_U_assigned || fill!(U, zero(eltype(U)))
+    idx = CartesianIndices((seq.output_dim, size(U, 2)))
+    @inbounds for (j, k) in seq.U_assignments
+        U[idx[j]] = tape[k]
+    end
+    return nothing
+end
+
 ## execute! — evaluate system
 
 Base.@propagate_inbounds function execute!(
@@ -136,18 +189,9 @@ Base.@propagate_inbounds function execute!(
     )
     isempty(I.sequence.parameters_range) ||
         error("Interpreter expects parameters; call execute!(u, I, x, p)")
-
-    vars_range = I.sequence.variables_range
-    @inbounds for (i, k) in enumerate(vars_range)
-        I.tape[k] = x[i]
-    end
+    _load_inputs!(I.tape, I.sequence, x)
     @inbounds execute_instructions!(I.tape, I.sequence.instructions)
-
-    I.sequence.all_u_assigned || fill!(u, zero(eltype(u)))
-    @inbounds for (i, k) in I.sequence.u_assignments
-        u[i] = I.tape[k]
-    end
-
+    _extract_u!(u, I.tape, I.sequence)
     return u
 end
 
@@ -157,22 +201,9 @@ Base.@propagate_inbounds function execute!(
         x::AbstractVector,
         p::AbstractVector,
     )
-    vars_range = I.sequence.variables_range
-    params_range = I.sequence.parameters_range
-
-    @inbounds for (i, k) in enumerate(params_range)
-        I.tape[k] = p[i]
-    end
-    @inbounds for (i, k) in enumerate(vars_range)
-        I.tape[k] = x[i]
-    end
+    _load_inputs!(I.tape, I.sequence, x, p)
     @inbounds execute_instructions!(I.tape, I.sequence.instructions)
-
-    I.sequence.all_u_assigned || fill!(u, zero(eltype(u)))
-    @inbounds for (i, k) in I.sequence.u_assignments
-        u[i] = I.tape[k]
-    end
-
+    _extract_u!(u, I.tape, I.sequence)
     return u
 end
 
@@ -184,24 +215,10 @@ Base.@propagate_inbounds function execute!(
     )
     isempty(I.sequence.parameters_range) ||
         error("Interpreter expects parameters; call execute!(u, U, I, x, p)")
-
-    vars_range = I.sequence.variables_range
-    @inbounds for (i, k) in enumerate(vars_range)
-        I.tape[k] = x[i]
-    end
+    _load_inputs!(I.tape, I.sequence, x)
     @inbounds execute_instructions!(I.tape, I.sequence.instructions)
-
-    I.sequence.all_U_assigned || fill!(U, zero(eltype(U)))
-    idx = CartesianIndices((I.sequence.output_dim, size(U, 2)))
-    @inbounds for (j, k) in I.sequence.U_assignments
-        U[idx[j]] = I.tape[k]
-    end
-
-    I.sequence.all_u_assigned || fill!(u, zero(eltype(u)))
-    @inbounds for (i, k) in I.sequence.u_assignments
-        u[i] = I.tape[k]
-    end
-
+    _extract_U!(U, I.tape, I.sequence)
+    _extract_u!(u, I.tape, I.sequence)
     return u
 end
 
@@ -212,28 +229,10 @@ Base.@propagate_inbounds function execute!(
         x::AbstractVector,
         p::AbstractVector,
     )
-    vars_range = I.sequence.variables_range
-    params_range = I.sequence.parameters_range
-
-    @inbounds for (i, k) in enumerate(params_range)
-        I.tape[k] = p[i]
-    end
-    @inbounds for (i, k) in enumerate(vars_range)
-        I.tape[k] = x[i]
-    end
+    _load_inputs!(I.tape, I.sequence, x, p)
     @inbounds execute_instructions!(I.tape, I.sequence.instructions)
-
-    I.sequence.all_U_assigned || fill!(U, zero(eltype(U)))
-    idx = CartesianIndices((I.sequence.output_dim, size(U, 2)))
-    @inbounds for (j, k) in I.sequence.U_assignments
-        U[idx[j]] = I.tape[k]
-    end
-
-    I.sequence.all_u_assigned || fill!(u, zero(eltype(u)))
-    @inbounds for (i, k) in I.sequence.u_assignments
-        u[i] = I.tape[k]
-    end
-
+    _extract_U!(U, I.tape, I.sequence)
+    _extract_u!(u, I.tape, I.sequence)
     return u
 end
 

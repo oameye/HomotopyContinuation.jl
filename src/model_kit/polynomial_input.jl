@@ -3,6 +3,21 @@
 # Converts DynamicPolynomials input into an InstructionSequence and Interpreter
 # via: polynomials → SExpr trees → CSE → IR → compile
 
+## ── Internal generic builder ──────────────────────────────────────────────────
+
+function _build_interpreter(
+        ::Type{V},
+        polys::AbstractVector{<:MP.AbstractPolynomialLike};
+        parameters::AbstractVector = _empty_vars(polys),
+        variables::AbstractVector = _effective_variables(polys, parameters),
+        include_jacobian::Bool = false,
+    ) where {V <: AbstractVector}
+    seq = _build_instruction_sequence(polys, variables, parameters; include_jacobian = include_jacobian)
+    var_syms = Symbol[Symbol(v) for v in variables]
+    param_syms = Symbol[Symbol(p) for p in parameters]
+    return Interpreter(V, seq; variables = var_syms, parameters = param_syms)
+end
+
 ## ── User-facing API ─────────────────────────────────────────────────────────
 
 """
@@ -15,10 +30,10 @@ function build_interpreter(
         parameters::AbstractVector = _empty_vars(polys),
         variables::AbstractVector = _effective_variables(polys, parameters),
     )
-    seq = _build_instruction_sequence(polys, variables, parameters; include_jacobian = false)
-    var_syms = Symbol[Symbol(v) for v in variables]
-    param_syms = Symbol[Symbol(p) for p in parameters]
-    return Interpreter(Vector{ComplexF64}, seq; variables = var_syms, parameters = param_syms)
+    return _build_interpreter(
+        Vector{ComplexF64}, polys;
+        parameters = parameters, variables = variables, include_jacobian = false,
+    )
 end
 
 """
@@ -31,10 +46,10 @@ function build_jacobian_interpreter(
         parameters::AbstractVector = _empty_vars(polys),
         variables::AbstractVector = _effective_variables(polys, parameters),
     )
-    seq = _build_instruction_sequence(polys, variables, parameters; include_jacobian = true)
-    var_syms = Symbol[Symbol(v) for v in variables]
-    param_syms = Symbol[Symbol(p) for p in parameters]
-    return Interpreter(Vector{ComplexF64}, seq; variables = var_syms, parameters = param_syms)
+    return _build_interpreter(
+        Vector{ComplexF64}, polys;
+        parameters = parameters, variables = variables, include_jacobian = true,
+    )
 end
 
 """
@@ -48,12 +63,9 @@ function build_taylor_interpreter(
         parameters::AbstractVector = _empty_vars(polys),
         variables::AbstractVector = _effective_variables(polys, parameters),
     ) where {K}
-    seq = _build_instruction_sequence(polys, variables, parameters; include_jacobian = false)
-    var_syms = Symbol[Symbol(v) for v in variables]
-    param_syms = Symbol[Symbol(p) for p in parameters]
-    return Interpreter(
-        Vector{TruncatedTaylorSeries{K + 1, ComplexF64}}, seq;
-        variables = var_syms, parameters = param_syms,
+    return _build_interpreter(
+        Vector{TruncatedTaylorSeries{K + 1, ComplexF64}}, polys;
+        parameters = parameters, variables = variables, include_jacobian = false,
     )
 end
 
@@ -67,10 +79,10 @@ function build_df64_interpreter(
         parameters::AbstractVector = _empty_vars(polys),
         variables::AbstractVector = _effective_variables(polys, parameters),
     )
-    seq = _build_instruction_sequence(polys, variables, parameters; include_jacobian = false)
-    var_syms = Symbol[Symbol(v) for v in variables]
-    param_syms = Symbol[Symbol(p) for p in parameters]
-    return Interpreter(Vector{ComplexDF64}, seq; variables = var_syms, parameters = param_syms)
+    return _build_interpreter(
+        Vector{ComplexDF64}, polys;
+        parameters = parameters, variables = variables, include_jacobian = false,
+    )
 end
 
 ## ── Variable discovery ──────────────────────────────────────────────────────
@@ -112,7 +124,7 @@ end
 
 # Return an empty vector with the correct variable element type
 @noinline function _empty_vars(polys)
-    return empty(_collect_variables(polys))
+    return empty(MP.variables(first(polys)))
 end
 
 @noinline function _effective_variables(polys, parameters)

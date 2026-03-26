@@ -4,9 +4,10 @@ using HomotopyContinuationNext
 
 @testset "ExplicitImports" begin
     using ExplicitImports
-    # OpType module created by @enumx is not analyzable by ExplicitImports
+    # OpType and SFuncKind modules created by @enumx are not analyzable by ExplicitImports
     allow_unanalyzable = (
         HomotopyContinuationNext.OpType,
+        HomotopyContinuationNext.SFuncKind,
     )
 
     @test check_no_implicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing
