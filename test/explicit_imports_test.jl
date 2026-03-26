@@ -10,6 +10,7 @@ using HomotopyContinuationNext
         HomotopyContinuationNext.NewtonCode,
         HomotopyContinuationNext.PredictionMethod,
         HomotopyContinuationNext.TrackerCode,
+        HomotopyContinuationNext.PathResultCode,
     )
 
     @test check_no_implicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing
@@ -32,6 +33,8 @@ using HomotopyContinuationNext
             # model_kit internal uses of non-public Base APIs:
             Symbol("@_inline_meta"), Symbol("@_propagate_inbounds_meta"),
             :FastMath, :div_fast, :inv_fast, :power_by_squaring,
+            # CommonSolve interface (not declared public in CommonSolve.jl):
+            :init, Symbol("solve!"), :solve,
         ),
     ) == nothing
     @test check_no_self_qualified_accesses(HomotopyContinuationNext) == nothing

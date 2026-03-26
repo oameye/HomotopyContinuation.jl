@@ -9,8 +9,11 @@ using MultivariatePolynomials: MultivariatePolynomials
 using DynamicPolynomials: @polyvar
 using FixedSizeArrays: FixedSizeArray
 import FunctionWrappers: FunctionWrapper
+using CommonSolve: CommonSolve
 
-export @polyvar
+export @polyvar, solve
+export solutions, real_solutions, nsolutions, nreal
+export TotalDegree, Result, PathResult
 
 const MP = MultivariatePolynomials
 # Concrete type aliases — FixedSizeVector{T} alone is NOT concrete because
@@ -48,5 +51,10 @@ include("core/straight_line_homotopy.jl")
 include("tracking/newton_corrector.jl")
 include("tracking/predictor.jl")
 include("tracking/tracker.jl")
+
+include("solving/path_result.jl")
+include("solving/total_degree.jl")
+include("solving/result.jl")
+include("solving/solve.jl")
 
 end # module
