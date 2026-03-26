@@ -1,6 +1,6 @@
 using Test
 import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: system_eval, StraightLineHomotopy, HomotopyEvaluator,
+using HomotopyContinuationNext: System, StraightLineHomotopy, HomotopyEvaluator,
     evaluate!, evaluate_and_jacobian!, taylor!,
     NewtonCorrector, NewtonCode, NewtonCorrectorResult, newton!, init_newton!,
     Predictor, PredictionMethod, predict!,
@@ -22,10 +22,10 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         @polyvar x y
         G = [x - 1, y - 1]
         F = [x^2 - 1, y^2 - 1]
-        _, eval_G = system_eval(G)
-        _, eval_F = system_eval(F)
+        eval_G = System(G)
+        eval_F = System(F)
 
-        H = StraightLineHomotopy(eval_G, eval_F; γ = ComplexF64(1.0))
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
         heval = HomotopyEvaluator(H)
 
         m, n = size(heval)
@@ -54,10 +54,10 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         @polyvar x y
         G = [x - 1, y - 1]
         F = [x^2 - 1, y^2 - 1]
-        _, eval_G = system_eval(G)
-        _, eval_F = system_eval(F)
+        eval_G = System(G)
+        eval_F = System(F)
 
-        H = StraightLineHomotopy(eval_G, eval_F; γ = ComplexF64(1.0))
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
         heval = HomotopyEvaluator(H)
 
         m, n = size(heval)
@@ -80,10 +80,10 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         @polyvar x y
         G = [x - 1, y - 1]
         F = [x - 2, y - 3]
-        _, eval_G = system_eval(G)
-        _, eval_F = system_eval(F)
+        eval_G = System(G)
+        eval_F = System(F)
 
-        H = StraightLineHomotopy(eval_G, eval_F; γ = ComplexF64(1.0))
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
         tracker = Tracker(HomotopyEvaluator(H))
 
         code = track!(tracker, ComplexF64[1.0, 1.0])
@@ -98,10 +98,10 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         @polyvar x y
         F = [x^2 + y - 1, x * y - 0.5]
         G = [x^2 - 1, y^2 - 1]
-        _, eval_G = system_eval(G)
-        _, eval_F = system_eval(F)
+        eval_G = System(G)
+        eval_F = System(F)
 
-        H = StraightLineHomotopy(eval_G, eval_F)
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator)
         heval = HomotopyEvaluator(H)
 
         starts = [ComplexF64[1, 1], ComplexF64[1, -1], ComplexF64[-1, 1], ComplexF64[-1, -1]]
@@ -114,7 +114,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
                 sol = tracker.state.x
                 # Verify it's a solution of F
                 u = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-                evaluate!(u, eval_F, sol, FSVec{ComplexF64}(ComplexF64[]))
+                evaluate!(u, eval_F.evaluator, sol, FSVec{ComplexF64}(ComplexF64[]))
                 res = maximum(abs.(Vector(u)))
                 @test res < 1.0e-8
                 solutions_found += 1
@@ -134,9 +134,9 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         ]
         G = [x0 - 1, x1^2 - 1, x2^2 - 1, x3^2 - 1]
 
-        _, eval_G = system_eval(G)
-        _, eval_F = system_eval(F)
-        H = StraightLineHomotopy(eval_G, eval_F)
+        eval_G = System(G)
+        eval_F = System(F)
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator)
         heval = HomotopyEvaluator(H)
 
         # Track from one start solution
@@ -146,7 +146,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         if code == TrackerCode.TRACKER_SUCCESS
             sol = tracker.state.x
             u = FSVec{ComplexF64}(zeros(ComplexF64, 4))
-            evaluate!(u, eval_F, sol, FSVec{ComplexF64}(ComplexF64[]))
+            evaluate!(u, eval_F.evaluator, sol, FSVec{ComplexF64}(ComplexF64[]))
             @test maximum(abs.(Vector(u))) < 1.0e-8
         end
         # Path should terminate one way or another
@@ -157,10 +157,10 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         @polyvar x y
         G = [x - 1, y - 1]
         F = [x - 3, y - 4]
-        _, eval_G = system_eval(G)
-        _, eval_F = system_eval(F)
+        eval_G = System(G)
+        eval_F = System(F)
 
-        H = StraightLineHomotopy(eval_G, eval_F; γ = ComplexF64(1.0))
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
         tracker = Tracker(HomotopyEvaluator(H))
 
         # Track same path twice — tracker should be reusable
@@ -179,10 +179,10 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         @polyvar x y
         G = [x - 1, y - 1]
         F = [x - 2, y - 3]
-        _, eval_G = system_eval(G)
-        _, eval_F = system_eval(F)
+        eval_G = System(G)
+        eval_F = System(F)
 
-        H = StraightLineHomotopy(eval_G, eval_F; γ = ComplexF64(1.0))
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
         tracker = Tracker(HomotopyEvaluator(H))
 
         HC.init!(tracker, ComplexF64[1.0, 1.0])

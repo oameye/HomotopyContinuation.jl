@@ -1,7 +1,7 @@
 ## solve — CommonSolve.jl integration for polynomial system solving.
 #
-# Pattern: solve(polys, alg) = solve!(init(polys, alg))
-# The polynomial vector IS the problem. The algorithm struct carries config.
+# Pattern: solve(F, alg) = solve!(init(F, alg))
+# F is a System (compiled polynomial system). The algorithm struct carries config.
 
 """
     SolveCache
@@ -15,23 +15,17 @@ struct SolveCache
     seed::UInt32
 end
 
-# ── CommonSolve.init: polys + TotalDegree ────────────────────────────────
+# ── CommonSolve.init: System + TotalDegree ────────────────────────────────
 
-function CommonSolve.init(
-        polys::AbstractVector{<:MP.AbstractPolynomialLike},
-        alg::TotalDegree;
-        parameters::AbstractVector = _empty_vars(polys),
-        variables::AbstractVector = _effective_variables(polys, parameters),
-    )::SolveCache
+function CommonSolve.init(F::System, alg::TotalDegree)::SolveCache
     seed = alg.seed
 
-    info, eval_F = system_eval(polys; parameters = parameters, variables = variables)
-    eval_G = _total_degree_startsystem(info.degrees, variables)
-    starts = _total_degree_solutions(info.degrees)
+    sys_G = _total_degree_startsystem(F.degrees)
+    starts = _total_degree_solutions(F.degrees)
 
     rng = Random.MersenneTwister(seed)
     γ = cis(2π * rand(rng))
-    H = StraightLineHomotopy(eval_G, eval_F; γ = γ)
+    H = StraightLineHomotopy(sys_G.evaluator, F.evaluator; γ = γ)
     heval = HomotopyEvaluator(H)
     tracker = Tracker(heval; options = alg.tracker_options)
 
@@ -53,11 +47,10 @@ function CommonSolve.solve!(cache::SolveCache)::Result
     return Result(path_results, length(cache.start_solutions), cache.seed)
 end
 
-# ── Convenience: solve(polys) and solve(polys, alg) ──────────────────────
+# ── Convenience: solve(F) and solve(F, alg) ──────────────────────────────
 
 """
-    solve(polynomials; parameters=[], variables=..., kwargs...)
-    solve(polynomials, algorithm; parameters=[], variables=...)
+    solve(F::System, alg=TotalDegree())
 
 Solve a polynomial system using homotopy continuation.
 
@@ -66,7 +59,8 @@ The default algorithm is `TotalDegree()` which tracks `prod(degrees)` paths.
 # Examples
 ```julia
 @polyvar x y
-result = solve([x^2 + y - 1, x*y - 2])
+F = System([x^2 + y - 1, x*y - 2])
+result = solve(F)
 solutions(result)
 real_solutions(result)
 
@@ -74,41 +68,24 @@ real_solutions(result)
 result = solve(F, TotalDegree(; seed=UInt32(42)))
 ```
 """
-function solve(
-        polys::AbstractVector{<:MP.AbstractPolynomialLike},
-        alg::TotalDegree = TotalDegree();
-        parameters::AbstractVector = _empty_vars(polys),
-        variables::AbstractVector = _effective_variables(polys, parameters),
-    )::Result
-    return CommonSolve.solve!(
-        CommonSolve.init(polys, alg; parameters = parameters, variables = variables),
-    )
+function solve(F::System, alg::TotalDegree = TotalDegree())::Result
+    return CommonSolve.solve!(CommonSolve.init(F, alg))
 end
 
 """
-    solve(polynomials, ::Polyhedral; parameters=[], variables=...)
+    solve(F::System, alg::Polyhedral)
 
 Solve a polynomial system using polyhedral homotopy continuation.
 Tracks `mixed_volume` paths (BKK bound), which is at most the Bezout bound.
 
-The algorithm proceeds in two phases per path:
-1. **Toric phase**: Track from binomial start solutions through `ToricHomotopy` (t: 0 -> 1)
-2. **Coefficient phase**: Track from generic system to target through `CoefficientHomotopy` (t: 1 -> 0)
-
 # Examples
 ```julia
 @polyvar x y
-result = solve([x^2 + y - 1, x*y - 2], Polyhedral())
+F = System([x^2 + y - 1, x*y - 2])
+result = solve(F, Polyhedral())
 solutions(result)
 ```
 """
-function solve(
-        polys::AbstractVector{<:MP.AbstractPolynomialLike},
-        alg::Polyhedral;
-        parameters::AbstractVector = _empty_vars(polys),
-        variables::AbstractVector = _effective_variables(polys, parameters),
-    )::Result
-    return CommonSolve.solve!(
-        CommonSolve.init(polys, alg; parameters = parameters, variables = variables),
-    )
+function solve(F::System, alg::Polyhedral)::Result
+    return CommonSolve.solve!(CommonSolve.init(F, alg))
 end

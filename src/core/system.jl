@@ -1,23 +1,37 @@
-## system_eval — MP polynomial input → SystemEvaluator
+## System — compiled polynomial system with cached interpreter pipeline.
 #
-# Converts a vector of MultivariatePolynomials into a fully-wired SystemEvaluator
-# with all FunctionWrapper closures backed by tape-based interpreters.
+# Merges the old PolynomialSystemInfo + SystemEvaluator into a single user-facing type.
+# The System constructor runs the full pipeline:
+#   MP polynomials → SExpr → CSE → InstructionSequence → Interpreters → FunctionWrappers
 
 """
-    PolynomialSystemInfo
+    System
 
-Metadata and GC roots for a polynomial system compiled into a `SystemEvaluator`.
+Compiled, ready-to-evaluate polynomial system. Caches the interpreter pipeline
+so users pay the compilation cost once and reuse across multiple `solve` calls.
 
-The `_interp_*` and `_seq_*` fields serve as GC roots — the FunctionWrapper closures
-capture interpreters by reference, and without these fields the interpreters could be
-garbage collected.
+Construct from MultivariatePolynomials:
+
+    F = System(polys; parameters=[], variables=...)
+
+# Examples
+```julia
+@polyvar x y
+F = System([x^2 + y - 1, x*y - 2])
+solve(F)
+solve(F, Polyhedral())
+```
 """
-struct PolynomialSystemInfo
+struct System
+    evaluator::SystemEvaluator
     degrees::Vector{Int}
     nvars::Int
     nparams::Int
     variable_groups::Vector{Vector{Int}}
     is_homogeneous::Bool
+    support::Vector{Matrix{Int32}}
+    coefficients::Vector{Vector{ComplexF64}}
+    # GC roots — interpreters must stay alive for FunctionWrapper closures
     _seq_eval::InstructionSequence
     _seq_jac::InstructionSequence
     _interp_f64::Interpreter{Vector{ComplexF64}}
@@ -27,6 +41,13 @@ struct PolynomialSystemInfo
     _interp_t2::Interpreter{Vector{TruncatedTaylorSeries{3, ComplexF64}}}
     _interp_t3::Interpreter{Vector{TruncatedTaylorSeries{4, ComplexF64}}}
 end
+
+## ── Accessors ────────────────────────────────────────────────────────────────
+
+Base.size(F::System)::Tuple{Int, Int} = size(F.evaluator)
+degrees(F::System)::Vector{Int} = F.degrees
+nvariables(F::System)::Int = F.nvars
+nparameters(F::System)::Int = F.nparams
 
 ## ── FW-compatible wrapper functions ──────────────────────────────────────────
 
@@ -55,24 +76,29 @@ function _execute_jac_fw!(
     return nothing
 end
 
-## ── system_eval ──────────────────────────────────────────────────────────────
+## ── System constructor ──────────────────────────────────────────────────────
 
 """
-    system_eval(polys; parameters=[], variables=...) -> (PolynomialSystemInfo, SystemEvaluator)
+    System(polys; parameters=[], variables=...) -> System
 
-Build a `SystemEvaluator` from a vector of MultivariatePolynomials polynomials.
-
-Returns a tuple of `(info, evaluator)` where `info` holds metadata (degrees,
-homogeneity, variable counts) and GC roots for the interpreter closures.
+Build a `System` from a vector of MultivariatePolynomials polynomials.
+Compiles the full interpreter pipeline and caches everything for reuse.
 """
-function system_eval(
+function System(
         polys::AbstractVector{<:MP.AbstractPolynomialLike};
         parameters::AbstractVector = _empty_vars(polys),
         variables::AbstractVector = _effective_variables(polys, parameters),
-    )::Tuple{PolynomialSystemInfo, SystemEvaluator}
+    )::System
     neqs = length(polys)
     nvars = length(variables)
     nparams = length(parameters)
+
+    # ── Support and coefficients (non-parametric systems only) ────────────
+    supp, coeffs = if nparams == 0
+        support_coefficients(polys, variables)
+    else
+        Vector{Matrix{Int32}}(), Vector{Vector{ComplexF64}}()
+    end
 
     # ── Build interpreters ────────────────────────────────────────────────
     interp_f64 = _build_interpreter(
@@ -101,7 +127,7 @@ function system_eval(
     )
 
     # ── Metadata ──────────────────────────────────────────────────────────
-    degrees = Int[MP.maxdegree(p) for p in polys]
+    degs = Int[MP.maxdegree(p) for p in polys]
 
     is_homogeneous = try
         all(p -> MP.ishomogeneous(p), polys)
@@ -121,21 +147,12 @@ function system_eval(
         nparams,
     )
 
-    info = PolynomialSystemInfo(
-        degrees,
-        nvars,
-        nparams,
-        Vector{Int}[],
-        is_homogeneous,
-        interp_f64.sequence,
-        interp_jac.sequence,
-        interp_f64,
-        interp_df64,
-        interp_jac,
-        interp_t1,
-        interp_t2,
-        interp_t3,
+    return System(
+        evaluator, degs, nvars, nparams,
+        Vector{Int}[], is_homogeneous,
+        supp, coeffs,
+        interp_f64.sequence, interp_jac.sequence,
+        interp_f64, interp_df64, interp_jac,
+        interp_t1, interp_t2, interp_t3,
     )
-
-    return (info, evaluator)
 end

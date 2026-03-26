@@ -5,15 +5,15 @@ if !@isdefined(print_header)
     include(joinpath(@__DIR__, "common.jl"))
 end
 
-using HomotopyContinuationNext: system_eval, StraightLineHomotopy, HomotopyEvaluator,
+using HomotopyContinuationNext: System, StraightLineHomotopy, HomotopyEvaluator,
     Tracker, TrackerCode, TrackerOptions, track!
 
 print_header("Path Tracking: Next vs HC v2")
 
 function _next_track_all(F_polys, G_polys, starts)
-    _, eval_G = system_eval(G_polys)
-    _, eval_F = system_eval(F_polys)
-    H = StraightLineHomotopy(eval_G, eval_F)
+    sys_G = System(G_polys)
+    sys_F = System(F_polys)
+    H = StraightLineHomotopy(sys_G.evaluator, sys_F.evaluator)
     heval = HomotopyEvaluator(H)
     tracker = Tracker(heval)
     n_success = 0

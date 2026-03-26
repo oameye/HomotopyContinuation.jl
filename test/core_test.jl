@@ -5,7 +5,7 @@ using HomotopyContinuationNext: AbstractSystem, AbstractHomotopy,
     nparameters, set_solution!, get_solution!,
     start_parameters!, target_parameters!,
     SystemEvaluator, HomotopyEvaluator,
-    system_eval, PolynomialSystemInfo,
+    System,
     StraightLineHomotopy,
     TaylorVector, TruncatedTaylorSeries, DoubleF64, ComplexDF64,
     # Raw interpreter API for FW-vs-raw comparison
@@ -183,7 +183,8 @@ end
     @testset "SystemEvaluator matches raw Interpreter" begin
         @polyvar x y
         F = [x^3 * y - x * y^2 + x^2 - 3, x^2 * y + y^3 - x + 2]
-        _, seval = system_eval(F)
+        sys = System(F)
+        seval = sys.evaluator
         I_eval = build_interpreter(F)
         I_jac = build_jacobian_interpreter(F)
         I_t1 = build_taylor_interpreter(F, Val(1))
@@ -306,27 +307,27 @@ end
         end
     end
 
-    # ── system_eval: polynomial input ────────────────────────────────────
+    # ── System: polynomial input ─────────────────────────────────────────
 
-    @testset "system_eval: metadata" begin
+    @testset "System: metadata" begin
         @polyvar x y
         F = [x^2 + y - 1, x * y - 2]
-        info, seval = system_eval(F)
+        sys = System(F)
 
-        @test info isa PolynomialSystemInfo
-        @test seval isa SystemEvaluator
-        @test size(seval) == (2, 2)
-        @test nparameters(seval) == 0
-        @test info.degrees == [2, 2]
-        @test info.nvars == 2
-        @test info.nparams == 0
-        @test info.is_homogeneous == false
+        @test sys isa System
+        @test sys.evaluator isa SystemEvaluator
+        @test size(sys) == (2, 2)
+        @test HC.nparameters(sys) == 0
+        @test HC.degrees(sys) == [2, 2]
+        @test HC.nvariables(sys) == 2
+        @test sys.is_homogeneous == false
     end
 
-    @testset "system_eval: eval+jac vs MP ground truth" begin
+    @testset "System: eval+jac vs MP ground truth" begin
         @polyvar x y
         F = [x^3 * y - x * y^2 + x^2 - 3, x^2 * y + y^3 - x + 2]
-        _, seval = system_eval(F)
+        sys = System(F)
+        seval = sys.evaluator
         vars = [x, y]
 
         for _ in 1:10
@@ -345,13 +346,14 @@ end
         end
     end
 
-    @testset "system_eval: with parameters" begin
+    @testset "System: with parameters" begin
         @polyvar x y a b
         F = [x^2 + a * y, x * y - b]
-        info, seval = system_eval(F; parameters = [a, b])
+        sys = System(F; parameters = [a, b])
+        seval = sys.evaluator
 
         @test nparameters(seval) == 2
-        @test info.nparams == 2
+        @test HC.nparameters(sys) == 2
 
         xv = FSVec{ComplexF64}(ComplexF64[2.0, 3.0])
         p = FSVec{ComplexF64}(ComplexF64[1.0, 2.0])
@@ -361,10 +363,11 @@ end
         @test u[2] ≈ 4.0 + 0im   # 6 - 2
     end
 
-    @testset "system_eval: DF64 matches F64" begin
+    @testset "System: DF64 matches F64" begin
         @polyvar x y
         F = [x^3 - y^2 + 1, x * y^2 - x^2]
-        _, seval = system_eval(F)
+        sys = System(F)
+        seval = sys.evaluator
 
         for _ in 1:5
             xvals = randn(ComplexF64, 2)
@@ -382,10 +385,11 @@ end
         end
     end
 
-    @testset "system_eval: Taylor vs finite differences" begin
+    @testset "System: Taylor vs finite differences" begin
         @polyvar x y
         F = [x^2 + y - 1, x * y - 2]
-        _, seval = system_eval(F)
+        sys = System(F)
+        seval = sys.evaluator
         p = FSVec{ComplexF64}(ComplexF64[])
 
         # Pick a base point and direction
@@ -426,7 +430,7 @@ end
         @test u_t2[2] ≈ fd2[2] atol = 1.0e-4
     end
 
-    @testset "system_eval: katsura-3 eval+jac vs MP" begin
+    @testset "System: katsura-3 eval+jac vs MP" begin
         @polyvar x0 x1 x2 x3
         F = [
             x0 + 2x1 + 2x2 + 2x3 - 1,
@@ -435,7 +439,8 @@ end
             x1^2 + 2x0 * x2 + 2x1 * x3 - x2,
         ]
         vars = [x0, x1, x2, x3]
-        _, seval = system_eval(F)
+        sys = System(F)
+        seval = sys.evaluator
 
         for _ in 1:5
             xvals = randn(ComplexF64, 4)
@@ -454,10 +459,10 @@ end
 
     @testset "StraightLineHomotopy: boundary conditions" begin
         @polyvar x y
-        _, eval_G = system_eval([x - 1, y - 1])
-        _, eval_F = system_eval([x^2 - 1, y^2 - 1])
+        eval_G = System([x - 1, y - 1])
+        eval_F = System([x^2 - 1, y^2 - 1])
 
-        H = StraightLineHomotopy(eval_G, eval_F; γ = ComplexF64(1.0))
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
         @test size(H) == (2, 2)
         heval = HomotopyEvaluator(H)
 
@@ -482,10 +487,10 @@ end
 
     @testset "StraightLineHomotopy: jacobian via finite differences" begin
         @polyvar x y
-        _, eval_G = system_eval([x^2 - 1, x * y + y^2])
-        _, eval_F = system_eval([x^3 + y - 2, x * y^2 - 1])
+        eval_G = System([x^2 - 1, x * y + y^2])
+        eval_F = System([x^3 + y - 2, x * y^2 - 1])
 
-        H = StraightLineHomotopy(eval_G, eval_F)
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator)
         heval = HomotopyEvaluator(H)
 
         u = FSVec{ComplexF64}(zeros(ComplexF64, 2))
@@ -512,11 +517,11 @@ end
 
     @testset "StraightLineHomotopy: SLH matches ManualSLH" begin
         @polyvar x y
-        _, eval_G = system_eval([x - 1, y - 1])
-        _, eval_F = system_eval([x^2 - 1, y^2 - 1])
+        eval_G = System([x - 1, y - 1])
+        eval_F = System([x^2 - 1, y^2 - 1])
         γ = cis(0.7)
 
-        H_slh = StraightLineHomotopy(eval_G, eval_F; γ = γ)
+        H_slh = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = γ)
         heval_slh = HomotopyEvaluator(H_slh)
 
         H_manual = ManualSLH(γ)
@@ -550,10 +555,10 @@ end
     @testset "StraightLineHomotopy: Taylor order 2 via finite differences" begin
         @polyvar x y
         # Use degree-3 systems so Taylor order 2 is nontrivial
-        _, eval_G = system_eval([x^2 - 1, y^2 - 1])
-        _, eval_F = system_eval([x^3 + y - 2, x * y^2 - 1])
+        eval_G = System([x^2 - 1, y^2 - 1])
+        eval_F = System([x^3 + y - 2, x * y^2 - 1])
 
-        H = StraightLineHomotopy(eval_G, eval_F; γ = ComplexF64(1.0))
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
         heval = HomotopyEvaluator(H)
 
         x0 = ComplexF64[1.5, 2.5]
@@ -586,10 +591,10 @@ end
     @testset "StraightLineHomotopy: Taylor order 3 via finite differences" begin
         @polyvar x y
         # Use degree-3+ systems so Taylor order 3 is nontrivial
-        _, eval_G = system_eval([x^3 - y^2, x * y^2 + y^3])
-        _, eval_F = system_eval([x^3 + y^3 - 1, x^2 * y - x * y^2])
+        eval_G = System([x^3 - y^2, x * y^2 + y^3])
+        eval_F = System([x^3 + y^3 - 1, x^2 * y - x * y^2])
 
-        H = StraightLineHomotopy(eval_G, eval_F; γ = ComplexF64(1.0))
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
         heval = HomotopyEvaluator(H)
 
         x0 = ComplexF64[1.0, -0.5]
@@ -623,9 +628,9 @@ end
 
     @testset "StraightLineHomotopy: random γ has unit magnitude" begin
         @polyvar x y
-        _, eval_G = system_eval([x - 1, y - 1])
-        _, eval_F = system_eval([x^2 - 1, y^2 - 1])
-        H = StraightLineHomotopy(eval_G, eval_F)
+        eval_G = System([x - 1, y - 1])
+        eval_F = System([x^2 - 1, y^2 - 1])
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator)
         @test abs(H.γ) ≈ 1.0 atol = 1.0e-14
     end
 
@@ -633,7 +638,8 @@ end
 
     @testset "zero allocations: SystemEvaluator eval + jac" begin
         @polyvar x y
-        _, seval = system_eval([x^2 + y - 1, x * y - 2])
+        sys = System([x^2 + y - 1, x * y - 2])
+        seval = sys.evaluator
 
         u = FSVec{ComplexF64}(zeros(ComplexF64, 2))
         xv = FSVec{ComplexF64}(ComplexF64[2.0, 3.0])
@@ -649,10 +655,10 @@ end
 
     @testset "zero allocations: HomotopyEvaluator eval + jac" begin
         @polyvar x y
-        _, eval_G = system_eval([x - 1, y - 1])
-        _, eval_F = system_eval([x^2 - 1, y^2 - 1])
+        eval_G = System([x - 1, y - 1])
+        eval_F = System([x^2 - 1, y^2 - 1])
 
-        H = StraightLineHomotopy(eval_G, eval_F)
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator)
         heval = HomotopyEvaluator(H)
 
         u = FSVec{ComplexF64}(zeros(ComplexF64, 2))

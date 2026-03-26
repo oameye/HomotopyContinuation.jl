@@ -5,7 +5,7 @@ using BenchmarkTools
 using DynamicPolynomials: @polyvar
 using FixedSizeArrays: FixedSizeArray
 using HomotopyContinuationNext:
-    system_eval, StraightLineHomotopy, HomotopyEvaluator,
+    System, StraightLineHomotopy, HomotopyEvaluator,
     Tracker, TrackerOptions, TrackerCode, track!
 
 const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
@@ -22,10 +22,10 @@ function benchmark_tracking!(SUITE::BenchmarkGroup)
         x1^2 + 2x0 * x2 + 2x1 * x3 - x2,
     ]
     G_k3 = [x0 - 1, x1^2 - 1, x2^2 - 1, x3^2 - 1]
-    _, eval_G = system_eval(G_k3)
-    _, eval_F = system_eval(F_k3)
+    sys_G = System(G_k3)
+    sys_F = System(F_k3)
 
-    H = StraightLineHomotopy(eval_G, eval_F)
+    H = StraightLineHomotopy(sys_G.evaluator, sys_F.evaluator)
     heval = HomotopyEvaluator(H)
     tracker = Tracker(heval)
 

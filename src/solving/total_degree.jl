@@ -12,7 +12,8 @@ Accepts all `TrackerOptions` fields as keyword arguments, or a pre-built
 # Examples
 ```julia
 @polyvar x y
-result = solve([x^2 + y - 1, x*y - 2], TotalDegree())
+F = System([x^2 + y - 1, x*y - 2])
+result = solve(F, TotalDegree())
 
 # With explicit seed for reproducibility
 result = solve(F, TotalDegree(; seed=UInt32(42)))
@@ -48,13 +49,11 @@ function TotalDegree(;
     return TotalDegree(opts, seed)
 end
 
-function _total_degree_startsystem(
-        degrees::Vector{Int}, variables::AbstractVector,
-    )::SystemEvaluator
+function _total_degree_startsystem(degrees::Vector{Int})::System
     n = length(degrees)
-    polys = [variables[i]^degrees[i] - 1 for i in 1:n]
-    _, evaluator = system_eval(polys; variables = variables)
-    return evaluator
+    @polyvar _td_x[1:n]
+    polys = [_td_x[i]^degrees[i] - 1 for i in 1:n]
+    return System(polys; variables = collect(_td_x))
 end
 
 function _total_degree_solutions(degrees::Vector{Int})::Vector{Vector{ComplexF64}}

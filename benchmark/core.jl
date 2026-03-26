@@ -6,7 +6,7 @@ using BenchmarkTools
 using DynamicPolynomials: @polyvar
 using FixedSizeArrays: FixedSizeArray
 using HomotopyContinuationNext:
-    system_eval, evaluate!, evaluate_and_jacobian!, taylor!,
+    System, evaluate!, evaluate_and_jacobian!, taylor!,
     StraightLineHomotopy, HomotopyEvaluator,
     TaylorVector, TruncatedTaylorSeries,
     build_interpreter, build_jacobian_interpreter,
@@ -28,7 +28,8 @@ function benchmark_core!(SUITE::BenchmarkGroup)
     ]
 
     # FW-wrapped vs raw: quantify FunctionWrapper overhead
-    _, seval_k3 = system_eval(F_k3)
+    sys_k3 = System(F_k3)
+    seval_k3 = sys_k3.evaluator
     xv_k3 = FSVec{ComplexF64}(randn(ComplexF64, 4))
     p_k3 = FSVec{ComplexF64}(ComplexF64[])
     u_k3 = FSVec{ComplexF64}(zeros(ComplexF64, 4))
@@ -57,7 +58,8 @@ function benchmark_core!(SUITE::BenchmarkGroup)
         [prod(cv) - 1]
     ]
 
-    _, seval_c7 = system_eval(F_c7)
+    sys_c7 = System(F_c7)
+    seval_c7 = sys_c7.evaluator
     xv_c7 = FSVec{ComplexF64}(randn(ComplexF64, 7))
     p_c7 = FSVec{ComplexF64}(ComplexF64[])
     u_c7 = FSVec{ComplexF64}(zeros(ComplexF64, 7))
@@ -81,10 +83,10 @@ function benchmark_core!(SUITE::BenchmarkGroup)
     # ── StraightLineHomotopy (katsura-3) — end-to-end homotopy cost ─────
     @polyvar y0 y1 y2 y3
     G_k3 = [y0 - 1, y1^2 - 1, y2^2 - 1, y3^2 - 1]
-    _, eval_G_k3 = system_eval(G_k3)
-    _, eval_F_k3 = system_eval(F_k3)
+    sys_G_k3 = System(G_k3)
+    sys_F_k3 = System(F_k3)
 
-    H = StraightLineHomotopy(eval_G_k3, eval_F_k3)
+    H = StraightLineHomotopy(sys_G_k3.evaluator, sys_F_k3.evaluator)
     heval = HomotopyEvaluator(H)
     u_hom = FSVec{ComplexF64}(zeros(ComplexF64, 4))
     U_hom = FSMat{ComplexF64}(zeros(ComplexF64, 4, 4))
@@ -100,9 +102,9 @@ function benchmark_core!(SUITE::BenchmarkGroup)
 
     # ── Build time ───────────────────────────────────────────────────────
     SUITE["core"]["build_katsura3"] =
-        @benchmarkable system_eval($F_k3)
+        @benchmarkable System($F_k3)
     SUITE["core"]["build_cyclic7"] =
-        @benchmarkable system_eval($F_c7)
+        @benchmarkable System($F_c7)
 
     return SUITE
 end

@@ -24,7 +24,7 @@ src/
 │   ├── interpreter.jl              # Tape-based execution engine
 │   └── polynomial_input.jl         # MP polynomials → Interpreter orchestration
 ├── core/                           # System/Homotopy types and FunctionWrapper firewall
-│   ├── system_eval.jl              # SystemEvaluator (concrete, type-erased)
+│   ├── system.jl                   # System (compiled polynomial system, caches interpreter pipeline)
 │   ├── homotopy_eval.jl            # HomotopyEvaluator (concrete, type-erased)
 │   ├── straight_line_homotopy.jl   # γt·G + (1-t)·F
 │   └── ...                         # CoefficientHomotopy, ToricHomotopy, AffineChart

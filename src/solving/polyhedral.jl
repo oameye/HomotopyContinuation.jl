@@ -16,7 +16,7 @@ Accepts all `TrackerOptions` fields as keyword arguments, or a pre-built
 # Examples
 ```julia
 @polyvar x y
-result = solve([x^2 + y - 1, x*y - 2], Polyhedral())
+result = solve(System([x^2 + y - 1, x*y - 2]), Polyhedral())
 
 # Tune tracker options directly
 result = solve(F, Polyhedral(; max_steps=500, extended_precision=false))
@@ -64,7 +64,7 @@ struct PolyhedralSolveCache
     start_solutions::Vector{Tuple{MixedSubdivisions.MixedCell, Vector{ComplexF64}}}
     seed::UInt32
     # GC roots for interpreters — must be kept alive for FunctionWrapper closures
-    _param_info::PolynomialSystemInfo
+    _param_system::System
 end
 
 # ── Helper: build parametric system from support ────────────────────────────
@@ -90,12 +90,21 @@ function _build_parametric_system(
     ]
 
     # Build polynomials: F_i = sum_j coeff_vars[offset+j] * prod(x_k^A[k,j])
-    polys = MP.AbstractPolynomialLike[]
-    offset = 0
-    for (i, A) in enumerate(support)
+    # Build first polynomial to infer the concrete Polynomial type
+    m_1 = size(support[1], 2)
+    p1 = coeff_vars[1] * prod(variables[k]^Int(support[1][k, 1]) for k in 1:n)
+    for j in 2:m_1
+        monomial = prod(variables[k]^Int(support[1][k, j]) for k in 1:n)
+        p1 = p1 + coeff_vars[j] * monomial
+    end
+    PolyType = typeof(p1)
+    polys = PolyType[p1]
+    offset = m_1
+    for i in 2:n
+        A = support[i]
         m_i = size(A, 2)
-        p = zero(coeff_vars[1]) * zero(variables[1])  # zero polynomial of correct type
-        for j in 1:m_i
+        p = coeff_vars[offset + 1] * prod(variables[k]^Int(A[k, 1]) for k in 1:n)
+        for j in 2:m_i
             monomial = prod(variables[k]^Int(A[k, j]) for k in 1:n)
             p = p + coeff_vars[offset + j] * monomial
         end
@@ -108,25 +117,21 @@ end
 
 # ── CommonSolve.init: polys + Polyhedral ────────────────────────────────────
 
-function CommonSolve.init(
-        polys::AbstractVector{<:MP.AbstractPolynomialLike},
-        alg::Polyhedral;
-        parameters::AbstractVector = _empty_vars(polys),
-        variables::AbstractVector = _effective_variables(polys, parameters),
-    )::PolyhedralSolveCache
+function CommonSolve.init(F::System, alg::Polyhedral)::PolyhedralSolveCache
     seed = alg.seed
+    n = F.nvars
 
-    n = length(variables)
-    @assert length(polys) == n "System must be square (same number of equations and variables)"
-
-    # 1. Extract support + target coefficients
-    support, target_coeffs = support_coefficients(polys, variables)
-
-    # 2. Add zero column to support for polynomials without constant term
-    for (i, A) in enumerate(support)
-        if !has_zero_column(A)
+    # 1. Get support + target coefficients from the System
+    #    Copy only entries that need modification (zero column addition).
+    support = Vector{Matrix{Int32}}(undef, length(F.support))
+    target_coeffs = Vector{Vector{ComplexF64}}(undef, length(F.coefficients))
+    for (i, A) in enumerate(F.support)
+        if has_zero_column(A)
+            support[i] = A
+            target_coeffs[i] = F.coefficients[i]
+        else
             support[i] = hcat(A, zeros(Int32, size(A, 1)))
-            push!(target_coeffs[i], zero(ComplexF64))
+            target_coeffs[i] = push!(copy(F.coefficients[i]), zero(ComplexF64))
         end
     end
 
@@ -169,21 +174,22 @@ function CommonSolve.init(
     end
 
     # 6. Build parametric system from support
+    @polyvar _hc_x[1:n]
     param_polys, param_vars, coeff_params =
-        _build_parametric_system(support, variables)
-    param_info, eval_param = system_eval(
+        _build_parametric_system(support, collect(_hc_x))
+    param_system = System(
         param_polys; variables = param_vars, parameters = coeff_params,
     )
 
     # 7. Build toric homotopy (phase 1: t goes from 0 to 1)
-    toric_H = ToricHomotopy(eval_param, start_coeffs)
+    toric_H = ToricHomotopy(param_system.evaluator, start_coeffs)
     toric_heval = HomotopyEvaluator(toric_H)
     toric_tracker = Tracker(toric_heval; options = alg.tracker_options)
 
     # 8. Build coefficient homotopy (phase 2: t goes from 1 to 0)
     flat_start = reduce(vcat, start_coeffs)
     flat_target = reduce(vcat, target_coeffs)
-    coeff_H = CoefficientHomotopy(eval_param, flat_start, flat_target)
+    coeff_H = CoefficientHomotopy(param_system.evaluator, flat_start, flat_target)
     coeff_heval = HomotopyEvaluator(coeff_H)
     coeff_tracker = Tracker(coeff_heval; options = alg.tracker_options)
 
@@ -191,7 +197,7 @@ function CommonSolve.init(
         toric_tracker, coeff_tracker, toric_H,
         support, lifting,
         all_starts, seed,
-        param_info,
+        param_system,
     )
 end
 
