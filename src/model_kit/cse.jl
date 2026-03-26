@@ -1254,6 +1254,7 @@ function _compile_sum!(c::TapeCompiler, expr::SAdd)::Int32
     neg_reduced =
         Tuple{Int32, Int32}[_compile_reduce_to_at_most_two!(c, e) for e in neg]
 
+    # Case 1: single positive, single negative — try maximal fusion
     if length(pos_reduced) == 1 && length(neg_reduced) == 1
         (a, b) = pos_reduced[1]
         (d, e) = neg_reduced[1]
@@ -1266,7 +1267,10 @@ function _compile_sum!(c::TapeCompiler, expr::SAdd)::Int32
         else
             return _emit!(c, OpType.OP_SUB, a, d)
         end
-    elseif length(neg_reduced) == 1
+    end
+
+    # Case 2: multiple positives, single negative
+    if length(neg_reduced) == 1
         a = _compile_sum_products!(c, pos_reduced)
         (d, e) = neg_reduced[1]
         if e != _SLOT_NONE
@@ -1276,14 +1280,81 @@ function _compile_sum!(c::TapeCompiler, expr::SAdd)::Int32
         end
     end
 
-    pos_sum = _compile_sum_products!(c, pos_reduced)
-    neg_sum = _compile_sum_products!(c, neg_reduced)
-    if pos_sum == _SLOT_NONE
-        return neg_sum == _SLOT_NONE ? _SLOT_NONE : _tape_neg!(c, neg_sum)
-    elseif neg_sum == _SLOT_NONE
-        return pos_sum
+    # Case 3: single positive, multiple negatives
+    if length(pos_reduced) == 1
+        neg_sum = _compile_sum_products!(c, neg_reduced)
+        (a, b) = pos_reduced[1]
+        if b != _SLOT_NONE
+            return _emit!(c, OpType.OP_MULSUB, a, b, neg_sum)
+        else
+            return _emit!(c, OpType.OP_SUB, a, neg_sum)
+        end
+    end
+
+    # Case 4: multiple positives, multiple negatives — interleave for MULMULSUB
+    # Pair positive products with negative products for MULMULSUB(a,b,c,d) = a*b - c*d
+    pos_pairs = Tuple{Int32, Int32}[t for t in pos_reduced if t[2] != _SLOT_NONE]
+    pos_singles = Int32[t[1] for t in pos_reduced if t[2] == _SLOT_NONE]
+    neg_pairs = Tuple{Int32, Int32}[t for t in neg_reduced if t[2] != _SLOT_NONE]
+    neg_singles = Int32[t[1] for t in neg_reduced if t[2] == _SLOT_NONE]
+
+    # Pair positive products with negative products for MULMULSUB
+    fused_results = Int32[]
+    n_fused = min(length(pos_pairs), length(neg_pairs))
+    for i in 1:n_fused
+        (a, b) = pos_pairs[i]
+        (d, e) = neg_pairs[i]
+        push!(fused_results, _emit!(c, OpType.OP_MULMULSUB, a, b, d, e))
+    end
+
+    # Leftover positive products
+    leftover_pos = Tuple{Int32, Int32}[]
+    for i in (n_fused + 1):length(pos_pairs)
+        push!(leftover_pos, pos_pairs[i])
+    end
+    for s in pos_singles
+        push!(leftover_pos, (s, _SLOT_NONE))
+    end
+
+    # Leftover negative products
+    leftover_neg = Tuple{Int32, Int32}[]
+    for i in (n_fused + 1):length(neg_pairs)
+        push!(leftover_neg, neg_pairs[i])
+    end
+    for s in neg_singles
+        push!(leftover_neg, (s, _SLOT_NONE))
+    end
+
+    # Sum fused results + leftover positives
+    all_pos_parts = Int32[]
+    append!(all_pos_parts, fused_results)
+    if !isempty(leftover_pos)
+        pos_sum = _compile_sum_products!(c, leftover_pos)
+        pos_sum != _SLOT_NONE && push!(all_pos_parts, pos_sum)
+    end
+
+    pos_total = _SLOT_NONE
+    if length(all_pos_parts) == 1
+        pos_total = all_pos_parts[1]
+    elseif length(all_pos_parts) >= 2
+        pos_total = _compile_sum_products!(
+            c, Tuple{Int32, Int32}[(s, _SLOT_NONE) for s in all_pos_parts],
+        )
+    end
+
+    # Sum leftover negatives
+    neg_total = _SLOT_NONE
+    if !isempty(leftover_neg)
+        neg_total = _compile_sum_products!(c, leftover_neg)
+    end
+
+    # Final subtraction
+    if pos_total == _SLOT_NONE
+        return neg_total == _SLOT_NONE ? _SLOT_NONE : _tape_neg!(c, neg_total)
+    elseif neg_total == _SLOT_NONE
+        return pos_total
     else
-        return _tape_sub!(c, pos_sum, neg_sum)
+        return _tape_sub!(c, pos_total, neg_total)
     end
 end
 
@@ -1375,36 +1446,68 @@ function compile_to_instructions(
         remap[Int32(scratch_offset + k)] = Int32(input_block_size + k)
     end
 
-    # Create assignment slots as a contiguous range after scratch.
+    # Build assignment slots.
+    # Non-scratch results (constants/vars/params) → use source slot directly (no IDENTITY).
+    # First-use scratch outputs → remap to dedicated assignment slot.
+    # Duplicate scratch outputs → IDENTITY to copy into a new assignment slot.
     nassignments = length(result_slots)
-    assignments_start = input_block_size + nscratch + 1
-    assignments_range = range(assignments_start; length = nassignments)
-
-    # For first-use scratch outputs that are assignment results: override the remap
-    # so the instruction writes directly to the assignment slot (no IDENTITY needed).
-    # For duplicates or non-scratch results (constants/vars/params): add IDENTITY.
     scratch_output_set = Set{Int32}(instr.output for instr in compiler.instructions)
     claimed_slots = Dict{Int32, Int}()  # raw result_slot → use count
     identity_instructions = Instruction[]
 
+    # Track which assignments need scratch-based dedicated slots vs direct references
+    direct_assignments = Tuple{Int, Int32}[]       # (output_index, input_block_slot)
+    scratch_assignment_count = 0
+    scratch_assignment_indices = Int[]              # which output indices use scratch slots
+
     for (k, raw_slot) in enumerate(result_slots)
-        target_slot = Int32(assignments_start + k - 1)
         seen = get(claimed_slots, raw_slot, 0)
         is_scratch_output = raw_slot ∈ scratch_output_set
 
         if is_scratch_output && seen == 0
-            # First use: remap this scratch output directly to the assignment slot
+            # First use of a scratch output: gets a dedicated assignment slot
             claimed_slots[raw_slot] = 1
+            scratch_assignment_count += 1
+            push!(scratch_assignment_indices, k)
+        elseif is_scratch_output
+            # Duplicate scratch output: needs IDENTITY to copy
+            claimed_slots[raw_slot] = seen + 1
+            scratch_assignment_count += 1
+            push!(scratch_assignment_indices, k)
+        else
+            # Non-scratch output (constant/var/param): direct reference, no IDENTITY
+            claimed_slots[raw_slot] = seen + 1
+            remapped_source = Int32(get(remap, raw_slot, raw_slot))
+            push!(direct_assignments, (k, remapped_source))
+        end
+    end
+
+    # Assign contiguous scratch assignment slots
+    assignments_start = input_block_size + nscratch + 1
+    scratch_assignments_range = range(assignments_start; length = scratch_assignment_count)
+
+    # Now emit remaps and IDENTITYs for scratch-based assignments
+    claimed_slots_2 = Dict{Int32, Int}()
+    scratch_assign_k = 0
+    for output_k in scratch_assignment_indices
+        raw_slot = result_slots[output_k]
+        seen = get(claimed_slots_2, raw_slot, 0)
+        scratch_assign_k += 1
+        target_slot = Int32(assignments_start + scratch_assign_k - 1)
+
+        if seen == 0
+            # First use: remap scratch output directly to assignment slot
+            claimed_slots_2[raw_slot] = 1
             remap[raw_slot] = target_slot
         else
-            # Need IDENTITY: non-scratch (constant/var/param) or duplicate
-            claimed_slots[raw_slot] = seen + 1
+            # Duplicate: emit IDENTITY
+            claimed_slots_2[raw_slot] = seen + 1
             remapped_source = get(remap, raw_slot, raw_slot)
             push!(
                 identity_instructions, Instruction(
                     (remapped_source, remapped_source, remapped_source, remapped_source),
                     OpType.OP_IDENTITY, target_slot,
-                )
+                ),
             )
         end
     end
@@ -1431,13 +1534,23 @@ function compile_to_instructions(
 
     # Run optimizer and register allocator
     instructions_opt = _optimize_instruction_order(core_instructions)
-    instructions_final, space_needed, updated_assignments_range =
-        _reduce_space(instructions_opt, input_block_size, assignments_range)
+    instructions_final, space_needed, updated_scratch_range, updated_direct =
+        _reduce_space(
+        instructions_opt, input_block_size, scratch_assignments_range, direct_assignments,
+    )
 
-    # Build final assignments: (output_index, tape_slot)
+    # Build final assignments: combine scratch-based and direct assignments
     updated_assignments = Vector{Tuple{Int, Int}}(undef, nassignments)
-    for (k, tape_idx) in enumerate(updated_assignments_range)
-        updated_assignments[k] = (k, Int(tape_idx))
+
+    # Fill in scratch-based assignments from updated range
+    for (j, tape_idx) in enumerate(updated_scratch_range)
+        output_k = scratch_assignment_indices[j]
+        updated_assignments[output_k] = (output_k, Int(tape_idx))
+    end
+
+    # Fill in direct assignments (these point to input-block slots, no remapping needed)
+    for (output_k, tape_slot) in updated_direct
+        updated_assignments[output_k] = (output_k, Int(tape_slot))
     end
 
     # Add STOP instruction
@@ -1445,7 +1558,7 @@ function compile_to_instructions(
     push!(
         instructions_final, Instruction(
             (Int32(n), Int32(n), Int32(n), Int32(n)), OpType.OP_STOP, Int32(n),
-        )
+        ),
     )
 
     # Split assignments into u (function values) and U (Jacobian entries)

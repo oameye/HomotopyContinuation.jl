@@ -119,18 +119,24 @@ function _optimize_instruction_order(
 end
 
 """
-    _reduce_space(instructions, input_block_size, assignments)
+    _reduce_space(instructions, input_block_size, scratch_assignments, direct_assignments)
 
 Apply register allocation to compact the tape indices used by instructions,
 then remap all instruction inputs/outputs to the compacted indices.
+
+- `scratch_assignments`: `UnitRange{Int}` of tape slots that are scratch-based
+  assignment targets (need dedicated post-scratch slots).
+- `direct_assignments`: `Vector{Tuple{Int, Int32}}` of `(output_index, tape_slot)`
+  for assignments pointing directly to input-block slots (no register needed).
 """
 function _reduce_space(
         instructions::Vector{Instruction},
         input_block_size::Int,
-        assignments::UnitRange{Int},
+        scratch_assignments::UnitRange{Int},
+        direct_assignments::Vector{Tuple{Int, Int32}},
     )
-    index_map, space_needed, updated_assignments =
-        _index_compactification_mapping(instructions, input_block_size, assignments)
+    index_map, space_needed, updated_scratch_assignments =
+        _index_compactification_mapping(instructions, input_block_size, scratch_assignments)
 
     remapped = map(instructions) do instr
         new_input = ntuple(Val(4)) do k
@@ -144,7 +150,7 @@ function _reduce_space(
         Instruction(new_input, instr.op, new_output)
     end
 
-    return remapped, space_needed, updated_assignments
+    return remapped, space_needed, updated_scratch_assignments, direct_assignments
 end
 
 """
@@ -226,6 +232,6 @@ function _index_compactification_mapping(
         index_map[Int32(orig_idx)] = Int32(input_block_size + num_scratch + k)
     end
 
-    tape_space_needed = last(updated_assignments)
+    tape_space_needed = isempty(updated_assignments) ? Int(max_reg) : last(updated_assignments)
     return index_map, tape_space_needed, updated_assignments
 end

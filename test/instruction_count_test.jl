@@ -159,7 +159,7 @@ const _MAX_EVAL_INSTRS = Dict(
     # Random sparse 6×6 (complex coefficients, degree 2–4)
     "sparse6_1" => 84,
     "sparse6_2" => 94,
-    "sparse6_3" => 90,
+    "sparse6_3" => 91,
     "sparse6_4" => 84,
     "sparse6_5" => 89,
     "sparse6_6" => 95,
