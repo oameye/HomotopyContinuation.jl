@@ -226,4 +226,64 @@ using CommonSolve: CommonSolve
             @test nsolutions(r_td) == nsolutions(r_ph)
         end
     end
+
+    # ── Parameter homotopy tests ──────────────────────────────────────────
+
+    @testset "Parameter homotopy: basic" begin
+        @polyvar x y a b
+        F = System([x^2 + a * y - 1, x * y - b]; parameters = [a, b])
+        # Solve the non-parametric version at a=1, b=0.5 to get start solutions
+        F_fixed = System([x^2 + 1.0 * y - 1, x * y - 0.5])
+        r1 = solve(F_fixed)
+        @test nsolutions(r1) >= 2
+        # Track to new parameters a=2, b=1
+        r2 = solve(
+            F, solutions(r1);
+            start_parameters = [1.0, 0.5],
+            target_parameters = [2.0, 1.0],
+        )
+        @test nsolutions(r2) >= 2
+        # Verify solutions satisfy the target system
+        for sol in solutions(r2)
+            @test abs(sol[1]^2 + 2.0 * sol[2] - 1) < 1.0e-6
+            @test abs(sol[1] * sol[2] - 1.0) < 1.0e-6
+        end
+    end
+
+    @testset "Parameter homotopy: x²-a, y²-a" begin
+        @polyvar x y a
+        F = System([x^2 - a, y^2 - a]; parameters = [a])
+        # Solve at a=1
+        F_fixed = System([x^2 - 1, y^2 - 1])
+        r1 = solve(F_fixed)
+        @test nsolutions(r1) == 4
+        # Track to a=4
+        r2 = solve(
+            F, solutions(r1);
+            start_parameters = [1.0],
+            target_parameters = [4.0],
+        )
+        @test nsolutions(r2) == 4
+        rsols = real_solutions(r2)
+        @test length(rsols) == 4
+        for sol in rsols
+            @test abs(sol[1]^2 - 4) < 1.0e-6
+            @test abs(sol[2]^2 - 4) < 1.0e-6
+        end
+    end
+
+    @testset "Parameter homotopy: CommonSolve interface" begin
+        @polyvar x y a
+        F = System([x^2 - a, y - 1]; parameters = [a])
+        F_fixed = System([x^2 - 1, y - 1])
+        r1 = solve(F_fixed)
+        cache = CommonSolve.init(
+            F, solutions(r1);
+            start_parameters = [1.0],
+            target_parameters = [4.0],
+        )
+        @test cache isa SolveCache
+        r2 = CommonSolve.solve!(cache)
+        @test nsolutions(r2) >= 1
+    end
 end

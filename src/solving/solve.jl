@@ -89,3 +89,70 @@ solutions(result)
 function solve(F::System, alg::Polyhedral)::Result
     return CommonSolve.solve!(CommonSolve.init(F, alg))
 end
+
+# ── Parameter homotopy: solve(F, starts; start_parameters, target_parameters) ─
+
+"""
+    solve(F::System, starts; start_parameters, target_parameters, seed, tracker_options)
+
+Track solutions from `start_parameters` to `target_parameters` using parameter homotopy.
+
+The system `F` must have been constructed with `parameters` — the homotopy interpolates
+`p(t) = t·start_parameters + (1-t)·target_parameters` from t=1 to t=0.
+
+# Examples
+```julia
+@polyvar x y a b
+F = System([x^2 + a*y - 1, x*y - b]; parameters=[a, b])
+
+# Find solutions at parameters [1, 2]
+result₁ = solve(F, TotalDegree(); start_parameters=[1.0, 2.0])
+
+# Track those solutions to new parameters [3, 4]
+result₂ = solve(F, solutions(result₁);
+    start_parameters=[1.0, 2.0],
+    target_parameters=[3.0, 4.0],
+)
+```
+"""
+function solve(
+        F::System,
+        starts::AbstractVector{<:AbstractVector{<:Number}};
+        start_parameters::AbstractVector{<:Number},
+        target_parameters::AbstractVector{<:Number},
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        tracker_options::TrackerOptions = TrackerOptions(),
+    )::Result
+    return CommonSolve.solve!(
+        CommonSolve.init(
+            F, starts;
+            start_parameters = start_parameters,
+            target_parameters = target_parameters,
+            seed = seed,
+            tracker_options = tracker_options,
+        ),
+    )
+end
+
+function CommonSolve.init(
+        F::System,
+        starts::AbstractVector{<:AbstractVector{<:Number}};
+        start_parameters::AbstractVector{<:Number},
+        target_parameters::AbstractVector{<:Number},
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        tracker_options::TrackerOptions = TrackerOptions(),
+    )::SolveCache
+    @assert nparameters(F) > 0 "System must have parameters for parameter homotopy"
+    @assert length(start_parameters) == nparameters(F) "start_parameters length must match nparameters"
+    @assert length(target_parameters) == nparameters(F) "target_parameters length must match nparameters"
+
+    sp = ComplexF64.(start_parameters)
+    tp = ComplexF64.(target_parameters)
+    H = CoefficientHomotopy(F.evaluator, sp, tp)
+    heval = HomotopyEvaluator(H)
+    tracker = Tracker(heval; options = tracker_options)
+
+    start_sols = [Vector{ComplexF64}(ComplexF64.(s)) for s in starts]
+
+    return SolveCache(tracker, start_sols, seed)
+end
