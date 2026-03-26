@@ -96,7 +96,7 @@ Before merging any PR:
 - **`NTuple{N,T}` for small fixed-size collections.** When the count is known at compile time and small (e.g., `tx_norm::NTuple{4,Float64}`).
 - **Enums over Symbols.** Use `EnumX.@enumx` for return codes and state machine states — scoped (`MyEnum.Value`), type-safe, faster than Symbol comparison.
 - **`FSVec{T}` / `FSMat{T}` for pre-allocated buffers.** Defined as `FixedSizeArray{T,1,Memory{T}}` / `FixedSizeArray{T,2,Memory{T}}` — same concrete type regardless of size, cannot be resized. **WARNING:** `FixedSizeVector{T}` and `FixedSizeMatrix{T}` are NOT concrete types (the `Mem` parameter is free). Always use `FSVec{T}` / `FSMat{T}` from the main module for struct fields, never `FixedSizeVector{T}` directly.
-- **`AbstractVector` / `AbstractMatrix` in user-facing interfaces.** The `AbstractSystem`/`AbstractHomotopy` contracts use abstract types so users don't need to import FixedSizeArrays.
+- **`AbstractVector` / `AbstractMatrix` only where truly needed.** Use them in the `AbstractSystem`/`AbstractHomotopy` interface contracts (so users don't need to import FixedSizeArrays) and in public `execute!` methods that must accept both `Vector` and `FSVec`. Prefer concrete types everywhere else.
 
 ### Performance
 

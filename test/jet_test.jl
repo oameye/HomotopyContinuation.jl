@@ -18,7 +18,6 @@ using HomotopyContinuationNext
             msg = string(r)
             !contains(msg, "variables") || !contains(msg, "AbstractPolynomialLike")
         end
-        @show real_reports
         @test length(real_reports) == 0
     end
 end

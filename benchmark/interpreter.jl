@@ -1,25 +1,16 @@
-# Phase 2: Interpreter pipeline benchmarks
-# Measures tape execution overhead and compilation cost.
+# Interpreter pipeline benchmarks
+# Measures tape execution, Jacobian, Taylor, and build time.
 
 using BenchmarkTools
 using DynamicPolynomials: @polyvar
-using HomotopyContinuationNext: build_interpreter, build_jacobian_interpreter, execute!
+using HomotopyContinuationNext:
+    build_interpreter, build_jacobian_interpreter, build_taylor_interpreter,
+    execute!, execute_taylor!, TaylorVector
 
 function benchmark_interpreter!(SUITE::BenchmarkGroup)
     SUITE["interpreter"] = BenchmarkGroup()
 
-    # --- Execution: tape dispatch overhead at different system sizes ---
-    # Small (2 vars, 2 polys): dominated by dispatch overhead per instruction
-    # Medium (4 vars, 4 polys): Katsura-3, typical HC workload
-    # Larger (5 vars, 5 polys): Cyclic-5, more instructions per evaluation
-
-    @polyvar x y
-    F_small = [x^2 + y, x * y - 1]
-    I_small = build_interpreter(F_small)
-    u_small = zeros(ComplexF64, 2)
-    x_small = ComplexF64[1.5, -0.5]
-    SUITE["interpreter"]["execute_2x2"] = @benchmarkable execute!($u_small, $I_small, $x_small, $(ComplexF64[]))
-
+    # --- Systems ---
     @polyvar x0 x1 x2 x3
     F_katsura = [
         x0 + 2x1 + 2x2 + 2x3 - 1,
@@ -27,29 +18,46 @@ function benchmark_interpreter!(SUITE::BenchmarkGroup)
         2x0 * x1 + 2x1 * x2 + 2x2 * x3 - x1,
         x1^2 + 2x0 * x2 + 2x1 * x3 - x2,
     ]
+
+    @polyvar c1 c2 c3 c4 c5 c6 c7
+    cv = [c1, c2, c3, c4, c5, c6, c7]
+    F_cyclic7 = [
+        [sum(prod(cv[mod1(j + k, 7)] for k in 0:(d - 1)) for j in 1:7) for d in 1:6]
+        [prod(cv) - 1]
+    ]
+
+    # --- Eval ---
     I_katsura = build_interpreter(F_katsura)
     u_katsura = zeros(ComplexF64, 4)
     x_katsura = ComplexF64.(randn(4))
-    SUITE["interpreter"]["execute_katsura3"] = @benchmarkable execute!($u_katsura, $I_katsura, $x_katsura, $(ComplexF64[]))
+    SUITE["interpreter"]["eval_katsura3"] = @benchmarkable execute!($u_katsura, $I_katsura, $x_katsura, $(ComplexF64[]))
 
-    @polyvar x1 x2 x3 x4 x5
-    F_cyclic = [
-        x1 + x2 + x3 + x4 + x5,
-        x1 * x2 + x2 * x3 + x3 * x4 + x4 * x5 + x5 * x1,
-        x1 * x2 * x3 + x2 * x3 * x4 + x3 * x4 * x5 + x4 * x5 * x1 + x5 * x1 * x2,
-        x1 * x2 * x3 * x4 + x2 * x3 * x4 * x5 + x3 * x4 * x5 * x1 +
-            x4 * x5 * x1 * x2 + x5 * x1 * x2 * x3,
-        x1 * x2 * x3 * x4 * x5 - 1,
-    ]
-    I_cyclic = build_interpreter(F_cyclic)
-    u_cyclic = zeros(ComplexF64, 5)
-    x_cyclic = ComplexF64.(randn(5))
-    SUITE["interpreter"]["execute_cyclic5"] = @benchmarkable execute!($u_cyclic, $I_cyclic, $x_cyclic, $(ComplexF64[]))
+    I_cyc7 = build_interpreter(F_cyclic7)
+    u_cyc7 = zeros(ComplexF64, 7)
+    x_cyc7 = ComplexF64.(randn(7))
+    SUITE["interpreter"]["eval_cyclic7"] = @benchmarkable execute!($u_cyc7, $I_cyc7, $x_cyc7, $(ComplexF64[]))
 
-    # --- Execution with Jacobian: more work per call ---
+    # --- Jacobian ---
     I_jac = build_jacobian_interpreter(F_katsura)
     U_katsura = zeros(ComplexF64, 4, 4)
-    SUITE["interpreter"]["execute_jac_katsura3"] = @benchmarkable execute!($u_katsura, $U_katsura, $I_jac, $x_katsura, $(ComplexF64[]))
+    SUITE["interpreter"]["jac_katsura3"] = @benchmarkable execute!($u_katsura, $U_katsura, $I_jac, $x_katsura, $(ComplexF64[]))
+
+    I_jac7 = build_jacobian_interpreter(F_cyclic7)
+    U_cyc7 = zeros(ComplexF64, 7, 7)
+    SUITE["interpreter"]["jac_cyclic7"] = @benchmarkable execute!($u_cyc7, $U_cyc7, $I_jac7, $x_cyc7, $(ComplexF64[]))
+
+    # --- Taylor ---
+    I_taylor = build_taylor_interpreter(F_katsura, Val(3))
+    tx = TaylorVector{4, ComplexF64}(4)
+    for i in 1:4
+        tx[i] = ntuple(k -> randn(ComplexF64), Val(4))
+    end
+    u_taylor = zeros(ComplexF64, 4)
+    p_empty = ComplexF64[]
+    SUITE["interpreter"]["taylor_katsura3"] = @benchmarkable execute_taylor!($u_taylor, Val(3), $I_taylor, $tx, $p_empty)
+
+    # --- Build time ---
+    SUITE["interpreter"]["build_jac_katsura3"] = @benchmarkable build_jacobian_interpreter($F_katsura)
 
     return SUITE
 end
