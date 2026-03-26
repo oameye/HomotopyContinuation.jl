@@ -142,9 +142,9 @@ const _MAX_EVAL_INSTRS = Dict(
     # Cyclic (real integer coefficients)
     "cyclic_3" => 6,
     "cyclic_4" => 11,
-    "cyclic_5" => 20,
-    "cyclic_6" => 29,
-    "cyclic_7" => 40,
+    "cyclic_5" => 19,
+    "cyclic_6" => 28,
+    "cyclic_7" => 38,
     # Chain (real integer coefficients, shared structure)
     "chain_3" => 17,
     "chain_4" => 23,
@@ -153,22 +153,22 @@ const _MAX_EVAL_INSTRS = Dict(
     "chain_7" => 39,
     # Dense quadratic (complex coefficients)
     "dense_quad_3" => 28,
-    "dense_quad_4" => 54,
-    "dense_quad_5" => 94,
-    "dense_quad_6" => 146,
+    "dense_quad_4" => 52,
+    "dense_quad_5" => 92,
+    "dense_quad_6" => 138,
     # Random sparse 6×6 (complex coefficients, degree 2–4)
-    "sparse6_1" => 84,
-    "sparse6_2" => 94,
+    "sparse6_1" => 83,
+    "sparse6_2" => 96,
     "sparse6_3" => 91,
-    "sparse6_4" => 84,
-    "sparse6_5" => 89,
-    "sparse6_6" => 95,
-    "sparse6_7" => 90,
-    "sparse6_8" => 94,
+    "sparse6_4" => 82,
+    "sparse6_5" => 85,
+    "sparse6_6" => 96,
+    "sparse6_7" => 87,
+    "sparse6_8" => 90,
     # Random sparse 8×8 (complex coefficients, degree 2–4)
-    "sparse8_1" => 165,
-    "sparse8_2" => 172,
-    "sparse8_3" => 174,
+    "sparse8_1" => 162,
+    "sparse8_2" => 168,
+    "sparse8_3" => 170,
     "sparse8_4" => 170,
 )
 

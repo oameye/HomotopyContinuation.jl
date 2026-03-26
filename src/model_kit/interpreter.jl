@@ -46,56 +46,97 @@ end
 # avoiding Julia 1.12 world age issues with @generated accessing
 # helpers (nested_ifs, op_call, etc.) defined in the same compilation unit.
 
-function _build_execute_instructions_inner(level::Int = 0)
-    op_types = collect(instances(OpType.T))
-    arity1 = filter(op -> arity(op) == 1, op_types)
-    arity2 = filter(op -> arity(op) == 2 && op !== OpType.OP_POW_INT, op_types)
-    arity3 = filter(op -> arity(op) == 3, op_types)
-    arity4 = filter(op -> arity(op) == 4, op_types)
+# Eval tapes are dominated by fused quaternary ops on the current benchmark set.
+const _EXECUTE_OP_ORDER_EVAL = (
+    OpType.OP_MULMULADD,
+    OpType.OP_MUL,
+    OpType.OP_ADD4,
+    OpType.OP_MULADD,
+    OpType.OP_ADD3,
+    OpType.OP_ADD,
+    OpType.OP_SUB,
+    OpType.OP_SQR,
+    OpType.OP_MULMULSUB,
+    OpType.OP_SUBMUL,
+    OpType.OP_MULSUB,
+    OpType.OP_DIV,
+    OpType.OP_MUL4,
+    OpType.OP_MUL3,
+    OpType.OP_CB,
+    OpType.OP_NEG,
+    OpType.OP_INV,
+    OpType.OP_INVSQR,
+    OpType.OP_IDENTITY,
+    OpType.OP_INV_NOT_ZERO,
+    OpType.OP_SQRT,
+    OpType.OP_SIN,
+    OpType.OP_COS,
+    OpType.OP_POW_INT,
+)
 
-    # Order branches by frequency in polynomial evaluation:
-    # MUL, MULADD, MULMULADD, ADD dominate typical tapes.
-    # Put high-frequency ops first to minimize branch comparisons.
-    # Priority order: arity2 (MUL, ADD, SUB) → arity3 (MULADD, MULSUB) →
-    #                 arity4 (MULMULADD) → arity1 (SQR, CB, NEG) → POW_INT
-    branches = [
-        map(arity2) do op
-            (
-                :(op == $(op)), quote
-                    t_2 = tape[arg_2]
-                    tape[i] = $(op_call(op))(t_1, t_2)
-                end,
-            )
+# Jacobian tapes skew more toward MUL/ADD/SUB/SQR-heavy instruction mixes.
+const _EXECUTE_OP_ORDER_JAC = (
+    OpType.OP_MUL,
+    OpType.OP_MULMULADD,
+    OpType.OP_MULADD,
+    OpType.OP_ADD4,
+    OpType.OP_ADD,
+    OpType.OP_ADD3,
+    OpType.OP_SQR,
+    OpType.OP_SUB,
+    OpType.OP_MULMULSUB,
+    OpType.OP_SUBMUL,
+    OpType.OP_MULSUB,
+    OpType.OP_DIV,
+    OpType.OP_MUL4,
+    OpType.OP_MUL3,
+    OpType.OP_CB,
+    OpType.OP_NEG,
+    OpType.OP_INV,
+    OpType.OP_INVSQR,
+    OpType.OP_IDENTITY,
+    OpType.OP_INV_NOT_ZERO,
+    OpType.OP_SQRT,
+    OpType.OP_SIN,
+    OpType.OP_COS,
+    OpType.OP_POW_INT,
+)
+
+function _execute_branch(op::OpType.T)
+    cond = :(op == $(op))
+    code = if op == OpType.OP_POW_INT
+        :(tape[i] = $(op_call(op))(t_1, arg_2))
+    elseif arity(op) == 1
+        :(tape[i] = $(op_call(op))(t_1))
+    elseif arity(op) == 2
+        quote
+            t_2 = tape[arg_2]
+            tape[i] = $(op_call(op))(t_1, t_2)
         end
-        map(arity3) do op
-            (
-                :(op == $(op)), quote
-                    t_2 = tape[arg_2]
-                    t_3 = tape[arg_3]
-                    tape[i] = $(op_call(op))(t_1, t_2, t_3)
-                end,
-            )
+    elseif arity(op) == 3
+        quote
+            t_2 = tape[arg_2]
+            t_3 = tape[arg_3]
+            tape[i] = $(op_call(op))(t_1, t_2, t_3)
         end
-        map(arity4) do op
-            (
-                :(op == $(op)), quote
-                    t_2 = tape[arg_2]
-                    t_3 = tape[arg_3]
-                    t_4 = tape[arg_4]
-                    tape[i] = $(op_call(op))(t_1, t_2, t_3, t_4)
-                end,
-            )
+    else
+        quote
+            t_2 = tape[arg_2]
+            t_3 = tape[arg_3]
+            t_4 = tape[arg_4]
+            tape[i] = $(op_call(op))(t_1, t_2, t_3, t_4)
         end
-        map(arity1) do op
-            (:(op == $(op)), :(tape[i] = $(op_call(op))(t_1)))
-        end
-        [(:(op == $(OpType.OP_POW_INT)), :(tape[i] = $(op_call(OpType.OP_POW_INT))(t_1, arg_2)))]
-    ]
+    end
+    return cond, code
+end
+
+function _build_execute_instructions_inner(op_order, level::Int = 0)
+    branches = [_execute_branch(op) for op in op_order]
 
     # Add one level of instruction recursion to reduce loop overhead
     if level < 1
         branches = map(branches) do (cond, code)
-            (cond, :($code; $(_build_execute_instructions_inner(level + 1))))
+            (cond, :($code; $(_build_execute_instructions_inner(op_order, level + 1))))
         end
     end
 
@@ -117,12 +158,28 @@ function _build_execute_instructions_inner(level::Int = 0)
     end
 end
 
-@generated function execute_instructions!(tape::AbstractVector, instructions::Vector{Instruction})
+@generated function execute_instructions_eval!(
+        tape::AbstractVector,
+        instructions::Vector{Instruction},
+    )
     return quote
         Base.@_propagate_inbounds_meta
         k = 0
         while true
-            $(_build_execute_instructions_inner())
+            $(_build_execute_instructions_inner(_EXECUTE_OP_ORDER_EVAL))
+        end
+    end
+end
+
+@generated function execute_instructions_jac!(
+        tape::AbstractVector,
+        instructions::Vector{Instruction},
+    )
+    return quote
+        Base.@_propagate_inbounds_meta
+        k = 0
+        while true
+            $(_build_execute_instructions_inner(_EXECUTE_OP_ORDER_JAC))
         end
     end
 end
@@ -190,7 +247,7 @@ Base.@propagate_inbounds function execute!(
     isempty(I.sequence.parameters_range) ||
         error("Interpreter expects parameters; call execute!(u, I, x, p)")
     _load_inputs!(I.tape, I.sequence, x)
-    @inbounds execute_instructions!(I.tape, I.sequence.instructions)
+    @inbounds execute_instructions_eval!(I.tape, I.sequence.instructions)
     _extract_u!(u, I.tape, I.sequence)
     return u
 end
@@ -202,7 +259,7 @@ Base.@propagate_inbounds function execute!(
         p::AbstractVector,
     )
     _load_inputs!(I.tape, I.sequence, x, p)
-    @inbounds execute_instructions!(I.tape, I.sequence.instructions)
+    @inbounds execute_instructions_eval!(I.tape, I.sequence.instructions)
     _extract_u!(u, I.tape, I.sequence)
     return u
 end
@@ -216,7 +273,7 @@ Base.@propagate_inbounds function execute!(
     isempty(I.sequence.parameters_range) ||
         error("Interpreter expects parameters; call execute!(u, U, I, x, p)")
     _load_inputs!(I.tape, I.sequence, x)
-    @inbounds execute_instructions!(I.tape, I.sequence.instructions)
+    @inbounds execute_instructions_jac!(I.tape, I.sequence.instructions)
     _extract_U!(U, I.tape, I.sequence)
     _extract_u!(u, I.tape, I.sequence)
     return u
@@ -230,7 +287,7 @@ Base.@propagate_inbounds function execute!(
         p::AbstractVector,
     )
     _load_inputs!(I.tape, I.sequence, x, p)
-    @inbounds execute_instructions!(I.tape, I.sequence.instructions)
+    @inbounds execute_instructions_jac!(I.tape, I.sequence.instructions)
     _extract_U!(U, I.tape, I.sequence)
     _extract_u!(u, I.tape, I.sequence)
     return u
@@ -248,62 +305,45 @@ function taylor_op_call(op::OpType.T)::Symbol
     return Symbol(:taylor_, op_call(op))
 end
 
-function _build_execute_taylor_instructions_inner()
-    op_types = collect(instances(OpType.T))
-    arity1 = filter(op -> arity(op) == 1, op_types)
-    arity2 = filter(op -> arity(op) == 2 && op !== OpType.OP_POW_INT, op_types)
-    arity3 = filter(op -> arity(op) == 3, op_types)
-    arity4 = filter(op -> arity(op) == 4, op_types)
+function _execute_taylor_branch(op::OpType.T)
+    cond = :(op == $(op))
+    code = if op == OpType.OP_POW_INT
+        quote
+            t_1 = tape[arg_1]
+            tape[i] = $(taylor_op_call(op))(t_1, arg_2)
+        end
+    elseif arity(op) == 1
+        quote
+            t_1 = tape[arg_1]
+            tape[i] = $(taylor_op_call(op))(t_1)
+        end
+    elseif arity(op) == 2
+        quote
+            t_1 = tape[arg_1]
+            t_2 = tape[arg_2]
+            tape[i] = $(taylor_op_call(op))(t_1, t_2)
+        end
+    elseif arity(op) == 3
+        quote
+            t_1 = tape[arg_1]
+            t_2 = tape[arg_2]
+            t_3 = tape[arg_3]
+            tape[i] = $(taylor_op_call(op))(t_1, t_2, t_3)
+        end
+    else
+        quote
+            t_1 = tape[arg_1]
+            t_2 = tape[arg_2]
+            t_3 = tape[arg_3]
+            t_4 = tape[arg_4]
+            tape[i] = $(taylor_op_call(op))(t_1, t_2, t_3, t_4)
+        end
+    end
+    return cond, code
+end
 
-    # Same frequency-based ordering as execute_instructions!
-    branches = [
-        map(arity2) do op
-            (
-                :(op == $(op)), quote
-                    t_1 = tape[arg_1]
-                    t_2 = tape[arg_2]
-                    tape[i] = $(taylor_op_call(op))(t_1, t_2)
-                end,
-            )
-        end
-        map(arity3) do op
-            (
-                :(op == $(op)), quote
-                    t_1 = tape[arg_1]
-                    t_2 = tape[arg_2]
-                    t_3 = tape[arg_3]
-                    tape[i] = $(taylor_op_call(op))(t_1, t_2, t_3)
-                end,
-            )
-        end
-        map(arity4) do op
-            (
-                :(op == $(op)), quote
-                    t_1 = tape[arg_1]
-                    t_2 = tape[arg_2]
-                    t_3 = tape[arg_3]
-                    t_4 = tape[arg_4]
-                    tape[i] = $(taylor_op_call(op))(t_1, t_2, t_3, t_4)
-                end,
-            )
-        end
-        map(arity1) do op
-            (
-                :(op == $(op)), quote
-                    t_1 = tape[arg_1]
-                    tape[i] = $(taylor_op_call(op))(t_1)
-                end,
-            )
-        end
-        [
-            (
-                :(op == $(OpType.OP_POW_INT)), quote
-                    t_1 = tape[arg_1]
-                    tape[i] = $(taylor_op_call(OpType.OP_POW_INT))(t_1, arg_2)
-                end,
-            ),
-        ]
-    ]
+function _build_execute_taylor_instructions_inner()
+    branches = [_execute_taylor_branch(op) for op in _EXECUTE_OP_ORDER_EVAL]
 
     return quote
         Base.@_propagate_inbounds_meta

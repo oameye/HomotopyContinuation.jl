@@ -1,4 +1,5 @@
 using Test
+import HomotopyContinuationNext as Next
 using HomotopyContinuationNext: Interpreter, InstructionSequence, Instruction,
     OpType, execute!, execute_taylor!,
     compile_to_instructions, SExpr, SVar, SParam, SConst, SAdd, SMul, SPow, cse,
@@ -95,5 +96,18 @@ end
         @test u[1] ≈ 4.0 + 0im
         execute_taylor!(u, Val(2), I_taylor, tx, ComplexF64[])
         @test u[1] ≈ 4.0 + 0im
+    end
+
+    @testset "SExpr constructors copy args" begin
+        args = SExpr[SVar(1), SVar(2)]
+        add = SAdd(args)
+        mul = SMul(args)
+        func = Next.SFuncSym(Next.SFuncKind.SFUNC_ADD, args)
+
+        push!(args, SVar(3))
+
+        @test length(add.args) == 2
+        @test length(mul.args) == 2
+        @test length(func.args) == 2
     end
 end

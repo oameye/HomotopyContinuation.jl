@@ -160,15 +160,27 @@ function compare_case(name, specs)
     t_next_jac = @belapsed Next.execute!($u_next, $U_next, $J_next, $x)
     t_hc_jac = @belapsed HC.ModelKit.evaluate_and_jacobian!($u_hc, $U_hc, $IS_hc, $x)
 
+    # Build time: interpreter construction (CSE + compilation)
+    t_next_build = @belapsed build_interpreter($next_polys)
+    t_next_build_jac = @belapsed build_jacobian_interpreter($next_polys)
+    t_hc_build = @belapsed InterpretedSystem(System($hc_polys))
+
     println(
         name,
         ": eval_ratio=", round(t_hc_eval / t_next_eval; digits = 2),
         " jac_ratio=", round(t_hc_jac / t_next_jac; digits = 2),
         " eval_ns=", round(t_next_eval * 1.0e9; digits = 1), "/", round(t_hc_eval * 1.0e9; digits = 1),
         " jac_ns=", round(t_next_jac * 1.0e9; digits = 1), "/", round(t_hc_jac * 1.0e9; digits = 1),
+        " build_us=", round(t_next_build * 1.0e6; digits = 0), "/", round(t_next_build_jac * 1.0e6; digits = 0),
+        "/", round(t_hc_build * 1.0e6; digits = 0),
         " err=", max(eval_err, jac_err),
     )
-    return (eval_ratio = t_hc_eval / t_next_eval, jac_ratio = t_hc_jac / t_next_jac)
+    return (
+        eval_ratio = t_hc_eval / t_next_eval,
+        jac_ratio = t_hc_jac / t_next_jac,
+        build_eval_ratio = t_hc_build / t_next_build,
+        build_jac_ratio = t_hc_build / t_next_build_jac,
+    )
 end
 
 function summarize(results, field)
@@ -205,6 +217,8 @@ end
 println("\n" * "="^72)
 summarize(results, :eval_ratio)
 summarize(results, :jac_ratio)
+summarize(results, :build_eval_ratio)
+summarize(results, :build_jac_ratio)
 println("="^72)
 println("ratio > 1.0 means Next is faster")
 println("="^72)

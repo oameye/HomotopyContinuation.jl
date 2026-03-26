@@ -28,25 +28,51 @@ struct STmp <: SExpr
     id::Int
 end
 
-"""Addition: sum of args (n-ary, n >= 2)."""
+"""Addition: sum of args (n-ary, n >= 2). Hash is cached at construction."""
 struct SAdd <: SExpr
     args::Vector{SExpr}
+    _hash::UInt
+end
+function SAdd(args::AbstractVector)
+    vargs = collect(SExpr, args)
+    h = hash(:SAdd, zero(UInt))
+    for a in vargs
+        h = hash(a, h)
+    end
+    return SAdd(vargs, h)
 end
 
-"""Multiplication: product of args (n-ary, n >= 2)."""
+"""Multiplication: product of args (n-ary, n >= 2). Hash is cached at construction."""
 struct SMul <: SExpr
     args::Vector{SExpr}
+    _hash::UInt
+end
+function SMul(args::AbstractVector)
+    vargs = collect(SExpr, args)
+    h = hash(:SMul, zero(UInt))
+    for a in vargs
+        h = hash(a, h)
+    end
+    return SMul(vargs, h)
 end
 
-"""Integer power: base^exp where exp is a positive integer."""
+"""Integer power: base^exp where exp is a positive integer. Hash is cached at construction."""
 struct SPow <: SExpr
     base::SExpr
     exp::Int
+    _hash::UInt
+end
+function SPow(base::SExpr, exp::Int)
+    return SPow(base, exp, hash(exp, hash(base, hash(:SPow, zero(UInt)))))
 end
 
-"""Negation: -arg."""
+"""Negation: -arg. Hash is cached at construction."""
 struct SNeg <: SExpr
     arg::SExpr
+    _hash::UInt
+end
+function SNeg(arg::SExpr)
+    return SNeg(arg, hash(arg, hash(:SNeg, zero(UInt))))
 end
 
 """
@@ -68,6 +94,15 @@ Corresponds to SymEngine's FunctionSymbol.
 struct SFuncSym <: SExpr
     kind::SFuncKind.T
     args::Vector{SExpr}
+    _hash::UInt
+end
+function SFuncSym(kind::SFuncKind.T, args::AbstractVector{<:SExpr})
+    vargs = collect(SExpr, args)
+    h = hash(kind, hash(:SFuncSym, zero(UInt)))
+    for a in vargs
+        h = hash(a, h)
+    end
+    return SFuncSym(kind, vargs, h)
 end
 
 ## ── Hashing and equality ────────────────────────────────────────────────────
@@ -85,48 +120,39 @@ function Base.hash(e::STmp, h::UInt)::UInt
     return hash(e.id, hash(:STmp, h))
 end
 function Base.hash(e::SAdd, h::UInt)::UInt
-    h = hash(:SAdd, h)
-    for a in e.args
-        h = hash(a, h)
-    end
-    return h
+    return hash(e._hash, h)
 end
 function Base.hash(e::SMul, h::UInt)::UInt
-    h = hash(:SMul, h)
-    for a in e.args
-        h = hash(a, h)
-    end
-    return h
+    return hash(e._hash, h)
 end
 function Base.hash(e::SPow, h::UInt)::UInt
-    return hash(e.exp, hash(e.base, hash(:SPow, h)))
+    return hash(e._hash, h)
 end
 function Base.hash(e::SNeg, h::UInt)::UInt
-    return hash(e.arg, hash(:SNeg, h))
+    return hash(e._hash, h)
 end
 function Base.hash(e::SFuncSym, h::UInt)::UInt
-    h = hash(e.kind, hash(:SFuncSym, h))
-    for a in e.args
-        h = hash(a, h)
-    end
-    return h
+    return hash(e._hash, h)
 end
 
 Base.:(==)(a::SConst, b::SConst) = a.val == b.val
 Base.:(==)(a::SVar, b::SVar) = a.idx == b.idx
 Base.:(==)(a::SParam, b::SParam) = a.idx == b.idx
 Base.:(==)(a::STmp, b::STmp) = a.id == b.id
-Base.:(==)(a::SPow, b::SPow) = a.exp == b.exp && a.base == b.base
-Base.:(==)(a::SNeg, b::SNeg) = a.arg == b.arg
+Base.:(==)(a::SPow, b::SPow) = a._hash == b._hash && a.exp == b.exp && a.base == b.base
+Base.:(==)(a::SNeg, b::SNeg) = a._hash == b._hash && a.arg == b.arg
 function Base.:(==)(a::SAdd, b::SAdd)
+    a._hash == b._hash || return false
     length(a.args) == length(b.args) || return false
     return all(i -> a.args[i] == b.args[i], eachindex(a.args))
 end
 function Base.:(==)(a::SMul, b::SMul)
+    a._hash == b._hash || return false
     length(a.args) == length(b.args) || return false
     return all(i -> a.args[i] == b.args[i], eachindex(a.args))
 end
 function Base.:(==)(a::SFuncSym, b::SFuncSym)
+    a._hash == b._hash || return false
     a.kind == b.kind || return false
     length(a.args) == length(b.args) || return false
     return all(i -> a.args[i] == b.args[i], eachindex(a.args))
