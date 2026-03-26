@@ -26,6 +26,16 @@ Base.iterate(seq::InstructionSequence, state) = iterate(seq.instructions, state)
 
 ## Internal helpers
 
+"""Remap a single instruction's inputs/outputs through a Dict, preserving immediate-value inputs."""
+function _remap_instruction(instr::Instruction, remap::Dict{Int32, Int32}; output_fallback::Bool = true)::Instruction
+    new_input = ntuple(Val(4)) do k
+        should_use_index_not_reference(instr.op, k) && return instr.input[k]
+        Int32(get(remap, instr.input[k], instr.input[k]))
+    end
+    new_output = output_fallback ? get(remap, instr.output, instr.output) : Int32(remap[instr.output])
+    return Instruction(new_input, instr.op, new_output)
+end
+
 """
     _optimize_instruction_order(instructions)
 
@@ -136,17 +146,7 @@ function _reduce_space(
     index_map, space_needed, updated_scratch_assignments =
         _index_compactification_mapping(instructions, input_block_size, scratch_assignments)
 
-    remapped = map(instructions) do instr
-        new_input = ntuple(Val(4)) do k
-            if should_use_index_not_reference(instr.op, k)
-                instr.input[k]
-            else
-                Int32(get(index_map, instr.input[k], instr.input[k]))
-            end
-        end
-        new_output = Int32(index_map[instr.output])
-        Instruction(new_input, instr.op, new_output)
-    end
+    remapped = map(instr -> _remap_instruction(instr, index_map; output_fallback = false), instructions)
 
     return remapped, space_needed, updated_scratch_assignments, direct_assignments
 end

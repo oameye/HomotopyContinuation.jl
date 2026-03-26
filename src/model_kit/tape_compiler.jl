@@ -61,35 +61,11 @@ function _get_constant_slot!(c::TapeCompiler, val::ComplexF64)::Int32
     return slot
 end
 
-"""Emit an instruction and return the output tape slot."""
-function _emit!(c::TapeCompiler, op::OpType.T, a1::Int32)::Int32
+"""Emit an instruction and return the output tape slot. Unused input slots are filled with the last provided arg."""
+function _emit!(c::TapeCompiler, op::OpType.T, a1::Int32, a2::Int32 = a1, a3::Int32 = a2, a4::Int32 = a3)::Int32
     c.next_slot += Int32(1)
-    slot = c.next_slot
-    push!(c.instructions, Instruction((a1, a1, a1, a1), op, slot))
-    return slot
-end
-
-function _emit!(c::TapeCompiler, op::OpType.T, a1::Int32, a2::Int32)::Int32
-    c.next_slot += Int32(1)
-    slot = c.next_slot
-    push!(c.instructions, Instruction((a1, a2, a2, a2), op, slot))
-    return slot
-end
-
-function _emit!(c::TapeCompiler, op::OpType.T, a1::Int32, a2::Int32, a3::Int32)::Int32
-    c.next_slot += Int32(1)
-    slot = c.next_slot
-    push!(c.instructions, Instruction((a1, a2, a3, a3), op, slot))
-    return slot
-end
-
-function _emit!(
-        c::TapeCompiler, op::OpType.T, a1::Int32, a2::Int32, a3::Int32, a4::Int32,
-    )::Int32
-    c.next_slot += Int32(1)
-    slot = c.next_slot
-    push!(c.instructions, Instruction((a1, a2, a3, a4), op, slot))
-    return slot
+    push!(c.instructions, Instruction((a1, a2, a3, a4), op, c.next_slot))
+    return c.next_slot
 end
 
 ## ── Slot-based predicates ───────────────────────────────────────────────────
@@ -103,17 +79,11 @@ _is_two_slot(c::TapeCompiler, s::Int32)::Bool =
 
 ## ── Arithmetic helpers ──────────────────────────────────────────────────────
 
-function _tape_add!(c::TapeCompiler, a::Int32, b::Int32)::Int32
-    return _emit!(c, OpType.OP_ADD, a, b)
-end
-
-function _tape_neg!(c::TapeCompiler, a::Int32)::Int32
-    return _emit!(c, OpType.OP_NEG, a)
-end
-
-function _tape_sub!(c::TapeCompiler, a::Int32, b::Int32)::Int32
-    return _emit!(c, OpType.OP_SUB, a, b)
-end
+_tape_add!(c::TapeCompiler, a::Int32, b::Int32)::Int32 = _emit!(c, OpType.OP_ADD, a, b)
+_tape_neg!(c::TapeCompiler, a::Int32)::Int32 = _emit!(c, OpType.OP_NEG, a)
+_tape_sub!(c::TapeCompiler, a::Int32, b::Int32)::Int32 = _emit!(c, OpType.OP_SUB, a, b)
+_tape_div!(c::TapeCompiler, a::Int32, b::Int32)::Int32 =
+    _is_one_slot(c, b) ? a : _emit!(c, OpType.OP_DIV, a, b)
 
 function _tape_mul!(c::TapeCompiler, a::Int32, b::Int32)::Int32
     _is_one_slot(c, a) && return b
@@ -130,27 +100,13 @@ function _tape_muladd!(c::TapeCompiler, a::Int32, b::Int32, d::Int32)::Int32
     return _emit!(c, OpType.OP_MULADD, a, b, d)
 end
 
-function _tape_mulmuladd!(
-        c::TapeCompiler, a::Int32, b::Int32, d::Int32, e::Int32,
-    )::Int32
-    return _emit!(c, OpType.OP_MULMULADD, a, b, d, e)
-end
-
-function _tape_div!(c::TapeCompiler, a::Int32, b::Int32)::Int32
-    return _is_one_slot(c, b) ? a : _emit!(c, OpType.OP_DIV, a, b)
-end
-
-function _tape_sqr!(c::TapeCompiler, a::Int32)::Int32
-    return _emit!(c, OpType.OP_SQR, a)
-end
-
 function _tape_pow!(c::TapeCompiler, a::Int32, k::Int)::Int32
     if k == 0
         return _get_constant_slot!(c, one(ComplexF64))
     elseif k == 1
         return a
     elseif k == 2
-        return _tape_sqr!(c, a)
+        return _emit!(c, OpType.OP_SQR, a)
     elseif k == 3
         return _emit!(c, OpType.OP_CB, a)
     elseif k == -1
@@ -235,22 +191,26 @@ function _compile_split_into_num_denom!(c::TapeCompiler, expr::SMul)
     return nums, denoms
 end
 
-function _compile_prod_parts!(c::TapeCompiler, exs::Vector{Int32})::Int32
-    isempty(exs) && return _SLOT_NONE
-    parts = reverse(copy(exs))
+"""Reduce a stack of slots by consuming 4/3/2 at a time with the given ops."""
+function _tree_reduce!(c::TapeCompiler, parts::Vector{Int32}, op4::OpType.T, op3::OpType.T, op2::F)::Int32 where {F}
     while length(parts) > 1
         if length(parts) >= 4
             a = pop!(parts); b = pop!(parts); d = pop!(parts); e = pop!(parts)
-            push!(parts, _emit!(c, OpType.OP_MUL4, a, b, d, e))
+            push!(parts, _emit!(c, op4, a, b, d, e))
         elseif length(parts) == 3
             a = pop!(parts); b = pop!(parts); d = pop!(parts)
-            push!(parts, _emit!(c, OpType.OP_MUL3, a, b, d))
-        elseif length(parts) == 2
+            push!(parts, _emit!(c, op3, a, b, d))
+        else
             a = pop!(parts); b = pop!(parts)
-            push!(parts, _tape_mul!(c, a, b))
+            push!(parts, op2(c, a, b))
         end
     end
     return parts[1]
+end
+
+function _compile_prod_parts!(c::TapeCompiler, exs::Vector{Int32})::Int32
+    isempty(exs) && return _SLOT_NONE
+    return _tree_reduce!(c, reverse(exs), OpType.OP_MUL4, OpType.OP_MUL3, _tape_mul!)
 end
 
 function _compile_mul!(c::TapeCompiler, expr::SMul)::Int32
@@ -319,7 +279,7 @@ function _compile_sum_products!(
     for k in 1:2:(n - 1)
         (a, b) = pairs[k]
         (d, e) = pairs[k + 1]
-        push!(singles, _tape_mulmuladd!(c, a, b, d, e))
+        push!(singles, _emit!(c, OpType.OP_MULMULADD, a, b, d, e))
     end
 
     if isodd(n)
@@ -331,19 +291,14 @@ function _compile_sum_products!(
         push!(singles, _tape_muladd!(c, a, b, d))
     end
 
-    while length(singles) > 1
-        if length(singles) >= 4
-            a = pop!(singles); b = pop!(singles); d = pop!(singles); e = pop!(singles)
-            push!(singles, _emit!(c, OpType.OP_ADD4, a, b, d, e))
-        elseif length(singles) == 3
-            a = pop!(singles); b = pop!(singles); d = pop!(singles)
-            push!(singles, _emit!(c, OpType.OP_ADD3, a, b, d))
-        elseif length(singles) == 2
-            a = pop!(singles); b = pop!(singles)
-            push!(singles, _emit!(c, OpType.OP_ADD, a, b))
-        end
-    end
-    return singles[1]
+    isempty(singles) && return _SLOT_NONE
+    return _tree_reduce!(c, singles, OpType.OP_ADD4, OpType.OP_ADD3, _tape_add!)
+end
+
+"""Reduce a vector of slots by addition."""
+function _sum_slots!(c::TapeCompiler, slots::Vector{Int32})::Int32
+    isempty(slots) && return _SLOT_NONE
+    return _tree_reduce!(c, slots, OpType.OP_ADD4, OpType.OP_ADD3, _tape_add!)
 end
 
 function _compile_sum!(c::TapeCompiler, expr::SAdd)::Int32
@@ -390,62 +345,27 @@ function _compile_sum!(c::TapeCompiler, expr::SAdd)::Int32
         end
     end
 
-    # Case 4: multiple positives, multiple negatives — interleave for MULMULSUB
-    # Pair positive products with negative products for MULMULSUB(a,b,c,d) = a*b - c*d
+    # Case 4: multiple positives, multiple negatives — pair for MULMULSUB
     pos_pairs = Tuple{Int32, Int32}[t for t in pos_reduced if t[2] != _SLOT_NONE]
-    pos_singles = Int32[t[1] for t in pos_reduced if t[2] == _SLOT_NONE]
     neg_pairs = Tuple{Int32, Int32}[t for t in neg_reduced if t[2] != _SLOT_NONE]
-    neg_singles = Int32[t[1] for t in neg_reduced if t[2] == _SLOT_NONE]
-
-    # Pair positive products with negative products for MULMULSUB
-    fused_results = Int32[]
     n_fused = min(length(pos_pairs), length(neg_pairs))
-    for i in 1:n_fused
-        (a, b) = pos_pairs[i]
-        (d, e) = neg_pairs[i]
-        push!(fused_results, _emit!(c, OpType.OP_MULMULSUB, a, b, d, e))
-    end
 
-    # Leftover positive products
-    leftover_pos = Tuple{Int32, Int32}[]
-    for i in (n_fused + 1):length(pos_pairs)
-        push!(leftover_pos, pos_pairs[i])
-    end
-    for s in pos_singles
-        push!(leftover_pos, (s, _SLOT_NONE))
-    end
+    # Fuse matching pos/neg product pairs into MULMULSUB
+    fused = Int32[_emit!(c, OpType.OP_MULMULSUB, pos_pairs[i]..., neg_pairs[i]...) for i in 1:n_fused]
 
-    # Leftover negative products
-    leftover_neg = Tuple{Int32, Int32}[]
-    for i in (n_fused + 1):length(neg_pairs)
-        push!(leftover_neg, neg_pairs[i])
-    end
-    for s in neg_singles
-        push!(leftover_neg, (s, _SLOT_NONE))
-    end
+    # Collect leftover pairs + singles for each side
+    leftover_pos = Tuple{Int32, Int32}[pos_pairs[(n_fused + 1):end]; [(t[1], _SLOT_NONE) for t in pos_reduced if t[2] == _SLOT_NONE]]
+    leftover_neg = Tuple{Int32, Int32}[neg_pairs[(n_fused + 1):end]; [(t[1], _SLOT_NONE) for t in neg_reduced if t[2] == _SLOT_NONE]]
 
-    # Sum fused results + leftover positives
-    all_pos_parts = Int32[]
-    append!(all_pos_parts, fused_results)
+    # Sum: fused results + leftover positives
     if !isempty(leftover_pos)
-        pos_sum = _compile_sum_products!(c, leftover_pos)
-        pos_sum != _SLOT_NONE && push!(all_pos_parts, pos_sum)
+        s = _compile_sum_products!(c, leftover_pos)
+        s != _SLOT_NONE && push!(fused, s)
     end
-
-    pos_total = _SLOT_NONE
-    if length(all_pos_parts) == 1
-        pos_total = all_pos_parts[1]
-    elseif length(all_pos_parts) >= 2
-        pos_total = _compile_sum_products!(
-            c, Tuple{Int32, Int32}[(s, _SLOT_NONE) for s in all_pos_parts],
-        )
-    end
+    pos_total = _sum_slots!(c, fused)
 
     # Sum leftover negatives
-    neg_total = _SLOT_NONE
-    if !isempty(leftover_neg)
-        neg_total = _compile_sum_products!(c, leftover_neg)
-    end
+    neg_total = isempty(leftover_neg) ? _SLOT_NONE : _compile_sum_products!(c, leftover_neg)
 
     # Final subtraction
     if pos_total == _SLOT_NONE
@@ -476,40 +396,33 @@ function _initialize_placeholder_slots!(
     return nothing
 end
 
-function _build_slot_remap(
-        nconstants::Int,
-        nparams::Int,
-        nvars::Int,
-        nscratch::Int,
-    )
+function _build_slot_remap(nconstants::Int, nparams::Int, nvars::Int, nscratch::Int)
     input_block_size = nconstants + nparams + nvars
     remap = Dict{Int32, Int32}()
 
-    constants_range = 1:nconstants
-    for k in constants_range
+    # Constants: identity mapping (k → k)
+    for k in 1:nconstants
         remap[Int32(k)] = Int32(k)
     end
-
-    parameters_range = (nconstants + 1):(nconstants + nparams)
+    # Params: negative placeholders → after constants
     for i in 1:nparams
         remap[Int32(-i)] = Int32(nconstants + i)
     end
-
-    variables_start = nconstants + nparams + 1
-    variables_range = variables_start:(variables_start + nvars - 1)
+    # Vars: negative placeholders → after params
+    vars_start = nconstants + nparams + 1
     for i in 1:nvars
-        remap[Int32(-(nparams + i))] = Int32(variables_start + i - 1)
+        remap[Int32(-(nparams + i))] = Int32(vars_start + i - 1)
     end
-
+    # Scratch: high offsets → after input block
     for k in 1:nscratch
         remap[Int32(_SCRATCH_OFFSET + k)] = Int32(input_block_size + k)
     end
 
     return (
         remap = remap,
-        constants_range = constants_range,
-        parameters_range = parameters_range,
-        variables_range = variables_range,
+        constants_range = 1:nconstants,
+        parameters_range = (nconstants + 1):(nconstants + nparams),
+        variables_range = vars_start:(vars_start + nvars - 1),
         input_block_size = input_block_size,
     )
 end
@@ -550,15 +463,8 @@ function _plan_assignment_slots!(
         if seen == 0
             remap[raw_slot] = target_slot
         else
-            remapped_source = get(remap, raw_slot, raw_slot)
-            push!(
-                identity_instructions,
-                Instruction(
-                    (remapped_source, remapped_source, remapped_source, remapped_source),
-                    OpType.OP_IDENTITY,
-                    target_slot,
-                ),
-            )
+            src = get(remap, raw_slot, raw_slot)
+            push!(identity_instructions, Instruction((src, src, src, src), OpType.OP_IDENTITY, target_slot))
         end
     end
 
@@ -576,26 +482,9 @@ function _remap_instructions(
         remap::Dict{Int32, Int32},
         identity_instructions::Vector{Instruction},
     )::Vector{Instruction}
-    nstmts = length(instructions)
-    core_instructions = Vector{Instruction}(undef, nstmts + length(identity_instructions))
-
-    for (idx, instr) in enumerate(instructions)
-        new_input = ntuple(Val(4)) do k
-            if should_use_index_not_reference(instr.op, k)
-                instr.input[k]
-            else
-                get(remap, instr.input[k], instr.input[k])
-            end
-        end
-        new_output = get(remap, instr.output, instr.output)
-        core_instructions[idx] = Instruction(new_input, instr.op, new_output)
-    end
-
-    for (j, id_instr) in enumerate(identity_instructions)
-        core_instructions[nstmts + j] = id_instr
-    end
-
-    return core_instructions
+    remapped = Instruction[_remap_instruction(instr, remap) for instr in instructions]
+    append!(remapped, identity_instructions)
+    return remapped
 end
 
 function _build_assignments(
@@ -682,12 +571,8 @@ function compile_to_instructions(
     )
 
     # Add STOP instruction
-    n = space_needed
-    push!(
-        instructions_final, Instruction(
-            (Int32(n), Int32(n), Int32(n), Int32(n)), OpType.OP_STOP, Int32(n),
-        ),
-    )
+    n = Int32(space_needed)
+    push!(instructions_final, Instruction((n, n, n, n), OpType.OP_STOP, n))
 
     # Split assignments into u (function values) and U (Jacobian entries)
     u_assignments = Tuple{Int, Int}[
