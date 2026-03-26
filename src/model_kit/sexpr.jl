@@ -57,22 +57,22 @@ function SMul(args::Vector{<:SExpr})
 end
 
 """Integer power: base^exp where exp is a positive integer. Hash is cached at construction."""
-struct SPow <: SExpr
-    base::SExpr
+struct SPow{T <: SExpr} <: SExpr
+    base::T
     exp::Int
     _hash::UInt
 end
-function SPow(base::SExpr, exp::Int)
-    return SPow(base, exp, hash(exp, hash(base, hash(:SPow, zero(UInt)))))
+function SPow(base::T, exp::Int) where {T <: SExpr}
+    return SPow{T}(base, exp, hash(exp, hash(base, hash(:SPow, zero(UInt)))))
 end
 
 """Negation: -arg. Hash is cached at construction."""
-struct SNeg <: SExpr
-    arg::SExpr
+struct SNeg{T <: SExpr} <: SExpr
+    arg::T
     _hash::UInt
 end
-function SNeg(arg::SExpr)
-    return SNeg(arg, hash(arg, hash(:SNeg, zero(UInt))))
+function SNeg(arg::T) where {T <: SExpr}
+    return SNeg{T}(arg, hash(arg, hash(:SNeg, zero(UInt))))
 end
 
 """

@@ -1,5 +1,6 @@
 [deps]
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+CheckConcreteStructs = "73c92db5-9da6-4938-911a-6443a7e94a58"
 CommonSolve = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
 DynamicPolynomials = "7c1d4256-1411-5781-91ec-d7bc3513ac07"
 EnumX = "4e289a0a-7415-4d19-859d-a7e5c4648b56"

@@ -16,7 +16,7 @@ struct PolynomialSystemInfo
     degrees::Vector{Int}
     nvars::Int
     nparams::Int
-    variable_groups::Union{Nothing, Vector{Vector{Int}}}
+    variable_groups::Vector{Vector{Int}}
     is_homogeneous::Bool
     _seq_eval::InstructionSequence
     _seq_jac::InstructionSequence
@@ -125,7 +125,7 @@ function system_eval(
         degrees,
         nvars,
         nparams,
-        nothing,
+        Vector{Int}[],
         is_homogeneous,
         interp_f64.sequence,
         interp_jac.sequence,

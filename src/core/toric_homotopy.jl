@@ -54,8 +54,8 @@ function update_weights!(
         support::Vector{Matrix{Int32}},
         lifting::Vector{Vector{Int32}},
         cell::MixedSubdivisions.MixedCell;
-        min_weight::Union{Nothing, Float64} = nothing,
-        max_weight::Union{Nothing, Float64} = nothing,
+        min_weight::Float64 = NaN,
+        max_weight::Float64 = NaN,
     )::Tuple{Float64, Float64}
     l = 1
     s_max = 0.0
@@ -84,13 +84,13 @@ function update_weights!(
     end
 
     # Normalize weights (skip if all weights are zero — s_min stays Inf)
-    if min_weight !== nothing && isfinite(s_min)
+    if !isnan(min_weight) && isfinite(s_min)
         lambda = s_min / min_weight
         @inbounds for i in eachindex(H.weights)
             H.weights[i] /= lambda
         end
         s_min, s_max = min_weight, s_max / lambda
-    elseif max_weight !== nothing && s_max > 0.0
+    elseif !isnan(max_weight) && s_max > 0.0
         lambda = s_max / max_weight
         @inbounds for i in eachindex(H.weights)
             H.weights[i] /= lambda

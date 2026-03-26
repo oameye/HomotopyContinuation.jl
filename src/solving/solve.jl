@@ -23,7 +23,7 @@ function CommonSolve.init(
         parameters::AbstractVector = _empty_vars(polys),
         variables::AbstractVector = _effective_variables(polys, parameters),
     )::SolveCache
-    seed = alg.seed === nothing ? rand(Random.RandomDevice(), UInt32) : alg.seed
+    seed = alg.seed
 
     info, eval_F = system_eval(polys; parameters = parameters, variables = variables)
     eval_G = _total_degree_startsystem(info.degrees, variables)

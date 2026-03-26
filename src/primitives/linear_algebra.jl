@@ -588,106 +588,61 @@ end
 end
 
 """
-    inverse_inf_norm_est(WS::MatrixWorkspace[, d_l, d_r])
+    inverse_inf_norm_est(WS::MatrixWorkspace)
 
-Estimate the infinity norm of `diag(d_r)⁻¹ A⁻¹ diag(d_l)⁻¹` using
-Higham's 1-norm condition estimator (1988). `d_l` and `d_r` are optional
-positive scaling vectors; `nothing` means the all-ones vector.
+Estimate the infinity norm of `A⁻¹` using Higham's 1-norm condition estimator (1988).
+When `WS.scaled`, incorporates the row scaling.
 """
-function inverse_inf_norm_est(
-        WS::MatrixWorkspace,
-        d_l::Union{Nothing, FSVec{Float64}} = nothing,
-        d_r::Union{Nothing, FSVec{Float64}} = nothing,
-    )
+function inverse_inf_norm_est(WS::MatrixWorkspace)::Float64
     m, n = size(WS)
     m == n || return Inf
     WS.factorized || factorize!(WS)
     work = WS.inf_norm_est_work
     rwork = WS.inf_norm_est_rwork
-    return if !WS.scaled
-        _inverse_inf_norm_est(WS.lu, d_l, d_r, nothing, work, rwork)
+    return if WS.scaled
+        _inverse_inf_norm_est(WS.lu, WS.row_scaling, work, rwork)
     else
-        _inverse_inf_norm_est(WS.lu, d_l, d_r, WS.row_scaling, work, rwork)
+        _inverse_inf_norm_est(WS.lu, work, rwork)
     end
 end
 
+## Unscaled variant
+
 function _inverse_inf_norm_est(
         lu::LA.LU{ComplexF64, FSMat{ComplexF64}, Vector{Int64}},
-        d_l::Union{Nothing, FSVec{Float64}},
-        d_r::Union{Nothing, FSVec{Float64}},
-        row_scaling::Union{Nothing, FSVec{Float64}},
         work::FSVec{ComplexF64},
         rwork::FSVec{Float64},
-    )
+    )::Float64
     n = size(lu.factors, 1)
-    # y, z, ξ all alias into work (used at different stages of the algorithm)
     y = work
     z = work
     ξ = work
     x = rwork
 
-    # Initialize: x = 1/n (optionally scaled by d_r)
     @inbounds for i in 1:n
         x[i] = inv(n)
     end
-    if d_r !== nothing
-        @inbounds for i in 1:n
-            x[i] /= d_r[i]
-        end
-    end
 
-    # Step 1: y = (Aᴴ)⁻¹ x  (adjoint solve)
     @inbounds for i in 1:n
         y[i] = x[i]
     end
     lu_ldiv_adj!(y, lu, y)
 
-    if d_l !== nothing
-        @inbounds for i in 1:n
-            y[i] /= d_l[i]
-        end
-    end
-    if row_scaling !== nothing
-        @inbounds for i in 1:n
-            y[i] *= row_scaling[i]
-        end
-    end
-
     γ = sum(fast_abs, y)
 
-    # ξ = sign(y) (complex sign: y / |y|), with optional scaling
     @inbounds for i in 1:n
         ay = fast_abs(y[i])
         ξ[i] = iszero(ay) ? one(ComplexF64) : y[i] / ay
     end
-    if d_l !== nothing
-        @inbounds for i in 1:n
-            ξ[i] /= d_l[i]
-        end
-    end
-    if row_scaling !== nothing
-        @inbounds for i in 1:n
-            ξ[i] /= row_scaling[i]
-        end
-    end
 
-    # Step 2: z = A⁻¹ ξ
     lu_ldiv!(z, lu, ξ)
 
-    # x = real(z) [optionally / d_r]
-    if d_r !== nothing
-        @inbounds for i in 1:n
-            x[i] = real(z[i]) / d_r[i]
-        end
-    else
-        @inbounds for i in 1:n
-            x[i] = real(z[i])
-        end
+    @inbounds for i in 1:n
+        x[i] = real(z[i])
     end
 
     k = 2
     while true
-        # find index j of max |x|
         j = 1
         @inbounds max_xi = abs(x[1])
         @inbounds for i in 2:n
@@ -698,32 +653,111 @@ function _inverse_inf_norm_est(
             end
         end
 
-        # x = e_j (unit vector), optionally scaled
         @inbounds for i in 1:n
             x[i] = zero(Float64)
         end
         @inbounds x[j] = one(Float64)
-        if d_r !== nothing
-            @inbounds for i in 1:n
-                x[i] /= d_r[i]
-            end
-        end
 
-        # y = (Aᴴ)⁻¹ x
         @inbounds for i in 1:n
             y[i] = x[i]
         end
         lu_ldiv_adj!(y, lu, y)
 
-        if d_l !== nothing
-            @inbounds for i in 1:n
-                y[i] /= d_l[i]
+        γ̄ = γ
+        γ = sum(fast_abs, y)
+
+        if γ ≤ γ̄
+            γ = γ̄
+            break
+        end
+
+        @inbounds for i in 1:n
+            ay = fast_abs(y[i])
+            ξ[i] = iszero(ay) ? one(ComplexF64) : y[i] / ay
+        end
+
+        lu_ldiv!(z, lu, ξ)
+
+        @inbounds for i in 1:n
+            x[i] = real(z[i])
+        end
+
+        k += 1
+        if @inbounds(x[j] == _norm_inf_real(x)) || k > 2
+            break
+        end
+    end
+
+    return nanmin(γ, Inf)
+end
+
+## Row-scaled variant
+
+function _inverse_inf_norm_est(
+        lu::LA.LU{ComplexF64, FSMat{ComplexF64}, Vector{Int64}},
+        row_scaling::FSVec{Float64},
+        work::FSVec{ComplexF64},
+        rwork::FSVec{Float64},
+    )::Float64
+    n = size(lu.factors, 1)
+    y = work
+    z = work
+    ξ = work
+    x = rwork
+
+    @inbounds for i in 1:n
+        x[i] = inv(n)
+    end
+
+    @inbounds for i in 1:n
+        y[i] = x[i]
+    end
+    lu_ldiv_adj!(y, lu, y)
+
+    @inbounds for i in 1:n
+        y[i] *= row_scaling[i]
+    end
+
+    γ = sum(fast_abs, y)
+
+    @inbounds for i in 1:n
+        ay = fast_abs(y[i])
+        ξ[i] = iszero(ay) ? one(ComplexF64) : y[i] / ay
+    end
+    @inbounds for i in 1:n
+        ξ[i] /= row_scaling[i]
+    end
+
+    lu_ldiv!(z, lu, ξ)
+
+    @inbounds for i in 1:n
+        x[i] = real(z[i])
+    end
+
+    k = 2
+    while true
+        j = 1
+        @inbounds max_xi = abs(x[1])
+        @inbounds for i in 2:n
+            abs_xi = abs(x[i])
+            if abs_xi > max_xi
+                j = i
+                max_xi = abs_xi
             end
         end
-        if row_scaling !== nothing
-            @inbounds for i in 1:n
-                y[i] *= row_scaling[i]
-            end
+
+        @inbounds for i in 1:n
+            x[i] = zero(Float64)
+        end
+        @inbounds x[j] = one(Float64)
+
+        @inbounds for i in 1:n
+            y[i] = x[i]
+        end
+        lu_ldiv_adj!(y, lu, y)
+
+        @inbounds for i in 1:n
+            y[i] *= row_scaling[i]
         end
 
         γ̄ = γ
@@ -734,32 +768,18 @@ function _inverse_inf_norm_est(
             break
         end
 
-        # ξ = sign(y)
         @inbounds for i in 1:n
             ay = fast_abs(y[i])
             ξ[i] = iszero(ay) ? one(ComplexF64) : y[i] / ay
         end
-        if d_l !== nothing
-            @inbounds for i in 1:n
-                ξ[i] /= d_l[i]
-            end
-        end
-        if row_scaling !== nothing
-            @inbounds for i in 1:n
-                ξ[i] /= row_scaling[i]
-            end
+        @inbounds for i in 1:n
+            ξ[i] /= row_scaling[i]
         end
 
         lu_ldiv!(z, lu, ξ)
 
-        if d_r !== nothing
-            @inbounds for i in 1:n
-                x[i] = real(z[i]) / d_r[i]
-            end
-        else
-            @inbounds for i in 1:n
-                x[i] = real(z[i])
-            end
+        @inbounds for i in 1:n
+            x[i] = real(z[i])
         end
 
         k += 1

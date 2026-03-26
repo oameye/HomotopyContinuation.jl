@@ -5,20 +5,48 @@
 #   Phase 2 (coefficient): Track from generic system to target through CoefficientHomotopy (t: 1 -> 0)
 
 """
-    Polyhedral(; tracker_options=TrackerOptions(), seed=nothing)
+    Polyhedral(; seed, max_steps, extended_precision, ...)
 
 Algorithm that constructs a polyhedral (BKK-optimal) start system using mixed subdivisions.
 The number of paths tracked equals the mixed volume, which is at most the Bezout bound.
+
+Accepts all `TrackerOptions` fields as keyword arguments, or a pre-built
+`tracker_options` object.
 
 # Examples
 ```julia
 @polyvar x y
 result = solve([x^2 + y - 1, x*y - 2], Polyhedral())
+
+# Tune tracker options directly
+result = solve(F, Polyhedral(; max_steps=500, extended_precision=false))
 ```
 """
-@kwdef struct Polyhedral
-    tracker_options::TrackerOptions = TrackerOptions()
-    seed::Union{Nothing, UInt32} = nothing
+struct Polyhedral
+    tracker_options::TrackerOptions
+    seed::UInt32
+end
+
+function Polyhedral(;
+        tracker_options::TrackerOptions = TrackerOptions(),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        max_steps::Int = tracker_options.max_steps,
+        max_step_size::Float64 = tracker_options.max_step_size,
+        max_initial_step_size::Float64 = tracker_options.max_initial_step_size,
+        extended_precision::Bool = tracker_options.extended_precision,
+        min_step_size::Float64 = tracker_options.min_step_size,
+        terminate_cond::Float64 = tracker_options.terminate_cond,
+        a::Float64 = tracker_options.a,
+        β_ω::Float64 = tracker_options.β_ω,
+        β_τ::Float64 = tracker_options.β_τ,
+        strict_β_τ::Float64 = tracker_options.strict_β_τ,
+    )
+    opts = TrackerOptions(;
+        max_steps, max_step_size, max_initial_step_size,
+        extended_precision, min_step_size, terminate_cond,
+        a, β_ω, β_τ, strict_β_τ,
+    )
+    return Polyhedral(opts, seed)
 end
 
 """
@@ -86,7 +114,7 @@ function CommonSolve.init(
         parameters::AbstractVector = _empty_vars(polys),
         variables::AbstractVector = _effective_variables(polys, parameters),
     )::PolyhedralSolveCache
-    seed = alg.seed === nothing ? rand(Random.RandomDevice(), UInt32) : alg.seed
+    seed = alg.seed
 
     n = length(variables)
     @assert length(polys) == n "System must be square (same number of equations and variables)"

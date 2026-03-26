@@ -213,6 +213,8 @@ function _check_terminated!(
         end
         if state.ω * state.μ > tol_acc
             state.code = TrackerCode.TERMINATED_ACCURACY_LIMIT
+        elseif state.last_steps_failed >= 3 && state.cond_J_ẋ > opts.terminate_cond
+            state.code = TrackerCode.TERMINATED_ILL_CONDITIONED
         end
     end
     return nothing
