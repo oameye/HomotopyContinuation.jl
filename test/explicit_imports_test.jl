@@ -7,6 +7,9 @@ using HomotopyContinuationNext
     allow_unanalyzable = (
         HomotopyContinuationNext.OpType,
         HomotopyContinuationNext.SFuncKind,
+        HomotopyContinuationNext.NewtonCode,
+        HomotopyContinuationNext.PredictionMethod,
+        HomotopyContinuationNext.TrackerCode,
     )
 
     @test check_no_implicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing

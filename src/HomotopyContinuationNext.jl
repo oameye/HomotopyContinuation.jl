@@ -45,4 +45,8 @@ include("core/system_eval.jl")
 include("core/homotopy_evaluator.jl")
 include("core/straight_line_homotopy.jl")
 
+include("tracking/newton_corrector.jl")
+include("tracking/predictor.jl")
+include("tracking/tracker.jl")
+
 end # module
