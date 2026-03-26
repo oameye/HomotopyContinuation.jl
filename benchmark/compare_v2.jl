@@ -22,7 +22,7 @@ BenchmarkTools.DEFAULT_PARAMETERS.samples = 4000
 
 function print_row(name::String, t_next::Float64, t_hc::Float64)
     ratio = t_hc / t_next
-    println(
+    return println(
         "  ", rpad(name, 28),
         "Next=", lpad(string(round(t_next * 1.0e9; digits = 1)), 8), "ns  ",
         "HC=", lpad(string(round(t_hc * 1.0e9; digits = 1)), 8), "ns  ",
@@ -32,9 +32,9 @@ end
 
 ## ── Primitives ────────────────────────────────────────────────────────────
 
-println("=" ^ 72)
+println("="^72)
 println("  Primitives: HomotopyContinuationNext vs HomotopyContinuation (v2)")
-println("=" ^ 72)
+println("="^72)
 
 println("\n── inf_norm ──")
 for n in [4, 16, 64]
@@ -71,9 +71,9 @@ end
 
 ## ── Interpreter sweep ─────────────────────────────────────────────────────
 
-println("\n" * "=" ^ 72)
+println("\n" * "="^72)
 println("  Interpreter: HomotopyContinuationNext vs HomotopyContinuation (v2)")
-println("=" ^ 72)
+println("="^72)
 
 # Polynomial system generators from exponent specs
 @polyvar nx1 nx2 nx3 nx4 nx5 nx6 nx7 nx8
@@ -114,8 +114,10 @@ function _chain_specs(n)
     for j in 1:n
         jp = mod1(j + 1, n); jm = mod1(j - 1, n)
         poly = Tuple{ComplexF64, Vector{Int}}[]
-        for (coeff, idxs) in [(1.0, [(j, 2)]), (1.0, [(jp, 2)]), (2.0, [(j, 1), (jp, 1)]),
-                              (-1.0, [(j, 1), (jm, 1)]), (1.0, [(j, 1)]), (-1.0, Int[])]
+        for (coeff, idxs) in [
+                (1.0, [(j, 2)]), (1.0, [(jp, 2)]), (2.0, [(j, 1), (jp, 1)]),
+                (-1.0, [(j, 1), (jm, 1)]), (1.0, [(j, 1)]), (-1.0, Int[]),
+            ]
             e = zeros(Int, n)
             for (idx, exp) in idxs
                 e[idx] = exp
@@ -191,7 +193,7 @@ for seed in 1:2
     push!(results, compare_case("sparse6_$seed", _random_sparse_specs(MersenneTwister(seed), 6, 6)))
 end
 
-println("\n" * "=" ^ 72)
+println("\n" * "="^72)
 for field in (:eval_ratio, :jac_ratio, :build_ratio)
     vals = getfield.(results, field)
     println(
@@ -202,4 +204,4 @@ for field in (:eval_ratio, :jac_ratio, :build_ratio)
     )
 end
 println("  ratio > 1.0 means Next is faster")
-println("=" ^ 72)
+println("="^72)

@@ -11,7 +11,11 @@ using HomotopyContinuationNext
 
     @test check_no_implicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing
     @test check_all_explicit_imports_via_owners(HomotopyContinuationNext) == nothing
-    @test check_all_explicit_imports_are_public(HomotopyContinuationNext) == nothing
+    # FunctionWrapper is the only public API of FunctionWrappers.jl but it is not
+    # declared `public` in the package — ignore it here.
+    @test check_all_explicit_imports_are_public(
+        HomotopyContinuationNext; ignore = (:FunctionWrapper,),
+    ) == nothing
     @test check_no_stale_explicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing
     @test check_all_qualified_accesses_via_owners(HomotopyContinuationNext) == nothing
     # Allow non-public but necessary accesses:

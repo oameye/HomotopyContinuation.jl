@@ -8,6 +8,7 @@ using EnumX: @enumx
 using MultivariatePolynomials: MultivariatePolynomials
 using DynamicPolynomials: @polyvar
 using FixedSizeArrays: FixedSizeArray
+import FunctionWrappers: FunctionWrapper
 
 export @polyvar
 
@@ -37,5 +38,11 @@ include("model_kit/tape_compiler.jl")
 
 include("model_kit/interpreter.jl")
 include("model_kit/polynomial_input.jl")
+
+include("core/abstract_types.jl")
+include("core/system_evaluator.jl")
+include("core/system_eval.jl")
+include("core/homotopy_evaluator.jl")
+include("core/straight_line_homotopy.jl")
 
 end # module

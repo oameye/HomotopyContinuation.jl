@@ -12,6 +12,9 @@ benchmark_primitives!(SUITE)
 include("interpreter.jl")
 benchmark_interpreter!(SUITE)
 
+include("core.jl")
+benchmark_core!(SUITE)
+
 BenchmarkTools.tune!(SUITE)
 results = BenchmarkTools.run(SUITE; verbose = true)
 display(median(results))
