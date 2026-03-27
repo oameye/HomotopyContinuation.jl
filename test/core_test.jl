@@ -8,8 +8,6 @@ using HomotopyContinuationNext: AbstractSystem, AbstractHomotopy,
     System,
     StraightLineHomotopy,
     TaylorVector, TruncatedTaylorSeries, DoubleF64, ComplexDF64,
-    # Raw interpreter API for FW-vs-raw comparison
-    build_interpreter, build_jacobian_interpreter, build_taylor_interpreter,
     execute!, execute_taylor!
 using DynamicPolynomials: @polyvar
 using MultivariatePolynomials: differentiate as mp_diff
@@ -185,11 +183,11 @@ end
         F = [x^3 * y - x * y^2 + x^2 - 3, x^2 * y + y^3 - x + 2]
         sys = System(F)
         seval = sys.evaluator
-        I_eval = build_interpreter(F)
-        I_jac = build_jacobian_interpreter(F)
-        I_t1 = build_taylor_interpreter(F, Val(1))
-        I_t2 = build_taylor_interpreter(F, Val(2))
-        I_t3 = build_taylor_interpreter(F, Val(3))
+        I_eval = sys._interp_f64
+        I_jac = sys._interp_jac
+        I_t1 = sys._interp_t1
+        I_t2 = sys._interp_t2
+        I_t3 = sys._interp_t3
 
         for _ in 1:10
             xvals = randn(ComplexF64, 2)

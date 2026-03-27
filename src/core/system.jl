@@ -34,9 +34,6 @@ struct System{P,V}
     is_homogeneous::Bool
     support::Vector{Matrix{Int32}}
     coefficients::Vector{Vector{ComplexF64}}
-    # GC roots — interpreters must stay alive for FunctionWrapper closures
-    _seq_eval::InstructionSequence
-    _seq_jac::InstructionSequence
     _interp_f64::Interpreter{Vector{ComplexF64}}
     _interp_df64::Interpreter{Vector{ComplexDF64}}
     _interp_jac::Interpreter{Vector{ComplexF64}}
@@ -139,35 +136,15 @@ end
         Vector{Matrix{Int32}}(), Vector{Vector{ComplexF64}}()
     end
 
-    var_syms = Symbol[Symbol(v) for v in variables]
-    param_syms = Symbol[Symbol(p) for p in parameters]
     seq_eval = _build_instruction_sequence(polys, variables, parameters, false)
     seq_jac = _build_instruction_sequence(polys, variables, parameters, true)
 
-    interp_f64 = Interpreter(
-        Vector{ComplexF64}, seq_eval;
-        variables = var_syms, parameters = param_syms,
-    )
-    interp_df64 = Interpreter(
-        Vector{ComplexDF64}, seq_eval;
-        variables = var_syms, parameters = param_syms,
-    )
-    interp_jac = Interpreter(
-        Vector{ComplexF64}, seq_jac;
-        variables = var_syms, parameters = param_syms,
-    )
-    interp_t1 = Interpreter(
-        Vector{TruncatedTaylorSeries{2, ComplexF64}}, seq_eval;
-        variables = var_syms, parameters = param_syms,
-    )
-    interp_t2 = Interpreter(
-        Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval;
-        variables = var_syms, parameters = param_syms,
-    )
-    interp_t3 = Interpreter(
-        Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval;
-        variables = var_syms, parameters = param_syms,
-    )
+    interp_f64 = Interpreter(Vector{ComplexF64}, seq_eval)
+    interp_df64 = Interpreter(Vector{ComplexDF64}, seq_eval)
+    interp_jac = Interpreter(Vector{ComplexF64}, seq_jac)
+    interp_t1 = Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, seq_eval)
+    interp_t2 = Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval)
+    interp_t3 = Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval)
 
     degs = Int[MP.maxdegree(p) for p in polys]
     is_homogeneous = _is_homogeneous(polys, variables)
@@ -185,7 +162,6 @@ end
         evaluator, degs, nvars, nparams,
         Vector{Int}[], is_homogeneous,
         supp, coeffs,
-        seq_eval, seq_jac,
         interp_f64, interp_df64, interp_jac,
         interp_t1, interp_t2, interp_t3,
     )

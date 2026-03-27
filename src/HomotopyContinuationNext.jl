@@ -5,6 +5,8 @@ using Random: Random
 using Printf: Printf
 
 using EnumX: @enumx
+using Moshi.Data: @data, isa_variant, variant_storage, variant_storage_type
+using Moshi.Derive: @derive
 using MultivariatePolynomials: MultivariatePolynomials
 using DynamicPolynomials: DynamicPolynomials, @polyvar
 using FixedSizeArrays: FixedSizeArray
@@ -40,6 +42,8 @@ include("model_kit/cse.jl")
 # model_kit/tape_compiler.jl — TapeCompiler, compile_to_instructions
 include("model_kit/tape_compiler.jl")
 
+include("model_kit/polynomial_compiler.jl")
+include("model_kit/symbolic_polynomial_compiler.jl")
 include("model_kit/interpreter.jl")
 include("model_kit/polynomial_input.jl")
 
