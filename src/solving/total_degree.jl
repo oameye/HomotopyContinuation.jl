@@ -27,6 +27,81 @@ struct TotalDegree
     seed::UInt32
 end
 
+struct TotalDegreeStartSystem <: AbstractSystem
+    degrees::Vector{Int}
+end
+
+Base.size(F::TotalDegreeStartSystem)::Tuple{Int, Int} =
+    (length(F.degrees), length(F.degrees))
+
+@inline _total_degree_value(x, degree::Int) = Base.power_by_squaring(x, degree) - one(x)
+@inline _total_degree_jacobian_entry(x, degree::Int) =
+    degree == 1 ? one(x) : degree * Base.power_by_squaring(x, degree - 1)
+
+function evaluate!(
+        u::FSVec{ComplexF64}, F::TotalDegreeStartSystem,
+        x::FSVec{ComplexF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    @inbounds for i in eachindex(u)
+        u[i] = _total_degree_value(x[i], F.degrees[i])
+    end
+    return nothing
+end
+
+function evaluate!(
+        u::FSVec{ComplexF64}, F::TotalDegreeStartSystem,
+        x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    @inbounds for i in eachindex(u)
+        u[i] = ComplexF64(_total_degree_value(x[i], F.degrees[i]))
+    end
+    return nothing
+end
+
+function evaluate_and_jacobian!(
+        u::FSVec{ComplexF64}, U::FSMat{ComplexF64},
+        F::TotalDegreeStartSystem, x::FSVec{ComplexF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    fill!(U, zero(ComplexF64))
+    @inbounds for i in eachindex(u)
+        degree = F.degrees[i]
+        x_i = x[i]
+        u[i] = _total_degree_value(x_i, degree)
+        U[i, i] = _total_degree_jacobian_entry(x_i, degree)
+    end
+    return nothing
+end
+
+function taylor!(
+        u::FSVec{ComplexF64}, ::Val{1}, F::TotalDegreeStartSystem,
+        tx::TaylorVector{2, ComplexF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    @inbounds for i in eachindex(u)
+        u[i] = taylor_op_pow_int(tx[i], F.degrees[i])[1]
+    end
+    return nothing
+end
+
+function taylor!(
+        u::FSVec{ComplexF64}, ::Val{2}, F::TotalDegreeStartSystem,
+        tx::TaylorVector{3, ComplexF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    @inbounds for i in eachindex(u)
+        u[i] = taylor_op_pow_int(tx[i], F.degrees[i])[2]
+    end
+    return nothing
+end
+
+function taylor!(
+        u::FSVec{ComplexF64}, ::Val{3}, F::TotalDegreeStartSystem,
+        tx::TaylorVector{4, ComplexF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    @inbounds for i in eachindex(u)
+        u[i] = taylor_op_pow_int(tx[i], F.degrees[i])[3]
+    end
+    return nothing
+end
+
 function TotalDegree(;
         tracker_options::TrackerOptions = TrackerOptions(),
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
@@ -49,11 +124,12 @@ function TotalDegree(;
     return TotalDegree(opts, seed)
 end
 
-function _total_degree_startsystem(degrees::Vector{Int})::System
-    n = length(degrees)
-    @polyvar _td_x[1:n]
-    polys = [_td_x[i]^degrees[i] - 1 for i in 1:n]
-    return System(polys; variables = collect(_td_x))
+function _total_degree_startsystem(degrees::Vector{Int})::TotalDegreeStartSystem
+    return TotalDegreeStartSystem(copy(degrees))
+end
+
+function _total_degree_startevaluator(degrees::Vector{Int})::SystemEvaluator
+    return SystemEvaluator(_total_degree_startsystem(degrees))
 end
 
 function _total_degree_solutions(degrees::Vector{Int})::Vector{Vector{ComplexF64}}

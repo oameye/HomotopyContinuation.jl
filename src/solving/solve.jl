@@ -20,12 +20,12 @@ end
 function CommonSolve.init(F::System, alg::TotalDegree)::SolveCache
     seed = alg.seed
 
-    sys_G = _total_degree_startsystem(F.degrees)
+    start_evaluator = _total_degree_startevaluator(F.degrees)
     starts = _total_degree_solutions(F.degrees)
 
     rng = Random.MersenneTwister(seed)
     γ = cis(2π * rand(rng))
-    H = StraightLineHomotopy(sys_G.evaluator, F.evaluator; γ = γ)
+    H = StraightLineHomotopy(start_evaluator, F.evaluator; γ = γ)
     heval = HomotopyEvaluator(H)
     tracker = Tracker(heval; options = alg.tracker_options)
 
