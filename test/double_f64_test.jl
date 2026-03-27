@@ -15,7 +15,12 @@ using HomotopyContinuationNext: DoubleF64, ComplexDF64, wide_add, wide_sub, wide
         @test abs(BigFloat(y) - big(π)) < 1.0e-30
 
         @test Float64(DoubleF64(3.14)) == 3.14
+        @test Int64(DoubleF64(2.0)) === Int64(2)
+        @test UInt8(DoubleF64(2.0)) === UInt8(2)
+        @test UInt64(DoubleF64(2.0)) === UInt64(2)
         @test convert(Integer, DoubleF64(2.0)) isa Int64
+        @test convert(UInt16, DoubleF64(2.0)) === UInt16(2)
+        @test convert(DoubleF64, UInt32(7)) == DoubleF64(7.0)
     end
 
     @testset "arithmetic precision vs BigFloat" begin
@@ -61,8 +66,18 @@ using HomotopyContinuationNext: DoubleF64, ComplexDF64, wide_add, wide_sub, wide
         @test 2.0 == DoubleF64(2.0)
         @test promote_type(DoubleF64, Float64) == DoubleF64
         @test promote_type(DoubleF64, Int) == DoubleF64
+        @test promote_type(DoubleF64, UInt8) == DoubleF64
+        @test promote_type(DoubleF64, UInt64) == DoubleF64
+        @test promote_type(DoubleF64, BigInt) == BigFloat
         @test DoubleF64(1.0) + 2.0 isa DoubleF64
         @test 3 + DoubleF64(1.0) isa DoubleF64
+        @test DoubleF64(1.0) + UInt8(2) isa DoubleF64
+        @test UInt16(3) + DoubleF64(1.0) isa DoubleF64
+
+        a, b = promote(DoubleF64(1.0), UInt8(2))
+        @test a isa DoubleF64
+        @test b isa DoubleF64
+        @test b == DoubleF64(2.0)
     end
 
     @testset "special values" begin
