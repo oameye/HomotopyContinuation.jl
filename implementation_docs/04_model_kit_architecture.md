@@ -20,9 +20,11 @@ InstructionSequence
 execute!(u, I, x) / execute!(u, U, I, x) / execute_taylor!(...)
 ```
 
-Entry points: `build_interpreter`, `build_jacobian_interpreter`, `build_taylor_interpreter`, `build_df64_interpreter` in `polynomial_input.jl`.
-`_build_instruction_sequence_via_sexpr` is the active lowering path. `polynomial_compiler.jl`
-contains an experimental direct compiler that is intentionally not the default yet.
+The public polynomial entry point is `System(polys; ...)`.
+`polynomial_input.jl` now only provides variable discovery and low-level
+instruction-sequence construction helpers. `_build_instruction_sequence_via_sexpr`
+is the active lowering path. `polynomial_compiler.jl` contains an experimental
+direct compiler that is intentionally not the default yet.
 
 ## File map
 

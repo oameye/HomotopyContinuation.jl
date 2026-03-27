@@ -205,9 +205,8 @@ end
 ```julia
 struct Interpreter{V<:AbstractVector}
     sequence::InstructionSequence
+    instructions::Vector{ExecInstructionT}
     tape::V                        # contents mutated via tape[i] = val; reference is fixed
-    variables::Vector{Symbol}
-    parameters::Vector{Symbol}
 end
 ```
 
@@ -319,8 +318,6 @@ struct System
     support::Vector{Matrix{Int32}}
     coefficients::Vector{Vector{ComplexF64}}
     # GC roots — interpreters must stay alive for FunctionWrapper closures
-    _seq_eval::InstructionSequence
-    _seq_jac::InstructionSequence
     _interp_f64::Interpreter{Vector{ComplexF64}}
     _interp_df64::Interpreter{Vector{ComplexDF64}}
     _interp_jac::Interpreter{Vector{ComplexF64}}
