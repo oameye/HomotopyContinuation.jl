@@ -142,7 +142,7 @@ result = solve([x^2 + sin(y), cos(x) - y])  # uses Symbolics.build_function inte
 
 **2. Interpreter-first.** One tape-based interpreter handles all evaluation modes — `ComplexF64`, `ComplexDF64`, and `TruncatedTaylorSeries{N}` — through Julia's generic dispatch on the tape element type. The same `InstructionSequence` drives all modes. This eliminates the dual-track (compiled vs. interpreted) complexity.
 
-**3. MP as the symbolic engine.** MultivariatePolynomials provides differentiation (`MP.differentiate`), exponent/coefficient extraction, degree computation, and homogeneity checks. No SymEngine, no Symbolics.jl in core.
+**3. MP as the symbolic source of truth.** MultivariatePolynomials provides differentiation (`MP.differentiate`), term/monomial access, exponent/coefficient extraction, and degree computation. `System` stores the original MP polynomials plus the chosen variables/parameters, so metadata should be derived from that source rather than from a second HC-owned symbolic layer. Homogeneity is computed directly from MP terms with respect to the chosen variables; we do not rely on a backend-specific `MP.ishomogeneous` API.
 
 ---
 
@@ -153,7 +153,7 @@ result = solve([x^2 + sin(y), cos(x) - y])  # uses Symbolics.build_function inte
 | Category | Features |
 |----------|----------|
 | **Input** | Accept `Vector{<:MP.AbstractPolynomialLike}`, `AbstractSystem` |
-| **Extraction** | MP-native: `exponents`, `coefficients`, `differentiate`, `maxdegree`, `effective_variables`, `ishomogeneous` |
+| **Extraction** | MP-native: `terms`, `monomial`, `exponents`, `coefficients`, `differentiate`, `maxdegree`, `effective_variables` |
 | **Evaluation** | Tape interpreter for eval, jacobian, Taylor orders 1-3, DF64 |
 | **Start systems** | Total degree, polyhedral (BKK mixed volume) |
 | **Path tracking** | Padé (2,1) predictor, α-theory Newton corrector, adaptive step size |
@@ -437,7 +437,10 @@ end
 entry point to `solve` — users construct it once and reuse across multiple solves.
 
 ```julia
-struct System
+struct System{P,V}
+    polys::FSVec{P}
+    parameters::FSVec{V}
+    variables::FSVec{V}
     evaluator::SystemEvaluator
     degrees::Vector{Int}
     nvars::Int
@@ -466,7 +469,18 @@ size(F)          # (neqs, nvars)
 degrees(F)       # Vector{Int}
 nvariables(F)    # Int
 nparameters(F)   # Int
+polynomials(F)   # original MP polynomials
+variables(F)     # chosen variable ordering
+parameters(F)    # chosen parameter ordering
+is_homogeneous(F)
 ```
+
+The important lesson from the refactor is that `System` should keep the original MP input. That gives the package a symbolic source of truth without reintroducing HC v2's `Expression` / `Variable` layer. Metadata queries such as `variables(F)`, `parameters(F)`, and `is_homogeneous(F)` are defined on top of that stored source.
+
+Two caveats:
+
+- `support_coefficients(F::System)` is only defined for parameter-free systems, because parameterized systems do not have constant `ComplexF64` coefficients.
+- `is_homogeneous` is currently stored as metadata. In this branch it is not yet used by the solver or tracker control flow, though HC v2 used it extensively for projective/affine logic.
 
 ### 6.5 Homotopy Types
 
@@ -610,9 +624,10 @@ Input: Vector{<:MP.AbstractPolynomialLike}
 Step 1: MP extraction
   MP.effective_variables(polys)   → variables (only those that appear)
   MP.maxdegree(p)                 → degrees (for total degree start system)
-  MP.ishomogeneous(p)             → homogeneity check (DynamicPolynomials)
   MP.terms(p), MP.exponents(t),
   MP.coefficient(t)               → exponent matrices + coefficient vectors
+  MP.terms(p), MP.monomial(t),
+  MP.variables(m), MP.exponents(m) → homogeneity and support metadata
   │
   ▼
 Step 2: Jacobian via MP
@@ -740,7 +755,7 @@ end
 ```
 HomotopyContinuationNext.jl
 ├── MultivariatePolynomials.jl      # Abstract interface, differentiation, exponent access
-├── DynamicPolynomials.jl           # @polyvar, concrete polynomial types, ishomogeneous
+├── DynamicPolynomials.jl           # @polyvar, concrete polynomial types
 ├── FunctionWrappers.jl             # Type-stable function erasure
 ├── FixedSizeArrays.jl              # Non-resizable vectors/matrices (size not in type)
 ├── MixedSubdivisions.jl            # BKK mixed volume computation
@@ -754,7 +769,7 @@ HomotopyContinuationNext.jl
 | Package | Functions we use |
 |---------|-----------------|
 | MultivariatePolynomials | `variables`, `effective_variables`, `terms`, `exponents`, `coefficient`, `coefficients`, `differentiate`, `maxdegree`, `nvariables`, `monomials`, `polynomial` |
-| DynamicPolynomials | `@polyvar`, `ishomogeneous`, `homogenize`, `subs` |
+| DynamicPolynomials | `@polyvar`, concrete variable/polynomial types |
 | FunctionWrappers | `FunctionWrapper` for SystemEvaluator / HomotopyEvaluator |
 | FixedSizeArrays | `FixedSizeArray{T,N,Memory{T}}` via `FSVec{T}`/`FSMat{T}` aliases — all pre-allocated scratch buffers and FW argument types. Size is runtime, not a type parameter. Note: `FixedSizeVector{T}` is NOT concrete. |
 | MixedSubdivisions | `mixed_volume`, `fine_mixed_cells` |

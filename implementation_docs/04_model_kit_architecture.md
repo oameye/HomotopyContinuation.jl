@@ -6,7 +6,7 @@ Interpreter pipeline in `src/model_kit/` — converts DynamicPolynomials input i
 
 ```
 DynamicPolynomials (@polyvar)
-    | poly_to_sexpr() + MP.differentiate() for Jacobian
+    | active path: poly_to_sexpr() + MP.differentiate() for Jacobian
     v
 SExpr trees (SAdd/SMul/SPow/SConst/SVar/SParam)
     | cse() = opt_cse() + tree_cse()
@@ -15,24 +15,28 @@ CSE output: (replacements, reduced_exprs)
     | compile_to_instructions()  [TapeCompiler + fusion + register allocation]
     v
 InstructionSequence
-    | Interpreter(V, seq)
+    | compile to ExecInstruction variants + Interpreter(V, seq)
     v
 execute!(u, I, x) / execute!(u, U, I, x) / execute_taylor!(...)
 ```
 
 Entry points: `build_interpreter`, `build_jacobian_interpreter`, `build_taylor_interpreter`, `build_df64_interpreter` in `polynomial_input.jl`.
+`_build_instruction_sequence_via_sexpr` is the active lowering path. `polynomial_compiler.jl`
+contains an experimental direct compiler that is intentionally not the default yet.
 
 ## File map
 
 | File | Lines | Role |
 |------|------:|------|
-| `operations.jl` | 157 | `OpType` enum (25 ops, arity 0-4), `nested_ifs` codegen helper, `@inline` scalar `op_*` implementations |
+| `operations.jl` | 157 | `OpType` enum (25 ops, arity 0-4), `@inline` scalar `op_*` implementations |
 | `taylor.jl` | 513 | `TruncatedTaylorSeries{N,T}` (aliased as `TTS`), `TaylorVector{N,T}`, `@generated` `taylor_op_*` recurrences, `_cauchy_product_exprs` shared helper |
 | `sexpr.jl` | 290 | SExpr type hierarchy, hash/==, `_canonical_add`/`_canonical_mul`, `_wrap_args` helper, `poly_to_sexpr` |
 | `cse.jl` | 561 | SymEngine CSE port: `FuncArgTracker`, `opt_cse`, `tree_cse`, `cse` |
 | `tape_compiler.jl` | 598 | `TapeCompiler`, `_compile!`, instruction fusion, `_tree_reduce!` shared helper, `compile_to_instructions` |
 | `instruction_sequence.jl` | 245 | `Instruction`, `InstructionSequence`, `_remap_instruction`, DAG reorder, linear-scan register allocator |
-| `interpreter.jl` | 407 | `Interpreter{V}`, `execute!` (4 overloads), `execute_taylor!`, code-generated dispatch |
+| `interpreter.jl` | 407 | `Interpreter{V}`, `ExecInstruction` variants, `execute!` (4 overloads), `execute_taylor!` |
+| `symbolic_polynomial_compiler.jl` | - | Active symbolic MP polynomial lowering path |
+| `polynomial_compiler.jl` | - | Experimental direct MP polynomial lowering path |
 | `polynomial_input.jl` | 186 | User API, MP variable discovery, pipeline orchestrator |
 | **Total** | **~2960** | |
 
@@ -93,7 +97,7 @@ Output: `(replacements::Vector{Pair{SExpr,SExpr}}, reduced_exprs::Vector{SExpr})
 
 Internal helpers (`_load_inputs!`, `_extract_u!`, `_extract_U!`) take `I::Interpreter` directly — the tape type is constrained by the struct parameter, not `AbstractVector`. User-facing `execute!` methods keep `AbstractVector` for `u`, `x`, `p` since callers may pass `Vector` or `FSVec`.
 
-`execute_instructions_eval!` and `execute_instructions_jac!` are `@generated` — build nested-if dispatch chains at compile time with opcodes tested in frequency order (different orderings for eval vs jac workloads). One level of "instruction recursion" (next instruction inlined after each body) halves loop overhead.
+The runtime loop does not execute raw `Instruction` values directly. At construction time, each `Instruction` is compiled into an `ExecInstruction` variant (`Add`, `Mul`, `MulAdd`, etc.). The hot loop then dispatches on `variant_storage(instr)` and writes results into the pre-allocated tape. This keeps the loop allocation-free while avoiding the large generated opcode tree used in earlier revisions.
 
 `execute_taylor_instructions!` uses `@eval` instead of `@generated` due to Julia 1.12 world-age constraints.
 
@@ -148,6 +152,15 @@ Composite ops (`add3`, `add4`, `mul3`, `mul4`, `mulmuladd`, `mulmulsub`) are one
 | Build | 7.2x | 10.0x | 15.3x |
 
 Execution is zero-allocation, dominated by arithmetic + `getindex`/`setindex!`.
+
+## System boundary
+
+The model kit now feeds a `System` that stores both:
+
+- the compiled evaluator state (`InstructionSequence`, interpreters, wrappers)
+- the original MP source (`polys`, `variables`, `parameters`)
+
+This is intentional. MP polynomials are the symbolic source of truth for this branch. Metadata such as `variables(F)`, `parameters(F)`, and `is_homogeneous(F)` should be derived from that stored source rather than from a revived v2-style `Expression` layer.
 
 ## Design decisions and what was tried
 

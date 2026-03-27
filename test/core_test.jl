@@ -320,7 +320,31 @@ end
         @test HC.nparameters(sys) == 0
         @test HC.degrees(sys) == [2, 2]
         @test HC.nvariables(sys) == 2
+        @test collect(HC.polynomials(sys)) == F
+        @test collect(HC.variables(sys)) == [x, y]
+        @test isempty(HC.parameters(sys))
+        supp, coeffs = HC.support_coefficients(sys)
+        @test supp == sys.support
+        @test coeffs == sys.coefficients
+        @test collect(sys.polys) == F
+        @test collect(sys.variables) == [x, y]
+        @test isempty(sys.parameters)
+        @test HC.is_homogeneous(sys) == false
         @test sys.is_homogeneous == false
+    end
+
+    @testset "System: homogeneous metadata" begin
+        @polyvar x y a
+        F = [x^2 + a * y^2, x * y]
+        sys = System(F; parameters = [a])
+
+        @test collect(sys.variables) == [x, y]
+        @test collect(sys.parameters) == [a]
+        @test collect(HC.parameters(sys)) == [a]
+        @test collect(HC.variables(sys)) == [x, y]
+        @test HC.is_homogeneous(sys) == true
+        @test sys.is_homogeneous == true
+        @test_throws ArgumentError HC.support_coefficients(sys)
     end
 
     @testset "System: eval+jac vs MP ground truth" begin

@@ -123,15 +123,16 @@ function CommonSolve.init(F::System, alg::Polyhedral)::PolyhedralSolveCache
 
     # 1. Get support + target coefficients from the System
     #    Copy only entries that need modification (zero column addition).
-    support = Vector{Matrix{Int32}}(undef, length(F.support))
-    target_coeffs = Vector{Vector{ComplexF64}}(undef, length(F.coefficients))
-    for (i, A) in enumerate(F.support)
+    source_support, source_coeffs = support_coefficients(F)
+    support = Vector{Matrix{Int32}}(undef, length(source_support))
+    target_coeffs = Vector{Vector{ComplexF64}}(undef, length(source_coeffs))
+    for (i, A) in enumerate(source_support)
         if has_zero_column(A)
             support[i] = A
-            target_coeffs[i] = F.coefficients[i]
+            target_coeffs[i] = source_coeffs[i]
         else
             support[i] = hcat(A, zeros(Int32, size(A, 1)))
-            target_coeffs[i] = push!(copy(F.coefficients[i]), zero(ComplexF64))
+            target_coeffs[i] = push!(copy(source_coeffs[i]), zero(ComplexF64))
         end
     end
 

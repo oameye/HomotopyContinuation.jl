@@ -13,6 +13,7 @@ function support_coefficients(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         variables::AbstractVector,
     )::Tuple{Vector{Matrix{Int32}}, Vector{Vector{ComplexF64}}}
+    Base.@nospecialize polys variables
     n = length(variables)
     var_to_idx = Dict{Symbol, Int}(Symbol(v) => i for (i, v) in enumerate(variables))
 
