@@ -13,8 +13,16 @@ using FixedSizeArrays: FixedSizeArray
 import FunctionWrappers: FunctionWrapper
 using CommonSolve: CommonSolve
 using MixedSubdivisions: MixedSubdivisions
+using RuntimeGeneratedFunctions: RuntimeGeneratedFunctions, @RuntimeGeneratedFunction
+RuntimeGeneratedFunctions.init(@__MODULE__)
+
+@enumx CompileMode::Int8 begin
+    INTERPRETED
+    COMPILED
+end
 
 export @polyvar, solve, System
+export CompileMode
 export solutions, real_solutions, nsolutions, nreal
 export TotalDegree, Polyhedral, Result, PathResult
 
@@ -45,6 +53,7 @@ include("model_kit/tape_compiler.jl")
 include("model_kit/polynomial_compiler.jl")
 include("model_kit/symbolic_polynomial_compiler.jl")
 include("model_kit/interpreter.jl")
+include("model_kit/codegen.jl")
 include("model_kit/polynomial_input.jl")
 
 include("core/abstract_types.jl")

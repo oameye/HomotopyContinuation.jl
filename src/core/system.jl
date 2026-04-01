@@ -48,27 +48,33 @@ function System(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         parameters::AbstractVector,
         variables::AbstractVector,
+        compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
     neqs = length(polys)
     nvars = length(variables)
     nparams = length(parameters)
-    return _build_compiled_system(polys, variables, parameters, neqs, nvars, nparams)
+    return _build_compiled_system(polys, variables, parameters, neqs, nvars, nparams, compile)
 end
 
 """
-    System(polys; parameters=[], variables=...) -> System
+    System(polys; parameters=[], variables=..., compile=CompileMode.INTERPRETED) -> System
 
 Build a `System` from a vector of MultivariatePolynomials polynomials.
 Compiles the full interpreter pipeline and caches everything for reuse.
+
+`compile` controls the evaluation backend:
+- `CompileMode.INTERPRETED` (default): tape-based interpreter
+- `CompileMode.COMPILED`: RuntimeGeneratedFunctions compiled eval + Jacobian, interpreter Taylor
 """
 function System(
         polys::AbstractVector{<:MP.AbstractPolynomialLike};
         parameters = nothing,
         variables = nothing,
+        compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
     parameters === nothing && (parameters = _empty_vars(polys))
     variables === nothing && (variables = _effective_variables(polys, parameters))
-    return System(polys, parameters, variables)
+    return System(polys, parameters, variables, compile)
 end
 
 
@@ -128,6 +134,7 @@ end
         neqs::Int,
         nvars::Int,
         nparams::Int,
+        compile::CompileMode.T,
     )::System
     Base.@nospecialize polys variables parameters
     supp, coeffs = if nparams == 0
@@ -149,11 +156,19 @@ end
     degs = Int[MP.maxdegree(p) for p in polys]
     is_homogeneous = _is_homogeneous(polys, variables)
 
-    evaluator = _build_system_evaluator(
-        interp_f64, interp_df64, interp_jac,
-        interp_t1, interp_t2, interp_t3,
-        neqs, nvars, nparams,
-    )
+    evaluator = if compile == CompileMode.INTERPRETED
+        _build_system_evaluator(
+            interp_f64, interp_df64, interp_jac,
+            interp_t1, interp_t2, interp_t3,
+            neqs, nvars, nparams,
+        )
+    else  # CompileMode.COMPILED
+        _build_compiled_evaluator(
+            seq_eval, seq_jac,
+            interp_df64, interp_t1, interp_t2, interp_t3,
+            neqs, nvars, nparams,
+        )
+    end
 
     return System(
         _to_fsvec(polys),

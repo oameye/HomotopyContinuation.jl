@@ -11,6 +11,7 @@ using HomotopyContinuationNext
         HomotopyContinuationNext.PredictionMethod,
         HomotopyContinuationNext.TrackerCode,
         HomotopyContinuationNext.PathResultCode,
+        HomotopyContinuationNext.CompileMode,  # @enumx module
         HomotopyContinuationNext.SExpr,  # Moshi @data module
         HomotopyContinuationNext.ExecInstruction,  # Moshi @data module
     )
@@ -25,6 +26,7 @@ using HomotopyContinuationNext
             :FunctionWrapper,
             Symbol("@data"),
             Symbol("@derive"),
+            Symbol("@RuntimeGeneratedFunction"),
         ),
     ) == nothing
     @test check_no_stale_explicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing

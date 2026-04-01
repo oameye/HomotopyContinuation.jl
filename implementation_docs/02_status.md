@@ -32,6 +32,7 @@ The strongest claim: **better foundation** (predictable compilation, pure Julia,
 - [x] Result types, seed reproducibility
 - [x] Tape interpreter for eval, jacobian, Taylor 1-3, DF64
 - [x] CSE optimizer (SymEngine port), Moshi ADTs
+- [x] RGF compiled eval+jac backend (`CompileMode.COMPILED`, opt-in, 3-6x kernel speedup)
 
 ### Not Done — Top Priority
 
@@ -42,59 +43,48 @@ The strongest claim: **better foundation** (predictable compilation, pure Julia,
 
 ### Not Done — Later
 
+- [ ] Compiled Taylor backend — RGF codegen for Taylor evaluation (only if profiling shows interpreter Taylor is a bottleneck; v2 found interpreted Taylor efficient)
 - [ ] Standalone `newton(F, x0)`, progress bars, path diagnostics
 - [ ] Monodromy, certification, witness sets, NID
-- [ ] Compiled eval backend (Symbolics.jl extension)
 - [ ] Benchmark CI, no-allocation enforcement tests
 
 ## Performance
 
 Re-run `make benchmark` for absolute timings, `make compare` for v3/v2 ratios.
 
-### End-to-end solve (v3/v2 ratio, > 1.0 = v3 faster)
+### End-to-end solve vs v2 (> 1.0 = v3 faster)
 
-From `benchmark/compare/tracking.jl` (2026-04-01). **v3 is currently slower.**
+From `benchmark/compare/tracking.jl` + inline comparison (2026-04-01). **v3 is still slower.**
 
-| System | Ratio |
-|--------|------:|
-| katsura-3 | 0.69x |
-| katsura-4 | 0.57x |
-| katsura-5 | 0.47x |
+| System | v3 INTERPRETED/v2 | v3 COMPILED/v2 |
+|--------|------------------:|---------------:|
+| katsura-3 | 0.75x | 0.85x |
+| katsura-4 | 0.57x | 0.61x |
+| katsura-5 | 0.51x | 0.54x |
 
-Note: v2 includes endgame; v3 does not. v2 uses compiled evaluation; v3 uses interpreter.
+Note: v2 includes endgame; v3 does not. The compiled backend closes ~15-18% of the gap
+but v2 remains faster. The remaining gap is in LU, Newton, and tracker overhead.
 
-### Raw interpreter (v3 vs v2 InterpretedSystem, > 1.0 = v3 faster)
+### v3 compiled vs v3 interpreted (`make benchmark` → compile_modes group)
 
-From `benchmark/compare/interpreter.jl` (2026-04-01).
+| Metric | Eval speedup | Jac speedup | Build overhead |
+|--------|-------------:|------------:|---------------:|
+| katsura-3 | 3.2x | 3.9x | 1.42x |
+| katsura-5 | 3.5x | 5.6x | 1.29x |
+| katsura-7 | 3.3x | 6.3x | 1.22x |
 
-| Metric | Min | Median | Max |
-|--------|----:|-------:|----:|
-| Eval | 0.70x | 1.25x | 1.55x |
-| Jacobian | 1.21x | 1.39x | 1.82x |
-| Build | 1.18x | 1.31x | 2.17x |
+End-to-end solve speedup: 7-18% (eval is a fraction of total time).
 
-v3 interpreter is faster than v2 interpreter. But v2 default uses compiled mode, not interpreter.
+### TTFX (fresh session)
 
-### v2 interpreted vs v2 compiled
+| Mode | Time |
+|------|------|
+| v3 INTERPRETED | ~14s |
+| v3 COMPILED | ~15s |
+| v2 [:mixed] | ~44s |
+| v2 [:none] | ~11s |
 
-From `benchmark/compare/v2_modes.jl` (2026-04-01). Ratio = interpreted/compiled.
-
-| Metric | Min | Median | Max |
-|--------|----:|-------:|----:|
-| Eval | 3.4x | 4.4x | 7.8x |
-| Jacobian | 6.9x | 9.6x | 12.7x |
-
-v2's compiled mode is significantly faster for raw kernels. End-to-end impact is smaller (LU/Newton dominate), but this is why v3 end-to-end solve is slower.
-
-### TTFX (from `benchmark/compare/ttfx.jl`, fresh session)
-
-| Metric | Time |
-|--------|------|
-| v3 first solve | ~13s |
-| v2 first solve [:mixed] | ~44s |
-| v2 first solve [:none] | ~11s |
-
-v3 wins against v2 default (:mixed). v2 :none (no type parameter) is slightly faster than v3. The win is against v2's per-system recompilation pathology, not against all v2 usage.
+v3 wins against v2 default (:mixed). COMPILED adds ~1s TTFX overhead vs INTERPRETED.
 
 ### Steady-state execution (raw interpreter, zero allocation)
 

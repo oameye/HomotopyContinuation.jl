@@ -18,6 +18,9 @@ benchmark_core!(SUITE)
 include("tracking.jl")
 benchmark_tracking!(SUITE)
 
+include("compile_modes.jl")
+benchmark_compile_modes!(SUITE)
+
 BenchmarkTools.tune!(SUITE)
 results = BenchmarkTools.run(SUITE; verbose = true)
 display(median(results))
