@@ -14,6 +14,7 @@ struct NewtonCorrectorResult
     iters::Int
     ω::Float64
     θ::Float64
+    μ_low::Float64
     norm_Δx₀::Float64
 end
 
@@ -48,8 +49,66 @@ end
 
 const NEWTON_MAX_ITERS = 11
 
+@inline function _mixed_refine!(
+        Δx::FSVec{ComplexF64},
+        J::Jacobian,
+        r::FSVec{ComplexF64},
+        norm::WeightedNorm,
+        tol::Float64,
+        max_iters::Int = 3,
+    )::Float64
+    δ = mixed_precision_iterative_refinement!(Δx, J.workspace, r, norm)
+    for _ in 2:max_iters
+        (!isfinite(δ) || δ <= tol) && break
+        δ = mixed_precision_iterative_refinement!(Δx, J.workspace, r, norm)
+    end
+    return δ
+end
+
+@inline function _copy_df64!(
+        dst::FSVec{ComplexDF64},
+        src::FSVec{ComplexF64},
+    )::Nothing
+    @inbounds for i in eachindex(dst, src)
+        dst[i] = ComplexDF64(src[i])
+    end
+    return nothing
+end
+
+function extended_prec_refinement_step!(
+        x̄::FSVec{ComplexF64},
+        NC::NewtonCorrector,
+        H::HomotopyEvaluator,
+        x::FSVec{ComplexF64},
+        t::ComplexF64,
+        J::Jacobian,
+        norm::WeightedNorm;
+        simple_newton_step::Bool = true,
+    )::Float64
+    evaluate_and_jacobian!(NC.r, J.workspace.A, H, x, t)
+    updated!(J)
+
+    _copy_df64!(NC.x_ext, x)
+    evaluate!(NC.r, H, NC.x_ext, t)
+    LA.ldiv!(NC.Δx, J, NC.r, norm)
+    _mixed_refine!(NC.Δx, J, NC.r, norm, 1.0e-8)
+
+    @inbounds for i in eachindex(x̄, x, NC.Δx)
+        x̄[i] = x[i] - NC.Δx[i]
+    end
+
+    if simple_newton_step
+        _copy_df64!(NC.x_ext, x̄)
+        evaluate!(NC.r, H, NC.x_ext, t)
+        LA.ldiv!(NC.Δx, J, NC.r, norm)
+    end
+
+    return weighted_norm(NC.Δx, norm)
+end
+
 """
-    newton!(x̄, NC, H, x₀, t, J, norm, ω, μ, first_correction) → NewtonCorrectorResult
+    newton!(x̄, NC, H, x₀, t, J, norm, ω, μ, first_correction,
+            extended_precision=false, accurate_μ=false) → NewtonCorrectorResult
 
 Perform Newton correction on predicted point `x₀`. Writes corrected point into `x̄`.
 All arguments are positional for hot-path performance (no kwargs overhead).
@@ -69,6 +128,8 @@ function newton!(
         ω::Float64,
         μ::Float64,
         first_correction::Bool,
+        extended_precision::Bool = false,
+        accurate_μ::Bool = false,
     )::NewtonCorrectorResult
     a = NC.a
     h_a = NC.h_a
@@ -81,6 +142,7 @@ function newton!(
         x̄[i] = x₀[i]
     end
 
+    μ_low = NaN
     norm_Δx₀ = 0.0
     norm_Δx_prev = 0.0
     θ = 0.0
@@ -91,15 +153,23 @@ function newton!(
         evaluate_and_jacobian!(r, J.workspace.A, H, x̄, t)
         updated!(J)
 
+        if extended_precision
+            _copy_df64!(NC.x_ext, x̄)
+            evaluate!(r, H, NC.x_ext, t)
+        end
+
         # Solve J * Δx = r
         LA.ldiv!(Δx, J, r, norm)
+        if extended_precision
+            _mixed_refine!(Δx, J, r, norm, ā^2)
+        end
 
         norm_Δx = weighted_norm(Δx, norm)
 
         # Check for singularity
         if isnan(norm_Δx)
             return NewtonCorrectorResult(
-                NewtonCode.NEWT_SINGULARITY, Inf, k, ω, θ, norm_Δx₀,
+                NewtonCode.NEWT_SINGULARITY, Inf, k, ω, θ, μ_low, norm_Δx₀,
             )
         end
 
@@ -113,7 +183,7 @@ function newton!(
             # Early termination check for non-first corrections
             if !first_correction && 0.125 * norm_Δx₀ * ω > h_a
                 return NewtonCorrectorResult(
-                    NewtonCode.NEWT_TERMINATED, Inf, k + 1, ω, θ, norm_Δx₀,
+                    NewtonCode.NEWT_TERMINATED, Inf, k + 1, ω, θ, μ_low, norm_Δx₀,
                 )
             end
         else
@@ -128,7 +198,7 @@ function newton!(
 
             if θ > ā
                 return NewtonCorrectorResult(
-                    NewtonCode.NEWT_TERMINATED, Inf, k + 1, ω, θ, norm_Δx₀,
+                    NewtonCode.NEWT_TERMINATED, Inf, k + 1, ω, θ, μ_low, norm_Δx₀,
                 )
             end
         end
@@ -139,19 +209,35 @@ function newton!(
             # One more eval+solve to get accuracy estimate
             evaluate_and_jacobian!(r, J.workspace.A, H, x̄, t)
             updated!(J)
+
+            if extended_precision
+                LA.ldiv!(Δx, J, r, norm)
+                μ_low = weighted_norm(Δx, norm)
+                _copy_df64!(NC.x_ext, x̄)
+                evaluate!(r, H, NC.x_ext, t)
+            end
             LA.ldiv!(Δx, J, r, norm)
+            if extended_precision
+                _mixed_refine!(Δx, J, r, norm, ā^2)
+            end
             norm_Δx_next = weighted_norm(Δx, norm)
 
             if isnan(norm_Δx_next)
                 return NewtonCorrectorResult(
-                    NewtonCode.NEWT_SINGULARITY, Inf, k + 2, ω, θ, norm_Δx₀,
+                    NewtonCode.NEWT_SINGULARITY, Inf, k + 2, ω, θ, μ_low, norm_Δx₀,
                 )
             end
 
             # Check for divergence
             if norm_Δx_next > sqrt(norm_Δx)
                 return NewtonCorrectorResult(
-                    NewtonCode.NEWT_TERMINATED, norm_Δx_next, k + 2, ω, θ, norm_Δx₀,
+                    NewtonCode.NEWT_TERMINATED,
+                    norm_Δx_next,
+                    k + 2,
+                    ω,
+                    θ,
+                    μ_low,
+                    norm_Δx₀,
                 )
             end
 
@@ -161,7 +247,12 @@ function newton!(
             end
 
             # Update μ
-            if norm_Δx_next > 2.0 * μ
+            if norm_Δx_next > 2.0 * μ && extended_precision
+                _copy_df64!(NC.x_ext, x̄)
+                evaluate!(r, H, NC.x_ext, t)
+                LA.ldiv!(Δx, J, r, norm)
+                μ = weighted_norm(Δx, norm)
+            elseif norm_Δx_next > 2.0 * μ || accurate_μ
                 # Recompute from fresh residual
                 evaluate!(r, H, x̄, t)
                 LA.ldiv!(Δx, J, r, norm)
@@ -172,7 +263,7 @@ function newton!(
 
             # Refine ω estimate at first iteration
             if k == 0 && norm_Δx_sq > eps()^2
-                ω_new = 2.0 * norm_Δx_next / norm_Δx_sq
+                ω_new = 2.0 * norm_Δx / (norm_Δx_next * norm_Δx_next)
                 if ω_new < ω
                     ω = ω_new
                 else
@@ -181,7 +272,13 @@ function newton!(
             end
 
             return NewtonCorrectorResult(
-                NewtonCode.NEWT_CONVERGED, max(μ, eps()), k + 2, ω, θ, norm_Δx₀,
+                NewtonCode.NEWT_CONVERGED,
+                max(μ, eps()),
+                k + 2,
+                ω,
+                θ,
+                μ_low,
+                norm_Δx₀,
             )
         end
 
@@ -192,12 +289,13 @@ function newton!(
     end
 
     return NewtonCorrectorResult(
-        NewtonCode.NEWT_MAX_ITERS, Inf, NEWTON_MAX_ITERS, ω, θ, norm_Δx₀,
+        NewtonCode.NEWT_MAX_ITERS, Inf, NEWTON_MAX_ITERS, ω, θ, μ_low, norm_Δx₀,
     )
 end
 
 """
-    init_newton!(x̄, NC, H, x₀, t, J, norm) → (success, ω, μ)
+    init_newton!(x̄, NC, H, x₀, t, J, norm, extended_precision=false)
+        → (success, ω, μ)
 
 Compute initial `ω` and `μ` estimates by taking Newton steps from `x₀`.
 Uses perturbation strategy for exact/near-exact start points.
@@ -210,6 +308,7 @@ function init_newton!(
         t::ComplexF64,
         J::Jacobian,
         norm::WeightedNorm,
+        extended_precision::Bool = false,
     )::Tuple{Bool, Float64, Float64}
     a = NC.a
     Δx = NC.Δx
@@ -218,6 +317,10 @@ function init_newton!(
     # First Newton step from x₀ to get initial residual size
     evaluate_and_jacobian!(r, J.workspace.A, H, x₀, t)
     updated!(J)
+    if extended_precision
+        _copy_df64!(NC.x_ext, x₀)
+        evaluate!(r, H, NC.x_ext, t)
+    end
     LA.ldiv!(Δx, J, r, norm)
     v = weighted_norm(Δx, norm) + eps()
 
@@ -241,6 +344,10 @@ function init_newton!(
         # First step from perturbed point
         evaluate_and_jacobian!(r, J.workspace.A, H, x̄, t)
         updated!(J)
+        if extended_precision
+            _copy_df64!(NC.x_ext, x̄)
+            evaluate!(r, H, NC.x_ext, t)
+        end
         LA.ldiv!(Δx, J, r, norm)
         norm_Δx₀ = weighted_norm(Δx, norm)
 
@@ -259,6 +366,10 @@ function init_newton!(
         # Second step
         evaluate_and_jacobian!(r, J.workspace.A, H, x̄, t)
         updated!(J)
+        if extended_precision
+            _copy_df64!(NC.x_ext, x̄)
+            evaluate!(r, H, NC.x_ext, t)
+        end
         LA.ldiv!(Δx, J, r, norm)
         norm_Δx₁ = weighted_norm(Δx, norm)
 
@@ -267,6 +378,10 @@ function init_newton!(
             # Reset x̄ from x₀
             evaluate_and_jacobian!(r, J.workspace.A, H, x₀, t)
             updated!(J)
+            if extended_precision
+                _copy_df64!(NC.x_ext, x₀)
+                evaluate!(r, H, NC.x_ext, t)
+            end
             LA.ldiv!(Δx, J, r, norm)
             @inbounds for i in eachindex(x̄, x₀, Δx)
                 x̄[i] = x₀[i] - Δx[i]
@@ -285,7 +400,7 @@ function init_newton!(
         # If ω*μ is too large, refine
         if ω * μ > a^7
             result = newton!(
-                x̄, NC, H, x̄, t, J, norm, ω, a^7 / ω, true,
+                x̄, NC, H, x̄, t, J, norm, ω, a^7 / ω, true, extended_precision, true,
             )
             if result.return_code == NewtonCode.NEWT_CONVERGED
                 ω = result.ω
@@ -306,7 +421,7 @@ function init_newton!(
 
     if !valid
         copyto!(x̄, x₀)
-        return (true, 1.0, eps())
+        return (false, NaN, NaN)
     end
 
     return (true, max(ω, 0.1), max(μ, eps()))

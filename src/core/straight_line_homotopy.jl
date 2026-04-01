@@ -12,10 +12,14 @@ struct StraightLineHomotopy <: AbstractHomotopy
     # Scratch buffers (contents mutated, references fixed)
     u_start::FSVec{ComplexF64}
     u_target::FSVec{ComplexF64}
+    u_cross_start::FSVec{ComplexF64}
+    u_cross_target::FSVec{ComplexF64}
     ū_start::FSVec{ComplexDF64}
     ū_target::FSVec{ComplexDF64}
     U_start::FSMat{ComplexF64}
     U_target::FSMat{ComplexF64}
+    tx1::TaylorVector{2, ComplexF64}
+    tx2::TaylorVector{3, ComplexF64}
     dv_start::TaylorVector{4, ComplexF64}
     dv_target::TaylorVector{4, ComplexF64}
 end
@@ -30,10 +34,14 @@ function StraightLineHomotopy(
         start, target, γ,
         FSVec{ComplexF64}(zeros(ComplexF64, m)),
         FSVec{ComplexF64}(zeros(ComplexF64, m)),
+        FSVec{ComplexF64}(zeros(ComplexF64, m)),
+        FSVec{ComplexF64}(zeros(ComplexF64, m)),
         FSVec{ComplexDF64}(zeros(ComplexDF64, m)),
         FSVec{ComplexDF64}(zeros(ComplexDF64, m)),
         FSMat{ComplexF64}(zeros(ComplexF64, m, n)),
         FSMat{ComplexF64}(zeros(ComplexF64, m, n)),
+        TaylorVector{2, ComplexF64}(n),
+        TaylorVector{3, ComplexF64}(n),
         TaylorVector{4, ComplexF64}(m),
         TaylorVector{4, ComplexF64}(m),
     )
@@ -108,17 +116,30 @@ end
 
 ## taylor! order 2
 
+@inline function _copy_prefix!(
+        dst::TaylorVector{K, T},
+        src::TaylorVector{N, T},
+    )::Nothing where {K, N, T}
+    @inbounds for j in axes(src.data, 2), i in 1:K
+        dst.data[i, j] = src.data[i, j]
+    end
+    return nothing
+end
+
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::StraightLineHomotopy,
         tx::TaylorVector{3, ComplexF64}, t::ComplexF64;
         incremental::Bool = false,
     )::Nothing
+    _copy_prefix!(H.tx1, tx)
+    taylor!(H.u_cross_start, Val(1), H.start, H.tx1, _EMPTY_PARAMS)
+    taylor!(H.u_cross_target, Val(1), H.target, H.tx1, _EMPTY_PARAMS)
     taylor!(H.u_start, Val(2), H.start, tx, _EMPTY_PARAMS)
     taylor!(H.u_target, Val(2), H.target, tx, _EMPTY_PARAMS)
-    γt = H.γ * t
     t1 = one(ComplexF64) - t
     @inbounds for i in eachindex(u)
-        u[i] = γt * H.u_start[i] + t1 * H.u_target[i]
+        u[i] = H.γ * (H.u_cross_start[i] + t * H.u_start[i]) +
+            t1 * H.u_target[i] - H.u_cross_target[i]
     end
     return nothing
 end
@@ -130,12 +151,15 @@ function taylor!(
         tx::TaylorVector{4, ComplexF64}, t::ComplexF64;
         incremental::Bool = false,
     )::Nothing
+    _copy_prefix!(H.tx2, tx)
+    taylor!(H.u_cross_start, Val(2), H.start, H.tx2, _EMPTY_PARAMS)
+    taylor!(H.u_cross_target, Val(2), H.target, H.tx2, _EMPTY_PARAMS)
     taylor!(H.u_start, Val(3), H.start, tx, _EMPTY_PARAMS)
     taylor!(H.u_target, Val(3), H.target, tx, _EMPTY_PARAMS)
-    γt = H.γ * t
     t1 = one(ComplexF64) - t
     @inbounds for i in eachindex(u)
-        u[i] = γt * H.u_start[i] + t1 * H.u_target[i]
+        u[i] = H.γ * (H.u_cross_start[i] + t * H.u_start[i]) +
+            t1 * H.u_target[i] - H.u_cross_target[i]
     end
     return nothing
 end

@@ -14,11 +14,12 @@ end
 @kwdef struct TrackerOptions
     max_steps::Int = 10_000
     max_step_size::Float64 = Inf
-    max_initial_step_size::Float64 = 0.1
+    max_initial_step_size::Float64 = Inf
     extended_precision::Bool = true
-    min_step_size::Float64 = 0.0
-    terminate_cond::Float64 = 1.0e14
+    min_step_size::Float64 = 1.0e-48
+    terminate_cond::Float64 = 1.0e13
     a::Float64 = 0.125
+    β_a::Float64 = 1.0
     β_ω::Float64 = 3.0
     β_τ::Float64 = 0.4
     strict_β_τ::Float64 = 0.3
@@ -26,15 +27,16 @@ end
 
 # Precomputed constants derived from TrackerOptions.a
 struct TrackerConstants
-    h_a::Float64       # 2a(√(4a²+1) - 2a)
-    tol_acc::Float64   # a³ * h_a — accuracy termination threshold
-    h_a_step::Float64  # √(1 + 2*h_a) - 1 — used in step size formula
+    tol_acc::Float64   # a³ * h(a) — accuracy termination threshold
+    h_a_step::Float64  # √(1 + 2*h(β_a*a)) - 1 — used in step size formula
 end
 
 function TrackerConstants(opts::TrackerOptions)
     a = opts.a
     h_a = 2a * (sqrt(4a^2 + 1) - 2a)
-    return TrackerConstants(h_a, a^3 * h_a, sqrt(1 + 2 * h_a) - 1)
+    step_a = opts.β_a * a
+    h_step = 2step_a * (sqrt(4step_a^2 + 1) - 2step_a)
+    return TrackerConstants(a^3 * h_a, sqrt(1 + 2 * h_step) - 1)
 end
 
 """
@@ -137,11 +139,11 @@ function _compute_initial_stepsize(
     e = pred.local_error
     τ = pred.trust_region
 
-    if isfinite(e) && e > 0 && isfinite(ω)
-        Δs₁ = nthroot(consts.h_a_step / (ω * e), p) / opts.β_ω
-    else
-        Δs₁ = Inf
+    # Fallback for infinite/NaN local error (v2 parity: use conservative estimate)
+    if !isfinite(e) || e <= 0
+        e = 1.0e5
     end
+    Δs₁ = isfinite(ω) ? nthroot(consts.h_a_step / (ω * e), p) / opts.β_ω : Inf
     Δs₂ = opts.β_τ * τ
 
     Δs = nanmin(Δs₁, Δs₂)
@@ -159,9 +161,10 @@ function _update_stepsize!(
     p = pred.order
 
     if result.return_code == NewtonCode.NEWT_CONVERGED
-        ω = state.ω
+        # ω extrapolation: predict ω trend to take larger steps (v2 parity)
+        ω = clamp(state.ω + 2 * (state.ω - state.ω_prev), state.ω, 8 * state.ω)
         e = pred.local_error
-        τ = pred.trust_region
+        τ = state.τ
 
         if isfinite(e) && e > 0 && isfinite(ω)
             Δs₁ = nthroot(consts.h_a_step / (ω * e), p) / opts.β_ω
@@ -178,6 +181,12 @@ function _update_stepsize!(
 
         Δs = min(nanmin(Δs₁, Δs₂), opts.max_step_size)
 
+        # Near-target refinement (v2 parity)
+        if state.use_strict_β_τ && dist_to_target(state.segment) < Δs
+            Δs *= opts.strict_β_τ
+        end
+
+        # Limit step increase rate
         if state.Δs_prev > 0
             Δs = min(Δs, 10 * state.Δs_prev)
         end
@@ -186,7 +195,26 @@ function _update_stepsize!(
             Δs = min(Δs, state.Δs_prev)
         end
     else
-        Δs = 0.25 * abs(state.segment.Δs)
+        # Convergence-rate-based rejection reduction (v2 parity)
+        # Use Newton convergence rate θ to estimate how much to reduce step size
+        j = result.iters - 2
+        Θ_j = j > 0 ? nthroot(result.θ, 1 << j) : result.θ
+        h_Θ_j = _h(Θ_j)
+        h_half_a = _h(0.5 * opts.β_a * opts.a)
+
+        if isnan(Θ_j) ||
+                result.return_code == NewtonCode.NEWT_SINGULARITY ||
+                isnan(result.accuracy) ||
+                result.iters <= 1 ||
+                h_Θ_j < h_half_a
+            # Fallback: fixed 0.25x reduction
+            Δs = 0.25 * abs(state.segment.Δs)
+        else
+            # Proportional reduction based on convergence rate
+            Δs = nthroot(
+                (sqrt(1 + 2 * h_half_a) - 1) / (sqrt(1 + 2 * h_Θ_j) - 1), p,
+            ) * abs(state.segment.Δs)
+        end
     end
 
     propose_step!(state.segment, max(Δs, opts.min_step_size))
@@ -213,11 +241,89 @@ function _check_terminated!(
         end
         if state.ω * state.μ > tol_acc
             state.code = TrackerCode.TERMINATED_ACCURACY_LIMIT
+        elseif abs(state.segment.Δs) < opts.min_step_size ||
+                fast_abs(state.segment.t′ - state.segment.t) <=
+                2eps(fast_abs(state.segment.t))
+            state.code = TrackerCode.TERMINATED_STEP_SIZE_TOO_SMALL
         elseif state.last_steps_failed >= 3 && state.cond_J_ẋ > opts.terminate_cond
             state.code = TrackerCode.TERMINATED_ILL_CONDITIONED
         end
     end
     return nothing
+end
+
+function use_extended_precision!(tracker::Tracker)::Float64
+    state = tracker.state
+    opts = tracker.options
+    opts.extended_precision || return state.μ
+    state.extended_prec && return state.μ
+
+    state.extended_prec = true
+    state.used_extended_prec = true
+
+    μ = state.μ
+    for _ in 1:2
+        μ = extended_prec_refinement_step!(
+            state.x, tracker.corrector, tracker.homotopy, state.x,
+            state.segment.t, state.jacobian, state.norm;
+            simple_newton_step = false,
+        )
+    end
+    state.μ = max(μ, eps())
+    return state.μ
+end
+
+function update_precision!(tracker::Tracker, μ_low::Float64)::Bool
+    state = tracker.state
+    opts = tracker.options
+    opts.extended_precision || return false
+
+    a = opts.a
+    if state.extended_prec && !state.keep_extended_prec && isfinite(μ_low) && μ_low > state.μ
+        if μ_low * state.ω < a^7 * _h(a)
+            state.extended_prec = false
+            state.μ = μ_low
+        end
+    elseif state.μ * state.ω > a^5 * _h(a)
+        use_extended_precision!(tracker)
+    end
+
+    return state.extended_prec
+end
+
+function refine_current_solution!(
+        tracker::Tracker;
+        min_tol::Float64 = 4 * eps(),
+        nsteps::Int = 3,
+    )::Float64
+    state = tracker.state
+    state.used_extended_prec = true
+
+    μ = state.accuracy
+    μ̄ = extended_prec_refinement_step!(
+        state.x̄, tracker.corrector, tracker.homotopy, state.x,
+        state.segment.t, state.jacobian, state.norm;
+        simple_newton_step = false,
+    )
+    if μ̄ < μ
+        copyto!(state.x, state.x̄)
+        μ = μ̄
+    end
+
+    k = 1
+    while μ > min_tol && k <= nsteps
+        μ̄ = extended_prec_refinement_step!(
+            state.x̄, tracker.corrector, tracker.homotopy, state.x,
+            state.segment.t, state.jacobian, state.norm,
+        )
+        if μ̄ < μ
+            copyto!(state.x, state.x̄)
+            μ = μ̄
+        end
+        k += 1
+    end
+
+    return μ
 end
 
 # ---------------------------------------------------------------------------
@@ -245,7 +351,7 @@ function step!(tracker::Tracker)::Bool
     result = newton!(
         state.x̄, tracker.corrector, H, state.x̂, state.segment.t′,
         state.jacobian, state.norm,
-        state.ω, state.μ, state.accepted_steps == 0,
+        state.ω, state.μ, state.accepted_steps == 0, state.extended_prec,
     )
 
     accepted = result.return_code == NewtonCode.NEWT_CONVERGED
@@ -259,8 +365,13 @@ function step!(tracker::Tracker)::Bool
         state.μ = max(result.accuracy, eps())
         state.ω_prev = state.ω
         state.ω = max(result.ω, 0.5 * state.ω, 0.1)
-        state.norm_Δx₀ = result.norm_Δx₀
+        update_precision!(tracker, result.μ_low)
         state.cond_J_ẋ = pred.cond_H_x
+
+        if is_done(state.segment) && opts.extended_precision && state.accuracy > 1.0e-14
+            state.accuracy = refine_current_solution!(tracker; min_tol = 1.0e-14)
+            state.μ = max(state.accuracy, eps())
+        end
 
         compute_local_error!(pred, state.x̂, state.x, state.norm, state.Δs_prev)
 
@@ -274,6 +385,7 @@ function step!(tracker::Tracker)::Bool
         state.last_steps_failed += 1
     end
 
+    state.norm_Δx₀ = result.norm_Δx₀
     _update_stepsize!(state, result, pred, opts, consts)
     _check_terminated!(state, opts, consts)
 
@@ -304,15 +416,17 @@ function init!(
     state.segment = SegmentStepper(t₁, t₀)
     copyto!(state.x, x₀)
     state.Δs_prev = 0.0
-    state.accuracy = eps()
+    state.accuracy = NaN
     state.ω = 1.0
     state.ω_prev = 1.0
     state.μ = eps()
     state.τ = Inf
+    state.norm_Δx₀ = NaN
     state.extended_prec = false
     state.used_extended_prec = false
     state.keep_extended_prec = false
     state.use_strict_β_τ = false
+    state.cond_J_ẋ = NaN
     state.code = TrackerCode.TRACKING
     state.accepted_steps = 0
     state.rejected_steps = 0
@@ -328,8 +442,17 @@ function init!(
 
     valid, ω, μ = init_newton!(
         state.x̄, tracker.corrector, tracker.homotopy, state.x, t₁,
-        state.jacobian, state.norm,
+        state.jacobian, state.norm, false,
     )
+
+    if !valid && opts.extended_precision
+        valid, ω, μ = init_newton!(
+            state.x̄, tracker.corrector, tracker.homotopy, state.x, t₁,
+            state.jacobian, state.norm, true,
+        )
+        state.extended_prec = valid
+        state.used_extended_prec = valid
+    end
 
     if !valid
         state.code = TrackerCode.TERMINATED_INVALID_STARTVALUE
@@ -337,9 +460,10 @@ function init!(
     end
 
     copyto!(state.x, state.x̄)
+    state.accuracy = max(μ, eps())
     state.ω = ω
     state.ω_prev = ω
-    state.μ = μ
+    state.μ = max(μ, eps())
 
     update!(pred, tracker.homotopy, state.x, t₁, state.jacobian, state.norm)
     state.τ = pred.trust_region

@@ -2,19 +2,34 @@
 
 Last updated: 2026-04-01.
 
-**Reproduce:** `make benchmark` (timings), `make compare` (v3/v2 ratios), `make test` (instruction counts)
+**Reproduce:**
+- `make benchmark` — steady-state timings
+- `make compare` — v3/v2 ratios
+- `julia --project=benchmark benchmark/compare/trace_tracker.jl 3` — raw tracker trace on katsura-3
+- `make test` — test suite
 
 ## Honest Assessment
 
-This is a robust monomorphic core, not yet a v2 replacement. The architecture is right (FunctionWrapper firewall, pure Julia, no per-system recompilation), but major gaps remain:
+This is still not a v2 replacement, but the core tracker is in much better shape than it was a
+few days ago.
 
-- **Endgame missing** — singular/at-infinity solutions will fail. This blocks real use.
-- **End-to-end solve is slower than v2** — 0.47x–0.69x on katsura-3/4/5 (`benchmark/compare/tracking.jl`).
-- **Raw interpreter is 3–8x slower than v2 compiled** for eval, 7–11x for Jacobian (`benchmark/compare/v2_modes.jl`). LU/Newton dominate end-to-end time, so the impact is smaller, but it's real.
-- **No threading, no overdetermined, no progress bars.**
-- **Low-level debt:** uncached SExpr hashes, O(n^2) insertion sort, fragile DP introspection, magic constants, no benchmark CI.
+- **Endgame is still missing**. This is now the clearest correctness and performance blocker.
+  Raw tracker traces still show large late-path gaps on hard paths, and v2's endgame is part of
+  why it terminates those cases much earlier.
+- **Core regular-path tracking improved substantially.** The straight-line homotopy Taylor
+  formulas were wrong at orders 2 and 3 when `x` and `t` varied together. Fixing those cross
+  terms, plus the Newton/predictor parity work, reduced the current katsura compare from roughly
+  `234 / 197 / 406` steps per path to about `77 / 105 / 154` accepted steps per path on
+  katsura-3/4/5.
+- **The current end-to-end katsura compare is around parity or better in wall time**, but those
+  numbers are still provisional: `benchmark/compare/tracking.jl` is currently unseeded and
+  reports accepted steps only.
+- **No threading, no overdetermined systems, no progress bars.**
 
-The strongest claim: **better foundation** (predictable compilation, pure Julia, extensible via AbstractSystem). The weakest claim: **already the right replacement**.
+The strongest honest claim is now:
+
+**v3 has a solid monomorphic core and a much better regular-path tracker, but it is still missing
+the late-path/endgame machinery required to call it a real v2 replacement.**
 
 ## Feature Checklist
 
@@ -28,42 +43,64 @@ The strongest claim: **better foundation** (predictable compilation, pure Julia,
 - [x] StraightLineHomotopy, CoefficientHomotopy, ToricHomotopy
 - [x] Predictor-corrector tracker (Pade 2,1 + adaptive step)
 - [x] Newton corrector (alpha-theory), DoubleF64 refinement
+- [x] Extended precision support in Newton corrector and tracker (v2 parity)
+- [x] Step control matching v2: ω extrapolation, convergence-rate rejection, near-target scaling, β_a
+- [x] Iterative refinement in predictor (accurate Taylor coefficients)
+- [x] StraightLineHomotopy Taylor formula fix (cross-derivative terms)
+- [x] Raw tracker trace tooling against v2 (`benchmark/compare/trace_tracker.jl`)
 - [x] Binomial system solver (HNF), weighted norms, custom LU
-- [x] Result types, seed reproducibility
+- [x] Result types, seed reproducibility in solve APIs
 - [x] Tape interpreter for eval, jacobian, Taylor 1-3, DF64
 - [x] CSE optimizer (SymEngine port), Moshi ADTs
 - [x] RGF compiled eval+jac backend (`CompileMode.COMPILED`, opt-in, 3-6x kernel speedup)
 
 ### Not Done — Top Priority
 
-- [ ] **Endgame tracker** — correctness blocker
+- [ ] **Endgame tracker / late-path handoff** — correctness blocker and likely the main remaining tracker-performance gap
 - [ ] **Threading** — performance blocker for large systems
 - [ ] **Overdetermined systems** — applicability blocker
-- [ ] **Direct polynomial compiler** — `polynomial_compiler.jl` exists, deferred. For polynomial input (the common case), this path could replace the SExpr→CSE→tape pipeline with less complexity.
+- [ ] **Tracking benchmark cleanup** — fix seed handling in `benchmark/compare/tracking.jl` and report total steps, not only accepted steps
 
 ### Not Done — Later
 
-- [ ] Compiled Taylor backend — RGF codegen for Taylor evaluation (only if profiling shows interpreter Taylor is a bottleneck; v2 found interpreted Taylor efficient)
+- [ ] Direct polynomial compiler — `polynomial_compiler.jl` exists, deferred
+- [ ] Compiled Taylor backend — RGF codegen for Taylor (only if profiling justifies it)
 - [ ] Standalone `newton(F, x0)`, progress bars, path diagnostics
 - [ ] Monodromy, certification, witness sets, NID
 - [ ] Benchmark CI, no-allocation enforcement tests
 
 ## Performance
 
-Re-run `make benchmark` for absolute timings, `make compare` for v3/v2 ratios.
+Treat the current `benchmark/compare/tracking.jl` numbers as **indicative**, not final. That
+script currently:
+
+- uses fresh random seeds for `solve`
+- prints **accepted** steps/path, not total predictor-corrector attempts
+
+It is still useful as a trend check, but not yet good enough for stable headline claims.
 
 ### End-to-end solve vs v2 (> 1.0 = v3 faster)
 
-From `benchmark/compare/tracking.jl` + inline comparison (2026-04-01). **v3 is still slower.**
+From the current `benchmark/compare/tracking.jl` with `CompileMode.COMPILED`:
 
-| System | v3 INTERPRETED/v2 | v3 COMPILED/v2 |
-|--------|------------------:|---------------:|
-| katsura-3 | 0.75x | 0.85x |
-| katsura-4 | 0.57x | 0.61x |
-| katsura-5 | 0.51x | 0.54x |
+| System | v3/v2 ratio | v3 accepted steps/path | v2 accepted steps/path |
+|--------|------------:|-----------------------:|-----------------------:|
+| katsura-3 | ~1.86x | ~76.9 | ~62.9 |
+| katsura-4 | ~1.33x | ~104.6 | ~75.6 |
+| katsura-5 | ~1.01x | ~153.5 | ~89.8 |
 
-Note: v2 includes endgame; v3 does not. The compiled backend closes ~15-18% of the gap
-but v2 remains faster. The remaining gap is in LU, Newton, and tracker overhead.
+This is a large improvement over the earlier tracker state. The remaining gap is no longer
+"v3 is generically 2-3x worse everywhere"; it is concentrated in harder late-path cases.
+
+### Raw tracker trace: where the remaining gap lives
+
+From `benchmark/compare/trace_tracker.jl 3` using the raw tracker on katsura-3 with `γ = 1`:
+
+- current worst traced raw path: Next `155 / 115 / 270` accepted/rejected/total
+- same path in HC v2 raw tracker: `27 / 0 / 27`
+
+The large remaining mismatch shows up near the target / late-path regime. That is exactly where
+the missing endgame becomes relevant.
 
 ### v3 compiled vs v3 interpreted (`make benchmark` → compile_modes group)
 
@@ -73,57 +110,55 @@ but v2 remains faster. The remaining gap is in LU, Newton, and tracker overhead.
 | katsura-5 | 3.5x | 5.6x | 1.29x |
 | katsura-7 | 3.3x | 6.3x | 1.22x |
 
-End-to-end solve speedup: 7-18% (eval is a fraction of total time).
+End-to-end solve speedup remains modest because eval is only part of total step cost.
 
 ### TTFX (fresh session)
 
 | Mode | Time |
 |------|------|
-| v3 INTERPRETED | ~14s |
-| v3 COMPILED | ~15s |
-| v2 [:mixed] | ~44s |
-| v2 [:none] | ~11s |
+| v3 total | ~15s |
+| v2 total `[:mixed]` | ~47s |
+| v2 solve-only `[:none]` | ~11s |
+| v2 second system `[:mixed]` | ~6s |
 
-v3 wins against v2 default (:mixed). COMPILED adds ~1s TTFX overhead vs INTERPRETED.
+v3 still wins clearly against v2 default `:mixed`, which is the main architectural motivation for
+the rewrite.
 
-### Steady-state execution (raw interpreter, zero allocation)
+### Tracker component breakdown
 
-From `benchmarks_output.json` (pre-Moshi refactor). Re-run `make benchmark` for current numbers.
-
-| Benchmark | Time |
-|-----------|------|
-| eval katsura-3 (4x4) | 57 ns |
-| eval cyclic-7 (7x7) | 131 ns |
-| jac katsura-3 (4x4) | 104 ns |
-| jac cyclic-7 (7x7) | 389 ns |
-| taylor katsura-3 (order 3) | 101 ns |
-| track one path katsura-3 | 551 us |
-| build katsura-3 (full System()) | 664 us |
-| build cyclic-7 (full System()) | 2.37 ms |
-
-### Instruction counts (regression test limits, `test/instruction_count_test.jl`)
-
-| System | Eval instrs |
-|--------|------------:|
-| cyclic-3/4/5/6/7 | 6 / 11 / 19 / 28 / 38 |
-| chain-3/4/5/6/7 | 17 / 23 / 28 / 34 / 39 |
-| dense-quad-3/4/5/6 | 28 / 52 / 92 / 138 |
-| sparse 6x6 (random) | 82-96 |
-| sparse 8x8 (random) | 162-170 |
+The old conclusion still holds: raw eval kernels are not the bottleneck. Predictor updates,
+Newton correction, and step acceptance dominate.
 
 ## Open Items
 
+### Performance / correctness
+
+1. **Endgame / late-path handoff**
+   The raw trace tooling now makes this visible: the hardest remaining step-count gaps occur
+   near the target, where v2's overall pipeline has endgame machinery and v3 does not.
+
+2. **Benchmark cleanup**
+   `benchmark/compare/tracking.jl` should use fixed seeds and should report accepted, rejected,
+   and total steps consistently. Right now it is fine for trend tracking, not for documentation
+   claims.
+
+3. **Invalid-start metadata leak**
+   Invalid starts now fail correctly, but `PathResult` can still expose stale tracker metadata
+   (`condition_jacobian`, machine-epsilon `accuracy`) from earlier state unless the invalid-start
+   path resets those fields explicitly.
+
 ### Architecture debt
-1. **Direct polynomial compiler** — validate `polynomial_compiler.jl` and promote to default for polynomial input. The SExpr→CSE path is more machinery than needed for the common case.
-2. **Fragile DynamicPolynomials introspection** — `_variable_creation_id` uses reflection
-3. **Uncached SExpr hashes** — Moshi refactor removed `_hash` fields, may regress CSE build time on large systems
-4. **O(n^2) `_stable_sort!`** — insertion sort on potentially large vertex lists
-5. **Magic constant 10000** — scratch slot placeholder base, unguarded
+
+4. **Direct polynomial compiler** — validate and promote for polynomial input
+5. **Fragile DynamicPolynomials introspection** — `_variable_creation_id` uses reflection
+6. **Uncached SExpr hashes** — Moshi refactor removed `_hash` fields
+7. **O(n^2) `_stable_sort!`** — insertion sort on potentially large vertex lists
+8. **Magic constant 10000** — scratch slot placeholder base, unguarded
 
 ### Infrastructure debt
-6. **No benchmark CI** — regressions go unnoticed
-7. **No-allocation tests** — should be enforced for tracker step, Newton, predictor
-8. **Steady-state benchmarks stale** — pre-Moshi numbers, need re-running
+
+9. **No benchmark CI** — regressions go unnoticed
+10. **No-allocation tests** — should be enforced for tracker step, Newton, predictor
 
 ## Dependencies
 
@@ -131,10 +166,11 @@ From `benchmarks_output.json` (pre-Moshi refactor). Re-run `make benchmark` for 
 |---------|---------|
 | CommonSolve | `init`/`solve!` interface |
 | DynamicPolynomials | `@polyvar`, user-facing polynomial input |
-| EnumX | Scoped enums (TrackerCode, PathResultCode, etc.) |
+| EnumX | Scoped enums (TrackerCode, PathResultCode, CompileMode, etc.) |
 | FixedSizeArrays | FSVec/FSMat (size not in type parameter) |
 | FunctionWrappers | Type erasure for SystemEvaluator/HomotopyEvaluator |
 | LinearAlgebra | stdlib LU/QR |
 | MixedSubdivisions | BKK mixed volume for polyhedral start system |
 | Moshi | `@data` ADT for SExpr and ExecInstruction |
 | MultivariatePolynomials | Abstract polynomial interface, differentiation |
+| RuntimeGeneratedFunctions | Compiled eval/jac backend (`CompileMode.COMPILED`) |

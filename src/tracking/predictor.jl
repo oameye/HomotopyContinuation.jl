@@ -96,12 +96,13 @@ function update!(
         u[i] = -u[i]
     end
     LA.ldiv!(xtemp, J, u)
+    # Iterative refinement for accurate Taylor coefficients (v2 parity)
+    δ = fixed_precision_iterative_refinement!(xtemp, J.workspace, u, norm)
+    pred.cond_H_x = δ / eps()
     @inbounds for i in 1:n
         pred.tx3.data[2, i] = xtemp[i]
     end
     n1 = weighted_norm(xtemp, norm)
-
-    pred.cond_H_x = LA.cond(J)
 
     # -- Order 2: x2 = -J^{-1} * taylor!(u, Val(2), H, tv2, t) --
     # Populate tv2 with [x0, x1, 0]
@@ -115,6 +116,9 @@ function update!(
         u[i] = -u[i]
     end
     LA.ldiv!(xtemp, J, u)
+    if δ > 1.0e-10
+        fixed_precision_iterative_refinement!(xtemp, J.workspace, u)
+    end
     @inbounds for i in 1:n
         pred.tx3.data[3, i] = xtemp[i]
     end
@@ -130,6 +134,9 @@ function update!(
         u[i] = -u[i]
     end
     LA.ldiv!(xtemp, J, u)
+    if δ > 1.0e-4
+        fixed_precision_iterative_refinement!(xtemp, J.workspace, u)
+    end
     @inbounds for i in 1:n
         pred.tx3.data[4, i] = xtemp[i]
     end
@@ -184,6 +191,10 @@ function _compute_trust_region!(pred::Predictor)::Nothing
     end
 
     pred.trust_region = isfinite(tau) ? tau : 1.0
+    if isnan(pred.local_error)
+        inv_tau = inv(pred.trust_region)
+        pred.local_error = (inv_tau * inv_tau)^2
+    end
     return nothing
 end
 
@@ -222,7 +233,12 @@ function predict!(
     )::Nothing
     n = length(x_hat)
     data = pred.tx3.data
-    tol2 = 1.0e-28  # tol^2 for abs2 comparisons
+    λ = pred.trust_region
+    λ = isfinite(λ) && λ > 0 ? λ : 1.0
+    λ2 = λ * λ
+    λ3 = λ2 * λ
+    tol = 1.0e-12
+    tol2 = tol * tol
 
     @inbounds for i in 1:n
         x0 = data[1, i]
@@ -230,10 +246,13 @@ function predict!(
         x2 = data[3, i]
         x3 = data[4, i]
 
-        c2sq = abs2(x2)
-        c3sq = abs2(x3)
+        c = fast_abs(x0)
+        c1 = fast_abs(x1)
+        c2 = fast_abs(x2)
+        c3 = fast_abs(x3)
+        τ = tol * sqrt(c * c + (c1 * λ)^2 + (c2 * λ2)^2 + (c3 * λ3)^2)
 
-        if c3sq < tol2 || c2sq < tol2
+        if c3 * λ3 <= τ || c2 * λ2 <= τ
             # Quadratic Taylor fallback
             x_hat[i] = x0 + dt * (x1 + dt * x2)
         else

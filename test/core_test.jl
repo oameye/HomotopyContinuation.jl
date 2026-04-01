@@ -574,31 +574,32 @@ end
         end
     end
 
-    @testset "StraightLineHomotopy: Taylor order 2 via finite differences" begin
+    # Higher-order homotopy Taylor coefficients are taken along z ↦ H(x(z), t + z),
+    # which is the quantity used by the tracker's implicit differentiation.
+    @testset "StraightLineHomotopy: Taylor order 2 via finite differences (coupled x,t)" begin
         @polyvar x y
-        # Use degree-3 systems so Taylor order 2 is nontrivial
-        eval_G = System([x^2 - 1, y^2 - 1])
-        eval_F = System([x^3 + y - 2, x * y^2 - 1])
+        eval_G = System([x^2 + x * y - 1, x * y + y^2 - 2])
+        eval_F = System([x^3 + x * y + y - 2, x * y^2 + x^2 - 1])
 
         H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
         heval = HomotopyEvaluator(H)
 
-        x0 = ComplexF64[1.5, 2.5]
-        dx = ComplexF64[0.3, -0.2]
+        x0 = ComplexF64[1.5, -0.7]
+        dx = ComplexF64[0.3, 0.2]
         t = ComplexF64(0.4)
         ε = 1.0e-4
 
-        function eval_h(xv)
+        function eval_h_xt2(z)
             u = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-            evaluate!(u, heval, FSVec{ComplexF64}(xv), t)
+            xv = FSVec{ComplexF64}(x0 .+ z .* dx)
+            evaluate!(u, heval, xv, t + z)
             return Vector(u)
         end
 
-        h0 = eval_h(x0)
-        hp = eval_h(x0 .+ ε .* dx)
-        hm = eval_h(x0 .- ε .* dx)
+        h0 = eval_h_xt2(0.0)
+        hp = eval_h_xt2(ε)
+        hm = eval_h_xt2(-ε)
 
-        # Taylor coefficient order 2 = f''/(2!) via central FD
         fd2 = (hp .- 2 .* h0 .+ hm) ./ ε^2 ./ 2
 
         tv2 = TaylorVector{3, ComplexF64}(2)
@@ -610,11 +611,10 @@ end
         @test u_t2[2] ≈ fd2[2] atol = 1.0e-3
     end
 
-    @testset "StraightLineHomotopy: Taylor order 3 via finite differences" begin
+    @testset "StraightLineHomotopy: Taylor order 3 via finite differences (coupled x,t)" begin
         @polyvar x y
-        # Use degree-3+ systems so Taylor order 3 is nontrivial
-        eval_G = System([x^3 - y^2, x * y^2 + y^3])
-        eval_F = System([x^3 + y^3 - 1, x^2 * y - x * y^2])
+        eval_G = System([x^3 + x * y - y^2, x * y^2 + y^3])
+        eval_F = System([x^3 + y^3 - 1, x^2 * y - x * y^2 + x])
 
         H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
         heval = HomotopyEvaluator(H)
@@ -624,19 +624,18 @@ end
         t = ComplexF64(0.6)
         ε = 1.0e-3
 
-        function eval_h3(xv)
+        function eval_h_xt3(z)
             u = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-            evaluate!(u, heval, FSVec{ComplexF64}(xv), t)
+            xv = FSVec{ComplexF64}(x0 .+ z .* dx)
+            evaluate!(u, heval, xv, t + z)
             return Vector(u)
         end
 
-        hp1 = eval_h3(x0 .+ ε .* dx)
-        hp2 = eval_h3(x0 .+ 2ε .* dx)
-        hm1 = eval_h3(x0 .- ε .* dx)
-        hm2 = eval_h3(x0 .- 2ε .* dx)
+        hp1 = eval_h_xt3(ε)
+        hp2 = eval_h_xt3(2ε)
+        hm1 = eval_h_xt3(-ε)
+        hm2 = eval_h_xt3(-2ε)
 
-        # Third derivative via 5-point stencil: (hp2 - 2hp1 + 2hm1 - hm2) / (2ε³)
-        # Taylor coeff order 3 = f'''/(3!) = f'''/(6)
         fd3 = (hp2 .- 2 .* hp1 .+ 2 .* hm1 .- hm2) ./ (2 * ε^3) ./ 6
 
         tv3 = TaylorVector{4, ComplexF64}(2)

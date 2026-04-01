@@ -37,6 +37,7 @@ function Polyhedral(;
         min_step_size::Float64 = tracker_options.min_step_size,
         terminate_cond::Float64 = tracker_options.terminate_cond,
         a::Float64 = tracker_options.a,
+        β_a::Float64 = tracker_options.β_a,
         β_ω::Float64 = tracker_options.β_ω,
         β_τ::Float64 = tracker_options.β_τ,
         strict_β_τ::Float64 = tracker_options.strict_β_τ,
@@ -44,7 +45,7 @@ function Polyhedral(;
     opts = TrackerOptions(;
         max_steps, max_step_size, max_initial_step_size,
         extended_precision, min_step_size, terminate_cond,
-        a, β_ω, β_τ, strict_β_τ,
+        a, β_a, β_ω, β_τ, strict_β_τ,
     )
     return Polyhedral(opts, seed)
 end

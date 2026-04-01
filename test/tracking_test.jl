@@ -74,6 +74,18 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         @test isfinite(μ) && μ > 0
     end
 
+    @testset "track!: rejects invalid singular start value" begin
+        @polyvar x y
+        G = [x^2 - 1, y^2 - 1]
+        eval_G = System(G)
+
+        H = StraightLineHomotopy(eval_G.evaluator, eval_G.evaluator; γ = ComplexF64(1.0))
+        tracker = Tracker(HomotopyEvaluator(H))
+
+        code = track!(tracker, ComplexF64[0.0, 0.0])
+        @test code == TrackerCode.TERMINATED_INVALID_STARTVALUE
+    end
+
     # ── Tracker: end-to-end ───────────────────────────────────────────────
 
     @testset "track!: linear system (trivial path)" begin
@@ -195,6 +207,8 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         pred = tracker.predictor
         @test pred.trust_region > 0
         @test all(isfinite, pred.tx_norm)
+        @test isfinite(pred.local_error)
+        @test pred.local_error >= 0
 
         # predict! uses Taylor coefficients to predict next point
         n = size(heval)[2]
@@ -228,7 +242,90 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         @test allocs == 0
     end
 
-    # ── Tracker: end-to-end ───────────────────────────────────────────────
+    # ── Tracker: options and step control ────────────────────────────────
+
+    @testset "track!: max_step_size is enforced" begin
+        @polyvar x y
+        G = [x - 1, y - 1]
+        F = [x - 2, y - 3]
+        eval_G = System(G)
+        eval_F = System(F)
+
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
+        opts = TrackerOptions(; max_step_size = 0.01)
+        tracker = Tracker(HomotopyEvaluator(H); options = opts)
+
+        code = track!(tracker, ComplexF64[1.0, 1.0])
+        @test code == TrackerCode.TRACKER_SUCCESS
+        # With max_step_size=0.01, should take many more steps than default
+        @test tracker.state.accepted_steps >= 50
+    end
+
+    @testset "_update_stepsize!: rejection branch respects β_a" begin
+        seg = SegmentStepper(ComplexF64(1.0), ComplexF64(0.0))
+        HC.propose_step!(seg, 0.8)
+
+        state = TrackerState(1, 1, seg)
+        pred = Predictor(1, 1)
+        opts = TrackerOptions(; a = 0.125, β_a = 1.6)
+        consts = HC.TrackerConstants(opts)
+        result = NewtonCorrectorResult(
+            NewtonCode.NEWT_TERMINATED,
+            1.0,
+            3,
+            1.0,
+            0.04,
+            NaN,
+            0.0,
+        )
+
+        h(a) = 2a * (sqrt(4a^2 + 1) - 2a)
+        p = pred.order
+        Θ_j = sqrt(result.θ)
+        expected = (
+            (
+                sqrt(1 + 2 * h(0.5 * opts.β_a * opts.a)) - 1
+            ) / (
+                sqrt(1 + 2 * h(Θ_j)) - 1
+            )
+        )^(1 / p) * 0.8
+        old_expected = (
+            (
+                sqrt(1 + 2 * h(0.5 * opts.a)) - 1
+            ) / (
+                sqrt(1 + 2 * h(Θ_j)) - 1
+            )
+        )^(1 / p) * 0.8
+
+        HC._update_stepsize!(state, result, pred, opts, consts)
+
+        @test abs(state.segment.Δs) ≈ expected rtol = 1.0e-12
+        @test !isapprox(abs(state.segment.Δs), old_expected; rtol = 1.0e-6)
+    end
+
+    @testset "track!: step count sanity (katsura-3)" begin
+        @polyvar x0 x1 x2 x3
+        F = [
+            x0 + 2x1 + 2x2 + 2x3 - 1,
+            x0^2 + 2x1^2 + 2x2^2 + 2x3^2 - x0,
+            2x0 * x1 + 2x1 * x2 + 2x2 * x3 - x1,
+            x1^2 + 2x0 * x2 + 2x1 * x3 - x2,
+        ]
+        G = [x0 - 1, x1^2 - 1, x2^2 - 1, x3^2 - 1]
+
+        eval_G = System(G)
+        eval_F = System(F)
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator)
+        tracker = Tracker(HomotopyEvaluator(H))
+
+        code = track!(tracker, ComplexF64[1.0, 1.0, 1.0, 1.0])
+        @test code == TrackerCode.TRACKER_SUCCESS
+        # Should complete in fewer than 1000 steps (v2 does ~100-200)
+        @test tracker.state.accepted_steps < 1000
+        @test tracker.state.rejected_steps < 50
+    end
+
+    # ── Tracker: allocation tests ────────────────────────────────────────
 
     @testset "track!: zero allocations in step!" begin
         @polyvar x y
