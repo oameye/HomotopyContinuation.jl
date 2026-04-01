@@ -6,12 +6,13 @@ A ground-up rewrite of HomotopyContinuation.jl for solving polynomial systems vi
 
 ## Architecture
 
-Read `implementation_docs/00_design_document.md` for the full architecture and `implementation_docs/01_type_signatures.md` for concrete type signatures.
+Read `implementation_docs/00_architecture.md` for the full architecture, `implementation_docs/01_decisions.md` for pitfalls and design choices, and `implementation_docs/02_status.md` for feature/performance status.
 
 Key design decisions:
 - **Interpreter-first**: tape-based evaluator handles eval, jacobian, Taylor, DF64 — no Symbolics.jl in core
 - **FunctionWrapper type firewall**: `SystemEvaluator`/`HomotopyEvaluator` wrap any system into a single concrete type — the tracker is monomorphic
 - **FixedSizeArrays**: all pre-allocated scratch buffers use `FSVec`/`FSMat` (size is runtime, not a type parameter). **CRITICAL:** `FixedSizeVector{T}` is NOT concrete — the `Mem` parameter is free. Use `FixedSizeArray{T,N,Memory{T}}` for struct fields (see type aliases in main module).
+- **Moshi ADTs**: `SExpr` and `ExecInstruction` use Moshi.jl `@data` for tagged unions — all variants are one concrete type, eliminating dynamic dispatch in CSE and interpreter
 - **DynamicPolynomials input**: users provide polynomials via `@polyvar`, internal pipeline uses `MP.differentiate` for Jacobian
 - **Immutable by default**: mutable structs require justification, use `const` fields for buffer references
 
@@ -19,12 +20,12 @@ Key design decisions:
 
 ```
 src/HomotopyContinuationNext.jl     # Main module
-src/primitives/                      # DoubleF64, norms, linear algebra, voronoi tree
-src/model_kit/                       # Operations, instruction sequence, interpreter, Taylor
+src/primitives/                      # DoubleF64, norms, linear algebra
+src/model_kit/                       # SExpr, CSE, tape compiler, interpreter, Taylor
 src/core/                            # AbstractSystem/Homotopy, SystemEvaluator, homotopy types
-src/tracking/                        # Predictor, Newton, Tracker, Endgame
+src/tracking/                        # Predictor, Newton, Tracker
 src/solving/                         # solve(), total degree, polyhedral, result types
-src/utils.jl                         # SegmentStepper, fast_abs, etc.
+src/utils.jl                         # SegmentStepper, _stable_sort!, fast_abs, etc.
 ```
 
 ## Git policy
@@ -97,6 +98,7 @@ Before merging any PR:
 - **Enums over Symbols.** Use `EnumX.@enumx` for return codes and state machine states — scoped (`MyEnum.Value`), type-safe, faster than Symbol comparison.
 - **`FSVec{T}` / `FSMat{T}` for pre-allocated buffers.** Defined as `FixedSizeArray{T,1,Memory{T}}` / `FixedSizeArray{T,2,Memory{T}}` — same concrete type regardless of size, cannot be resized. **WARNING:** `FixedSizeVector{T}` and `FixedSizeMatrix{T}` are NOT concrete types (the `Mem` parameter is free). Always use `FSVec{T}` / `FSMat{T}` from the main module for struct fields, never `FixedSizeVector{T}` directly.
 - **`AbstractVector` / `AbstractMatrix` only where truly needed.** Use them in the `AbstractSystem`/`AbstractHomotopy` interface contracts (so users don't need to import FixedSizeArrays) and in public `execute!` methods that must accept both `Vector` and `FSVec`. Prefer concrete types everywhere else.
+- **Moshi `@data` for tagged unions.** Use `variant_storage(expr)` for pattern dispatch, never `isa` on the ADT module variants directly. Access the concrete type via `typeof(Module.Variant(...))` alias (e.g., `SExprT`, `ExecInstructionT`).
 
 ### Performance
 
@@ -122,21 +124,12 @@ For full reference, see the `julia-perf` skill (`.claude/skills/julia-perf/`) an
 
 | Package | Purpose |
 |---------|---------|
-| MultivariatePolynomials | Abstract polynomial interface, differentiation, exponent access |
+| CommonSolve | `init`/`solve!` interface |
+| DynamicPolynomials | `@polyvar`, concrete polynomial types |
+| EnumX | Scoped enums (TrackerCode, PathResultCode, etc.) |
 | FixedSizeArrays | Non-resizable vectors/matrices (size not in type parameter) |
+| FunctionWrappers | Type-stable function erasure for SystemEvaluator/HomotopyEvaluator |
 | LinearAlgebra | stdlib |
-
-Dependencies added as needed during implementation (not yet in Project.toml):
-- DynamicPolynomials — `@polyvar`, concrete polynomial types
-- FunctionWrappers — type-stable function erasure for SystemEvaluator/HomotopyEvaluator
-- MixedSubdivisions — BKK mixed volume computation
-- ProgressMeter — progress bars
-
-## Implementation phases
-
-1. **Primitives**: DoubleF64, WeightedNorm, MatrixWorkspace, LU, utils
-2. **Interpreter pipeline**: OpType, extract supports via MP, instruction sequence, interpreter, Taylor
-3. **Core types**: AbstractSystem/Homotopy, SystemEvaluator, HomotopyEvaluator, homotopy types
-4. **Path tracking**: Newton, predictor, tracker, valuation, endgame
-5. **Solve**: total degree, polyhedral, solve(), result types
-6. **Testing & validation**: benchmarks, JET verification, TTFX measurement
+| MixedSubdivisions | BKK mixed volume computation for polyhedral start system |
+| Moshi | `@data` tagged unions for SExpr and ExecInstruction |
+| MultivariatePolynomials | Abstract polynomial interface, differentiation, exponent access |

@@ -6,7 +6,7 @@ using HomotopyContinuationNext: AbstractSystem, AbstractHomotopy,
     start_parameters!, target_parameters!,
     SystemEvaluator, HomotopyEvaluator,
     System,
-    StraightLineHomotopy,
+    StraightLineHomotopy, CoefficientHomotopy,
     TaylorVector, TruncatedTaylorSeries, DoubleF64, ComplexDF64,
     execute!, execute_taylor!
 using DynamicPolynomials: @polyvar
@@ -686,6 +686,93 @@ end
         u = FSVec{ComplexF64}(zeros(ComplexF64, 2))
         xv = FSVec{ComplexF64}(ComplexF64[2.0, 3.0])
         U = FSMat{ComplexF64}(zeros(ComplexF64, 2, 2))
+        t = ComplexF64(0.5)
+
+        evaluate!(u, heval, xv, t)
+        evaluate_and_jacobian!(u, U, heval, xv, t)
+
+        @test (@allocated evaluate!(u, heval, xv, t)) == 0
+        @test (@allocated evaluate_and_jacobian!(u, U, heval, xv, t)) == 0
+    end
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CoefficientHomotopy
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    @testset "CoefficientHomotopy: interpolation" begin
+        # Build a parametric system: f(x; a,b) = [a*x^2 + b*x - 1]
+        @polyvar x a b
+        F = System([a * x^2 + b * x - 1]; parameters = [a, b])
+
+        start_coeffs = ComplexF64[2.0, 3.0]   # a=2, b=3 at t=1
+        target_coeffs = ComplexF64[1.0, -1.0]  # a=1, b=-1 at t=0
+
+        H = CoefficientHomotopy(F.evaluator, start_coeffs, target_coeffs)
+        m, n = size(H)
+        @test m == 1
+        @test n == 1
+
+        u = FSVec{ComplexF64}(zeros(ComplexF64, m))
+        xv = FSVec{ComplexF64}(ComplexF64[0.5])
+
+        # At t=1: coeffs = start → F(x; 2, 3) = 2*0.25 + 3*0.5 - 1 = 1.0
+        evaluate!(u, H, xv, ComplexF64(1.0))
+        @test abs(u[1] - 1.0) < 1.0e-12
+
+        # At t=0: coeffs = target → F(x; 1, -1) = 1*0.25 + (-1)*0.5 - 1 = -1.25
+        evaluate!(u, H, xv, ComplexF64(0.0))
+        @test abs(u[1] - (-1.25)) < 1.0e-12
+
+        # At t=0.5: coeffs = (1.5, 1.0) → 1.5*0.25 + 1.0*0.5 - 1 = -0.125
+        evaluate!(u, H, xv, ComplexF64(0.5))
+        @test abs(u[1] - (-0.125)) < 1.0e-12
+    end
+
+    @testset "CoefficientHomotopy: jacobian" begin
+        @polyvar x y a b
+        F = System([a * x + b * y, x * y - a]; parameters = [a, b])
+
+        H = CoefficientHomotopy(F.evaluator, ComplexF64[2.0, 1.0], ComplexF64[1.0, 1.0])
+        m, n = size(H)
+        u = FSVec{ComplexF64}(zeros(ComplexF64, m))
+        U = FSMat{ComplexF64}(zeros(ComplexF64, m, n))
+        xv = FSVec{ComplexF64}(ComplexF64[1.0, 2.0])
+
+        evaluate_and_jacobian!(u, U, H, xv, ComplexF64(0.0))
+
+        # At t=0: a=1, b=1. F = [x+y, xy-1]. J = [1 1; y x] = [1 1; 2 1]
+        @test abs(U[1, 1] - 1.0) < 1.0e-12
+        @test abs(U[1, 2] - 1.0) < 1.0e-12
+        @test abs(U[2, 1] - 2.0) < 1.0e-12
+        @test abs(U[2, 2] - 1.0) < 1.0e-12
+    end
+
+    @testset "CoefficientHomotopy: taylor order 1" begin
+        @polyvar x a
+        F = System([a * x^2 - 1]; parameters = [a])
+
+        start = ComplexF64[3.0]
+        target = ComplexF64[1.0]
+        H = CoefficientHomotopy(F.evaluator, start, target)
+
+        u = FSVec{ComplexF64}(zeros(ComplexF64, 1))
+        xv = FSVec{ComplexF64}(ComplexF64[0.5])
+
+        # Taylor order 1: dH/dt = F(x; start - target) = F(x; 2) = 2*0.25 - 1 = -0.5
+        taylor!(u, Val(1), H, xv, ComplexF64(0.5))
+        @test abs(u[1] - (-0.5)) < 1.0e-12
+    end
+
+    @testset "CoefficientHomotopy: zero allocations" begin
+        @polyvar x a
+        F = System([a * x^2 - 1]; parameters = [a])
+        H = CoefficientHomotopy(F.evaluator, ComplexF64[2.0], ComplexF64[1.0])
+        heval = HomotopyEvaluator(H)
+
+        m, n = size(heval)
+        u = FSVec{ComplexF64}(zeros(ComplexF64, m))
+        U = FSMat{ComplexF64}(zeros(ComplexF64, m, n))
+        xv = FSVec{ComplexF64}(ComplexF64[0.5])
         t = ComplexF64(0.5)
 
         evaluate!(u, heval, xv, t)

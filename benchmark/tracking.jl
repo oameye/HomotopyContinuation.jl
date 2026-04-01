@@ -6,7 +6,10 @@ using DynamicPolynomials: @polyvar
 using FixedSizeArrays: FixedSizeArray
 using HomotopyContinuationNext:
     System, StraightLineHomotopy, HomotopyEvaluator,
-    Tracker, TrackerOptions, TrackerCode, track!
+    Tracker, TrackerOptions, TrackerCode, track!, step!,
+    Predictor, predict!, update!,
+    NewtonCorrector, newton!, init_newton!,
+    Jacobian, MatrixWorkspace, WeightedNorm
 
 const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
 
@@ -36,6 +39,38 @@ function benchmark_tracking!(SUITE::BenchmarkGroup)
 
     SUITE["tracking"]["track_one_path_katsura3"] =
         @benchmarkable track!($tracker, $x₀)
+
+    # ── Newton corrector micro-benchmark ─────────────────────────────────
+    m, n = size(heval)
+    NC = NewtonCorrector(0.125, n, m)
+    J = Jacobian(MatrixWorkspace(m, n))
+    norm = WeightedNorm(n)
+    x_nc = FSVec{ComplexF64}(ComplexF64[1.01, 0.99, 1.01, 0.99])
+    x̄_nc = FSVec{ComplexF64}(zeros(ComplexF64, n))
+    HomotopyContinuationNext.init!(norm, x_nc)
+    newton!(x̄_nc, NC, heval, x_nc, ComplexF64(0.5), J, norm, 1.0, 0.1, true)
+
+    SUITE["tracking"]["newton_katsura3"] =
+        @benchmarkable newton!($x̄_nc, $NC, $heval, $x_nc, $(ComplexF64(0.5)), $J, $norm, 1.0, 0.1, true)
+
+    # ── Predictor micro-benchmark ────────────────────────────────────────
+    pred = Predictor(m, n)
+    x_pred = FSVec{ComplexF64}(ComplexF64[1.0, 1.0, 1.0, 1.0])
+    HomotopyContinuationNext.init!(norm, x_pred)
+    update!(pred, heval, x_pred, ComplexF64(1.0), J, norm)
+    x̂_pred = FSVec{ComplexF64}(zeros(ComplexF64, n))
+    predict!(x̂_pred, pred, ComplexF64(-0.01))
+
+    SUITE["tracking"]["predict_katsura3"] =
+        @benchmarkable predict!($x̂_pred, $pred, $(ComplexF64(-0.01)))
+
+    # ── Single step! micro-benchmark ─────────────────────────────────────
+    tracker_step = Tracker(heval)
+    HomotopyContinuationNext.init!(tracker_step, x₀)
+    step!(tracker_step)  # warmup
+
+    SUITE["tracking"]["step_katsura3"] =
+        @benchmarkable step!($tracker_step) setup = (HomotopyContinuationNext.init!($tracker_step, $x₀))
 
     return SUITE
 end

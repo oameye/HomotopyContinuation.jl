@@ -3,7 +3,7 @@ import HomotopyContinuationNext as HC
 using HomotopyContinuationNext: System, StraightLineHomotopy, HomotopyEvaluator,
     evaluate!, evaluate_and_jacobian!, taylor!,
     NewtonCorrector, NewtonCode, NewtonCorrectorResult, newton!, init_newton!,
-    Predictor, PredictionMethod, predict!,
+    Predictor, PredictionMethod, predict!, update!, compute_local_error!,
     Tracker, TrackerCode, TrackerOptions, TrackerState, track!, step!,
     Jacobian, MatrixWorkspace, WeightedNorm, SegmentStepper,
     TaylorVector, TruncatedTaylorSeries, weighted_norm
@@ -174,6 +174,61 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
         @test sol1 ≈ sol2
     end
+
+    # ── Predictor ─────────────────────────────────────────────────────────
+
+    @testset "predict!: Pade (2,1) prediction via tracker init" begin
+        # Setup: use tracker's init! which properly initializes Jacobian + predictor
+        @polyvar x y
+        G = [x - 1, y - 1]
+        F = [x - 2, y - 3]
+        eval_G = System(G)
+        eval_F = System(F)
+
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
+        heval = HomotopyEvaluator(H)
+        tracker = Tracker(heval)
+
+        # init! sets up Jacobian factorization + predictor Taylor coefficients
+        HC.init!(tracker, ComplexF64[1.0, 1.0])
+
+        pred = tracker.predictor
+        @test pred.trust_region > 0
+        @test all(isfinite, pred.tx_norm)
+
+        # predict! uses Taylor coefficients to predict next point
+        n = size(heval)[2]
+        x̂ = FSVec{ComplexF64}(zeros(ComplexF64, n))
+        dt = ComplexF64(-0.01)
+        predict!(x̂, pred, dt)
+        @test all(isfinite, Vector(x̂))
+        # Prediction should be close to x₀ for small dt
+        @test maximum(abs.(Vector(x̂) .- Vector(tracker.state.x))) < 0.1
+    end
+
+    @testset "predict!: zero allocations" begin
+        @polyvar x y
+        G = [x - 1, y - 1]
+        F = [x - 2, y - 3]
+        eval_G = System(G)
+        eval_F = System(F)
+
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
+        tracker = Tracker(HomotopyEvaluator(H))
+        HC.init!(tracker, ComplexF64[1.0, 1.0])
+
+        pred = tracker.predictor
+        n = size(tracker.homotopy)[2]
+        x̂ = FSVec{ComplexF64}(zeros(ComplexF64, n))
+
+        # Warmup
+        predict!(x̂, pred, ComplexF64(-0.01))
+
+        allocs = @allocated predict!(x̂, pred, ComplexF64(-0.02))
+        @test allocs == 0
+    end
+
+    # ── Tracker: end-to-end ───────────────────────────────────────────────
 
     @testset "track!: zero allocations in step!" begin
         @polyvar x y

@@ -1,52 +1,63 @@
 # HomotopyContinuationNext.jl
 
-This is a fork of [HomotopyContinuation.jl](https://github.com/JuliaHomotopyContinuation/HomotopyContinuation.jl), with the goals to make the package more type-stable and reduce inference time (TTFX). The eventual goal would be for the package to become HomotopyContinuation v3.
+A ground-up rewrite of [HomotopyContinuation.jl](https://github.com/JuliaHomotopyContinuation/HomotopyContinuation.jl) for solving polynomial systems via homotopy continuation.
 
-## Feature Parity with HC v2
+**Status:** Robust monomorphic core. Not yet a v2 replacement — missing endgame (singular solutions), threading, and overdetermined support. End-to-end solve is currently slower than v2 on nonsingular systems (`make compare`). The win is architectural: predictable compilation, no TTFX pathology, pure Julia throughout.
 
-### Done
-- [x] Total degree homotopy
-- [x] Polyhedral homotopy (two-phase: toric + coefficient)
-- [x] Parameter homotopy (`solve(F, starts; start_parameters, target_parameters)`)
-- [x] `System` type (cached interpreter pipeline, replaces v2's `System` + compilation modes)
-- [x] `SystemEvaluator` / `HomotopyEvaluator` type firewall (FunctionWrappers)
-- [x] `StraightLineHomotopy`, `CoefficientHomotopy`, `ToricHomotopy`
-- [x] Predictor-corrector tracker with adaptive stepping
-- [x] Extended precision (DoubleF64) path tracking
-- [x] Newton corrector with alpha-theory convergence
-- [x] Ill-conditioning termination
-- [x] `Result` / `PathResult` with `solutions`, `real_solutions`, `nsolutions`, `nreal`
-- [x] CommonSolve.jl integration (`init` / `solve!`)
-- [x] Seed-based reproducibility
+## What this solves
 
-### Tier 1: Core features (needed for general use)
-- [ ] **Endgame tracker**: Singular solution handling via Cauchy integral / power series. Required for systems with singular solutions. Without this, paths to singular points fail or return inaccurate results.
-- [ ] **Threading**: Parallel path tracking. v2 uses `Threads.@spawn` with dynamic load balancing. Infrastructure is ready (`SolveCache` is parallelizable).
-- [ ] **Overdetermined systems**: `RandomizedSystem` to square-up via random linear combinations, plus `excess_solution_check!` to filter false solutions.
-- [ ] **Affine charts / projective tracking**: `AffineChartHomotopy` for homogeneous systems. Needed for multi-projective variable groups.
-- [ ] **Standalone Newton**: Expose `newton(F, x₀)` as a public API (internal `newton!` already exists).
-- [ ] **Path diagnostics**: `path_info(tracker, x₀)` returning per-step data (step sizes, condition numbers, accuracy).
-- [ ] **Multiplicity / singularity detection**: Compute multiplicities from clustered solutions, detect singular vs nonsingular paths.
-- [ ] **Progress bars**: `ProgressMeter.jl` integration for `solve`.
+v2's `CompiledSystem{ID}` creates a unique type per polynomial system, forcing full recompilation of the tracker pipeline on every new system (~44s first solve, ~6s each new system). This is a fundamental type-system design problem, not fixable by tuning.
 
-### Tier 2: Advanced algorithms (research features)
-- [ ] **Monodromy solving**: `monodromy_solve(F, solutions, parameters)` — discover solutions via parameter loops. Requires: parameter homotopy (done), `UniquePoints` deduplication, loop management, trace test, group actions.
-- [ ] **Certification**: `certify(F, result)` — Krawczyk interval method with Arblib.jl for rigorous solution enclosures.
-- [ ] **Witness sets**: `witness_set(F; dim=k)` — compute via random linear section intersection. Requires: linear subspace homotopies, monodromy.
-- [ ] **Numerical irreducible decomposition**: `nid(F)` — decompose variety into irreducible components by dimension. Requires: witness sets, monodromy.
+v3 inserts a `FunctionWrapper` type firewall at the evaluator boundary (`SystemEvaluator`). The tracker is monomorphic — compiled once, reused for all systems. First solve ~13s (vs v2 :mixed ~44s). No per-system recompilation cost.
 
-### Tier 3: Extensions & optimizations
-- [ ] **Linear subspace homotopies**: `ExtrinsicSubspaceHomotopy`, `IntrinsicSubspaceHomotopy` for Grassmannian tracking.
-- [ ] **Compiled evaluation mode**: Symbolics.jl package extension to compile polynomial evaluation to native code (v2's `:all` mode). Currently interpreter-only is within ~4% of compiled.
-- [ ] **Direct monomial evaluator for polyhedral**: Build `InstructionSequence` directly from support matrices, bypassing the DynamicPolynomials roundtrip in `_build_parametric_system`.
-- [ ] **Sparse Jacobian**: Exploit sparsity structure for large systems.
-- [ ] **SemialgebraicSets.jl adapter**: Package extension for algebraic set solving backend.
+The secondary goal: replace SymEngine (C FFI) with a pure-Julia symbolic pipeline. Fully precompilable, debuggable, no FFI boundary.
 
-## Development TODO
+See `implementation_docs/03_v3_vs_v2.md` for the full comparison.
 
-- [ ] Benchmark interpreter vs v2 compiled mode on standard benchmarks (katsura, cyclic)
-- [ ] No-allocation tests for hot paths (tracker step, Newton, predictor)
-- [ ] Benchmark CSE build time on larger systems (cyclic-7/8) — Moshi SExpr no longer caches `_hash` fields, so compound expressions recompute hashes on every Dict/Set lookup
-- [ ] Replace `_stable_sort!` insertion sort (O(n^2)) with `sort!(..., alg=InsertionSort)` from Base or restore `MergeSort` for larger inputs like `vertex_list` in `_optimize_instruction_order`
-- [x] ~~Add ConcreteStructs tests~~ Done: `test/concrete_structs_test.jl`
-- [x] ~~Review type system and API~~ Done: `System` type, flattened algorithm kwargs, parameter homotopy
+## Current Limitations
+
+- **No endgame tracker** — singular or at-infinity solutions will fail. This is the top priority.
+- **No threading** — solve loop is sequential. Infrastructure is ready but not wired.
+- **No overdetermined support** — more equations than variables not handled.
+- **End-to-end solve is slower than v2** on nonsingular systems (0.47x–0.69x on katsura-3/4/5). The FunctionWrapper indirection and lack of compiled evaluation backends are the main costs.
+- **Raw interpreter is 3–8x slower than v2 compiled mode** for polynomial evaluation. End-to-end impact is smaller (LU/Newton dominate), but it's real.
+
+## What works well
+
+```julia
+using HomotopyContinuationNext
+
+@polyvar x y
+F = System([x^2 + y - 1, x*y - 2])
+result = solve(F)
+solutions(result)
+real_solutions(result)
+```
+
+- Total degree and polyhedral (BKK-optimal) start systems
+- Parameter homotopy: `solve(F, starts; start_parameters=p₁, target_parameters=p₀)`
+- Predictor-corrector tracker with adaptive stepping and DoubleF64 refinement
+- Pure-Julia tape interpreter for eval, Jacobian, Taylor orders 1-3
+- CommonSolve.jl integration, seed reproducibility
+- All hot-path types concrete, monomorphic tracker, immutable results
+
+## Near-term priorities
+
+1. **Endgame** — correctness blocker for any real use
+2. **Threading** — performance blocker for large systems
+3. **Overdetermined systems** — extends applicability
+4. **Direct polynomial compiler** — the SExpr→CSE→tape path may be more machinery than needed for polynomial input. A direct polynomial→tape compiler exists (`polynomial_compiler.jl`) but is deferred. Promoting it could reduce complexity and build cost.
+5. **Benchmark CI** — no regression tracking, claims rot quickly
+
+See `implementation_docs/02_status.md` for the full status.
+
+## Development
+
+```sh
+make test          # run all tests in parallel
+make benchmark     # steady-state timings
+make compare       # v3/v2 comparison (interpreter, tracking, TTFX, v2 modes)
+make format        # format with Runic.jl
+```
+
+See `CLAUDE.md` for coding rules and conventions.
