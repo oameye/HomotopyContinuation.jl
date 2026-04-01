@@ -6,6 +6,33 @@ const DEFAULT_REAL_TOL = 1.0e-6
 nanmin(a, b) = isnan(a) ? b : (isnan(b) ? a : min(a, b))
 nanmax(a, b) = isnan(a) ? b : (isnan(b) ? a : max(a, b))
 
+function _stable_sort!(values::Vector{T}, lt::F)::Vector{T} where {T, F}
+    for i in 2:length(values)
+        value = values[i]
+        j = i - 1
+        while j >= 1 && lt(value, values[j])
+            values[j + 1] = values[j]
+            j -= 1
+        end
+        values[j + 1] = value
+    end
+    return values
+end
+
+function _stable_sort_by!(values::Vector{T}, by::F)::Vector{T} where {T, F}
+    for i in 2:length(values)
+        value = values[i]
+        value_key = by(value)
+        j = i - 1
+        while j >= 1 && isless(value_key, by(values[j]))
+            values[j + 1] = values[j]
+            j -= 1
+        end
+        values[j + 1] = value
+    end
+    return values
+end
+
 function nthroot(x::Real, N::Integer)
     return if N == 4
         sqrt(sqrt(x))

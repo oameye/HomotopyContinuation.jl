@@ -14,7 +14,7 @@ const Next = HomotopyContinuationNext
 const HC = HomotopyContinuation
 const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
 
-BenchmarkTools.DEFAULT_PARAMETERS.seconds = 0.06
+BenchmarkTools.DEFAULT_PARAMETERS.seconds = 0.5
 BenchmarkTools.DEFAULT_PARAMETERS.samples = 4000
 
 function print_row(name::String, t_next::Float64, t_hc::Float64)

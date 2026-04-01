@@ -11,6 +11,8 @@ using HomotopyContinuationNext
         HomotopyContinuationNext.PredictionMethod,
         HomotopyContinuationNext.TrackerCode,
         HomotopyContinuationNext.PathResultCode,
+        HomotopyContinuationNext.SExpr,  # Moshi @data module
+        HomotopyContinuationNext.ExecInstruction,  # Moshi @data module
     )
 
     @test check_no_implicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing
@@ -18,7 +20,12 @@ using HomotopyContinuationNext
     # FunctionWrapper is the only public API of FunctionWrappers.jl but it is not
     # declared `public` in the package — ignore it here.
     @test check_all_explicit_imports_are_public(
-        HomotopyContinuationNext; ignore = (:FunctionWrapper,),
+        HomotopyContinuationNext;
+        ignore = (
+            :FunctionWrapper,
+            Symbol("@data"),
+            Symbol("@derive"),
+        ),
     ) == nothing
     @test check_no_stale_explicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing
     @test check_all_qualified_accesses_via_owners(HomotopyContinuationNext) == nothing

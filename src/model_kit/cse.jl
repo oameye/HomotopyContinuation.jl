@@ -12,17 +12,17 @@
 # Direct translation of SymEngine's FuncArgTracker class.
 
 struct FuncArgTracker
-    value_numbers::Dict{SExpr, UInt32}
-    value_number_to_value::Vector{SExpr}
+    value_numbers::Dict{SExprT, UInt32}
+    value_number_to_value::Vector{SExprT}
     arg_to_funcset::Vector{Set{UInt32}}
     func_to_argset::Vector{Set{UInt32}}
 end
 
 function FuncArgTracker(
-        funcs::Vector{Pair{SExpr, Vector{SExpr}}},
+        funcs::Vector{Pair{SExprT, Vector{SExprT}}},
     )::FuncArgTracker
-    value_numbers = Dict{SExpr, UInt32}()
-    value_number_to_value = SExpr[]
+    value_numbers = Dict{SExprT, UInt32}()
+    value_number_to_value = SExprT[]
     arg_to_funcset = Set{UInt32}[]
     func_to_argset = Set{UInt32}[]
 
@@ -48,10 +48,10 @@ function FuncArgTracker(
 end
 
 function _get_or_add_value_number!(
-        value_numbers::Dict{SExpr, UInt32},
-        value_number_to_value::Vector{SExpr},
+        value_numbers::Dict{SExprT, UInt32},
+        value_number_to_value::Vector{SExprT},
         arg_to_funcset::Vector{Set{UInt32}},
-        value::SExpr,
+        value::SExprT,
     )::UInt32
     existing = get(value_numbers, value, UInt32(0))
     if existing != UInt32(0)
@@ -64,6 +64,16 @@ function _get_or_add_value_number!(
     return vn
 end
 
+_sexpr_pair_lt(a::Pair{SExprT, Vector{SExprT}}, b::Pair{SExprT, Vector{SExprT}})::Bool =
+    _sexpr_lt(a.first, b.first)
+_pair_arg_count(p::Pair{SExprT, Vector{SExprT}})::Int = length(p.second)
+
+@inline function _candidate_lt(a::UInt32, b::UInt32, candidate_counts::Dict{UInt32, UInt32})::Bool
+    count_a = candidate_counts[a]
+    count_b = candidate_counts[b]
+    return count_a < count_b || (count_a == count_b && a < b)
+end
+
 """
 Get values in sorted index order.
 C++ std::set iterates in sorted order; Julia Set does not.
@@ -72,9 +82,9 @@ We sort explicitly to match SymEngine behavior.
 function _get_args_in_value_order(
         tracker::FuncArgTracker,
         argset::Union{Set{UInt32}, Vector{UInt32}},
-    )::Vector{SExpr}
-    sorted = sort!(collect(UInt32, argset))
-    return SExpr[tracker.value_number_to_value[i] for i in sorted]
+    )::Vector{SExprT}
+    sorted = _stable_sort!(collect(UInt32, argset), isless)
+    return SExprT[tracker.value_number_to_value[i] for i in sorted]
 end
 
 function _stop_arg_tracking!(tracker::FuncArgTracker, func_i::UInt32)::Nothing
@@ -100,7 +110,7 @@ function _get_common_arg_candidates(
     # SymEngine sorts funcsets by size for performance.
     # We collect and sort similarly.
     funcsets = [tracker.arg_to_funcset[arg] for arg in argset]
-    sort!(funcsets; by = length)
+    _stable_sort_by!(funcsets, length)
 
     for funcset in funcsets
         for func_i in funcset
@@ -123,7 +133,7 @@ function _get_subset_candidates(
         argset::Vector{UInt32},
         restrict_to_funcset,
     )::Vector{UInt32}
-    indices = sort!(collect(UInt32, restrict_to_funcset))
+    indices = _stable_sort!(collect(UInt32, restrict_to_funcset), isless)
     for arg in argset
         new_indices = UInt32[]
         for idx in indices
@@ -174,8 +184,8 @@ end
 
 function match_common_args!(
         func_class::SFuncKind.T,
-        funcs_::Vector{SExpr},
-        opt_subs::Dict{SExpr, SExpr},
+        funcs_::Vector{SExprT},
+        opt_subs::Dict{SExprT, SExprT},
     )::Nothing
     isempty(funcs_) && return nothing
 
@@ -185,9 +195,9 @@ function match_common_args!(
     # input is already __cmp__-sorted, so same-size groups preserve __cmp__ order
     # in practice on most implementations).
     # We sort by __cmp__ first, then stable-sort by arg count to match.
-    funcs = Pair{SExpr, Vector{SExpr}}[e => _get_args(e) for e in funcs_]
-    sort!(funcs; lt = (a, b) -> _sexpr_lt(a.first, b.first))
-    sort!(funcs; by = p -> length(p.second), alg = Base.Sort.MergeSort)
+    funcs = Pair{SExprT, Vector{SExprT}}[e => _get_args(e) for e in funcs_]
+    sort!(funcs; lt = _sexpr_pair_lt)
+    _stable_sort_by!(funcs, _pair_arg_count)  # stable sort by arg count preserves __cmp__ order within groups
 
     tracker = FuncArgTracker(funcs)
 
@@ -202,9 +212,9 @@ function match_common_args!(
 
         # Sort candidates by match count (ascending), then by index
         # "This makes us try combining smaller matches first." — SymEngine
-        candidates = sort!(
-            collect(keys(candidates_counts));
-            by = j -> (candidates_counts[j], j),
+        candidates = _stable_sort!(
+            collect(keys(candidates_counts)),
+            (a, b) -> _candidate_lt(a, b, candidates_counts),
         )
 
         ci = 1
@@ -213,17 +223,20 @@ function match_common_args!(
             ci += 1
 
             # Intersect arg sets
-            com_args = sort!(collect(intersect(tracker.func_to_argset[i], tracker.func_to_argset[j])))
+            com_args = _stable_sort!(
+                collect(intersect(tracker.func_to_argset[i], tracker.func_to_argset[j])),
+                isless,
+            )
 
             length(com_args) >= 2 || continue
 
-            diff_i = sort!(collect(setdiff(tracker.func_to_argset[i], com_args)))
+            diff_i = _stable_sort!(collect(setdiff(tracker.func_to_argset[i], com_args)), isless)
 
             local com_func_number::UInt32
 
             if !isempty(diff_i)
                 # "com_func needs to be unevaluated to allow for recursive matches."
-                com_func = SFuncSym(func_class, _get_args_in_value_order(tracker, com_args))
+                com_func = SExpr.SFuncSym(func_class, _get_args_in_value_order(tracker, com_args))
                 com_func_number = _get_or_add_value_number!(
                     tracker.value_numbers, tracker.value_number_to_value,
                     tracker.arg_to_funcset, com_func,
@@ -244,14 +257,14 @@ function match_common_args!(
                 )
             end
 
-            diff_j = sort!(collect(setdiff(tracker.func_to_argset[j], com_args)))
+            diff_j = _stable_sort!(collect(setdiff(tracker.func_to_argset[j], com_args)), isless)
             _add_to_sorted_vec!(diff_j, com_func_number)
             _update_func_argset!(tracker, j, diff_j)
             push!(changed, j)
 
             # Also update all subset candidates
             for k in _get_subset_candidates(tracker, com_args, candidates[ci:end])
-                diff_k = sort!(collect(setdiff(tracker.func_to_argset[k], com_args)))
+                diff_k = _stable_sort!(collect(setdiff(tracker.func_to_argset[k], com_args)), isless)
                 _add_to_sorted_vec!(diff_k, com_func_number)
                 _update_func_argset!(tracker, k, diff_k)
                 push!(changed, k)
@@ -259,7 +272,7 @@ function match_common_args!(
         end
 
         if i in changed
-            opt_subs[funcs[i].first] = SFuncSym(
+            opt_subs[funcs[i].first] = SExpr.SFuncSym(
                 func_class,
                 _get_args_in_value_order(tracker, tracker.func_to_argset[i]),
             )
@@ -280,25 +293,26 @@ Visitor that collects Add/Mul nodes and handles negative coefficients/exponents.
 Direct translation of SymEngine's OptsCSEVisitor.
 """
 function _opts_cse_visit!(
-        expr::SExpr,
-        adds::Set{SExpr},
-        muls::Set{SExpr},
-        opt_subs::Dict{SExpr, SExpr},
-        seen::Set{SExpr},
+        expr::SExprT,
+        adds::Set{SExprT},
+        muls::Set{SExprT},
+        opt_subs::Dict{SExprT, SExprT},
+        seen::Set{SExprT},
     )::Nothing
     expr in seen && return nothing
     push!(seen, expr)
+    storage = sexpr_storage(expr)
 
-    if expr isa SAdd
+    if storage isa SAddStorage
         # bvisit(const Add &x)
-        for a in _get_args(expr)
+        for a in storage.args
             _opts_cse_visit!(a, adds, muls, opt_subs, seen)
         end
         push!(adds, expr)
 
-    elseif expr isa SMul
+    elseif storage isa SMulStorage
         # bvisit(const Mul &x)
-        for a in _get_args(expr)
+        for a in storage.args
             _opts_cse_visit!(a, adds, muls, opt_subs, seen)
         end
         # Check for negative coefficient
@@ -306,57 +320,69 @@ function _opts_cse_visit!(
         # IMPORTANT: SymEngine's is_negative() returns true ONLY for real negative
         # numbers (Integer, Rational, RealDouble), NEVER for Complex.
         # So we must check: imaginary part is zero AND real part is negative.
-        if !isempty(expr.args) && expr.args[1] isa SConst &&
-                imag(expr.args[1].val) == 0 && real(expr.args[1].val) < 0
-            neg_coeff = expr.args[1].val
-            pos_coeff = -neg_coeff
-            # Compute neg(expr): flip the coefficient
-            if length(expr.args) == 2 && isone(pos_coeff)
-                # neg(Mul(-1, x)) = x — SymEngine simplifies this
-                neg_expr = expr.args[2]
-            else
-                if isone(pos_coeff)
-                    pos_args = expr.args[2:end]
+        args = storage.args
+        if !isempty(args)
+            first_storage = sexpr_storage(args[1])
+            if first_storage isa SConstStorage &&
+                    imag(first_storage.val) == 0 && real(first_storage.val) < 0
+                neg_coeff = first_storage.val
+                pos_coeff = -neg_coeff
+                # Compute neg(expr): flip the coefficient
+                if length(args) == 2 && isone(pos_coeff)
+                    # neg(Mul(-1, x)) = x — SymEngine simplifies this
+                    neg_expr = args[2]
                 else
-                    pos_args = copy(expr.args)
-                    pos_args[1] = SConst(pos_coeff)
+                    if isone(pos_coeff)
+                        pos_args = args[2:end]
+                    else
+                        pos_args = copy(args)
+                        pos_args[1] = SExpr.SConst(pos_coeff)
+                    end
+                    neg_expr = length(pos_args) == 1 ? pos_args[1] : SExpr.SMul(pos_args)
                 end
-                neg_expr = length(pos_args) == 1 ? pos_args[1] : SMul(pos_args)
-            end
-            # SymEngine: if (not is_a<Symbol>(*neg_expr))
-            # Skip when negation simplifies to an atom (like a variable)
-            if !_is_atom(neg_expr)
-                opt_subs[expr] = SFuncSym(SFuncKind.SFUNC_MUL, SExpr[SConst(-one(ComplexF64)), neg_expr])
-                push!(seen, neg_expr)
-                # SymEngine: expr = neg_expr; if (is_a<Mul>(*expr)) muls.insert(expr)
-                # Note: using Set ensures no duplicates (matching SymEngine's set_basic)
-                if neg_expr isa SMul
-                    push!(muls, neg_expr)
+                # SymEngine: if (not is_a<Symbol>(*neg_expr))
+                # Skip when negation simplifies to an atom (like a variable)
+                if !_is_atom(neg_expr)
+                    opt_subs[expr] = SExpr.SFuncSym(
+                        SFuncKind.SFUNC_MUL,
+                        SExprT[SExpr.SConst(-one(ComplexF64)), neg_expr],
+                    )
+                    push!(seen, neg_expr)
+                    # SymEngine: expr = neg_expr; if (is_a<Mul>(*expr)) muls.insert(expr)
+                    # Note: using Set ensures no duplicates (matching SymEngine's set_basic)
+                    if sexpr_storage(neg_expr) isa SMulStorage
+                        push!(muls, neg_expr)
+                    end
+                else
+                    # neg_expr is an atom, treat original as regular Mul
+                    push!(muls, expr)
                 end
             else
-                # neg_expr is an atom, treat original as regular Mul
                 push!(muls, expr)
             end
         else
             push!(muls, expr)
         end
 
-    elseif expr isa SPow
+    elseif storage isa SPowStorage
         # bvisit(const Pow &x)
-        _opts_cse_visit!(expr.base, adds, muls, opt_subs, seen)
+        _opts_cse_visit!(storage.base, adds, muls, opt_subs, seen)
         # SymEngine: check if exponent is negative
-        if expr.exp < 0
+        if storage.exp < 0
             # pow(base, -n) → FuncSym("pow", [pow(base, n), -1])
-            opt_subs[expr] = SFuncSym(SFuncKind.SFUNC_POW, SExpr[SPow(expr.base, -expr.exp), SConst(ComplexF64(-1))])
+            opt_subs[expr] = SExpr.SFuncSym(
+                SFuncKind.SFUNC_POW,
+                SExprT[SExpr.SPow(storage.base, -storage.exp), SExpr.SConst(ComplexF64(-1))],
+            )
         end
 
-    elseif expr isa SNeg
+    elseif storage isa SNegStorage
         # SNeg is our representation for SymEngine's Mul(-1, x) where neg simplifies to atom
-        _opts_cse_visit!(expr.arg, adds, muls, opt_subs, seen)
+        _opts_cse_visit!(storage.arg, adds, muls, opt_subs, seen)
 
-    elseif expr isa SFuncSym
+    elseif storage isa SFuncSymStorage
         # bvisit(const Basic &x) — generic case for compound expressions
-        for a in _get_args(expr)
+        for a in storage.args
             _opts_cse_visit!(a, adds, muls, opt_subs, seen)
         end
     end
@@ -365,25 +391,25 @@ function _opts_cse_visit!(
 end
 
 """
-    opt_cse(exprs) -> Dict{SExpr, SExpr}
+    opt_cse(exprs) -> Dict{SExprT, SExprT}
 
 Phase 1: find optimization opportunities in Add/Mul/Pow nodes.
 Direct translation of SymEngine's opt_cse function.
 """
-function opt_cse(exprs::Vector{SExpr})::Dict{SExpr, SExpr}
-    opt_subs = Dict{SExpr, SExpr}()
+function opt_cse(exprs::Vector{SExprT})::Dict{SExprT, SExprT}
+    opt_subs = Dict{SExprT, SExprT}()
     # SymEngine uses set_basic (ordered set) for adds/muls — ensures uniqueness
-    adds = Set{SExpr}()
-    muls = Set{SExpr}()
-    seen = Set{SExpr}()
+    adds = Set{SExprT}()
+    muls = Set{SExprT}()
+    seen = Set{SExprT}()
 
     for e in exprs
         _opts_cse_visit!(e, adds, muls, opt_subs, seen)
     end
 
     # Convert to vectors for match_common_args (SymEngine: set_as_vec)
-    adds_vec = collect(SExpr, adds)
-    muls_vec = collect(SExpr, muls)
+    adds_vec = collect(SExprT, adds)
+    muls_vec = collect(SExprT, muls)
     sort!(adds_vec; lt = _sexpr_lt)
     sort!(muls_vec; lt = _sexpr_lt)
     match_common_args!(SFuncKind.SFUNC_ADD, adds_vec, opt_subs)
@@ -408,17 +434,18 @@ Key logic (matching SymEngine exactly):
 5. Get args of (possibly replaced) expr and recurse into each
 """
 function _find_repeated!(
-        expr::SExpr,
-        seen::Set{SExpr},
-        to_eliminate::Set{SExpr},
-        opt_subs::Dict{SExpr, SExpr},
+        expr::SExprT,
+        seen::Set{SExprT},
+        to_eliminate::Set{SExprT},
+        opt_subs::Dict{SExprT, SExprT},
     )::Nothing
+    storage = sexpr_storage(expr)
     # SymEngine: if (is_a_Number(*expr) ...) return;
-    if expr isa SConst
+    if storage isa SConstStorage
         return nothing
     end
 
-    if expr isa STmp
+    if storage isa STmpStorage
         return nothing
     end
 
@@ -460,13 +487,13 @@ Key logic (matching SymEngine exactly):
 6. Return rebuilt expression
 """
 function _rebuild(
-        orig_expr::SExpr,
-        to_eliminate::Set{SExpr},
-        opt_subs::Dict{SExpr, SExpr},
-        subs::Dict{SExpr, SExpr},
-        replacements::Vector{Pair{SExpr, SExpr}},
+        orig_expr::SExprT,
+        to_eliminate::Set{SExprT},
+        opt_subs::Dict{SExprT, SExprT},
+        subs::Dict{SExprT, SExprT},
+        replacements::Vector{Pair{SExprT, SExprT}},
         next_id::Base.RefValue{Int},
-    )::SExpr
+    )::SExprT
     # SymEngine: if (is_a_Atom(*expr)) return expr;
     _is_atom(orig_expr) && return orig_expr
 
@@ -485,7 +512,7 @@ function _rebuild(
     # SymEngine: if (to_eliminate.find(orig_expr) != to_eliminate.end())
     if orig_expr in to_eliminate
         next_id[] += 1
-        tmp = STmp(next_id[])
+        tmp = SExpr.STmp(next_id[])
         subs[orig_expr] = tmp
         push!(replacements, tmp => new_expr)
         return tmp
@@ -499,17 +526,17 @@ Rebuild the children of an expression.
 Corresponds to SymEngine's TransformVisitor + RebuildVisitor::bvisit(FunctionSymbol).
 """
 function _rebuild_children(
-        expr::SExpr,
-        to_eliminate::Set{SExpr},
-        opt_subs::Dict{SExpr, SExpr},
-        subs::Dict{SExpr, SExpr},
-        replacements::Vector{Pair{SExpr, SExpr}},
+        expr::SExprT,
+        to_eliminate::Set{SExprT},
+        opt_subs::Dict{SExprT, SExprT},
+        subs::Dict{SExprT, SExprT},
+        replacements::Vector{Pair{SExprT, SExprT}},
         next_id::Base.RefValue{Int},
-    )::SExpr
+    )::SExprT
     if _is_atom(expr)
         return expr
     end
-    new_args = SExpr[
+    new_args = SExprT[
         _rebuild(a, to_eliminate, opt_subs, subs, replacements, next_id) for a in _get_args(expr)
     ]
     return _rebuild_expr(expr, new_args)
@@ -522,21 +549,21 @@ Phase 2: find and eliminate repeated subexpressions.
 Direct translation of SymEngine's tree_cse function.
 """
 function tree_cse(
-        exprs::Vector{SExpr},
-        opt_subs::Dict{SExpr, SExpr},
-    )::Tuple{Vector{Pair{SExpr, SExpr}}, Vector{SExpr}}
-    to_eliminate = Set{SExpr}()
-    seen = Set{SExpr}()
+        exprs::Vector{SExprT},
+        opt_subs::Dict{SExprT, SExprT},
+    )::Tuple{Vector{Pair{SExprT, SExprT}}, Vector{SExprT}}
+    to_eliminate = Set{SExprT}()
+    seen = Set{SExprT}()
 
     for e in exprs
         _find_repeated!(e, seen, to_eliminate, opt_subs)
     end
 
-    subs = Dict{SExpr, SExpr}()
-    replacements = Pair{SExpr, SExpr}[]
+    subs = Dict{SExprT, SExprT}()
+    replacements = Pair{SExprT, SExprT}[]
 
     next_id = Ref(0)
-    reduced_exprs = SExpr[]
+    reduced_exprs = SExprT[]
     for e in exprs
         push!(reduced_exprs, _rebuild(e, to_eliminate, opt_subs, subs, replacements, next_id))
     end
@@ -547,12 +574,12 @@ end
 ## ── Main CSE entry point ────────────────────────────────────────────────────
 
 """
-    cse(exprs::Vector{SExpr}) -> (replacements, reduced_exprs)
+    cse(exprs::Vector{SExprT}) -> (replacements, reduced_exprs)
 
 Run Common Subexpression Elimination on a list of expressions.
 Direct translation of SymEngine's cse function.
 """
-function cse(exprs::Vector{SExpr})::Tuple{Vector{Pair{SExpr, SExpr}}, Vector{SExpr}}
+function cse(exprs::Vector{SExprT})::Tuple{Vector{Pair{SExprT, SExprT}}, Vector{SExprT}}
     # Phase 1: find optimization opportunities (common argument matching)
     opt_subs = opt_cse(exprs)
 

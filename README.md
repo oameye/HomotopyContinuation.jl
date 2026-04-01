@@ -46,5 +46,7 @@ This is a fork of [HomotopyContinuation.jl](https://github.com/JuliaHomotopyCont
 
 - [ ] Benchmark interpreter vs v2 compiled mode on standard benchmarks (katsura, cyclic)
 - [ ] No-allocation tests for hot paths (tracker step, Newton, predictor)
+- [ ] Benchmark CSE build time on larger systems (cyclic-7/8) — Moshi SExpr no longer caches `_hash` fields, so compound expressions recompute hashes on every Dict/Set lookup
+- [ ] Replace `_stable_sort!` insertion sort (O(n^2)) with `sort!(..., alg=InsertionSort)` from Base or restore `MergeSort` for larger inputs like `vertex_list` in `_optimize_instruction_order`
 - [x] ~~Add ConcreteStructs tests~~ Done: `test/concrete_structs_test.jl`
 - [x] ~~Review type system and API~~ Done: `System` type, flattened algorithm kwargs, parameter homotopy

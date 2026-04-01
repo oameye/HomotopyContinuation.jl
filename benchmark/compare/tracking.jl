@@ -1,55 +1,48 @@
-# Compare path tracking: per-path time for katsura systems.
+# Compare path tracking: end-to-end solve() for katsura systems.
 # Standalone: julia --project=benchmark benchmark/compare/tracking.jl
+#
+# Fair comparison rules:
+# - System construction is done OUTSIDE the timed region for both sides.
+#   Next builds System() (compiles interpreter), v2 builds InterpretedSystem
+#   (compiles via SymEngine). Neither pays compilation cost in the timed region.
+# - Only katsura systems are compared because total-degree == mixed volume,
+#   so both sides track the same number of paths.
+# - Both sides use their full solve() pipeline with pre-built systems.
 
 if !@isdefined(print_header)
     include(joinpath(@__DIR__, "common.jl"))
 end
 
-using HomotopyContinuationNext: System, StraightLineHomotopy, HomotopyEvaluator,
-    Tracker, TrackerCode, TrackerOptions, track!
+print_header("Solve: Next vs HC v2 (end-to-end)")
 
-print_header("Path Tracking: Next vs HC v2")
+println("\n── Katsura systems ──")
+println("  (total-degree = mixed volume → same number of paths)")
 
-function _next_track_all(F_polys, G_polys, starts)
-    sys_G = System(G_polys)
-    sys_F = System(F_polys)
-    H = StraightLineHomotopy(sys_G.evaluator, sys_F.evaluator)
-    heval = HomotopyEvaluator(H)
-    tracker = Tracker(heval)
-    n_success = 0
-    for x0 in starts
-        code = track!(tracker, ComplexF64.(x0))
-        if code == TrackerCode.TRACKER_SUCCESS
-            n_success += 1
-        end
-    end
-    return n_success
-end
-
-println("\n── Katsura systems (total-degree start) ──")
-for n in [3, 4]
+for n in [3, 4, 5]
     @polyvar kv[1:(n + 1)]
-    F = _katsura_polys(kv, n)
-    nvars = n + 1
-    td_degrees = [1; fill(2, n)]
-    G = [kv[1] - 1; [kv[i]^td_degrees[i] - 1 for i in 2:nvars]]
-    starts = _td_starts(td_degrees)
-    npaths = length(starts)
+    next_F = _katsura_polys(kv, n)
 
-    # Warmup + run Next
-    _next_track_all(F, G, starts)
-    t_next = @belapsed _next_track_all($F, $G, $starts)
-
-    # HC v2: full solve
     @var hkv[1:(n + 1)]
     hc_F = _katsura_polys(hkv, n)
-    HC.solve(hc_F)
-    t_hc = @belapsed HC.solve($hc_F)
 
-    print_row("katsura$n ($npaths paths)", t_next / npaths, t_hc / npaths)
-    println("    Next: $(round(t_next * 1.0e3, digits = 2))ms total  HC: $(round(t_hc * 1.0e3, digits = 2))ms total")
+    # Pre-build systems outside timed region
+    next_sys = Next.System(next_F)
+    hc_sys = HC.ModelKit.System(hc_F)
+
+    # Warmup
+    Next.solve(next_sys)
+    HC.solve(hc_sys)
+
+    t_next = @belapsed Next.solve($next_sys)
+    t_hc = @belapsed HC.solve($hc_sys)
+
+    print_row("katsura$n", t_next, t_hc)
+
+    nsol_next = Next.nsolutions(Next.solve(next_sys))
+    nsol_hc = length(HC.solve(hc_sys))
+    println("    Next: $(nsol_next) solutions, HC: $(nsol_hc) solutions")
 end
 
-println("\n  Note: HC v2 includes endgame, solution filtering, polyhedral start system.")
-println("  Next tracks total-degree paths only (no endgame, no filtering).")
-println("  Per-path comparison is most meaningful for raw tracking speed.")
+println()
+println("  ratio > 1.0 means Next is faster.")
+println("  Note: HC v2 includes endgame; Next does not yet.")

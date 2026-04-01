@@ -55,7 +55,7 @@ end
 Holds pre-built trackers and start solutions for the two-phase polyhedral homotopy.
 Created by `CommonSolve.init`.
 """
-struct PolyhedralSolveCache
+struct PolyhedralSolveCache{S <: System}
     toric_tracker::Tracker
     coeff_tracker::Tracker
     toric_homotopy::ToricHomotopy
@@ -64,7 +64,7 @@ struct PolyhedralSolveCache
     start_solutions::Vector{Tuple{MixedSubdivisions.MixedCell, Vector{ComplexF64}}}
     seed::UInt32
     # GC roots for interpreters — must be kept alive for FunctionWrapper closures
-    _param_system::System
+    _param_system::S
 end
 
 # ── Helper: build parametric system from support ────────────────────────────

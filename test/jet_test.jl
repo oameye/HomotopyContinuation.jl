@@ -16,7 +16,14 @@ using HomotopyContinuationNext
         # that calls it is correct at runtime but unresolvable by JET.
         real_reports = filter(reports) do r
             msg = string(r)
-            !contains(msg, "variables") || !contains(msg, "AbstractPolynomialLike")
+            # Filter MP.variables false positive (abstract type dispatch at construction time)
+            contains(msg, "variables") && contains(msg, "AbstractPolynomialLike") && return false
+            # Filter Moshi @match generated variable warnings (false positives —
+            # pattern matching variables are always defined in the matched branch)
+            contains(msg, "may be undefined") && contains(msg, "##") && return false
+            # Filter Moshi @derive Hash/Eq generated code (false positive union split)
+            contains(msg, "variant_getfield") && return false
+            return true
         end
         @test length(real_reports) == 0
     end

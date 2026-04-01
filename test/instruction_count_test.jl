@@ -107,8 +107,9 @@ function _test_system(name::String, specs; max_eval_instrs::Int)
     next_polys = [_poly(nv, s) for s in specs]
     m = length(specs)
 
-    I_eval = Next.build_interpreter(next_polys)
-    I_jac = Next.build_jacobian_interpreter(next_polys)
+    sys = Next.System(next_polys)
+    I_eval = sys._interp_f64
+    I_jac = sys._interp_jac
 
     x = ComplexF64.(randn(n))
     u = zeros(ComplexF64, m)

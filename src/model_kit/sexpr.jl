@@ -1,79 +1,11 @@
-## SExpr types, hash/==, canonicalization, and poly_to_sexpr
+## SExpr — algebraic data type for the symbolic IR.
 #
 # SExpr is an S-expression IR used as an intermediate representation between
-# the MultivariatePolynomials input and the CSE algorithm. It mirrors the
-# canonical forms produced by SymEngine's Add/Mul/Pow/FunctionSymbol types.
+# the MultivariatePolynomials input and the CSE algorithm. Uses Moshi.jl for
+# tagged-union storage — all variants are one concrete type, eliminating
+# dynamic dispatch in the CSE pipeline.
 
-## ── SExpr types ─────────────────────────────────────────────────────────────
-
-abstract type SExpr end
-
-"""Constant value."""
-struct SConst <: SExpr
-    val::ComplexF64
-end
-
-"""Variable reference (1-based index)."""
-struct SVar <: SExpr
-    idx::Int
-end
-
-"""Parameter reference (1-based index)."""
-struct SParam <: SExpr
-    idx::Int
-end
-
-"""CSE temporary (assigned by tree_cse)."""
-struct STmp <: SExpr
-    id::Int
-end
-
-function _fold_hash(seed, args)::UInt
-    h = hash(seed, zero(UInt))
-    for a in args
-        h = hash(a, h)
-    end
-    return h
-end
-
-"""Addition: sum of args (n-ary, n >= 2). Hash is cached at construction."""
-struct SAdd <: SExpr
-    args::Vector{SExpr}
-    _hash::UInt
-end
-function SAdd(args::Vector{<:SExpr})
-    vargs = collect(SExpr, args)
-    return SAdd(vargs, _fold_hash(:SAdd, vargs))
-end
-
-"""Multiplication: product of args (n-ary, n >= 2). Hash is cached at construction."""
-struct SMul <: SExpr
-    args::Vector{SExpr}
-    _hash::UInt
-end
-function SMul(args::Vector{<:SExpr})
-    vargs = collect(SExpr, args)
-    return SMul(vargs, _fold_hash(:SMul, vargs))
-end
-
-"""Integer power: base^exp where exp is a positive integer. Hash is cached at construction."""
-struct SPow{T <: SExpr} <: SExpr
-    base::T
-    exp::Int
-    _hash::UInt
-end
-function SPow(base::T, exp::Int) where {T <: SExpr}
-    return SPow{T}(base, exp, hash(exp, hash(base, hash(:SPow, zero(UInt)))))
-end
-
-"""Negation: -arg. Hash is cached at construction."""
-struct SNeg{T <: SExpr} <: SExpr
-    arg::T
-    _hash::UInt
-end
-function SNeg(arg::T) where {T <: SExpr}
-    return SNeg{T}(arg, hash(arg, hash(:SNeg, zero(UInt))))
-end
+## ── SFuncKind enum (used by SFuncSym variant) ─────────────────────────────
 
 """
 Kind of unevaluated function symbol used by opt_cse.
@@ -85,80 +17,239 @@ Corresponds to SymEngine's FunctionSymbol name ("add", "mul", "pow").
     SFUNC_POW
 end
 
-"""
-Unevaluated function symbol — placeholder created by opt_cse to represent
-factored common arguments without triggering canonical-form collapse.
-`kind` is SFuncKind.SFUNC_ADD, SFUNC_MUL, or SFUNC_POW.
-Corresponds to SymEngine's FunctionSymbol.
-"""
-struct SFuncSym <: SExpr
-    kind::SFuncKind.T
-    args::Vector{SExpr}
-    _hash::UInt
+## ── SExpr ADT ─────────────────────────────────────────────────────────────
+
+@data SExpr begin
+    """Constant value."""
+    struct SConst
+        val::ComplexF64
+    end
+
+    """Variable reference (1-based index)."""
+    struct SVar
+        idx::Int
+    end
+
+    """Parameter reference (1-based index)."""
+    struct SParam
+        idx::Int
+    end
+
+    """CSE temporary (assigned by tree_cse)."""
+    struct STmp
+        id::Int
+    end
+
+    """Addition: sum of args (n-ary, n >= 2)."""
+    struct SAdd
+        args::Vector{SExpr}
+    end
+
+    """Multiplication: product of args (n-ary, n >= 2)."""
+    struct SMul
+        args::Vector{SExpr}
+    end
+
+    """Integer power: base^exp where exp is a positive integer."""
+    struct SPow
+        base::SExpr
+        exp::Int
+    end
+
+    """Negation: -arg."""
+    struct SNeg
+        arg::SExpr
+    end
+
+    """Unevaluated function symbol — placeholder created by opt_cse."""
+    struct SFuncSym
+        kind::SFuncKind.T
+        args::Vector{SExpr}
+    end
 end
-function SFuncSym(kind::SFuncKind.T, args::Vector{<:SExpr})
-    vargs = collect(SExpr, args)
-    return SFuncSym(kind, vargs, _fold_hash((:SFuncSym, kind), vargs))
+
+@derive SExpr[Eq]
+
+## ── Concrete type alias ───────────────────────────────────────────────────
+# Moshi creates one concrete type for all variants. We alias it for use in
+# Vector{SExprT}, Dict{SExprT,...}, Set{SExprT}, and function signatures.
+
+const SExprT = typeof(SExpr.SConst(zero(ComplexF64)))
+const SConstStorage = variant_storage_type(SExpr.SConst)
+const SVarStorage = variant_storage_type(SExpr.SVar)
+const SParamStorage = variant_storage_type(SExpr.SParam)
+const STmpStorage = variant_storage_type(SExpr.STmp)
+const SAddStorage = variant_storage_type(SExpr.SAdd)
+const SMulStorage = variant_storage_type(SExpr.SMul)
+const SPowStorage = variant_storage_type(SExpr.SPow)
+const SNegStorage = variant_storage_type(SExpr.SNeg)
+const SFuncSymStorage = variant_storage_type(SExpr.SFuncSym)
+const _EMPTY_SEXPR_VEC = SExprT[]
+
+@inline _owned_args(args::AbstractVector{<:SExprT})::Vector{SExprT} = collect(SExprT, args)
+
+# Compound expressions are hashed structurally and used as Dict/Set keys in CSE.
+# They must therefore own stable child storage instead of aliasing caller vectors.
+@inline SExpr.SAdd(args::AbstractVector{<:SExprT}) = invoke(SExpr.SAdd, Tuple{Any}, _owned_args(args))
+@inline SExpr.SMul(args::AbstractVector{<:SExprT}) = invoke(SExpr.SMul, Tuple{Any}, _owned_args(args))
+@inline SExpr.SFuncSym(kind::SFuncKind.T, args::AbstractVector{<:SExprT}) =
+    invoke(SExpr.SFuncSym, Tuple{Any, Any}, kind, _owned_args(args))
+
+@inline sexpr_storage(expr::SExprT) = variant_storage(expr)
+
+## ── Hashing (matches old symbol-seeded hash for CSE ordering stability) ──
+
+function _fold_hash(seed, args)::UInt
+    h = hash(seed, zero(UInt))
+    for a in args
+        h = hash(a, h)
+    end
+    return h
 end
 
-## ── Hashing and equality ────────────────────────────────────────────────────
-
-Base.hash(e::SConst, h::UInt)::UInt = hash(e.val, hash(:SConst, h))
-Base.hash(e::SVar, h::UInt)::UInt = hash(e.idx, hash(:SVar, h))
-Base.hash(e::SParam, h::UInt)::UInt = hash(e.idx, hash(:SParam, h))
-Base.hash(e::STmp, h::UInt)::UInt = hash(e.id, hash(:STmp, h))
-Base.hash(e::SAdd, h::UInt)::UInt = hash(e._hash, h)
-Base.hash(e::SMul, h::UInt)::UInt = hash(e._hash, h)
-Base.hash(e::SPow, h::UInt)::UInt = hash(e._hash, h)
-Base.hash(e::SNeg, h::UInt)::UInt = hash(e._hash, h)
-Base.hash(e::SFuncSym, h::UInt)::UInt = hash(e._hash, h)
-
-Base.:(==)(a::SConst, b::SConst) = a.val == b.val
-Base.:(==)(a::SVar, b::SVar) = a.idx == b.idx
-Base.:(==)(a::SParam, b::SParam) = a.idx == b.idx
-Base.:(==)(a::STmp, b::STmp) = a.id == b.id
-Base.:(==)(a::SPow, b::SPow) = a._hash == b._hash && a.exp == b.exp && a.base == b.base
-Base.:(==)(a::SNeg, b::SNeg) = a._hash == b._hash && a.arg == b.arg
-
-Base.:(==)(a::SAdd, b::SAdd) = a._hash == b._hash && a.args == b.args
-Base.:(==)(a::SMul, b::SMul) = a._hash == b._hash && a.args == b.args
-Base.:(==)(a::SFuncSym, b::SFuncSym) =
-    a._hash == b._hash && a.kind == b.kind && a.args == b.args
-Base.:(==)(::SExpr, ::SExpr) = false
+function Base.hash(e::SExprT, h::UInt)::UInt
+    storage = sexpr_storage(e)
+    if storage isa SConstStorage
+        return hash(storage.val, hash(:SConst, h))
+    elseif storage isa SVarStorage
+        return hash(storage.idx, hash(:SVar, h))
+    elseif storage isa SParamStorage
+        return hash(storage.idx, hash(:SParam, h))
+    elseif storage isa STmpStorage
+        return hash(storage.id, hash(:STmp, h))
+    elseif storage isa SAddStorage
+        return hash(_fold_hash(:SAdd, storage.args), h)
+    elseif storage isa SMulStorage
+        return hash(_fold_hash(:SMul, storage.args), h)
+    elseif storage isa SPowStorage
+        return hash(hash(storage.exp, hash(storage.base, hash(:SPow, zero(UInt)))), h)
+    elseif storage isa SNegStorage
+        return hash(storage.arg, hash(:SNeg, h))
+    else # SFuncSymStorage
+        return hash(_fold_hash((:SFuncSym, storage.kind), storage.args), h)
+    end
+end
 
 ## ── SExpr helpers ───────────────────────────────────────────────────────────
 
-_is_atom(e::SExpr)::Bool = e isa SConst || e isa SVar || e isa SParam || e isa STmp
+@inline _is_atom_storage(::Union{SConstStorage, SVarStorage, SParamStorage, STmpStorage}) = true
+@inline _is_atom_storage(::Any) = false
+@inline _is_atom(e::SExprT)::Bool = _is_atom_storage(sexpr_storage(e))
 
 """Get the arguments (children) of a compound expression."""
-_get_args(::SExpr)::Vector{SExpr} = SExpr[]
-_get_args(e::SAdd)::Vector{SExpr} = e.args
-_get_args(e::SMul)::Vector{SExpr} = e.args
-_get_args(e::SPow)::Vector{SExpr} = SExpr[e.base]
-_get_args(e::SNeg)::Vector{SExpr} = SExpr[e.arg]
-_get_args(e::SFuncSym)::Vector{SExpr} = e.args
+@inline _get_args_storage(storage::Union{SConstStorage, SVarStorage, SParamStorage, STmpStorage}) =
+    _EMPTY_SEXPR_VEC
+@inline _get_args_storage(storage::SAddStorage) = storage.args
+@inline _get_args_storage(storage::SMulStorage) = storage.args
+@inline _get_args_storage(storage::SPowStorage) = SExprT[storage.base]
+@inline _get_args_storage(storage::SNegStorage) = SExprT[storage.arg]
+@inline _get_args_storage(storage::SFuncSymStorage) = storage.args
+@inline _get_args(e::SExprT)::Vector{SExprT} = _get_args_storage(sexpr_storage(e))
 
-_rebuild_expr(expr::SExpr, ::Vector{SExpr})::SExpr = expr
-_rebuild_expr(::SAdd, args::Vector{SExpr})::SExpr = _canonical_add(args)
-_rebuild_expr(::SMul, args::Vector{SExpr})::SExpr = _canonical_mul(args)
-_rebuild_expr(expr::SPow, args::Vector{SExpr})::SExpr = SPow(args[1], expr.exp)
-_rebuild_expr(::SNeg, args::Vector{SExpr})::SExpr = SNeg(args[1])
-
-function _rebuild_expr(expr::SFuncSym, args::Vector{SExpr})::SExpr
-    if expr.kind == SFuncKind.SFUNC_ADD
+@inline _rebuild_expr_storage(storage::SAddStorage, args::Vector{SExprT})::SExprT =
+    _canonical_add(args)
+@inline _rebuild_expr_storage(storage::SMulStorage, args::Vector{SExprT})::SExprT =
+    _canonical_mul(args)
+@inline _rebuild_expr_storage(storage::SPowStorage, args::Vector{SExprT})::SExprT =
+    SExpr.SPow(args[1], storage.exp)
+@inline _rebuild_expr_storage(storage::SNegStorage, args::Vector{SExprT})::SExprT =
+    SExpr.SNeg(args[1])
+@inline function _rebuild_expr_storage(
+        storage::SFuncSymStorage,
+        args::Vector{SExprT},
+    )::SExprT
+    if storage.kind == SFuncKind.SFUNC_ADD
         return _canonical_add(args)
-    elseif expr.kind == SFuncKind.SFUNC_MUL
+    elseif storage.kind == SFuncKind.SFUNC_MUL
         return _canonical_mul(args)
-    elseif expr.kind == SFuncKind.SFUNC_POW && length(args) == 2 && args[2] isa SConst
-        return SPow(args[1], Int(real(args[2].val)))
+    elseif storage.kind == SFuncKind.SFUNC_POW && length(args) == 2
+        exponent_storage = sexpr_storage(args[2])
+        if exponent_storage isa SConstStorage
+            return SExpr.SPow(args[1], Int(real(exponent_storage.val)))
+        end
     end
-    return SFuncSym(expr.kind, args)
+    return SExpr.SFuncSym(storage.kind, args)
+end
+@inline _rebuild_expr_storage(::Union{SConstStorage, SVarStorage, SParamStorage, STmpStorage}, args::Vector{SExprT})::SExprT =
+    error("atom expressions should not be rebuilt")
+@inline _rebuild_expr(expr::SExprT, args::Vector{SExprT})::SExprT =
+    _is_atom(expr) ? expr : _rebuild_expr_storage(sexpr_storage(expr), args)
+
+@inline _complex_lt(a::ComplexF64, b::ComplexF64)::Bool =
+    real(a) < real(b) || (real(a) == real(b) && imag(a) < imag(b))
+@inline _sexpr_kind_lt(a::SFuncKind.T, b::SFuncKind.T)::Bool = Int(a) < Int(b)
+
+@inline _sexpr_tag_order(::SConstStorage)::UInt8 = 0x01
+@inline _sexpr_tag_order(::SVarStorage)::UInt8 = 0x02
+@inline _sexpr_tag_order(::SParamStorage)::UInt8 = 0x03
+@inline _sexpr_tag_order(::STmpStorage)::UInt8 = 0x04
+@inline _sexpr_tag_order(::SAddStorage)::UInt8 = 0x05
+@inline _sexpr_tag_order(::SMulStorage)::UInt8 = 0x06
+@inline _sexpr_tag_order(::SPowStorage)::UInt8 = 0x07
+@inline _sexpr_tag_order(::SNegStorage)::UInt8 = 0x08
+@inline _sexpr_tag_order(::SFuncSymStorage)::UInt8 = 0x09
+
+function _sexpr_args_lt(a_args::Vector{SExprT}, b_args::Vector{SExprT})::Bool
+    n = min(length(a_args), length(b_args))
+    for i in 1:n
+        a = a_args[i]
+        b = b_args[i]
+        a == b && continue
+        return _sexpr_struct_lt(a, b)
+    end
+    return length(a_args) < length(b_args)
 end
 
-_sexpr_lt(a::SExpr, b::SExpr)::Bool = hash(a) < hash(b)
+function _sexpr_struct_lt(a::SExprT, b::SExprT)::Bool
+    a_storage = sexpr_storage(a)
+    b_storage = sexpr_storage(b)
+    a_tag = _sexpr_tag_order(a_storage)
+    b_tag = _sexpr_tag_order(b_storage)
+    a_tag == b_tag || return a_tag < b_tag
+
+    if a_storage isa SConstStorage
+        b_storage_typed = b_storage::SConstStorage
+        return _complex_lt(a_storage.val, b_storage_typed.val)
+    elseif a_storage isa SVarStorage
+        b_storage_typed = b_storage::SVarStorage
+        return a_storage.idx < b_storage_typed.idx
+    elseif a_storage isa SParamStorage
+        b_storage_typed = b_storage::SParamStorage
+        return a_storage.idx < b_storage_typed.idx
+    elseif a_storage isa STmpStorage
+        b_storage_typed = b_storage::STmpStorage
+        return a_storage.id < b_storage_typed.id
+    elseif a_storage isa SAddStorage
+        b_storage_typed = b_storage::SAddStorage
+        return _sexpr_args_lt(a_storage.args, b_storage_typed.args)
+    elseif a_storage isa SMulStorage
+        b_storage_typed = b_storage::SMulStorage
+        return _sexpr_args_lt(a_storage.args, b_storage_typed.args)
+    elseif a_storage isa SPowStorage
+        b_storage_typed = b_storage::SPowStorage
+        if a_storage.base == b_storage_typed.base
+            return a_storage.exp < b_storage_typed.exp
+        end
+        return _sexpr_struct_lt(a_storage.base, b_storage_typed.base)
+    elseif a_storage isa SNegStorage
+        b_storage_typed = b_storage::SNegStorage
+        return _sexpr_struct_lt(a_storage.arg, b_storage_typed.arg)
+    elseif a_storage isa SFuncSymStorage
+        b_storage_typed = b_storage::SFuncSymStorage
+        if a_storage.kind != b_storage_typed.kind
+            return _sexpr_kind_lt(a_storage.kind, b_storage_typed.kind)
+        end
+        return _sexpr_args_lt(a_storage.args, b_storage_typed.args)
+    else
+        error("Unhandled SExpr storage in _sexpr_struct_lt: $(typeof(a_storage))")
+    end
+end
+
+_sexpr_lt(a::SExprT, b::SExprT)::Bool = hash(a) < hash(b)
+_add_term_lt(a::SExprT, b::SExprT)::Bool = _sexpr_lt(_add_term_base(a), _add_term_base(b))
 
 """Return `empty_val` for 0 args, the single arg for 1, or `constructor(args)` for many."""
-function _wrap_args(args::Vector{SExpr}, empty_val::SExpr, constructor::F)::SExpr where {F}
+function _wrap_args(args::Vector{SExprT}, empty_val::SExprT, constructor::F)::SExprT where {F}
     isempty(args) && return empty_val
     length(args) == 1 && return args[1]
     return constructor(args)
@@ -166,128 +257,124 @@ end
 
 """
 Extract the "base expression" of an Add term, stripping the leading coefficient.
-E.g., Mul(3+i, v1, v2) → the base is Mul(v1, v2) (the product without coef).
-A bare variable SVar(1) stays as is. A Pow stays as is.
 """
-function _add_term_base(e::SExpr)::SExpr
-    if e isa SMul && !isempty(e.args) && e.args[1] isa SConst
-        rest = e.args[2:end]
-        return length(rest) == 1 ? rest[1] : SMul(rest)
+function _add_term_base(e::SExprT)::SExprT
+    storage = sexpr_storage(e)
+    if storage isa SMulStorage
+        args = storage.args
+        if !isempty(args)
+            first_storage = sexpr_storage(args[1])
+            if first_storage isa SConstStorage
+                rest = args[2:end]
+                return length(rest) == 1 ? rest[1] : SExpr.SMul(rest)
+            end
+        end
     end
     return e
 end
 
 function _flatten_add_arg!(
-        flat_args::Vector{SExpr},
+        flat_args::Vector{SExprT},
         const_sum::Base.RefValue{ComplexF64},
-        arg::SExpr,
+        arg::SExprT,
     )::Nothing
-    if arg isa SAdd
-        for child in arg.args
+    storage = sexpr_storage(arg)
+    if storage isa SAddStorage
+        for child in storage.args
             _flatten_add_arg!(flat_args, const_sum, child)
         end
-    elseif arg isa SConst
-        const_sum[] += arg.val
+    elseif storage isa SConstStorage
+        const_sum[] += storage.val
     else
         push!(flat_args, arg)
     end
     return nothing
 end
 
-"""
-Canonicalize an Add expression.
-
-1. Flatten nested Adds and collect constants
-2. Sort by `_sexpr_lt`
-3. Reconstruct: constant first (if non-zero), then sorted terms
-"""
-function _canonical_add(args::Vector{SExpr})::SExpr
-    flat_args = SExpr[]
+function _canonical_add(args::Vector{SExprT})::SExprT
+    flat_args = SExprT[]
     const_sum = Ref(zero(ComplexF64))
     for arg in args
         _flatten_add_arg!(flat_args, const_sum, arg)
     end
     sort!(flat_args; lt = _sexpr_lt)
-    !iszero(const_sum[]) && pushfirst!(flat_args, SConst(const_sum[]))
-    return _wrap_args(flat_args, SConst(zero(ComplexF64)), SAdd)
+    !iszero(const_sum[]) && pushfirst!(flat_args, SExpr.SConst(const_sum[]))
+    return _wrap_args(flat_args, SExpr.SConst(zero(ComplexF64)), SExpr.SAdd)
 end
 
 function _flatten_mul_arg!(
-        flat_args::Vector{SExpr},
+        flat_args::Vector{SExprT},
         coeff::Base.RefValue{ComplexF64},
-        arg::SExpr,
+        arg::SExprT,
     )::Nothing
-    if arg isa SMul
-        for child in arg.args
+    storage = sexpr_storage(arg)
+    if storage isa SMulStorage
+        for child in storage.args
             _flatten_mul_arg!(flat_args, coeff, child)
         end
-    elseif arg isa SConst
-        coeff[] *= arg.val
-    elseif arg isa SNeg
+    elseif storage isa SConstStorage
+        coeff[] *= storage.val
+    elseif storage isa SNegStorage
         coeff[] = -coeff[]
-        _flatten_mul_arg!(flat_args, coeff, arg.arg)
+        _flatten_mul_arg!(flat_args, coeff, storage.arg)
     else
         push!(flat_args, arg)
     end
     return nothing
 end
 
-function _canonical_mul(args::Vector{SExpr})::SExpr
-    flat_args = SExpr[]
+function _canonical_mul(args::Vector{SExprT})::SExprT
+    flat_args = SExprT[]
     coeff = Ref(one(ComplexF64))
     for arg in args
         _flatten_mul_arg!(flat_args, coeff, arg)
     end
-    iszero(coeff[]) && return SConst(zero(ComplexF64))
+    iszero(coeff[]) && return SExpr.SConst(zero(ComplexF64))
     sort!(flat_args; lt = _sexpr_lt)
-    coeff[] != one(ComplexF64) && pushfirst!(flat_args, SConst(coeff[]))
-    return _wrap_args(flat_args, SConst(one(ComplexF64)), SMul)
+    coeff[] != one(ComplexF64) && pushfirst!(flat_args, SExpr.SConst(coeff[]))
+    return _wrap_args(flat_args, SExpr.SConst(one(ComplexF64)), SExpr.SMul)
 end
 
 ## ── Polynomial → SExpr conversion ──────────────────────────────────────────
 
 """
-    poly_to_sexpr(poly, var_to_idx, param_to_idx) -> SExpr
+    poly_to_sexpr(poly, var_to_idx, param_to_idx) -> SExprT
 
 Convert a MultivariatePolynomials polynomial to an SExpr tree.
-Produces the same structure as SymEngine's canonical forms:
-- Each term becomes SMul([coeff, factors...]) matching Mul.get_args()
-- Coefficient -1 uses SNeg (matching SymEngine's neg() simplification)
-- The sum becomes SAdd([terms...]) matching Add.get_args()
 """
 function poly_to_sexpr(
         poly::MP.AbstractPolynomialLike,
         var_to_idx::Dict{Symbol, Int},
         param_to_idx::Dict{Symbol, Int},
-    )::SExpr
-    terms = SExpr[]
+    )::SExprT
+    Base.@nospecialize poly
+    terms = SExprT[]
     for term in MP.terms(poly)
         raw_coeff = MP.coefficient(term)
         coeff = ComplexF64(raw_coeff)
         iszero(coeff) && continue
         mono = MP.monomial(term)
 
-        factors = SExpr[]
+        factors = SExprT[]
         for (var, exp) in zip(MP.variables(mono), MP.exponents(mono))
             exp == 0 && continue
             sym = Symbol(var)
             idx_var = get(var_to_idx, sym, 0)
             idx_param = get(param_to_idx, sym, 0)
-            base = idx_var > 0 ? SVar(idx_var) : SParam(idx_param)
-            push!(factors, exp == 1 ? base : SPow(base, exp))
+            base = idx_var > 0 ? SExpr.SVar(idx_var) : SExpr.SParam(idx_param)
+            push!(factors, exp == 1 ? base : SExpr.SPow(base, exp))
         end
 
         if isempty(factors)
-            push!(terms, SConst(coeff))
+            push!(terms, SExpr.SConst(coeff))
         elseif coeff == one(ComplexF64)
-            push!(terms, length(factors) == 1 ? factors[1] : SMul(factors))
+            push!(terms, length(factors) == 1 ? factors[1] : SExpr.SMul(factors))
         else
-            # Non-unit coefficient (including -1): SMul([coeff, factors...])
-            pushfirst!(factors, SConst(coeff))
-            push!(terms, SMul(factors))
+            pushfirst!(factors, SExpr.SConst(coeff))
+            push!(terms, SExpr.SMul(factors))
         end
     end
 
-    length(terms) > 1 && sort!(terms; lt = (a, b) -> _sexpr_lt(_add_term_base(a), _add_term_base(b)))
-    return _wrap_args(terms, SConst(zero(ComplexF64)), SAdd)
+    length(terms) > 1 && sort!(terms; lt = _add_term_lt)
+    return _wrap_args(terms, SExpr.SConst(zero(ComplexF64)), SExpr.SAdd)
 end

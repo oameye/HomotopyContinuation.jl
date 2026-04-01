@@ -9,8 +9,7 @@ using HomotopyContinuationNext:
     System, evaluate!, evaluate_and_jacobian!, taylor!,
     StraightLineHomotopy, HomotopyEvaluator,
     TaylorVector, TruncatedTaylorSeries,
-    build_interpreter, build_jacobian_interpreter,
-    execute!
+    Interpreter, execute!
 
 const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
 const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
@@ -35,18 +34,18 @@ function benchmark_core!(SUITE::BenchmarkGroup)
     u_k3 = FSVec{ComplexF64}(zeros(ComplexF64, 4))
     U_k3 = FSMat{ComplexF64}(zeros(ComplexF64, 4, 4))
 
-    I_eval_k3 = build_interpreter(F_k3)
-    I_jac_k3 = build_jacobian_interpreter(F_k3)
+    I_eval_k3 = sys_k3._interp_f64
+    I_jac_k3 = sys_k3._interp_jac
     u_raw_k3 = zeros(ComplexF64, 4)
     U_raw_k3 = zeros(ComplexF64, 4, 4)
     x_raw_k3 = ComplexF64.(randn(4))
 
     SUITE["core"]["eval_raw_katsura3"] =
-        @benchmarkable execute!($u_raw_k3, $I_eval_k3, $x_raw_k3, $(ComplexF64[]))
+        @benchmarkable execute!($u_raw_k3, $I_eval_k3, $x_raw_k3)
     SUITE["core"]["eval_fw_katsura3"] =
         @benchmarkable evaluate!($u_k3, $seval_k3, $xv_k3, $p_k3)
     SUITE["core"]["jac_raw_katsura3"] =
-        @benchmarkable execute!($u_raw_k3, $U_raw_k3, $I_jac_k3, $x_raw_k3, $(ComplexF64[]))
+        @benchmarkable execute!($u_raw_k3, $U_raw_k3, $I_jac_k3, $x_raw_k3)
     SUITE["core"]["jac_fw_katsura3"] =
         @benchmarkable evaluate_and_jacobian!($u_k3, $U_k3, $seval_k3, $xv_k3, $p_k3)
 
@@ -65,18 +64,18 @@ function benchmark_core!(SUITE::BenchmarkGroup)
     u_c7 = FSVec{ComplexF64}(zeros(ComplexF64, 7))
     U_c7 = FSMat{ComplexF64}(zeros(ComplexF64, 7, 7))
 
-    I_eval_c7 = build_interpreter(F_c7)
-    I_jac_c7 = build_jacobian_interpreter(F_c7)
+    I_eval_c7 = sys_c7._interp_f64
+    I_jac_c7 = sys_c7._interp_jac
     u_raw_c7 = zeros(ComplexF64, 7)
     U_raw_c7 = zeros(ComplexF64, 7, 7)
     x_raw_c7 = ComplexF64.(randn(7))
 
     SUITE["core"]["eval_raw_cyclic7"] =
-        @benchmarkable execute!($u_raw_c7, $I_eval_c7, $x_raw_c7, $(ComplexF64[]))
+        @benchmarkable execute!($u_raw_c7, $I_eval_c7, $x_raw_c7)
     SUITE["core"]["eval_fw_cyclic7"] =
         @benchmarkable evaluate!($u_c7, $seval_c7, $xv_c7, $p_c7)
     SUITE["core"]["jac_raw_cyclic7"] =
-        @benchmarkable execute!($u_raw_c7, $U_raw_c7, $I_jac_c7, $x_raw_c7, $(ComplexF64[]))
+        @benchmarkable execute!($u_raw_c7, $U_raw_c7, $I_jac_c7, $x_raw_c7)
     SUITE["core"]["jac_fw_cyclic7"] =
         @benchmarkable evaluate_and_jacobian!($u_c7, $U_c7, $seval_c7, $xv_c7, $p_c7)
 

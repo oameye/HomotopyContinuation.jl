@@ -5,7 +5,7 @@ using Random: Random
 using Printf: Printf
 
 using EnumX: @enumx
-using Moshi.Data: @data, isa_variant, variant_storage, variant_storage_type
+using Moshi.Data: @data, variant_storage, variant_storage_type
 using Moshi.Derive: @derive
 using MultivariatePolynomials: MultivariatePolynomials
 using DynamicPolynomials: DynamicPolynomials, @polyvar

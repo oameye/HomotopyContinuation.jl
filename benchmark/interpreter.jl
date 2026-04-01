@@ -4,8 +4,9 @@
 using BenchmarkTools
 using DynamicPolynomials: @polyvar
 using HomotopyContinuationNext:
-    build_interpreter, build_jacobian_interpreter, build_taylor_interpreter,
-    execute!, execute_taylor!, TaylorVector
+    System, Interpreter, InstructionSequence,
+    execute!, execute_taylor!, TaylorVector,
+    TruncatedTaylorSeries
 
 function benchmark_interpreter!(SUITE::BenchmarkGroup)
     SUITE["interpreter"] = BenchmarkGroup()
@@ -27,27 +28,29 @@ function benchmark_interpreter!(SUITE::BenchmarkGroup)
     ]
 
     # --- Eval ---
-    I_katsura = build_interpreter(F_katsura)
+    sys_katsura = System(F_katsura)
+    I_katsura = sys_katsura._interp_f64
     u_katsura = zeros(ComplexF64, 4)
     x_katsura = ComplexF64.(randn(4))
-    SUITE["interpreter"]["eval_katsura3"] = @benchmarkable execute!($u_katsura, $I_katsura, $x_katsura, $(ComplexF64[]))
+    SUITE["interpreter"]["eval_katsura3"] = @benchmarkable execute!($u_katsura, $I_katsura, $x_katsura)
 
-    I_cyc7 = build_interpreter(F_cyclic7)
+    sys_cyc7 = System(F_cyclic7)
+    I_cyc7 = sys_cyc7._interp_f64
     u_cyc7 = zeros(ComplexF64, 7)
     x_cyc7 = ComplexF64.(randn(7))
-    SUITE["interpreter"]["eval_cyclic7"] = @benchmarkable execute!($u_cyc7, $I_cyc7, $x_cyc7, $(ComplexF64[]))
+    SUITE["interpreter"]["eval_cyclic7"] = @benchmarkable execute!($u_cyc7, $I_cyc7, $x_cyc7)
 
     # --- Jacobian ---
-    I_jac = build_jacobian_interpreter(F_katsura)
+    I_jac = sys_katsura._interp_jac
     U_katsura = zeros(ComplexF64, 4, 4)
-    SUITE["interpreter"]["jac_katsura3"] = @benchmarkable execute!($u_katsura, $U_katsura, $I_jac, $x_katsura, $(ComplexF64[]))
+    SUITE["interpreter"]["jac_katsura3"] = @benchmarkable execute!($u_katsura, $U_katsura, $I_jac, $x_katsura)
 
-    I_jac7 = build_jacobian_interpreter(F_cyclic7)
+    I_jac7 = sys_cyc7._interp_jac
     U_cyc7 = zeros(ComplexF64, 7, 7)
-    SUITE["interpreter"]["jac_cyclic7"] = @benchmarkable execute!($u_cyc7, $U_cyc7, $I_jac7, $x_cyc7, $(ComplexF64[]))
+    SUITE["interpreter"]["jac_cyclic7"] = @benchmarkable execute!($u_cyc7, $U_cyc7, $I_jac7, $x_cyc7)
 
     # --- Taylor ---
-    I_taylor = build_taylor_interpreter(F_katsura, Val(3))
+    I_taylor = sys_katsura._interp_t3
     tx = TaylorVector{4, ComplexF64}(4)
     for i in 1:4
         tx[i] = ntuple(k -> randn(ComplexF64), Val(4))
@@ -56,8 +59,8 @@ function benchmark_interpreter!(SUITE::BenchmarkGroup)
     p_empty = ComplexF64[]
     SUITE["interpreter"]["taylor_katsura3"] = @benchmarkable execute_taylor!($u_taylor, Val(3), $I_taylor, $tx, $p_empty)
 
-    # --- Build time ---
-    SUITE["interpreter"]["build_jac_katsura3"] = @benchmarkable build_jacobian_interpreter($F_katsura)
+    # --- Build time (System construction includes full interpreter pipeline) ---
+    SUITE["interpreter"]["build_jac_katsura3"] = @benchmarkable System($F_katsura)
 
     return SUITE
 end

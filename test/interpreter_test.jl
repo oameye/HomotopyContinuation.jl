@@ -2,7 +2,7 @@ using Test
 import HomotopyContinuationNext as Next
 using HomotopyContinuationNext: Interpreter, InstructionSequence, Instruction,
     OpType, execute!, execute_taylor!,
-    compile_to_instructions, SExpr, SVar, SParam, SConst, SAdd, SMul, SPow, cse,
+    compile_to_instructions, SExpr, SExprT, cse,
     TruncatedTaylorSeries, TaylorVector,
     DoubleF64, ComplexDF64
 using FixedSizeArrays: FixedSizeArray
@@ -12,31 +12,28 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 # Helper: f(x1,x2) = x1*x2 + x1
 function make_test_sequence()
-    exprs = SExpr[SAdd([SMul([SVar(1), SVar(2)]), SVar(1)])]
+    exprs = SExprT[SExpr.SAdd(SExprT[SExpr.SMul(SExprT[SExpr.SVar(1), SExpr.SVar(2)]), SExpr.SVar(1)])]
     replacements, reduced = cse(exprs)
     return compile_to_instructions(
-        replacements, reduced;
-        nvars = 2, nparams = 0, output_dim = 1,
+        replacements, reduced, 2, 0, 1,
     )
 end
 
 # Helper: f(x1,x2; p1) = p1*x1^2 + x2
 function make_param_sequence()
-    exprs = SExpr[SAdd([SMul([SParam(1), SPow(SVar(1), 2)]), SVar(2)])]
+    exprs = SExprT[SExpr.SAdd(SExprT[SExpr.SMul(SExprT[SExpr.SParam(1), SExpr.SPow(SExpr.SVar(1), 2)]), SExpr.SVar(2)])]
     replacements, reduced = cse(exprs)
     return compile_to_instructions(
-        replacements, reduced;
-        nvars = 2, nparams = 1, output_dim = 1,
+        replacements, reduced, 2, 1, 1,
     )
 end
 
 # Helper: f1=x1*x2, f2=x1+x2
 function make_two_output_sequence()
-    exprs = SExpr[SMul([SVar(1), SVar(2)]), SAdd([SVar(1), SVar(2)])]
+    exprs = SExprT[SExpr.SMul(SExprT[SExpr.SVar(1), SExpr.SVar(2)]), SExpr.SAdd(SExprT[SExpr.SVar(1), SExpr.SVar(2)])]
     replacements, reduced = cse(exprs)
     return compile_to_instructions(
-        replacements, reduced;
-        nvars = 2, nparams = 0, output_dim = 2,
+        replacements, reduced, 2, 0, 2,
     )
 end
 
@@ -98,16 +95,30 @@ end
         @test u[1] ≈ 4.0 + 0im
     end
 
-    @testset "SExpr constructors copy args" begin
-        args = SExpr[SVar(1), SVar(2)]
-        add = SAdd(args)
-        mul = SMul(args)
-        func = Next.SFuncSym(Next.SFuncKind.SFUNC_ADD, args)
+    @testset "SExpr compound constructors copy arg vectors" begin
+        add_args = SExprT[SExpr.SVar(1), SExpr.SVar(2)]
+        mul_args = SExprT[SExpr.SVar(1), SExpr.SVar(2)]
+        func_args = SExprT[SExpr.SVar(1), SExpr.SVar(2)]
 
-        push!(args, SVar(3))
+        add = SExpr.SAdd(add_args)
+        mul = SExpr.SMul(mul_args)
+        func = SExpr.SFuncSym(Next.SFuncKind.SFUNC_ADD, func_args)
+        add_set = Set([add])
+        mul_set = Set([mul])
+        func_set = Set([func])
 
+        push!(add_args, SExpr.SVar(3))
+        push!(mul_args, SExpr.SVar(3))
+        push!(func_args, SExpr.SVar(3))
+
+        @test add.args !== add_args
+        @test mul.args !== mul_args
+        @test func.args !== func_args
         @test length(add.args) == 2
         @test length(mul.args) == 2
         @test length(func.args) == 2
+        @test add in add_set
+        @test mul in mul_set
+        @test func in func_set
     end
 end

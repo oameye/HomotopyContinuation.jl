@@ -2,7 +2,7 @@ using Test
 using CheckConcreteStructs: all_concrete
 using HomotopyContinuationNext
 using HomotopyContinuationNext: Interpreter, TaylorVector, TruncatedTaylorSeries,
-    DoubleF64, ComplexDF64, SNeg, SPow, SVar
+    DoubleF64, ComplexDF64
 
 # Types from other packages (e.g. FunctionWrapper aliases) are filtered by parentmodule.
 const _CONCRETE_SKIP = Set{Symbol}()
@@ -39,11 +39,5 @@ const _CONCRETE_SKIP = Set{Symbol}()
     end
     @testset "TruncatedTaylorSeries{4,ComplexF64}" begin
         @test all_concrete(TruncatedTaylorSeries{4, ComplexF64}; verbose = false)
-    end
-    @testset "SNeg{SVar}" begin
-        @test all_concrete(SNeg{SVar}; verbose = false)
-    end
-    @testset "SPow{SVar}" begin
-        @test all_concrete(SPow{SVar}; verbose = false)
     end
 end

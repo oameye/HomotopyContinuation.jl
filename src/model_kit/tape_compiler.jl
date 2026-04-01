@@ -15,7 +15,7 @@ mutable struct TapeCompiler
     const constants_map::Dict{ComplexF64, Int32}  # value → tape slot
     const var_slots::Vector{Int32}                 # var index → tape slot
     const param_slots::Vector{Int32}               # param index → tape slot
-    const cse_defs::Dict{Int, SExpr}               # STmp id → definition
+    const cse_defs::Dict{Int, SExprT}               # STmp id → definition
     const cse_slots::Dict{Int, Int32}              # STmp id → tape slot (memoized)
     next_slot::Int32
     # Known constant slots for optimization
@@ -33,7 +33,7 @@ function TapeCompiler(nvars::Int, nparams::Int)
         Dict{ComplexF64, Int32}(),
         Vector{Int32}(undef, nvars),
         Vector{Int32}(undef, nparams),
-        Dict{Int, SExpr}(),
+        Dict{Int, SExprT}(),
         Dict{Int, Int32}(),
         Int32(0),
         _SLOT_NONE,
@@ -64,7 +64,7 @@ end
 """Emit an instruction and return the output tape slot. Unused input slots are filled with the last provided arg."""
 function _emit!(c::TapeCompiler, op::OpType.T, a1::Int32, a2::Int32 = a1, a3::Int32 = a2, a4::Int32 = a3)::Int32
     c.next_slot += Int32(1)
-    push!(c.instructions, Instruction((a1, a2, a3, a4), op, c.next_slot))
+    push!(c.instructions, _instruction((a1, a2, a3, a4), op, c.next_slot))
     return c.next_slot
 end
 
@@ -119,7 +119,7 @@ function _tape_pow!(c::TapeCompiler, a::Int32, k::Int)::Int32
         slot = c.next_slot
         push!(
             c.instructions,
-            Instruction((a, Int32(k), Int32(k), Int32(k)), OpType.OP_POW_INT, slot),
+            _instruction((a, Int32(k), Int32(k), Int32(k)), OpType.OP_POW_INT, slot),
         )
         return slot
     end
@@ -128,62 +128,66 @@ end
 ## ── Main dispatcher ─────────────────────────────────────────────────────────
 
 """Compile an SExpr to a tape slot, returning the Int32 slot index."""
-function _compile!(c::TapeCompiler, expr::SExpr)::Int32
-    if expr isa SConst
-        return _get_constant_slot!(c, expr.val)
-    elseif expr isa SVar
-        return c.var_slots[expr.idx]
-    elseif expr isa SParam
-        return c.param_slots[expr.idx]
-    elseif expr isa STmp
-        cached = get(c.cse_slots, expr.id, _SLOT_NONE)
-        cached != _SLOT_NONE && return cached
-        slot = _compile!(c, c.cse_defs[expr.id])
-        c.cse_slots[expr.id] = slot
-        return slot
-    elseif expr isa SPow
-        base = _compile!(c, expr.base)
-        return _tape_pow!(c, base, expr.exp)
-    elseif expr isa SMul
-        return _compile_mul!(c, expr)
-    elseif expr isa SAdd
-        return _compile_sum!(c, expr)
-    elseif expr isa SNeg
-        return _tape_neg!(c, _compile!(c, expr.arg))
-    elseif expr isa SFuncSym
-        if expr.kind == SFuncKind.SFUNC_ADD
-            return _compile_sum!(c, SAdd(expr.args))
-        elseif expr.kind == SFuncKind.SFUNC_MUL
-            return _compile_mul!(c, SMul(expr.args))
-        else
-            error("Unknown SFuncSym kind: $(expr.kind)")
-        end
-    else
-        error("Unknown SExpr type: $(typeof(expr))")
+@inline _compile!(c::TapeCompiler, expr::SExprT)::Int32 =
+    _compile_storage!(c, sexpr_storage(expr))
+
+@inline _compile_storage!(c::TapeCompiler, storage::SConstStorage)::Int32 =
+    _get_constant_slot!(c, storage.val)
+@inline _compile_storage!(c::TapeCompiler, storage::SVarStorage)::Int32 =
+    c.var_slots[storage.idx]
+@inline _compile_storage!(c::TapeCompiler, storage::SParamStorage)::Int32 =
+    c.param_slots[storage.idx]
+
+function _compile_storage!(c::TapeCompiler, storage::STmpStorage)::Int32
+    cached = get(c.cse_slots, storage.id, _SLOT_NONE)
+    cached != _SLOT_NONE && return cached
+    slot = _compile!(c, c.cse_defs[storage.id])
+    c.cse_slots[storage.id] = slot
+    return slot
+end
+
+function _compile_storage!(c::TapeCompiler, storage::SPowStorage)::Int32
+    base_slot = _compile!(c, storage.base)
+    return _tape_pow!(c, base_slot, storage.exp)
+end
+
+@inline _compile_storage!(c::TapeCompiler, storage::SMulStorage)::Int32 =
+    _compile_mul!(c, storage.args)
+@inline _compile_storage!(c::TapeCompiler, storage::SAddStorage)::Int32 =
+    _compile_sum!(c, storage.args)
+@inline _compile_storage!(c::TapeCompiler, storage::SNegStorage)::Int32 =
+    _tape_neg!(c, _compile!(c, storage.arg))
+
+function _compile_storage!(c::TapeCompiler, storage::SFuncSymStorage)::Int32
+    if storage.kind == SFuncKind.SFUNC_ADD
+        return _compile_sum!(c, storage.args)
+    elseif storage.kind == SFuncKind.SFUNC_MUL
+        return _compile_mul!(c, storage.args)
     end
+    error("Unknown SFuncSym kind: $(storage.kind)")
 end
 
 ## ── Mul processing ──────────────────────────────────────────────────────────
 
-function _split_off_minus_one(expr::SExpr)::Tuple{Int, SExpr}
-    if expr isa SMul && !isempty(expr.args) && expr.args[1] isa SConst
-        cv = expr.args[1]
-        if cv.val == -one(ComplexF64)
-            rest = expr.args[2:end]
-            return -1, length(rest) == 1 ? rest[1] : SMul(rest)
+function _split_off_minus_one(args::Vector{SExprT})::Tuple{Int, Vector{SExprT}}
+    if !isempty(args)
+        coeff_storage = sexpr_storage(args[1])
+        if coeff_storage isa SConstStorage && coeff_storage.val == -one(ComplexF64)
+            return -1, args[2:end]
         end
     end
-    return 1, expr
+    return 1, args
 end
 
-function _compile_split_into_num_denom!(c::TapeCompiler, expr::SMul)
+function _compile_split_into_num_denom!(c::TapeCompiler, args::Vector{SExprT})
     nums = Int32[]
     denoms = Int32[]
-    for arg in expr.args
-        if arg isa SPow && arg.exp < 0
-            push!(denoms, _tape_pow!(c, _compile!(c, arg.base), -arg.exp))
-        elseif arg isa SPow
-            push!(nums, _tape_pow!(c, _compile!(c, arg.base), arg.exp))
+    for arg in args
+        storage = sexpr_storage(arg)
+        if storage isa SPowStorage && storage.exp < 0
+            push!(denoms, _tape_pow!(c, _compile!(c, storage.base), -storage.exp))
+        elseif storage isa SPowStorage
+            push!(nums, _tape_pow!(c, _compile!(c, storage.base), storage.exp))
         else
             push!(nums, _compile!(c, arg))
         end
@@ -213,13 +217,15 @@ function _compile_prod_parts!(c::TapeCompiler, exs::Vector{Int32})::Int32
     return _tree_reduce!(c, reverse(exs), OpType.OP_MUL4, OpType.OP_MUL3, _tape_mul!)
 end
 
-function _compile_mul!(c::TapeCompiler, expr::SMul)::Int32
-    (m, expr2) = _split_off_minus_one(expr)
+function _compile_mul!(c::TapeCompiler, args::Vector{SExprT})::Int32
+    (m, args2) = _split_off_minus_one(args)
     m_slot = _get_constant_slot!(c, ComplexF64(m))
-    if !(expr2 isa SMul)
-        return _tape_mul!(c, m_slot, _compile!(c, expr2))
+    if isempty(args2)
+        return m_slot
+    elseif length(args2) == 1
+        return _tape_mul!(c, m_slot, _compile!(c, args2[1]))
     end
-    nums, denoms = _compile_split_into_num_denom!(c, expr2)
+    nums, denoms = _compile_split_into_num_denom!(c, args2)
     num_prod = _compile_prod_parts!(c, nums)
     denom_prod = _compile_prod_parts!(c, denoms)
     local ref::Int32
@@ -235,11 +241,18 @@ end
 
 ## ── Add processing ──────────────────────────────────────────────────────────
 
-function _split_into_positives_negatives(expr::SAdd)
-    positives = SExpr[]
-    negatives = SExpr[]
-    for arg in expr.args
-        (sign, val) = _split_off_minus_one(arg)
+function _split_into_positives_negatives(args::Vector{SExprT})
+    positives = SExprT[]
+    negatives = SExprT[]
+    for arg in args
+        storage = sexpr_storage(arg)
+        if storage isa SMulStorage
+            sign, values = _split_off_minus_one(storage.args)
+            val = length(values) == 1 ? values[1] : SExpr.SMul(values)
+        else
+            sign = 1
+            val = arg
+        end
         if sign == -1
             push!(negatives, val)
         else
@@ -250,16 +263,17 @@ function _split_into_positives_negatives(expr::SAdd)
 end
 
 function _compile_reduce_to_at_most_two!(
-        c::TapeCompiler, expr::SExpr,
+        c::TapeCompiler, expr::SExprT,
     )::Tuple{Int32, Int32}
-    if expr isa SMul
-        args = expr.args
+    storage = sexpr_storage(expr)
+    if storage isa SMulStorage
+        args = storage.args
         if length(args) == 2
             return (_compile!(c, args[1]), _compile!(c, args[2]))
         elseif length(args) == 1
             return (_compile!(c, args[1]), _SLOT_NONE)
         elseif length(args) > 2
-            prefix = SMul(args[1:(end - 1)])
+            prefix = SExpr.SMul(args[1:(end - 1)])
             v2 = _compile!(c, prefix)
             return (_compile!(c, args[end]), v2)
         end
@@ -272,8 +286,15 @@ function _compile_sum_products!(
     )::Int32
     isempty(tuples) && return _SLOT_NONE
 
-    singles = Int32[first(t) for t in tuples if t[2] == _SLOT_NONE]
-    pairs = [t for t in tuples if t[2] != _SLOT_NONE]
+    singles = Int32[]
+    pairs = Tuple{Int32, Int32}[]
+    for tuple in tuples
+        if tuple[2] == _SLOT_NONE
+            push!(singles, first(tuple))
+        else
+            push!(pairs, tuple)
+        end
+    end
     n = length(pairs)
 
     for k in 1:2:(n - 1)
@@ -301,12 +322,16 @@ function _sum_slots!(c::TapeCompiler, slots::Vector{Int32})::Int32
     return _tree_reduce!(c, slots, OpType.OP_ADD4, OpType.OP_ADD3, _tape_add!)
 end
 
-function _compile_sum!(c::TapeCompiler, expr::SAdd)::Int32
-    pos, neg = _split_into_positives_negatives(expr)
-    pos_reduced =
-        Tuple{Int32, Int32}[_compile_reduce_to_at_most_two!(c, e) for e in pos]
-    neg_reduced =
-        Tuple{Int32, Int32}[_compile_reduce_to_at_most_two!(c, e) for e in neg]
+function _compile_sum!(c::TapeCompiler, args::Vector{SExprT})::Int32
+    pos, neg = _split_into_positives_negatives(args)
+    pos_reduced = Vector{Tuple{Int32, Int32}}(undef, length(pos))
+    for i in eachindex(pos)
+        pos_reduced[i] = _compile_reduce_to_at_most_two!(c, pos[i])
+    end
+    neg_reduced = Vector{Tuple{Int32, Int32}}(undef, length(neg))
+    for i in eachindex(neg)
+        neg_reduced[i] = _compile_reduce_to_at_most_two!(c, neg[i])
+    end
 
     # Case 1: single positive, single negative — try maximal fusion
     if length(pos_reduced) == 1 && length(neg_reduced) == 1
@@ -346,16 +371,43 @@ function _compile_sum!(c::TapeCompiler, expr::SAdd)::Int32
     end
 
     # Case 4: multiple positives, multiple negatives — pair for MULMULSUB
-    pos_pairs = Tuple{Int32, Int32}[t for t in pos_reduced if t[2] != _SLOT_NONE]
-    neg_pairs = Tuple{Int32, Int32}[t for t in neg_reduced if t[2] != _SLOT_NONE]
+    pos_pairs = Tuple{Int32, Int32}[]
+    neg_pairs = Tuple{Int32, Int32}[]
+    pos_singles = Tuple{Int32, Int32}[]
+    neg_singles = Tuple{Int32, Int32}[]
+    for tuple in pos_reduced
+        if tuple[2] == _SLOT_NONE
+            push!(pos_singles, (tuple[1], _SLOT_NONE))
+        else
+            push!(pos_pairs, tuple)
+        end
+    end
+    for tuple in neg_reduced
+        if tuple[2] == _SLOT_NONE
+            push!(neg_singles, (tuple[1], _SLOT_NONE))
+        else
+            push!(neg_pairs, tuple)
+        end
+    end
     n_fused = min(length(pos_pairs), length(neg_pairs))
 
     # Fuse matching pos/neg product pairs into MULMULSUB
-    fused = Int32[_emit!(c, OpType.OP_MULMULSUB, pos_pairs[i]..., neg_pairs[i]...) for i in 1:n_fused]
+    fused = Int32[]
+    for i in 1:n_fused
+        push!(fused, _emit!(c, OpType.OP_MULMULSUB, pos_pairs[i]..., neg_pairs[i]...))
+    end
 
     # Collect leftover pairs + singles for each side
-    leftover_pos = Tuple{Int32, Int32}[pos_pairs[(n_fused + 1):end]; [(t[1], _SLOT_NONE) for t in pos_reduced if t[2] == _SLOT_NONE]]
-    leftover_neg = Tuple{Int32, Int32}[neg_pairs[(n_fused + 1):end]; [(t[1], _SLOT_NONE) for t in neg_reduced if t[2] == _SLOT_NONE]]
+    leftover_pos = Tuple{Int32, Int32}[]
+    leftover_neg = Tuple{Int32, Int32}[]
+    for i in (n_fused + 1):length(pos_pairs)
+        push!(leftover_pos, pos_pairs[i])
+    end
+    append!(leftover_pos, pos_singles)
+    for i in (n_fused + 1):length(neg_pairs)
+        push!(leftover_neg, neg_pairs[i])
+    end
+    append!(leftover_neg, neg_singles)
 
     # Sum: fused results + leftover positives
     if !isempty(leftover_pos)
@@ -434,7 +486,10 @@ function _plan_assignment_slots!(
         input_block_size::Int,
         nscratch::Int,
     )
-    scratch_output_set = Set{Int32}(instr.output for instr in instructions)
+    scratch_output_set = Set{Int32}()
+    for instr in instructions
+        push!(scratch_output_set, instruction_output(instr))
+    end
     claimed_slots = Dict{Int32, Int}()
     direct_assignments = Tuple{Int, Int32}[]
     scratch_assignment_indices = Int[]
@@ -450,7 +505,7 @@ function _plan_assignment_slots!(
 
     assignments_start = input_block_size + nscratch + 1
     scratch_assignments_range =
-        range(assignments_start; length = length(scratch_assignment_indices))
+        assignments_start:(assignments_start + length(scratch_assignment_indices) - 1)
     identity_instructions = Instruction[]
     empty!(claimed_slots)
 
@@ -464,7 +519,10 @@ function _plan_assignment_slots!(
             remap[raw_slot] = target_slot
         else
             src = get(remap, raw_slot, raw_slot)
-            push!(identity_instructions, Instruction((src, src, src, src), OpType.OP_IDENTITY, target_slot))
+            push!(
+                identity_instructions,
+                _instruction((src, src, src, src), OpType.OP_IDENTITY, target_slot),
+            )
         end
     end
 
@@ -482,7 +540,10 @@ function _remap_instructions(
         remap::Dict{Int32, Int32},
         identity_instructions::Vector{Instruction},
     )::Vector{Instruction}
-    remapped = Instruction[_remap_instruction(instr, remap) for instr in instructions]
+    remapped = Vector{Instruction}(undef, length(instructions))
+    for i in eachindex(instructions)
+        remapped[i] = _remap_instruction(instructions[i], remap)
+    end
     append!(remapped, identity_instructions)
     return remapped
 end
@@ -507,39 +568,13 @@ function _build_assignments(
     return updated_assignments
 end
 
-"""
-    compile_to_instructions(replacements, reduced_exprs;
-        nvars, nparams, output_dim) -> InstructionSequence
-
-Compile CSE output directly to an optimized `InstructionSequence`.
-
-Tape layout: constants | params | variables | scratch | assignments
-"""
-function compile_to_instructions(
-        replacements::Vector{Pair{SExpr, SExpr}},
-        reduced_exprs::Vector{SExpr};
+function _finalize_compiler(
+        compiler::TapeCompiler,
+        result_slots::Vector{Int32},
         nvars::Int,
         nparams::Int,
         output_dim::Int,
     )::InstructionSequence
-    compiler = TapeCompiler(nvars, nparams)
-
-    # Register CSE definitions (compiled lazily on first use)
-    for (tmp, definition) in replacements
-        @assert tmp isa STmp
-        compiler.cse_defs[tmp.id] = definition
-    end
-
-    # Use a two-pass approach with placeholder slots.
-    # During compilation, constant slots use temporary 1-based indices.
-    # Var/param slots use negative placeholders. Scratch uses high offsets.
-    # After compilation, we remap everything to the final tape layout.
-
-    _initialize_placeholder_slots!(compiler, nvars, nparams)
-
-    # Compile all reduced expressions
-    result_slots = Int32[_compile!(compiler, expr) for expr in reduced_exprs]
-
     nconstants = length(compiler.constants)
     nscratch = Int(compiler.next_slot - _SCRATCH_OFFSET)
     layout = _build_slot_remap(nconstants, nparams, nvars, nscratch)
@@ -553,7 +588,6 @@ function compile_to_instructions(
         assignment_plan.identity_instructions,
     )
 
-    # Run optimizer and register allocator
     instructions_opt = _optimize_instruction_order(core_instructions)
     instructions_final, space_needed, updated_scratch_range, updated_direct =
         _reduce_space(
@@ -570,17 +604,18 @@ function compile_to_instructions(
         updated_direct,
     )
 
-    # Add STOP instruction
     n = Int32(space_needed)
-    push!(instructions_final, Instruction((n, n, n, n), OpType.OP_STOP, n))
+    push!(instructions_final, _instruction((n, n, n, n), OpType.OP_STOP, n))
 
-    # Split assignments into u (function values) and U (Jacobian entries)
-    u_assignments = Tuple{Int, Int}[
-        (i, k) for (i, k) in updated_assignments if i <= output_dim
-    ]
-    U_assignments = Tuple{Int, Int}[
-        (i - output_dim, k) for (i, k) in updated_assignments if i > output_dim
-    ]
+    u_assignments = Tuple{Int, Int}[]
+    U_assignments = Tuple{Int, Int}[]
+    for (i, k) in updated_assignments
+        if i <= output_dim
+            push!(u_assignments, (i, k))
+        else
+            push!(U_assignments, (i - output_dim, k))
+        end
+    end
 
     return InstructionSequence(
         instructions_final,
@@ -596,3 +631,41 @@ function compile_to_instructions(
         length(U_assignments) == output_dim * nvars,
     )
 end
+
+"""
+    compile_to_instructions(replacements, reduced_exprs, nvars, nparams, output_dim)
+
+Compile CSE output directly to an optimized `InstructionSequence`.
+
+Tape layout: constants | params | variables | scratch | assignments
+"""
+function compile_to_instructions(
+        replacements::Vector{Pair{SExprT, SExprT}},
+        reduced_exprs::Vector{SExprT},
+        nvars::Int,
+        nparams::Int,
+        output_dim::Int,
+    )::InstructionSequence
+    compiler = TapeCompiler(nvars, nparams)
+
+    # Register CSE definitions (compiled lazily on first use)
+    for (tmp, definition) in replacements
+        tmp_storage = sexpr_storage(tmp)::STmpStorage
+        compiler.cse_defs[tmp_storage.id] = definition
+    end
+
+    # Use a two-pass approach with placeholder slots.
+    # During compilation, constant slots use temporary 1-based indices.
+    # Var/param slots use negative placeholders. Scratch uses high offsets.
+    # After compilation, we remap everything to the final tape layout.
+
+    _initialize_placeholder_slots!(compiler, nvars, nparams)
+
+    # Compile all reduced expressions
+    result_slots = Vector{Int32}(undef, length(reduced_exprs))
+    for i in eachindex(reduced_exprs)
+        result_slots[i] = _compile!(compiler, reduced_exprs[i])
+    end
+    return _finalize_compiler(compiler, result_slots, nvars, nparams, output_dim)
+end
+

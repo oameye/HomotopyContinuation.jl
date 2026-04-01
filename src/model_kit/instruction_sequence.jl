@@ -6,6 +6,22 @@ struct Instruction
     output::Int32
 end
 
+@inline instruction_op(instr::Instruction) = instr.op
+@inline instruction_input(instr::Instruction) = instr.input
+@inline instruction_output(instr::Instruction) = instr.output
+
+@inline function _instruction(
+        input::NTuple{4, <:Integer}, op::OpType.T, output::Integer,
+    )::Instruction
+    return Instruction(
+        ntuple(Val(4)) do k
+            Int32(input[k])
+        end,
+        op,
+        Int32(output),
+    )
+end
+
 struct InstructionSequence
     instructions::Vector{Instruction}
     constants::Vector{ComplexF64}
@@ -26,14 +42,60 @@ Base.iterate(seq::InstructionSequence, state) = iterate(seq.instructions, state)
 
 ## Internal helpers
 
-"""Remap a single instruction's inputs/outputs through a Dict, preserving immediate-value inputs."""
-function _remap_instruction(instr::Instruction, remap::Dict{Int32, Int32}; output_fallback::Bool = true)::Instruction
-    new_input = ntuple(Val(4)) do k
-        should_use_index_not_reference(instr.op, k) && return instr.input[k]
-        Int32(get(remap, instr.input[k], instr.input[k]))
+@inline function _register_vertex!(
+        vertices::Set{Int32},
+        vertex_list::Vector{Int32},
+        v::Int32,
+    )::Int32
+    if v ∉ vertices
+        push!(vertices, v)
+        push!(vertex_list, v)
     end
-    new_output = output_fallback ? get(remap, instr.output, instr.output) : Int32(remap[instr.output])
-    return Instruction(new_input, instr.op, new_output)
+    return v
+end
+
+@inline function _is_unlisted_vertex(
+        v::Int32,
+        in_degree::Dict{Int32, Int},
+        out_degree::Dict{Int32, Int},
+        roots::Vector{Int32},
+    )::Bool
+    return get(in_degree, v, 0) == 0 &&
+        get(out_degree, v, 0) > 0 &&
+        v ∉ roots
+end
+
+function _take_register!(
+        used_indices::Set{Int32},
+        unused_indices::Vector{Int32},
+        next_reg::Base.RefValue{Int32},
+        max_reg::Base.RefValue{Int32},
+    )::Int32
+    if isempty(unused_indices)
+        next_reg[] += Int32(1)
+        r = next_reg[]
+        push!(used_indices, r)
+        max_reg[] = max(max_reg[], r)
+        return r
+    end
+    r = pop!(unused_indices)
+    push!(used_indices, r)
+    return r
+end
+
+"""Remap a single instruction's inputs/outputs through a Dict, preserving immediate-value inputs."""
+function _remap_instruction(
+        instr::Instruction, remap::Dict{Int32, Int32}; output_fallback::Bool = true,
+    )::Instruction
+    op = instruction_op(instr)
+    input = instruction_input(instr)
+    new_input = ntuple(Val(4)) do k
+        should_use_index_not_reference(op, k) && return input[k]
+        Int32(get(remap, input[k], input[k]))
+    end
+    output = instruction_output(instr)
+    new_output = output_fallback ? get(remap, output, output) : Int32(remap[output])
+    return _instruction(new_input, op, new_output)
 end
 
 """
@@ -52,38 +114,37 @@ function _optimize_instruction_order(
     index_to_instr = Dict{Int32, Instruction}()
     vertices = Set{Int32}()
     vertex_list = Int32[]
-    function register_vertex!(v::Int32)
-        if v ∉ vertices
-            push!(vertices, v)
-            push!(vertex_list, v)
-        end
-        return v
-    end
     in_degree = Dict{Int32, Int}()
     out_degree = Dict{Int32, Int}()
     children = Dict{Int32, Vector{Int32}}()
 
     for instr in instructions
-        index_to_instr[instr.output] = instr
-        register_vertex!(instr.output)
-        get!(children, instr.output, Int32[])
-        get!(in_degree, instr.output, 0)
-        get!(out_degree, instr.output, 0)
-        for k in 1:arity(instr.op)
-            should_use_index_not_reference(instr.op, k) && continue
-            input_idx = instr.input[k]
-            register_vertex!(input_idx)
-            push!(get!(children, instr.output, Int32[]), input_idx)
+        output = instruction_output(instr)
+        op = instruction_op(instr)
+        input = instruction_input(instr)
+        index_to_instr[output] = instr
+        _register_vertex!(vertices, vertex_list, output)
+        get!(children, output, Int32[])
+        get!(in_degree, output, 0)
+        get!(out_degree, output, 0)
+        for k in 1:arity(op)
+            should_use_index_not_reference(op, k) && continue
+            input_idx = input[k]
+            _register_vertex!(vertices, vertex_list, input_idx)
+            push!(get!(children, output, Int32[]), input_idx)
             in_degree[input_idx] = get(in_degree, input_idx, 0) + 1
-            out_degree[instr.output] = get(out_degree, instr.output, 0) + 1
+            out_degree[output] = get(out_degree, output, 0) + 1
             get!(out_degree, input_idx, 0)
-            get!(in_degree, instr.output, 0)
+            get!(in_degree, output, 0)
         end
     end
 
     listing = Int32[]
-    sort!(vertex_list)
-    roots = Int32[v for v in vertex_list if get(in_degree, v, 0) == 0]
+    _stable_sort!(vertex_list, isless)
+    roots = Int32[]
+    for v in vertex_list
+        get(in_degree, v, 0) == 0 && push!(roots, v)
+    end
 
     while !isempty(roots)
         root = pop!(roots)
@@ -112,18 +173,22 @@ function _optimize_instruction_order(
             end
 
             if isempty(unlisted_nodes_without_parent)
-                is_unlisted(v) =
-                    get(in_degree, v, 0) == 0 &&
-                    get(out_degree, v, 0) > 0 &&
-                    v ∉ roots
-                unlisted_nodes_without_parent =
-                    Int32[v for v in vertex_list if v in vertices && is_unlisted(v)]
+                for v in vertex_list
+                    v in vertices || continue
+                    _is_unlisted_vertex(v, in_degree, out_degree, roots) || continue
+                    push!(unlisted_nodes_without_parent, v)
+                end
             end
         end
     end
 
     reverse!(listing)
-    return [index_to_instr[v] for v in listing if haskey(index_to_instr, v)]
+    ordered = Instruction[]
+    for v in listing
+        haskey(index_to_instr, v) || continue
+        push!(ordered, index_to_instr[v])
+    end
+    return ordered
 end
 
 """
@@ -146,7 +211,11 @@ function _reduce_space(
     index_map, space_needed, updated_scratch_assignments =
         _index_compactification_mapping(instructions, input_block_size, scratch_assignments)
 
-    remapped = map(instr -> _remap_instruction(instr, index_map; output_fallback = false), instructions)
+    remapped = Vector{Instruction}(undef, length(instructions))
+    for i in eachindex(instructions)
+        remapped[i] =
+            _remap_instruction(instructions[i], index_map; output_fallback = false)
+    end
 
     return remapped, space_needed, updated_scratch_assignments, direct_assignments
 end
@@ -167,34 +236,23 @@ function _index_compactification_mapping(
     )
     used_indices = Set{Int32}()
     unused_indices = Vector{Int32}()
-    next_reg = Int32(input_block_size)  # next fresh register to allocate
-    max_reg = Int32(input_block_size)   # high-water mark for scratch registers
+    next_reg = Ref(Int32(input_block_size))  # next fresh register to allocate
+    max_reg = Ref(Int32(input_block_size))   # high-water mark for scratch registers
 
     index_map = Dict{Int32, Int32}()
     for idx in Int32(1):Int32(input_block_size)
         index_map[idx] = idx
     end
 
-    get_register!() = begin
-        if isempty(unused_indices)
-            next_reg += Int32(1)
-            r = next_reg
-            push!(used_indices, r)
-            max_reg = max(max_reg, r)
-            return r
-        end
-        r = pop!(unused_indices)
-        push!(used_indices, r)
-        r
-    end
-
     # Compute the last instruction index that reads each output register.
     output_lifetime_end = Dict{Int32, Int32}()
     for instr_idx in length(instructions):-1:1
         instr = instructions[instr_idx]
-        for i in 1:arity(instr.op)
-            should_use_index_not_reference(instr.op, i) && continue
-            idx = instr.input[i]
+        op = instruction_op(instr)
+        input = instruction_input(instr)
+        for i in 1:arity(op)
+            should_use_index_not_reference(op, i) && continue
+            idx = input[i]
             if !haskey(output_lifetime_end, idx)
                 output_lifetime_end[idx] = Int32(instr_idx)
             end
@@ -202,15 +260,20 @@ function _index_compactification_mapping(
     end
 
     for (instr_idx, instr) in enumerate(instructions)
+        op = instruction_op(instr)
+        output = instruction_output(instr)
+        input = instruction_input(instr)
         # Allocate output register (skip if this is an assignment-target slot)
-        if instr.output ∉ assignments
-            index_map[instr.output] = get_register!()
+        if output ∉ assignments
+            index_map[output] = _take_register!(
+                used_indices, unused_indices, next_reg, max_reg,
+            )
         end
 
         # Free registers whose lifetime has ended
-        for i in 1:arity(instr.op)
-            should_use_index_not_reference(instr.op, i) && continue
-            input_idx = instr.input[i]
+        for i in 1:arity(op)
+            should_use_index_not_reference(op, i) && continue
+            input_idx = input[i]
             if input_idx > input_block_size &&
                     instr_idx == Int(get(output_lifetime_end, input_idx, Int32(0)))
                 mapped_idx = get(index_map, input_idx, input_idx)
@@ -223,13 +286,14 @@ function _index_compactification_mapping(
     end
 
     # Assignment slots come after all scratch registers (using high-water mark)
-    num_scratch = Int(max_reg) - input_block_size
+    num_scratch = Int(max_reg[]) - input_block_size
+    assignment_start = input_block_size + num_scratch + 1
     updated_assignments =
-        range(input_block_size + num_scratch + 1; length = length(assignments))
+        assignment_start:(assignment_start + length(assignments) - 1)
     for (k, orig_idx) in enumerate(assignments)
         index_map[Int32(orig_idx)] = Int32(input_block_size + num_scratch + k)
     end
 
-    tape_space_needed = isempty(updated_assignments) ? Int(max_reg) : last(updated_assignments)
+    tape_space_needed = isempty(updated_assignments) ? Int(max_reg[]) : last(updated_assignments)
     return index_map, tape_space_needed, updated_assignments
 end
