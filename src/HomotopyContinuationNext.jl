@@ -23,7 +23,9 @@ end
 
 export @polyvar, solve, System
 export CompileMode
-export solutions, real_solutions, nsolutions, nreal
+export solutions, real_solutions, nsolutions, nreal, nsingular, nnonsingular, nat_infinity
+export nresults, results, multiplicity
+export is_success, is_singular, is_nonsingular, is_at_infinity, is_real
 export TotalDegree, Polyhedral, Result, PathResult
 export EndgameOptions, EndgameTracker
 

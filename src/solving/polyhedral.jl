@@ -140,7 +140,7 @@ function CommonSolve.init(F::System, alg::Polyhedral)::PolyhedralSolveCache
     end
 
     # 3. Compute mixed cells via MixedSubdivisions
-    result = MixedSubdivisions.fine_mixed_cells(support)
+    result = MixedSubdivisions.fine_mixed_cells(support; show_progress = false)
     if result === nothing
         error("MixedSubdivisions.fine_mixed_cells returned nothing — could not compute mixed cells")
     end

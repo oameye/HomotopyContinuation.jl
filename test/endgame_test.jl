@@ -93,7 +93,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
             ν, dν_dt = HC._val_dval(x_of_t(t), ẋ_of_t(t), ComplexF64(2.0), t)
             ν_fd = (
                 HC._val(x_of_t(t + h), ẋ_of_t(t + h), t + h) -
-                HC._val(x_of_t(t - h), ẋ_of_t(t - h), t - h)
+                    HC._val(x_of_t(t - h), ẋ_of_t(t - h), t - h)
             ) / (2h)
 
             @test ν ≈ HC._val(x_of_t(t), ẋ_of_t(t), t) atol = 1.0e-12
@@ -217,6 +217,8 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
             eg.val.Δval_x[2] = -0.001
             eg.val.val_tẋ[1] = 0.51
             eg.val.val_tẋ[2] = 0.49
+            eg.val.Δval_tẋ[1] = 0.001
+            eg.val.Δval_tẋ[2] = -0.001
             eg.val.samples = 3
             eg.state.in_endgame = true
 
@@ -448,6 +450,103 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         _measure_endgame_step_allocs()  # warmup
         allocs = _measure_endgame_step_allocs()
         @test allocs == 0
+    end
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Integration tests — real polynomial systems through full solve pipeline
+    # Ported from HomotopyContinuation.jl v2 endgame_test.jl
+    # ══════════════════════════════════════════════════════════════════════
+
+    @testset "Integration: (x-10)^d singular roots" begin
+        using HomotopyContinuationNext: solve, TotalDegree, nsingular, nresults, multiplicity
+
+        @testset "d=2" begin
+            @polyvar x
+            # No fixed seed — must work for any γ
+            result = solve(System([(x - 10)^2]))
+            # 1 unique singular solution with multiplicity 2
+            @test nresults(result) == 1
+            @test nsingular(result) == 1
+            @test multiplicity(result, first(result.clusters[1])) == 2
+            # At least one path detects winding number 2
+            @test any(r -> r.winding_number == 2, result.path_results)
+        end
+
+        @testset "d=6" begin
+            @polyvar x
+            result = solve(System([(x - 10)^6]))
+            # Most paths detect winding number 6
+            @test count(r -> r.winding_number == 6, result.path_results) >= 4
+            # Convergence at multiplicity 6 is hard — v2 also gets 0 solutions here
+        end
+    end
+
+    @testset "Integration: at-infinity detection" begin
+        using HomotopyContinuationNext: solve, TotalDegree, nat_infinity
+
+        # "Beyond Polyhedral Homotopy" example from v2:
+        # 2 finite solutions, 2 paths diverge to infinity
+        @polyvar x y
+        result = solve(
+            System([2.3x^2 + 1.2y^2 + 3x - 2y + 3, 2.3x^2 + 1.2y^2 + 5x + 2y - 5]),
+        )
+        @test count(HC.is_success, result.path_results) == 2
+        @test nat_infinity(result) == 2
+    end
+
+    @testset "Integration: winding number family" begin
+        using HomotopyContinuationNext: solve, TotalDegree
+
+        for d in 2:2:6
+            @testset "d=$d" begin
+                @polyvar x y
+                a = [0.257, -0.139, -1.73, -0.199, 1.79, -1.32]
+                f1 = (a[1] * x^d + a[2] * y) * (a[3] * x + a[4] * y) + 1
+                f2 = (a[1] * x^d + a[2] * y) * (a[5] * x + a[6] * y) + 1
+                result = solve(System([f1, f2]))
+                @test count(HC.is_success, result.path_results) == d + 1
+            end
+        end
+    end
+
+    @testset "Integration: Hyperbolic 6,6" begin
+        using HomotopyContinuationNext: solve, TotalDegree, nsingular, nresults
+
+        # Two roots of multiplicity 6 at the hyperplane y=0
+        # Each root has winding number 3 (set y=1 to dehomogenize)
+        @polyvar x z
+        y = 1
+        F = System(
+            [
+                0.75x^4 + 1.5x^2 * y^2 - 2.5x^2 * z^2 + 0.75y^4 - 2.5y^2 * z^2 + 0.75z^4,
+                10x^2 * z + 10y^2 * z - 6z^3,
+            ]
+        )
+        result = solve(F, TotalDegree(; seed = UInt32(1)))
+        # All 12 paths detect winding number 3 (v2 parity)
+        @test count(r -> r.winding_number == 3, result.path_results) == 12
+        # 2 unique singular solutions after deduplication (v2 parity: nresults=2, nsingular=2)
+        @test nresults(result) == 2
+        @test nsingular(result) == 2
+    end
+
+    @testset "Integration: singular system with multiplicity 3" begin
+        using HomotopyContinuationNext: solve, TotalDegree, nsingular, nnonsingular, nresults
+
+        # 1 singular + 1 nonsingular solution (dehomogenized: z=1, v2 parity)
+        @polyvar x y
+        z = 1
+        F = System(
+            [
+                x^2 + 2y^2 + 2im * y * z,
+                (18 + 3im) * x * y + 7im * y^2 - (3 - 18im) * x * z - 14y * z - 7im * z^2,
+            ]
+        )
+        result = solve(F, TotalDegree(; seed = UInt32(12345)))
+        # v2 parity: nresults=2, nsingular=1, nnonsingular=1
+        @test nresults(result) == 2
+        @test nsingular(result) == 1
+        @test nnonsingular(result) == 1
     end
 
 end # top-level testset

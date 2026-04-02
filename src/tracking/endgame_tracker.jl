@@ -220,12 +220,18 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
         @inbounds for i in eachindex(state.col_scaling)
             state.col_scaling[i] = ts.norm.weights[i]
         end
-        skeel_row_scaling!(
-            state.row_scaling,
-            ts.jacobian.workspace,
-            state.col_scaling,
+        # Evaluate Jacobian at (solution, t=0) to get condition at the target (v2 parity).
+        # The tracker's workspace holds the Jacobian at its last position, which may be
+        # at t > 0. Re-evaluating at t=0 gives the correct singularity assessment.
+        ws = ts.jacobian.workspace
+        evaluate_and_jacobian!(
+            eg.tracker.corrector.r, ws.A, eg.tracker.homotopy,
+            state.solution, complex(0.0),
         )
-        state.cond = _scaled_cond(ts.jacobian.workspace, state.row_scaling, state.col_scaling)
+        updated!(ws)
+        skeel_row_scaling!(state.row_scaling, ws, state.col_scaling)
+        factorize!(ws)
+        state.cond = _scaled_cond(ws, state.row_scaling, state.col_scaling)
         if state.cond > opts.sing_cond || state.accuracy > opts.sing_accuracy
             state.singular = true
         end
@@ -278,7 +284,7 @@ function _scaled_cond(
     else
         ws.factorized || factorize!(ws)
         return _scaled_inf_norm_matrix(ws, row_scaling, col_scaling) *
-               _inverse_inf_norm_est(
+            _inverse_inf_norm_est(
             ws.lu,
             row_scaling,
             ws.inf_norm_est_work,
@@ -287,6 +293,7 @@ function _scaled_cond(
     end
 end
 
+# Raw tolerance: used by is_finite in valuation.jl
 @inline function _at_infinity_tol(
         val_x::Float64,
         val_tẋ::Float64,
@@ -302,6 +309,30 @@ end
         abs(Δval_tẋ / val_tẋ),
     )
     return isfinite(ε∞) ? ε∞ : Inf
+end
+
+# Gated version for check_at_infinity!: only returns finite ε∞ when the valuation
+# actually indicates divergence (val_x < 0 → ∞) or convergence to zero (val_x > 0 → 0).
+# Without this gate, regular coordinates with small ε∞ get spuriously marked.
+@inline function _at_infinity_tol_gated(
+        val_x::Float64,
+        val_tẋ::Float64,
+        Δval_x::Float64,
+        Δval_tẋ::Float64,
+        finite_tol::Float64,
+        zero_is_at_infinity::Bool,
+    )::Float64
+    ε∞ = _at_infinity_tol(val_x, val_tẋ, Δval_x, Δval_tẋ)
+    if !isfinite(ε∞)
+        return Inf
+    end
+    if val_x + ε∞ < -finite_tol
+        return ε∞
+    elseif zero_is_at_infinity && val_x - ε∞ > finite_tol
+        return ε∞
+    else
+        return Inf
+    end
 end
 
 @inline function _clear_at_infinity_candidate!(state::EndgameState, i::Int)::Nothing
@@ -441,22 +472,22 @@ function check_finite!(eg::EndgameTracker)::Bool
     opts = eg.options
     n = length(state.solution)
 
+    # Guard: only consider the singular endgame if all coordinates have finite
+    # valuations. Without this gate, at-infinity paths (val_x ≈ −1) would
+    # erroneously enter the singular endgame before check_at_infinity! runs.
+    # This matches v2's `is_finite(...) || return false` guard.
+    is_finite(
+        val;
+        finite_tol = opts.val_finite_tol,
+        zero_is_finite = !opts.zero_is_at_infinity,
+        max_winding_number = opts.max_winding_number,
+    ) || return false
+
     m, m_err = estimate_winding_number(val, n, opts.max_winding_number)
 
-    # Check if all coordinates look regular (m == 1)
-    if m == 1
-        all_finite = true
-        @inbounds for i in 1:n
-            if abs(val.val_x[i]) > opts.val_finite_tol ||
-                    abs(val.Δval_x[i]) > opts.val_finite_tol ||
-                    val.val_tẋ[i] < 0.5 * opts.val_finite_tol
-                all_finite = false
-                break
-            end
-        end
-        if all_finite
-            return false
-        end
+    # Regular non-singular endpoint: m == 1 with reliable winding number
+    if m == 1 && m_err < opts.val_finite_tol
+        return false
     end
 
     # Winding number not reliable yet
@@ -538,7 +569,7 @@ function check_at_infinity!(eg::EndgameTracker)::Bool
         vtx = val.val_tẋ[i]
         dvx = val.Δval_x[i]
         dvtx = val.Δval_tẋ[i]
-        ε∞ = _at_infinity_tol(vx, vtx, dvx, dvtx)
+        ε∞ = _at_infinity_tol_gated(vx, vtx, dvx, dvtx, opts.val_finite_tol, opts.zero_is_at_infinity)
 
         if !state.at_inf_active[i]
             # Stage 1: mark candidates
@@ -794,13 +825,17 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
         end
     end
 
-    # Inner tracker failed to reach t_new
+    # Inner tracker failed to reach t_new — attempt finalization with existing
+    # samples if we have enough, otherwise give up (v2 parity).
     if tracker.state.code != TrackerCode.TRACKER_SUCCESS
-        # Copy solution/accuracy metadata before mapping the code
-        state.accuracy = tracker.state.accuracy
-        copyto!(state.solution, tracker.state.x)
-        state.cond = tracker.state.cond_J_ẋ
-        state.code = _tracker_code_to_endgame_code(tracker.state.code)
+        if state.singular_steps >= 2
+            _predict_and_finalize!(eg, true)
+        else
+            state.accuracy = tracker.state.accuracy
+            copyto!(state.solution, tracker.state.x)
+            state.cond = tracker.state.cond_J_ẋ
+            state.code = _tracker_code_to_endgame_code(tracker.state.code)
+        end
         return nothing
     end
 
@@ -827,21 +862,17 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
     acc = predict_endpoint!(eg)
 
     if state.singular_steps == 2
-        # Keep the first high-quality endpoint estimate as the current candidate.
-        # The next prediction can be worse, and finalization should still be able
-        # to accept this first estimate instead of falling back with accuracy=NaN.
-        if acc < opts.singular_min_accuracy
-            copyto!(state.solution, state.prediction)
-            state.accuracy = acc
-        end
-        state.prev_accuracy = acc
+        # Always store the first prediction (v2 parity). Convergence acceptance
+        # happens in _predict_and_finalize!, not here.
+        state.accuracy = acc
+        copyto!(state.solution, state.prediction)
         return nothing
     end
 
-    if acc < state.prev_accuracy && acc < opts.singular_min_accuracy
-        copyto!(state.solution, state.prediction)
+    if acc < state.accuracy && state.accuracy > 1.0e-12
+        # Accuracy improved — update solution and continue
         state.accuracy = acc
-        state.prev_accuracy = acc
+        copyto!(state.solution, state.prediction)
     else
         _predict_and_finalize!(eg, false)
     end

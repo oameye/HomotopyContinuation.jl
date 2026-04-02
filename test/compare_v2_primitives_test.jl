@@ -1,9 +1,8 @@
-# Compare extreme-case results between HomotopyContinuationNext and HomotopyContinuation v2.
-# Verifies that both packages produce the same answers on edge cases.
-# Requires HomotopyContinuation in the test environment.
+# Compare primitive operations between HomotopyContinuationNext and HomotopyContinuation v2.
+# Covers: DoubleF64, norms, LU solve, condition estimation.
 
 using Test
-using LinearAlgebra: LinearAlgebra, I, norm, ldiv!, diagm, opnorm
+using LinearAlgebra: LinearAlgebra, I, norm, ldiv!, diagm
 
 using HomotopyContinuationNext
 using HomotopyContinuation

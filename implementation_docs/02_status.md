@@ -14,10 +14,11 @@ v3 is now a credible replacement for v2's core solve pipeline on well-conditione
 systems. The remaining gaps are threading, overdetermined systems, and advanced features
 (monodromy, certification).
 
-- **Endgame is implemented and integrated.** The `EndgameTracker` wraps the inner `Tracker` with
-  Puiseux series valuation-based singularity detection, at-infinity/at-zero classification, and
-  Cauchy-style singular endpoint extrapolation via cubic Hermite prediction. All solve paths
-  (`TotalDegree`, `Polyhedral`, parameter homotopy) go through `EndgameTracker`.
+- **Endgame is implemented, integrated, and at v2 result parity.** The `EndgameTracker` wraps the
+  inner `Tracker` with Puiseux series valuation-based singularity detection, at-infinity/at-zero
+  classification, Cauchy-style singular endpoint extrapolation via cubic Hermite prediction, and
+  s-plane Hermite predictor for winding number > 1. Integration tests ported from v2 pass with
+  exact result counts (nresults, nsingular, nnonsingular, nat_infinity).
 - **A `taylor_op_sqr` bug fix dramatically improved step counts.** The 3rd-order Taylor
   coefficient for the squaring operation was missing a cross term for odd orders, which poisoned
   the Padé predictor. Fixing this reduced katsura steps/path from ~103/122/155 to ~37/49/57 —
@@ -57,8 +58,19 @@ overdetermined systems, and advanced features (monodromy, certification, NID).**
 - [x] RGF compiled eval+jac backend (`CompileMode.COMPILED`, opt-in, 3-6x kernel speedup)
 - [x] **Endgame tracker** — Puiseux valuation, winding number estimation, singular Cauchy endgame,
   at-infinity/at-zero detection, cubic Hermite prediction, solution refinement
+- [x] **S-plane Hermite predictor** — when winding number > 1, predictor switches from Padé (2,1)
+  in t-space to cubic Hermite in s-space (s = t^{1/m}), dramatically improving convergence near
+  branch points (v2 parity)
+- [x] **At-infinity detection with valuation gating** — only marks coordinates as divergence
+  candidates when the valuation actually indicates divergence (v2 parity)
+- [x] **Condition number at t=0** — `tracking_stopped!` evaluates the Jacobian at (solution, t=0)
+  for correct singularity assessment (v2 parity)
+- [x] **Solution deduplication** — `_cluster_solutions` groups paths converging to the same
+  endpoint by proximity. `nresults`, `multiplicity`, `results` return deduplicated counts/data.
 - [x] **EndgameTracker integrated into solve pipeline** — TotalDegree, Polyhedral, parameter homotopy
   all route through `EndgameTracker`
+- [x] **Integration tests from v2** — (x-10)^d, at-infinity, winding number family, Hyperbolic 6,6,
+  singular multiplicity 3. All pass with exact v2 result parity (no seeds on key assertions).
 - [x] **AllocCheck tests** — zero-allocation enforcement for tracker step, Newton, predictor,
   valuation, endgame step, and helpers (with FunctionWrapper false-positive filtering)
 - [x] **Tracking benchmark with fixed seeds** — `benchmark/compare/tracking.jl` uses
@@ -102,6 +114,18 @@ All paths succeed through the endgame. Example from katsura-3 (seed `0x4567`):
 - 2 paths detected as singular (high condition number at endpoint)
 - Endgame steps per path: 13–31 (mean 19.1)
 - Zero rejected steps across all paths
+
+### Endgame result parity with v2
+
+Integration tests ported from v2 (no seeds on key assertions):
+
+| System | v2 result | v3 result |
+|--------|-----------|-----------|
+| (x-10)^2 | nresults=1, nsingular=1 | same |
+| at-infinity | 2 success + 2 at_infinity | same |
+| winding family d=2,4,6 | d+1 success each | same |
+| Hyperbolic 6,6 | nresults=2, nsingular=2 | same |
+| Singular multiplicity 3 | nresults=2, nsingular=1, nnonsingular=1 | same |
 
 ### Raw tracker trace (without endgame)
 

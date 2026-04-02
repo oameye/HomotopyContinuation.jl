@@ -28,6 +28,9 @@ struct PathResult
 end
 
 is_success(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_SUCCESS
+is_singular(r::PathResult)::Bool = is_success(r) && r.singular
+is_nonsingular(r::PathResult)::Bool = is_success(r) && !r.singular
+is_at_infinity(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_AT_INFINITY
 
 function is_real(r::PathResult; tol::Float64 = DEFAULT_REAL_TOL)::Bool
     return is_success(r) && all(x -> abs(imag(x)) < tol * max(1.0, abs(x)), r.solution)

@@ -74,6 +74,8 @@ function update!(
     xtemp = pred.xtemp
     n = length(x)
 
+    m = pred.winding_number
+
     # Save previous Taylor data for Hermite predictor
     if !isnan(pred.t)
         @inbounds for i in 1:n
@@ -103,6 +105,20 @@ function update!(
         pred.tx3.data[2, i] = xtemp[i]
     end
     n1 = weighted_norm(xtemp, norm)
+
+    # -- Singular mode: skip orders 2-3, use Hermite in s-plane --
+    if m > 1
+        pred.tx_norm = (n0, n1, 0.0, 0.0)
+        pred.method = PredictionMethod.HERMITE
+        pred.trust_region = n0 / max(n1, 1.0e-30)
+        if isnan(pred.local_error)
+            inv_tau = n1 / max(n0, 1.0e-30)
+            pred.local_error = (inv_tau * inv_tau)^2
+        end
+        return nothing
+    end
+
+    pred.method = PredictionMethod.PADE21
 
     # -- Order 2: x2 = -J^{-1} * taylor!(u, Val(2), H, tv2, t) --
     # Populate tv2 with [x0, x1, 0]
@@ -231,6 +247,19 @@ function predict!(
         pred::Predictor,
         dt::ComplexF64,
     )::Nothing
+    if pred.method == PredictionMethod.HERMITE
+        _predict_hermite!(x_hat, pred, dt)
+    else
+        _predict_pade21!(x_hat, pred, dt)
+    end
+    return nothing
+end
+
+function _predict_pade21!(
+        x_hat::FSVec{ComplexF64},
+        pred::Predictor,
+        dt::ComplexF64,
+    )::Nothing
     n = length(x_hat)
     data = pred.tx3.data
     λ = pred.trust_region
@@ -253,10 +282,8 @@ function predict!(
         τ = tol * sqrt(c * c + (c1 * λ)^2 + (c2 * λ2)^2 + (c3 * λ3)^2)
 
         if c3 * λ3 <= τ || c2 * λ2 <= τ
-            # Quadratic Taylor fallback
             x_hat[i] = x0 + dt * (x1 + dt * x2)
         else
-            # Pade (2,1): x_hat = x0 + dt*(x1 + dt*x2/(1 - dt*x3/x2))
             delta = 1 - dt * x3 / x2
             if abs2(delta) < tol2
                 x_hat[i] = x0 + dt * (x1 + dt * x2)
@@ -265,6 +292,55 @@ function predict!(
             end
         end
     end
-
     return nothing
+end
+
+# Cubic Hermite prediction in s-plane for singular paths (winding_number > 1).
+# Converts t-plane Taylor data to s-plane (s = t^{1/m}) and interpolates.
+function _predict_hermite!(
+        x_hat::FSVec{ComplexF64},
+        pred::Predictor,
+        dt::ComplexF64,
+    )::Nothing
+    n = length(x_hat)
+    m = pred.winding_number
+    t = pred.t
+    prev_t = pred.prev_t
+    t_target = t + dt
+
+    prev_s = _t_to_s(prev_t, m)
+    s = _t_to_s(t, m)
+    s_target = _t_to_s(t_target, m)
+
+    prev_μ = m > 2 ? m * prev_s^(m - 1) : (m == 2 ? 2 * prev_s : 1.0 + 0.0im)
+    μ = m > 2 ? m * s^(m - 1) : (m == 2 ? 2 * s : 1.0 + 0.0im)
+
+    h = s - prev_s
+
+    # Hermite basis on [prev_s, s] evaluated at s_target
+    u = (s_target - prev_s) / h
+    h00 = (1 + 2u) * (1 - u)^2
+    h10 = (s_target - prev_s) * (1 - u)^2
+    h01 = u^2 * (3 - 2u)
+    h11 = (s_target - prev_s) * u * (u - 1)
+
+    @inbounds for i in 1:n
+        y0 = pred.prev_tx1.data[1, i]
+        dy0 = prev_μ * pred.prev_tx1.data[2, i]
+        y1 = pred.tx3.data[1, i]
+        dy1 = μ * pred.tx3.data[2, i]
+        x_hat[i] = h00 * y0 + h10 * dy0 + h01 * y1 + h11 * dy1
+    end
+    return nothing
+end
+
+# Convert t to s-plane: s = t^{1/m} (positive real root for real positive t)
+@inline function _t_to_s(t::ComplexF64, m::Int)::ComplexF64
+    r = fast_abs(t)
+    if isreal(t) && real(t) > 0
+        return complex(nthroot(r, m))
+    else
+        θ = mod(angle(t), 2π)
+        return nthroot(r, m) * cis(θ / m)
+    end
 end

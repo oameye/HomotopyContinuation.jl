@@ -156,7 +156,9 @@ EndgameTracker
 
 The solve pipeline creates `EndgameTracker` wrapping `Tracker`. The inner tracker handles
 predictor-corrector stepping; the endgame layer monitors valuations and switches to singular
-endpoint extrapolation when winding number > 1 is detected.
+endpoint extrapolation when winding number > 1 is detected. The predictor automatically
+switches from Padé (2,1) in t-space to cubic Hermite in s-space (s = t^{1/m}) when
+`winding_number > 1`, matching v2's approach for singular paths.
 
 ### Result Types
 
@@ -170,6 +172,19 @@ struct PathResult                      # immutable
     extended_precision_used::Bool
     last_path_point::Vector{ComplexF64}; last_path_t::Float64
 end
+
+struct Result
+    path_results::Vector{PathResult}
+    tracked_paths::Int; seed::UInt32
+    clusters::Vector{Vector{Int}}      # groups of paths converging to same solution
+    multiplicity::Vector{Int}          # per-path cluster size (0 for non-success)
+end
+```
+
+`Result` automatically deduplicates solutions at construction time via O(k²) proximity
+clustering. `nsolutions`/`nresults` return the deduplicated count. `solutions()` and
+`results()` return one representative per cluster. `multiplicity(r, i)` gives the cluster
+size for path `i`.
 
 struct Result
     path_results::Vector{PathResult}
