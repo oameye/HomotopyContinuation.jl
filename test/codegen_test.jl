@@ -40,7 +40,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         u_interp = zeros(ComplexF64, 4)
         execute!(u_interp, sys._interp_f64, x)
 
-        @test u_compiled ≈ u_interp atol = 1e-14
+        @test u_compiled ≈ u_interp atol = 1.0e-14
     end
 
     @testset "eval expr matches interpreter: parametric" begin
@@ -57,7 +57,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         u_interp = zeros(ComplexF64, 1)
         execute!(u_interp, sys._interp_f64, ComplexF64[0.5], ComplexF64[2.0, 3.0])
 
-        @test u_compiled ≈ u_interp atol = 1e-14
+        @test u_compiled ≈ u_interp atol = 1.0e-14
     end
 
     # ── Jac expr ─────────────────────────────────────────────────────────
@@ -85,8 +85,8 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         U_i = zeros(ComplexF64, 4, 4)
         execute!(u_i, U_i, sys._interp_jac, x)
 
-        @test u_c ≈ u_i atol = 1e-14
-        @test U_c ≈ U_i atol = 1e-14
+        @test u_c ≈ u_i atol = 1.0e-14
+        @test U_c ≈ U_i atol = 1.0e-14
     end
 
     # ── System compile modes ─────────────────────────────────────────────
@@ -105,14 +105,14 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         u_c = FSVec{ComplexF64}(zeros(ComplexF64, 2))
         evaluate!(u_i, sys_i.evaluator, xv, pv)
         evaluate!(u_c, sys_c.evaluator, xv, pv)
-        @test u_i ≈ u_c atol = 1e-14
+        @test u_i ≈ u_c atol = 1.0e-14
 
         U_i = FSMat{ComplexF64}(zeros(ComplexF64, 2, 2))
         U_c = FSMat{ComplexF64}(zeros(ComplexF64, 2, 2))
         evaluate_and_jacobian!(u_i, U_i, sys_i.evaluator, xv, pv)
         evaluate_and_jacobian!(u_c, U_c, sys_c.evaluator, xv, pv)
-        @test u_i ≈ u_c atol = 1e-14
-        @test U_i ≈ U_c atol = 1e-14
+        @test u_i ≈ u_c atol = 1.0e-14
+        @test U_i ≈ U_c atol = 1.0e-14
     end
 
     @testset "System(compile=COMPILED) zero allocations" begin
@@ -148,7 +148,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         @test HC.nsolutions(result) >= 2
         for sol in HC.solutions(result)
             res = abs(sol[1]^2 + sol[2] - 1) + abs(sol[1] * sol[2] - 2)
-            @test res < 1e-6
+            @test res < 1.0e-6
         end
     end
 end

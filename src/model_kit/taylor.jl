@@ -283,9 +283,11 @@ end
                 # ord == 1: c[1] = 2 * a[0]*a[1] = 2 * a.val[1] * a.val[2]
                 exprs[k] = :(2 * a.val[1] * a.val[2])
             else
-                # c[ord] = 2 * Σ_{j=1}^{half} a.val[j] * a.val[ord+2-j]
+                # c[ord] = 2 * Σ_{j=1}^{half+1} a.val[j] * a.val[ord+2-j]
+                # For odd orders, the symmetric pairs are (0, ord), (1, ord-1), ...
+                # so the 1-indexed loop must include half+1 terms.
                 terms = Expr[]
-                for j in 1:half
+                for j in 1:(half + 1)
                     push!(terms, :(a.val[$j] * a.val[$(ord + 2 - j)]))
                 end
                 sum_expr = _expr_sum(terms)

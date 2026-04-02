@@ -668,4 +668,3 @@ function compile_to_instructions(
     end
     return _finalize_compiler(compiler, result_slots, nvars, nparams, output_dim)
 end
-

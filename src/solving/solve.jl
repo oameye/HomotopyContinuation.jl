@@ -6,11 +6,11 @@
 """
     SolveCache
 
-Holds a pre-built tracker and start solutions, ready for `solve!` to track all paths.
+Holds a pre-built endgame tracker and start solutions, ready for `solve!` to track all paths.
 Created by `CommonSolve.init`.
 """
 struct SolveCache
-    tracker::Tracker
+    tracker::EndgameTracker
     start_solutions::Vector{Vector{ComplexF64}}
     seed::UInt32
 end
@@ -28,20 +28,21 @@ function CommonSolve.init(F::System, alg::TotalDegree)::SolveCache
     H = StraightLineHomotopy(start_evaluator, F.evaluator; γ = γ)
     heval = HomotopyEvaluator(H)
     tracker = Tracker(heval; options = alg.tracker_options)
+    eg = EndgameTracker(tracker, alg.endgame_options)
 
-    return SolveCache(tracker, starts, seed)
+    return SolveCache(eg, starts, seed)
 end
 
 # ── CommonSolve.solve!: track all paths ──────────────────────────────────
 
 function CommonSolve.solve!(cache::SolveCache)::Result
-    tracker = cache.tracker
+    eg = cache.tracker
     path_results = PathResult[]
     sizehint!(path_results, length(cache.start_solutions))
 
     for x₀ in cache.start_solutions
-        track!(tracker, x₀)
-        push!(path_results, PathResult(tracker))
+        track!(eg, x₀)
+        push!(path_results, PathResult(eg))
     end
 
     return Result(path_results, length(cache.start_solutions), cache.seed)
@@ -93,7 +94,7 @@ end
 # ── Parameter homotopy: solve(F, starts; start_parameters, target_parameters) ─
 
 """
-    solve(F::System, starts; start_parameters, target_parameters, seed, tracker_options)
+    solve(F::System, starts; start_parameters, target_parameters, seed, tracker_options, endgame_options)
 
 Track solutions from `start_parameters` to `target_parameters` using parameter homotopy.
 
@@ -122,6 +123,7 @@ function solve(
         target_parameters::AbstractVector{<:Number},
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
+        endgame_options::EndgameOptions = EndgameOptions(),
     )::Result
     return CommonSolve.solve!(
         CommonSolve.init(
@@ -130,6 +132,7 @@ function solve(
             target_parameters = target_parameters,
             seed = seed,
             tracker_options = tracker_options,
+            endgame_options = endgame_options,
         ),
     )
 end
@@ -141,6 +144,7 @@ function CommonSolve.init(
         target_parameters::AbstractVector{<:Number},
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
+        endgame_options::EndgameOptions = EndgameOptions(),
     )::SolveCache
     @assert nparameters(F) > 0 "System must have parameters for parameter homotopy"
     @assert length(start_parameters) == nparameters(F) "start_parameters length must match nparameters"
@@ -151,8 +155,9 @@ function CommonSolve.init(
     H = CoefficientHomotopy(F.evaluator, sp, tp)
     heval = HomotopyEvaluator(H)
     tracker = Tracker(heval; options = tracker_options)
+    eg = EndgameTracker(tracker, endgame_options)
 
     start_sols = [Vector{ComplexF64}(ComplexF64.(s)) for s in starts]
 
-    return SolveCache(tracker, start_sols, seed)
+    return SolveCache(eg, start_sols, seed)
 end

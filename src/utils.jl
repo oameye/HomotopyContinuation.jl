@@ -55,13 +55,12 @@ end
 # forward == false → s decreases from abs_Δ to 0
 #
 # Mutable justification: s and s′ are advanced every tracker step.
-# start, target, abs_Δ, forward are const because they are fixed per segment;
-# init! returns a NEW SegmentStepper instead of mutating these fields.
+# start, target, abs_Δ, forward are reset via reinit! for each new path segment.
 mutable struct SegmentStepper
-    const start::ComplexF64
-    const target::ComplexF64
-    const abs_Δ::Float64
-    const forward::Bool
+    start::ComplexF64
+    target::ComplexF64
+    abs_Δ::Float64
+    forward::Bool
     s::Float64
     s′::Float64
 end
@@ -75,9 +74,17 @@ end
 SegmentStepper(start::Number, target::Number) =
     SegmentStepper(ComplexF64(start), ComplexF64(target))
 
-# init! returns a NEW SegmentStepper because start/target/abs_Δ/forward are const fields.
-init!(::SegmentStepper, start::Number, target::Number) =
-    SegmentStepper(ComplexF64(start), ComplexF64(target))
+function reinit!(S::SegmentStepper, start::ComplexF64, target::ComplexF64)::Nothing
+    S.start = start
+    S.target = target
+    S.abs_Δ = abs(target - start)
+    S.forward = abs(start) < abs(target)
+    S.s = S.forward ? 0.0 : S.abs_Δ
+    S.s′ = S.s
+    return nothing
+end
+reinit!(S::SegmentStepper, start::Number, target::Number) =
+    reinit!(S, ComplexF64(start), ComplexF64(target))
 
 is_done(S::SegmentStepper)::Bool = S.forward ? S.s == S.abs_Δ : S.s == 0.0
 

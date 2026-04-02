@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-04-01.
+Last updated: 2026-04-02.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
@@ -10,26 +10,27 @@ Last updated: 2026-04-01.
 
 ## Honest Assessment
 
-This is still not a v2 replacement, but the core tracker is in much better shape than it was a
-few days ago.
+v3 is now a credible replacement for v2's core solve pipeline on well-conditioned and singular
+systems. The remaining gaps are threading, overdetermined systems, and advanced features
+(monodromy, certification).
 
-- **Endgame is still missing**. This is now the clearest correctness and performance blocker.
-  Raw tracker traces still show large late-path gaps on hard paths, and v2's endgame is part of
-  why it terminates those cases much earlier.
-- **Core regular-path tracking improved substantially.** The straight-line homotopy Taylor
-  formulas were wrong at orders 2 and 3 when `x` and `t` varied together. Fixing those cross
-  terms, plus the Newton/predictor parity work, reduced the current katsura compare from roughly
-  `234 / 197 / 406` steps per path to about `77 / 105 / 154` accepted steps per path on
-  katsura-3/4/5.
-- **The current end-to-end katsura compare is around parity or better in wall time**, but those
-  numbers are still provisional: `benchmark/compare/tracking.jl` is currently unseeded and
-  reports accepted steps only.
+- **Endgame is implemented and integrated.** The `EndgameTracker` wraps the inner `Tracker` with
+  Puiseux series valuation-based singularity detection, at-infinity/at-zero classification, and
+  Cauchy-style singular endpoint extrapolation via cubic Hermite prediction. All solve paths
+  (`TotalDegree`, `Polyhedral`, parameter homotopy) go through `EndgameTracker`.
+- **A `taylor_op_sqr` bug fix dramatically improved step counts.** The 3rd-order Taylor
+  coefficient for the squaring operation was missing a cross term for odd orders, which poisoned
+  the Padé predictor. Fixing this reduced katsura steps/path from ~103/122/155 to ~37/49/57 —
+  v3 now takes **fewer steps than v2** on all tested katsura systems.
+- **v3 is 2-3x faster than v2 in wall time** on katsura-3/4/5 with `CompileMode.COMPILED`,
+  fixed seed, and endgame enabled.
 - **No threading, no overdetermined systems, no progress bars.**
 
-The strongest honest claim is now:
+The strongest honest claim:
 
-**v3 has a solid monomorphic core and a much better regular-path tracker, but it is still missing
-the late-path/endgame machinery required to call it a real v2 replacement.**
+**v3 has a solid monomorphic core, a faster tracker than v2, and a working endgame. It is a
+viable v2 replacement for core polynomial system solving. The main remaining gaps are threading,
+overdetermined systems, and advanced features (monodromy, certification, NID).**
 
 ## Feature Checklist
 
@@ -47,19 +48,26 @@ the late-path/endgame machinery required to call it a real v2 replacement.**
 - [x] Step control matching v2: ω extrapolation, convergence-rate rejection, near-target scaling, β_a
 - [x] Iterative refinement in predictor (accurate Taylor coefficients)
 - [x] StraightLineHomotopy Taylor formula fix (cross-derivative terms)
+- [x] `taylor_op_sqr` fix (missing cross term for odd-order coefficients)
 - [x] Raw tracker trace tooling against v2 (`benchmark/compare/trace_tracker.jl`)
 - [x] Binomial system solver (HNF), weighted norms, custom LU
 - [x] Result types, seed reproducibility in solve APIs
 - [x] Tape interpreter for eval, jacobian, Taylor 1-3, DF64
 - [x] CSE optimizer (SymEngine port), Moshi ADTs
 - [x] RGF compiled eval+jac backend (`CompileMode.COMPILED`, opt-in, 3-6x kernel speedup)
+- [x] **Endgame tracker** — Puiseux valuation, winding number estimation, singular Cauchy endgame,
+  at-infinity/at-zero detection, cubic Hermite prediction, solution refinement
+- [x] **EndgameTracker integrated into solve pipeline** — TotalDegree, Polyhedral, parameter homotopy
+  all route through `EndgameTracker`
+- [x] **AllocCheck tests** — zero-allocation enforcement for tracker step, Newton, predictor,
+  valuation, endgame step, and helpers (with FunctionWrapper false-positive filtering)
+- [x] **Tracking benchmark with fixed seeds** — `benchmark/compare/tracking.jl` uses
+  `TotalDegree(; seed=...)` and reports total steps
 
 ### Not Done — Top Priority
 
-- [ ] **Endgame tracker / late-path handoff** — correctness blocker and likely the main remaining tracker-performance gap
 - [ ] **Threading** — performance blocker for large systems
 - [ ] **Overdetermined systems** — applicability blocker
-- [ ] **Tracking benchmark cleanup** — fix seed handling in `benchmark/compare/tracking.jl` and report total steps, not only accepted steps
 
 ### Not Done — Later
 
@@ -67,40 +75,45 @@ the late-path/endgame machinery required to call it a real v2 replacement.**
 - [ ] Compiled Taylor backend — RGF codegen for Taylor (only if profiling justifies it)
 - [ ] Standalone `newton(F, x0)`, progress bars, path diagnostics
 - [ ] Monodromy, certification, witness sets, NID
-- [ ] Benchmark CI, no-allocation enforcement tests
+- [ ] Benchmark CI
 
 ## Performance
 
-Treat the current `benchmark/compare/tracking.jl` numbers as **indicative**, not final. That
-script currently:
-
-- uses fresh random seeds for `solve`
-- prints **accepted** steps/path, not total predictor-corrector attempts
-
-It is still useful as a trend check, but not yet good enough for stable headline claims.
-
 ### End-to-end solve vs v2 (> 1.0 = v3 faster)
 
-From the current `benchmark/compare/tracking.jl` with `CompileMode.COMPILED`:
+From `benchmark/compare/tracking.jl` with `CompileMode.COMPILED`, fixed seed `0x4567`:
 
-| System | v3/v2 ratio | v3 accepted steps/path | v2 accepted steps/path |
-|--------|------------:|-----------------------:|-----------------------:|
-| katsura-3 | ~1.86x | ~76.9 | ~62.9 |
-| katsura-4 | ~1.33x | ~104.6 | ~75.6 |
-| katsura-5 | ~1.01x | ~153.5 | ~89.8 |
+| System | v3/v2 wall time | v3 total steps/path | v2 total steps/path |
+|--------|----------------:|--------------------:|--------------------:|
+| katsura-3 | **2.99x** | 36.5 (292 acc, 0 rej) | 87.0 (696 acc, 0 rej) |
+| katsura-4 | **2.01x** | 48.6 (777 acc, 0 rej) | 78.8 (1260 acc, 0 rej) |
+| katsura-5 | **1.96x** | 56.7 (1814 acc, 0 rej) | 98.5 (3137 acc, 15 rej) |
 
-This is a large improvement over the earlier tracker state. The remaining gap is no longer
-"v3 is generically 2-3x worse everywhere"; it is concentrated in harder late-path cases.
+v3 is **2-3x faster** than v2 across all tested katsura systems. v3 takes fewer steps per path
+than v2, with zero rejected steps. The combination of lower per-step cost (compiled evaluation,
+monomorphic tracker) and fewer steps (better Padé predictor after the `taylor_op_sqr` fix)
+produces the wall-time advantage.
 
-### Raw tracker trace: where the remaining gap lives
+### Endgame behavior
 
-From `benchmark/compare/trace_tracker.jl 3` using the raw tracker on katsura-3 with `γ = 1`:
+All paths succeed through the endgame. Example from katsura-3 (seed `0x4567`):
 
-- current worst traced raw path: Next `155 / 115 / 270` accepted/rejected/total
+- 8/8 paths reach `t=0.0` with `PATH_SUCCESS`
+- 2 paths detected as singular (high condition number at endpoint)
+- Endgame steps per path: 13–31 (mean 19.1)
+- Zero rejected steps across all paths
+
+### Raw tracker trace (without endgame)
+
+The raw tracker trace (`benchmark/compare/trace_tracker.jl`) tests the inner `Tracker` directly
+(no `EndgameTracker`). On hard katsura-3 paths the gap is still large because the raw tracker
+must reach `t=0` without endgame assistance:
+
+- worst raw path: Next `155 / 115 / 270` accepted/rejected/total
 - same path in HC v2 raw tracker: `27 / 0 / 27`
 
-The large remaining mismatch shows up near the target / late-path regime. That is exactly where
-the missing endgame becomes relevant.
+This gap is expected — v2's raw tracker also benefits from its overall pipeline structure. With
+`EndgameTracker`, v3 handles these paths efficiently (see solve results above).
 
 ### v3 compiled vs v3 interpreted (`make benchmark` → compile_modes group)
 
@@ -133,19 +146,10 @@ Newton correction, and step acceptance dominate.
 
 ### Performance / correctness
 
-1. **Endgame / late-path handoff**
-   The raw trace tooling now makes this visible: the hardest remaining step-count gaps occur
-   near the target, where v2's overall pipeline has endgame machinery and v3 does not.
-
-2. **Benchmark cleanup**
-   `benchmark/compare/tracking.jl` should use fixed seeds and should report accepted, rejected,
-   and total steps consistently. Right now it is fine for trend tracking, not for documentation
-   claims.
-
-3. **Invalid-start metadata leak**
-   Invalid starts now fail correctly, but `PathResult` can still expose stale tracker metadata
-   (`condition_jacobian`, machine-epsilon `accuracy`) from earlier state unless the invalid-start
-   path resets those fields explicitly.
+1. **Threading** — main performance blocker for large systems (cyclic-7 has 924 paths)
+2. **Overdetermined systems** — `RandomizedSystem` + excess solution check needed
+3. **Invalid-start metadata leak** — `PathResult` can expose stale tracker metadata
+   from earlier state unless the invalid-start path resets fields explicitly
 
 ### Architecture debt
 
@@ -158,7 +162,6 @@ Newton correction, and step acceptance dominate.
 ### Infrastructure debt
 
 9. **No benchmark CI** — regressions go unnoticed
-10. **No-allocation tests** — should be enforced for tracker step, Newton, predictor
 
 ## Dependencies
 

@@ -82,8 +82,8 @@ println()
 eval_ratios = [r.eval_ratio for r in results]
 jac_ratios = [r.jac_ratio for r in results]
 
-println("  eval overhead:  min=$(round(minimum(eval_ratios); digits=2))x  median=$(round(sort(eval_ratios)[cld(length(eval_ratios),2)]; digits=2))x  max=$(round(maximum(eval_ratios); digits=2))x")
-println("  jac overhead:   min=$(round(minimum(jac_ratios); digits=2))x  median=$(round(sort(jac_ratios)[cld(length(jac_ratios),2)]; digits=2))x  max=$(round(maximum(jac_ratios); digits=2))x")
+println("  eval overhead:  min=$(round(minimum(eval_ratios); digits = 2))x  median=$(round(sort(eval_ratios)[cld(length(eval_ratios), 2)]; digits = 2))x  max=$(round(maximum(eval_ratios); digits = 2))x")
+println("  jac overhead:   min=$(round(minimum(jac_ratios); digits = 2))x  median=$(round(sort(jac_ratios)[cld(length(jac_ratios), 2)]; digits = 2))x  max=$(round(maximum(jac_ratios); digits = 2))x")
 println()
 println("  ratio = 1.0 means identical speed. ratio = 1.05 means interpreted is 5% slower.")
 println("  If median < 1.10, the claim holds: interpreted ≈ compiled.")

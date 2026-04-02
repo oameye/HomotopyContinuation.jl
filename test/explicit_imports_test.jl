@@ -14,6 +14,7 @@ using HomotopyContinuationNext
         HomotopyContinuationNext.CompileMode,  # @enumx module
         HomotopyContinuationNext.SExpr,  # Moshi @data module
         HomotopyContinuationNext.ExecInstruction,  # Moshi @data module
+        HomotopyContinuationNext.EndgameCode,  # @enumx module
     )
 
     @test check_no_implicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing

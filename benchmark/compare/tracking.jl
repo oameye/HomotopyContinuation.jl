@@ -40,13 +40,13 @@ for n in [3, 4, 5]
     Next.solve(next_sys)
     HC.solve(hc_sys)
 
-    t_next = @belapsed Next.solve($next_sys; seed = $TRACKING_SEED)
+    t_next = @belapsed Next.solve($next_sys, Next.TotalDegree(; seed = $TRACKING_SEED))
     t_hc = @belapsed HC.solve($hc_sys; seed = $TRACKING_SEED)
 
     print_row("katsura$n", t_next, t_hc)
 
     # Step counts from fixed-seed run
-    r_next = Next.solve(next_sys; seed = TRACKING_SEED)
+    r_next = Next.solve(next_sys, Next.TotalDegree(; seed = TRACKING_SEED))
     r_hc = HC.solve(hc_sys; seed = TRACKING_SEED)
 
     np = r_next.tracked_paths
@@ -59,10 +59,10 @@ for n in [3, 4, 5]
     tr_hc = sum(p.rejected_steps for p in HC.results(r_hc))
     total_hc = ta_hc + tr_hc
 
-    println("    Next: $(Next.nsolutions(r_next)) sol, $(round(total_next/np; digits=1)) total steps/path ($ta_next acc, $tr_next rej)")
-    println("    HC:   $(length(HC.solutions(r_hc))) sol, $(round(total_hc/np_hc; digits=1)) total steps/path ($ta_hc acc, $tr_hc rej)")
+    println("    Next: $(Next.nsolutions(r_next)) sol, $(round(total_next / np; digits = 1)) total steps/path ($ta_next acc, $tr_next rej)")
+    println("    HC:   $(length(HC.solutions(r_hc))) sol, $(round(total_hc / np_hc; digits = 1)) total steps/path ($ta_hc acc, $tr_hc rej)")
 end
 
 println()
 println("  ratio > 1.0 means Next is faster.")
-println("  Note: HC v2 includes endgame; Next does not yet.")
+println("  Both v3 and v2 include endgame.")

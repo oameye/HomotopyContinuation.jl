@@ -155,25 +155,27 @@ function _trace_next!(tracker::Next.Tracker, x0::Vector{ComplexF64})
         accepted = Next.step!(tracker)
         post = _next_snapshot(tracker)
         k += 1
-        push!(rows, (
-            step = k,
-            accepted = accepted,
-            t = pre.t,
-            ds = pre.ds,
-            tau = pre.tau,
-            local_error = pre.local_error,
-            omega = pre.omega,
-            mu = pre.mu,
-            accuracy = pre.accuracy,
-            cond = pre.cond,
-            ds_err = pre.ds_err,
-            ds_tau = pre.ds_tau,
-            limiter = pre.limiter,
-            next_ds = post.ds,
-            next_t = post.t,
-            next_tau = post.tau,
-            next_error = post.local_error,
-        ))
+        push!(
+            rows, (
+                step = k,
+                accepted = accepted,
+                t = pre.t,
+                ds = pre.ds,
+                tau = pre.tau,
+                local_error = pre.local_error,
+                omega = pre.omega,
+                mu = pre.mu,
+                accuracy = pre.accuracy,
+                cond = pre.cond,
+                ds_err = pre.ds_err,
+                ds_tau = pre.ds_tau,
+                limiter = pre.limiter,
+                next_ds = post.ds,
+                next_t = post.t,
+                next_tau = post.tau,
+                next_error = post.local_error,
+            )
+        )
     end
     return rows, tracker.state.code
 end
@@ -190,25 +192,27 @@ function _trace_hc!(tracker::HC.Tracker, x0::Vector{ComplexF64})
         accepted = HC.step!(tracker)
         post = _hc_snapshot(tracker)
         k += 1
-        push!(rows, (
-            step = k,
-            accepted = accepted,
-            t = pre.t,
-            ds = pre.ds,
-            tau = pre.tau,
-            local_error = pre.local_error,
-            omega = pre.omega,
-            mu = pre.mu,
-            accuracy = pre.accuracy,
-            cond = pre.cond,
-            ds_err = pre.ds_err,
-            ds_tau = pre.ds_tau,
-            limiter = pre.limiter,
-            next_ds = post.ds,
-            next_t = post.t,
-            next_tau = post.tau,
-            next_error = post.local_error,
-        ))
+        push!(
+            rows, (
+                step = k,
+                accepted = accepted,
+                t = pre.t,
+                ds = pre.ds,
+                tau = pre.tau,
+                local_error = pre.local_error,
+                omega = pre.omega,
+                mu = pre.mu,
+                accuracy = pre.accuracy,
+                cond = pre.cond,
+                ds_err = pre.ds_err,
+                ds_tau = pre.ds_tau,
+                limiter = pre.limiter,
+                next_ds = post.ds,
+                next_t = post.t,
+                next_tau = post.tau,
+                next_error = post.local_error,
+            )
+        )
     end
     return rows, HC.status(tracker)
 end
@@ -247,6 +251,7 @@ function _print_summary(rows)
             row.next.total - row.hc.total,
         )
     end
+    return
 end
 
 function _print_trace_side_by_side(next_rows, hc_rows; max_rows::Int = 40)
@@ -257,15 +262,16 @@ function _print_trace_side_by_side(next_rows, hc_rows; max_rows::Int = 40)
         nr = i <= length(next_rows) ? next_rows[i] : nothing
         hr = i <= length(hc_rows) ? hc_rows[i] : nothing
         next_txt = isnothing(nr) ? "" : @sprintf(
-            "%s %7.3g %7.3g %7.3g %-5s -> %7.3g",
-            nr.accepted ? "A" : "R", nr.ds, nr.tau, nr.local_error, nr.limiter, nr.next_ds,
-        )
+                "%s %7.3g %7.3g %7.3g %-5s -> %7.3g",
+                nr.accepted ? "A" : "R", nr.ds, nr.tau, nr.local_error, nr.limiter, nr.next_ds,
+            )
         hc_txt = isnothing(hr) ? "" : @sprintf(
-            "%s %7.3g %7.3g %7.3g %-5s -> %7.3g",
-            hr.accepted ? "A" : "R", hr.ds, hr.tau, hr.local_error, hr.limiter, hr.next_ds,
-        )
+                "%s %7.3g %7.3g %7.3g %-5s -> %7.3g",
+                hr.accepted ? "A" : "R", hr.ds, hr.tau, hr.local_error, hr.limiter, hr.next_ds,
+            )
         println(lpad(i, 4), "  ", rpad(next_txt, 44), "  ", hc_txt)
     end
+    return
 end
 
 function main()
@@ -304,7 +310,7 @@ function main()
     println("  Next final code: $next_code, steps=$(length(next_rows))")
     println("  HC final code:   $hc_code, steps=$(length(hc_rows))")
 
-    _print_trace_side_by_side(next_rows, hc_rows)
+    return _print_trace_side_by_side(next_rows, hc_rows)
 end
 
 main()

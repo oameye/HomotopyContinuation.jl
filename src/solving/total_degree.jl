@@ -24,6 +24,7 @@ result = solve(F, TotalDegree(; max_steps=500, extended_precision=false))
 """
 struct TotalDegree
     tracker_options::TrackerOptions
+    endgame_options::EndgameOptions
     seed::UInt32
 end
 
@@ -104,6 +105,7 @@ end
 
 function TotalDegree(;
         tracker_options::TrackerOptions = TrackerOptions(),
+        endgame_options::EndgameOptions = EndgameOptions(),
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         max_steps::Int = tracker_options.max_steps,
         max_step_size::Float64 = tracker_options.max_step_size,
@@ -122,7 +124,7 @@ function TotalDegree(;
         extended_precision, min_step_size, terminate_cond,
         a, β_a, β_ω, β_τ, strict_β_τ,
     )
-    return TotalDegree(opts, seed)
+    return TotalDegree(opts, endgame_options, seed)
 end
 
 function _total_degree_startsystem(degrees::Vector{Int})::TotalDegreeStartSystem

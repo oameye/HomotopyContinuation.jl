@@ -92,7 +92,10 @@ function updated!(MW::MatrixWorkspace)
     if m == n
         @inbounds copyto!(MW.lu.factors, MW.A)
     else
-        @inbounds copyto!(MW.qr.factors, MW.A)
+        # Explicit element copy to avoid unaliascopy in Matrix←FSMat copyto!
+        @inbounds for j in 1:n, i in 1:m
+            MW.qr.factors[i, j] = MW.A[i, j]
+        end
     end
     return MW
 end
@@ -336,13 +339,15 @@ function LA.ldiv!(
     WS.factorized || factorize!(WS)
     if m == n
         if WS.scaled
-            x .= WS.row_scaling .* b
+            @inbounds for i in eachindex(x, b)
+                x[i] = WS.row_scaling[i] * b[i]
+            end
             lu_ldiv!(x, WS.lu, x)
         else
             lu_ldiv!(x, WS.lu, b)
         end
     else
-        WS.r .= b
+        copyto!(WS.r, b)
         qr_ldiv!(x, WS.qr, WS.r)
     end
     return x
@@ -528,9 +533,13 @@ function mixed_precision_iterative_refinement!(
         b::AbstractVector{ComplexF64},
         norm::Union{WeightedNorm, Nothing} = nothing,
     )
-    M.x̄ .= x
+    @inbounds for i in eachindex(M.x̄, x)
+        M.x̄[i] = x[i]
+    end
     residual!(M.r̄, M.A, M.x̄, b)
-    M.r .= M.r̄
+    @inbounds for i in eachindex(M.r, M.r̄)
+        M.r[i] = M.r̄[i]
+    end
     LA.ldiv!(M.δx, M, M.r)
     @inbounds for i in eachindex(x)
         x[i] -= M.δx[i]
@@ -876,9 +885,9 @@ Solve `J x = b` using the underlying `MatrixWorkspace` and increment counters.
 function LA.ldiv!(
         x::AbstractVector{ComplexF64}, J::Jacobian, b::AbstractVector{ComplexF64},
     )
+    J.factorizations[] += Int(!J.workspace.factorized)
     LA.ldiv!(x, J.workspace, b)
     J.ldivs[] += 1
-    J.factorizations[] += 1
     return x
 end
 
@@ -896,13 +905,13 @@ function LA.ldiv!(
         w::WeightedNorm,
     )
     m, n = size(J.workspace)
-    if m == n
+    if m == n && !J.workspace.factorized
         skeel_row_scaling!(J.workspace, w.weights)
         apply_row_scaling!(J.workspace)
     end
+    J.factorizations[] += Int(!J.workspace.factorized)
     LA.ldiv!(x, J.workspace, b)
     J.ldivs[] += 1
-    J.factorizations[] += 1
     return x
 end
 

@@ -24,11 +24,13 @@ result = solve(F, Polyhedral(; max_steps=500, extended_precision=false))
 """
 struct Polyhedral
     tracker_options::TrackerOptions
+    endgame_options::EndgameOptions
     seed::UInt32
 end
 
 function Polyhedral(;
         tracker_options::TrackerOptions = TrackerOptions(),
+        endgame_options::EndgameOptions = EndgameOptions(),
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         max_steps::Int = tracker_options.max_steps,
         max_step_size::Float64 = tracker_options.max_step_size,
@@ -47,7 +49,7 @@ function Polyhedral(;
         extended_precision, min_step_size, terminate_cond,
         a, β_a, β_ω, β_τ, strict_β_τ,
     )
-    return Polyhedral(opts, seed)
+    return Polyhedral(opts, endgame_options, seed)
 end
 
 """
@@ -58,7 +60,7 @@ Created by `CommonSolve.init`.
 """
 struct PolyhedralSolveCache{S <: System}
     toric_tracker::Tracker
-    coeff_tracker::Tracker
+    coeff_tracker::EndgameTracker
     toric_homotopy::ToricHomotopy
     support::Vector{Matrix{Int32}}
     lifting::Vector{Vector{Int32}}
@@ -193,7 +195,10 @@ function CommonSolve.init(F::System, alg::Polyhedral)::PolyhedralSolveCache
     flat_target = reduce(vcat, target_coeffs)
     coeff_H = CoefficientHomotopy(param_system.evaluator, flat_start, flat_target)
     coeff_heval = HomotopyEvaluator(coeff_H)
-    coeff_tracker = Tracker(coeff_heval; options = alg.tracker_options)
+    coeff_tracker = EndgameTracker(
+        Tracker(coeff_heval; options = alg.tracker_options),
+        alg.endgame_options,
+    )
 
     return PolyhedralSolveCache(
         toric_tracker, coeff_tracker, toric_H,

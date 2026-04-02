@@ -235,9 +235,9 @@ end
 function _compile_exec_instruction_branches()
     return [
         (
-            :(op == $op),
-            :(return $(_compile_exec_instruction_call(variant, op))),
-        ) for (variant, op_name) in _EXEC_INSTRUCTION_SPECS
+                :(op == $op),
+                :(return $(_compile_exec_instruction_call(variant, op))),
+            ) for (variant, op_name) in _EXEC_INSTRUCTION_SPECS
             for op in (getfield(OpType, op_name),)
     ]
 end

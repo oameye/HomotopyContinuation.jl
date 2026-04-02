@@ -2,7 +2,7 @@ using Test
 using HomotopyContinuationNext:
     TruncatedTaylorSeries, TaylorVector, vectors,
     taylor_op_add, taylor_op_mul, taylor_op_div,
-    taylor_op_neg, taylor_op_inv, taylor_op_sqrt
+    taylor_op_neg, taylor_op_inv, taylor_op_sqr, taylor_op_sqrt
 using FixedSizeArrays: FixedSizeArray
 const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
@@ -43,6 +43,15 @@ end
         @test r[0] ≈ a[0] * b[0]
         @test r[1] ≈ a[0] * b[1] + a[1] * b[0]
         @test r[2] ≈ a[0] * b[2] + a[1] * b[1] + a[2] * b[0]
+    end
+
+    @testset "sqr includes odd-order cross term" begin
+        c = TruncatedTaylorSeries((2.0 + 0im, 3.0 + 0im, 5.0 + 0im, 7.0 + 0im))
+        r = taylor_op_sqr(c)
+        @test r[0] ≈ 4.0 + 0im
+        @test r[1] ≈ 12.0 + 0im
+        @test r[2] ≈ 29.0 + 0im
+        @test r[3] ≈ 58.0 + 0im
     end
 
     @testset "inv: inv(b) * b ≈ (1, 0, 0)" begin

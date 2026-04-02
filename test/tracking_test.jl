@@ -347,4 +347,22 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
             @test allocs == 0
         end
     end
+
+    @testset "TrackerState: ext step counters" begin
+        @polyvar x y
+        G = [x - 1, y - 1]
+        F = [x - 2, y - 3]
+        eval_G = System(G)
+        eval_F = System(F)
+        H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = ComplexF64(1.0))
+        tracker = Tracker(HomotopyEvaluator(H))
+        code = track!(tracker, ComplexF64[1.0, 1.0])
+        @test code == TrackerCode.TRACKER_SUCCESS
+        # ext counters exist and are non-negative
+        @test tracker.state.ext_accepted_steps >= 0
+        @test tracker.state.ext_rejected_steps >= 0
+        # ext steps <= total steps
+        @test tracker.state.ext_accepted_steps <= tracker.state.accepted_steps
+        @test tracker.state.ext_rejected_steps <= tracker.state.rejected_steps
+    end
 end

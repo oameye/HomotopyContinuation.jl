@@ -22,7 +22,7 @@ solve(F)
 solve(F, Polyhedral())
 ```
 """
-struct System{P,V}
+struct System{P, V}
     polys::FSVec{P}
     parameters::FSVec{V}
     variables::FSVec{V}

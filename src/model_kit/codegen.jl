@@ -73,7 +73,11 @@ function _instruction_sequence_to_eval_expr(seq::InstructionSequence)::Expr
     end
     push!(body, :(return nothing))
 
-    return :((u, x, p) -> @inbounds begin $(body...) end)
+    return :(
+        (u, x, p) -> @inbounds begin
+            $(body...)
+        end
+    )
 end
 
 """
@@ -107,7 +111,11 @@ function _instruction_sequence_to_jac_expr(seq::InstructionSequence)::Expr
     end
     push!(body, :(return nothing))
 
-    return :((u, U, x, p) -> @inbounds begin $(body...) end)
+    return :(
+        (u, U, x, p) -> @inbounds begin
+            $(body...)
+        end
+    )
 end
 
 ## ── Compiled evaluator builder ──────────────────────────────────────────────

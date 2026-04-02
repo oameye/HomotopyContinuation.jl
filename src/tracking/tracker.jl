@@ -71,6 +71,8 @@ mutable struct TrackerState
     code::TrackerCode.T
     accepted_steps::Int
     rejected_steps::Int
+    ext_accepted_steps::Int
+    ext_rejected_steps::Int
     last_steps_failed::Int
 end
 
@@ -87,7 +89,7 @@ function TrackerState(m::Int, n::Int, segment::SegmentStepper)
         Jacobian(MatrixWorkspace(m, n)),
         NaN,                                          # cond_J_ẋ
         TrackerCode.TRACKING,
-        0, 0, 0,                                      # counters
+        0, 0, 0, 0, 0,                                # counters: accepted, rejected, ext_accepted, ext_rejected, last_failed
     )
 end
 
@@ -379,9 +381,11 @@ function step!(tracker::Tracker)::Bool
         state.τ = pred.trust_region
 
         state.accepted_steps += 1
+        state.ext_accepted_steps += Int(state.extended_prec)
         state.last_steps_failed = 0
     else
         state.rejected_steps += 1
+        state.ext_rejected_steps += Int(state.extended_prec)
         state.last_steps_failed += 1
     end
 
@@ -413,7 +417,7 @@ function init!(
     pred = tracker.predictor
     opts = tracker.options
 
-    state.segment = SegmentStepper(t₁, t₀)
+    reinit!(state.segment, t₁, t₀)
     copyto!(state.x, x₀)
     state.Δs_prev = 0.0
     state.accuracy = NaN
@@ -430,6 +434,8 @@ function init!(
     state.code = TrackerCode.TRACKING
     state.accepted_steps = 0
     state.rejected_steps = 0
+    state.ext_accepted_steps = 0
+    state.ext_rejected_steps = 0
     state.last_steps_failed = 0
 
     pred.t = complex(NaN)
@@ -468,6 +474,32 @@ function init!(
     update!(pred, tracker.homotopy, state.x, t₁, state.jacobian, state.norm)
     state.τ = pred.trust_region
     state.cond_J_ẋ = pred.cond_H_x
+
+    Δs = _compute_initial_stepsize(state, pred, opts, tracker.constants)
+    propose_step!(state.segment, Δs)
+
+    return state.code
+end
+
+ext_steps(state::TrackerState)::Int = state.ext_accepted_steps + state.ext_rejected_steps
+
+"""
+    resume_from!(tracker, t₀) -> TrackerCode.T
+
+Lightweight reinit: reset segment from current position to `t₀`, recompute
+initial step size, but preserve x, accuracy, ω, norm, Jacobian, and step
+counters. Used by endgame fallback to continue tracking without losing state.
+"""
+function resume_from!(tracker::Tracker, t₀::ComplexF64)::TrackerCode.T
+    state = tracker.state
+    pred = tracker.predictor
+    opts = tracker.options
+
+    t_current = state.segment.t
+    reinit!(state.segment, t_current, t₀)
+    state.code = TrackerCode.TRACKING
+    state.Δs_prev = 0.0
+    state.last_steps_failed = 0
 
     Δs = _compute_initial_stepsize(state, pred, opts, tracker.constants)
     propose_step!(state.segment, Δs)

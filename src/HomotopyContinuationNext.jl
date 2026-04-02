@@ -25,6 +25,7 @@ export @polyvar, solve, System
 export CompileMode
 export solutions, real_solutions, nsolutions, nreal
 export TotalDegree, Polyhedral, Result, PathResult
+export EndgameOptions, EndgameTracker
 
 const MP = MultivariatePolynomials
 # Concrete type aliases — FixedSizeVector{T} alone is NOT concrete because
@@ -68,6 +69,8 @@ include("core/toric_homotopy.jl")
 include("tracking/newton_corrector.jl")
 include("tracking/predictor.jl")
 include("tracking/tracker.jl")
+include("tracking/valuation.jl")
+include("tracking/endgame_tracker.jl")
 include("solving/binomial_system.jl")
 include("solving/path_result.jl")
 include("solving/total_degree.jl")

@@ -30,6 +30,9 @@
    Tracker (monomorphic) → Predictor · Newton · Jacobian · WeightedNorm
          │
          ▼
+   EndgameTracker → Valuation · singular endgame · at-infinity detection
+         │
+         ▼
    solve() orchestration → Result{Vector{PathResult}}
 ```
 
@@ -65,7 +68,9 @@ src/
 ├── tracking/
 │   ├── tracker.jl                   Path tracker, adaptive step control
 │   ├── predictor.jl                 Pade (2,1), Taylor coefficients, trust region
-│   └── newton_corrector.jl          Alpha-theory Newton, DoubleF64 refinement
+│   ├── newton_corrector.jl          Alpha-theory Newton, DoubleF64 refinement
+│   ├── valuation.jl                 Puiseux series valuation for endgame detection
+│   └── endgame_tracker.jl           Endgame state machine, singular endpoint handling
 └── solving/
     ├── solve.jl                     solve() API, CommonSolve integration
     ├── total_degree.jl              Bezout start system
@@ -141,7 +146,17 @@ Tracker
   ├── corrector::NewtonCorrector       # immutable: scratch buffers
   ├── state::TrackerState              # mutable: x, accuracy, omega, step counts, code
   └── options::TrackerOptions          # max_steps, step_size bounds, etc.
+
+EndgameTracker
+  ├── tracker::Tracker                 # inner path tracker
+  ├── state::EndgameState              # endgame-specific state (code, samples, predictions)
+  ├── val::Valuation                   # per-coordinate Puiseux series valuations
+  └── options::EndgameOptions          # endgame_start, max_winding_number, tolerances
 ```
+
+The solve pipeline creates `EndgameTracker` wrapping `Tracker`. The inner tracker handles
+predictor-corrector stepping; the endgame layer monitors valuations and switches to singular
+endpoint extrapolation when winding number > 1 is detected.
 
 ### Result Types
 
@@ -150,7 +165,10 @@ struct PathResult                      # immutable
     return_code::PathResultCode        # enumx: PATH_SUCCESS, PATH_AT_INFINITY, etc.
     solution::Vector{ComplexF64}
     t, accuracy, condition_jacobian::Float64
-    winding_number, accepted_steps, rejected_steps::Int
+    winding_number::Int; singular::Bool
+    accepted_steps, rejected_steps, steps_eg::Int
+    extended_precision_used::Bool
+    last_path_point::Vector{ComplexF64}; last_path_t::Float64
 end
 
 struct Result

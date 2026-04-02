@@ -1,7 +1,7 @@
 using Test
 using HomotopyContinuationNext:
     fast_abs, nanmin, nanmax, nthroot,
-    SegmentStepper, init!, propose_step!, step_success!, is_done, dist_to_target
+    SegmentStepper, reinit!, propose_step!, step_success!, is_done, dist_to_target
 
 @testset "Utility functions" begin
     @testset "fast_abs" begin
@@ -31,12 +31,12 @@ using HomotopyContinuationNext:
 end
 
 @testset "SegmentStepper" begin
-    @testset "reinit returns new stepper (const fields)" begin
+    @testset "reinit! resets stepper in-place" begin
         S = SegmentStepper(0.0 + 0.0im, 1.0 + 0.0im)
         propose_step!(S, 0.5)
         step_success!(S)
 
-        S = init!(S, 0.0 + 0.0im, 2.0 + 0.0im)
+        reinit!(S, 0.0 + 0.0im, 2.0 + 0.0im)
         @test S.abs_Δ ≈ 2.0
         @test S.s ≈ 0.0
         @test !is_done(S)

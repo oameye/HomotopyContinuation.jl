@@ -126,6 +126,36 @@ end
 
     # Condition number delegation
     @test 1.0 ≤ LA.cond(J) < 1.0e6
+
+    @testset "repeated weighted solves reuse scaled factorization correctly" begin
+        A_bad = ComplexF64[
+            1.0e8 1.0 0.0 0.0
+            1.0 1.0e-8 1.0 0.0
+            0.0 1.0 1.0e6 1.0
+            1.0 0.0 1.0 1.0e-6
+        ]
+        x_true_bad = ComplexF64[1.0e-3, -2.0, 5.0e1, -3.0e-2]
+        b_bad = A_bad * x_true_bad
+
+        init!(J)
+        copyto!(J.workspace.A, A_bad)
+        updated!(J)
+
+        w_bad = WeightedNorm(n)
+        @inbounds for (i, wi) in enumerate((1.0e-3, 1.0, 1.0e2, 1.0e-1))
+            w_bad.weights[i] = wi
+        end
+
+        x1 = FSVec{ComplexF64}(zeros(ComplexF64, n))
+        x2 = FSVec{ComplexF64}(zeros(ComplexF64, n))
+        LA.ldiv!(x1, J, FSVec{ComplexF64}(copy(b_bad)), w_bad)
+        LA.ldiv!(x2, J, FSVec{ComplexF64}(copy(b_bad)), w_bad)
+        x_dense = A_bad \ b_bad
+
+        @test LA.norm(Vector(x1) - x_dense) < 1.0e-7
+        @test LA.norm(Vector(x2) - x_dense) < 1.0e-7
+        @test LA.norm(Vector(x1) - Vector(x2)) < 1.0e-12
+    end
 end
 
 @testset "Zero allocations (ldiv!)" begin

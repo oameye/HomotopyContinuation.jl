@@ -88,7 +88,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
         t_i = @belapsed evaluate!($u_i, $(sys_i.evaluator), $xv, $pv)
         t_c = @belapsed evaluate!($u_c, $(sys_c.evaluator), $xv, $pv)
-        println("  katsura-$n: interp=$(round(t_i * 1e9; digits=1))ns  compiled=$(round(t_c * 1e9; digits=1))ns  speedup=$(round(t_i / t_c; digits=2))x")
+        println("  katsura-$n: interp=$(round(t_i * 1.0e9; digits = 1))ns  compiled=$(round(t_c * 1.0e9; digits = 1))ns  speedup=$(round(t_i / t_c; digits = 2))x")
     end
 
     println("\n── Jacobian through SystemEvaluator ──")
@@ -112,7 +112,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
         t_i = @belapsed evaluate_and_jacobian!($u_i, $U_i, $(sys_i.evaluator), $xv, $pv)
         t_c = @belapsed evaluate_and_jacobian!($u_c, $U_c, $(sys_c.evaluator), $xv, $pv)
-        println("  katsura-$n: interp=$(round(t_i * 1e9; digits=1))ns  compiled=$(round(t_c * 1e9; digits=1))ns  speedup=$(round(t_i / t_c; digits=2))x")
+        println("  katsura-$n: interp=$(round(t_i * 1.0e9; digits = 1))ns  compiled=$(round(t_c * 1.0e9; digits = 1))ns  speedup=$(round(t_i / t_c; digits = 2))x")
     end
 
     println("\n── Build time ──")
@@ -121,7 +121,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         F = _katsura(kv, n)
         t_i = @belapsed System($F; compile = CompileMode.INTERPRETED)
         t_c = @belapsed System($F; compile = CompileMode.COMPILED)
-        println("  katsura-$n: interp=$(round(t_i / 1e-6; digits=1))us  compiled=$(round(t_c / 1e-6; digits=1))us  overhead=$(round(t_c / t_i; digits=2))x")
+        println("  katsura-$n: interp=$(round(t_i / 1.0e-6; digits = 1))us  compiled=$(round(t_c / 1.0e-6; digits = 1))us  overhead=$(round(t_c / t_i; digits = 2))x")
     end
 
     println("\n── End-to-end solve ──")
@@ -134,6 +134,6 @@ if abspath(PROGRAM_FILE) == @__FILE__
         solve(sys_i); solve(sys_c)
         t_i = @belapsed solve($sys_i)
         t_c = @belapsed solve($sys_c)
-        println("  katsura-$n: interp=$(round(t_i * 1e3; digits=2))ms  compiled=$(round(t_c * 1e3; digits=2))ms  speedup=$(round(t_i / t_c; digits=2))x")
+        println("  katsura-$n: interp=$(round(t_i * 1.0e3; digits = 2))ms  compiled=$(round(t_c * 1.0e3; digits = 2))ms  speedup=$(round(t_i / t_c; digits = 2))x")
     end
 end
