@@ -35,11 +35,43 @@ function support_coefficients(
                 end
             end
         end
-        supports[k] = S
-        coeffs[k] = c
+        # Sort columns by descending total degree, then descending lexicographic
+        # (v2 parity: matches HC ModelKit's td_order for identical RNG paths)
+        perm = _td_order_perm(S)
+        supports[k] = S[:, perm]
+        coeffs[k] = c[perm]
     end
 
     return supports, coeffs
+end
+
+"""
+    _td_order_perm(S::Matrix{Int32}) → Vector{Int}
+
+Compute permutation that sorts support columns by descending total degree,
+with ties broken by descending lexicographic order of exponent vectors.
+Matches v2's `td_order` for identical monomial ordering.
+"""
+function _td_order_perm(S::Matrix{Int32})::Vector{Int}
+    ncols = size(S, 2)
+    nrows = size(S, 1)
+    return sortperm(
+        1:ncols; lt = (a, b) -> begin
+            sa = zero(Int32)
+            sb = zero(Int32)
+            @inbounds for i in 1:nrows
+                sa += S[i, a]
+                sb += S[i, b]
+            end
+            if sa != sb
+                return sa > sb
+            end
+            @inbounds for i in 1:nrows
+                S[i, a] != S[i, b] && return S[i, a] > S[i, b]
+            end
+            return false
+        end
+    )
 end
 
 """

@@ -73,35 +73,45 @@ function evaluate_and_jacobian!(
     return nothing
 end
 
-function taylor!(
-        u::FSVec{ComplexF64}, ::Val{1}, F::TotalDegreeStartSystem,
-        tx::TaylorVector{2, ComplexF64}, p::FSVec{ComplexF64},
-    )::Nothing
+# TotalDegreeStartSystem ignores parameters — shared implementation for all
+# taylor! dispatch variants (FSVec and TaylorVector parameter signatures).
+@inline function _td_taylor!(
+        u::FSVec{ComplexF64}, ::Val{K},
+        F::TotalDegreeStartSystem, tx::TaylorVector
+    )::Nothing where {K}
     @inbounds for i in eachindex(u)
-        u[i] = taylor_op_pow_int(tx[i], F.degrees[i])[1]
+        u[i] = taylor_op_pow_int(tx[i], F.degrees[i])[K]
     end
     return nothing
 end
 
-function taylor!(
-        u::FSVec{ComplexF64}, ::Val{2}, F::TotalDegreeStartSystem,
-        tx::TaylorVector{3, ComplexF64}, p::FSVec{ComplexF64},
-    )::Nothing
-    @inbounds for i in eachindex(u)
-        u[i] = taylor_op_pow_int(tx[i], F.degrees[i])[2]
-    end
-    return nothing
-end
+# FSVec parameter variants (used by StraightLineHomotopy, etc.)
+taylor!(
+    u::FSVec{ComplexF64}, v::Val{1}, F::TotalDegreeStartSystem,
+    tx::TaylorVector{2, ComplexF64}, ::FSVec{ComplexF64}
+)::Nothing = _td_taylor!(u, v, F, tx)
+taylor!(
+    u::FSVec{ComplexF64}, v::Val{2}, F::TotalDegreeStartSystem,
+    tx::TaylorVector{3, ComplexF64}, ::FSVec{ComplexF64}
+)::Nothing = _td_taylor!(u, v, F, tx)
+taylor!(
+    u::FSVec{ComplexF64}, v::Val{3}, F::TotalDegreeStartSystem,
+    tx::TaylorVector{4, ComplexF64}, ::FSVec{ComplexF64}
+)::Nothing = _td_taylor!(u, v, F, tx)
 
-function taylor!(
-        u::FSVec{ComplexF64}, ::Val{3}, F::TotalDegreeStartSystem,
-        tx::TaylorVector{4, ComplexF64}, p::FSVec{ComplexF64},
-    )::Nothing
-    @inbounds for i in eachindex(u)
-        u[i] = taylor_op_pow_int(tx[i], F.degrees[i])[3]
-    end
-    return nothing
-end
+# TaylorVector parameter variants (used by CoefficientHomotopy/ToricHomotopy Cauchy product path)
+taylor!(
+    u::FSVec{ComplexF64}, v::Val{1}, F::TotalDegreeStartSystem,
+    tx::TaylorVector{2, ComplexF64}, ::TaylorVector{2, ComplexF64}
+)::Nothing = _td_taylor!(u, v, F, tx)
+taylor!(
+    u::FSVec{ComplexF64}, v::Val{2}, F::TotalDegreeStartSystem,
+    tx::TaylorVector{3, ComplexF64}, ::TaylorVector{3, ComplexF64}
+)::Nothing = _td_taylor!(u, v, F, tx)
+taylor!(
+    u::FSVec{ComplexF64}, v::Val{3}, F::TotalDegreeStartSystem,
+    tx::TaylorVector{4, ComplexF64}, ::TaylorVector{4, ComplexF64}
+)::Nothing = _td_taylor!(u, v, F, tx)
 
 function TotalDegree(;
         tracker_options::TrackerOptions = TrackerOptions(),

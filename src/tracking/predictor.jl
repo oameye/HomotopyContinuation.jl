@@ -98,9 +98,13 @@ function update!(
         u[i] = -u[i]
     end
     LA.ldiv!(xtemp, J, u)
-    # Iterative refinement for accurate Taylor coefficients (v2 parity)
+    # Fixed-precision refinement + condition estimate
     δ = fixed_precision_iterative_refinement!(xtemp, J.workspace, u, norm)
     pred.cond_H_x = δ / eps()
+    # Multi-round mixed-precision refinement for accurate Taylor coefficients (v2 parity)
+    if δ > 1.0e-10
+        iterative_refinement!(xtemp, J.workspace, u; tol = 1.0e-10, max_iters = 5)
+    end
     @inbounds for i in 1:n
         pred.tx3.data[2, i] = xtemp[i]
     end
@@ -112,8 +116,10 @@ function update!(
         pred.method = PredictionMethod.HERMITE
         pred.trust_region = n0 / max(n1, 1.0e-30)
         if isnan(pred.local_error)
-            inv_tau = n1 / max(n0, 1.0e-30)
-            pred.local_error = (inv_tau * inv_tau)^2
+            # Match v2's Hermite-mode bootstrap. This seeds the initial
+            # local-error estimate from the first-derivative scale rather than
+            # the generic Padé trust-region formula.
+            pred.local_error = (n1 / max(n0, 1.0e-30))^3
         end
         return nothing
     end
@@ -133,7 +139,7 @@ function update!(
     end
     LA.ldiv!(xtemp, J, u)
     if δ > 1.0e-10
-        fixed_precision_iterative_refinement!(xtemp, J.workspace, u)
+        iterative_refinement!(xtemp, J.workspace, u, norm; tol = 1.0e-10, max_iters = 4)
     end
     @inbounds for i in 1:n
         pred.tx3.data[3, i] = xtemp[i]
@@ -151,7 +157,7 @@ function update!(
     end
     LA.ldiv!(xtemp, J, u)
     if δ > 1.0e-4
-        fixed_precision_iterative_refinement!(xtemp, J.workspace, u)
+        iterative_refinement!(xtemp, J.workspace, u, norm; tol = 1.0e-4, max_iters = 3)
     end
     @inbounds for i in 1:n
         pred.tx3.data[4, i] = xtemp[i]

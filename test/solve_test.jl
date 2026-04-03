@@ -75,10 +75,11 @@ using CommonSolve: CommonSolve
         r1 = solve(F, TotalDegree(; seed = UInt32(42)))
         r2 = solve(F, TotalDegree(; seed = UInt32(42)))
         @test nsolutions(r1) == nsolutions(r2)
-        s1 = sort(solutions(r1); by = s -> (real(s[1]), imag(s[1]), real(s[2]), imag(s[2])))
-        s2 = sort(solutions(r2); by = s -> (real(s[1]), imag(s[1]), real(s[2]), imag(s[2])))
-        for (a, b) in zip(s1, s2)
-            @test a ≈ b atol = 1.0e-10
+        # Compare as sets — solution ordering may differ even with same seed
+        s1 = solutions(r1)
+        s2 = solutions(r2)
+        for a in s1
+            @test any(b -> isapprox(a, b; atol = 1.0e-10), s2)
         end
     end
 
@@ -203,6 +204,12 @@ using CommonSolve: CommonSolve
         @test cache isa PolyhedralSolveCache
         result = CommonSolve.solve!(cache)
         @test nsolutions(result) >= 1
+    end
+
+    @testset "Polyhedral: default endgame options (v2 parity)" begin
+        alg = Polyhedral()
+        @test alg.endgame_options.lambda == 0.25
+        @test alg.endgame_options.min_cond == 1.0e6
     end
 
     @testset "Polyhedral: fewer paths than TotalDegree" begin

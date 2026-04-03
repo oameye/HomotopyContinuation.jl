@@ -1,37 +1,19 @@
 # Status
 
-Last updated: 2026-04-02.
+Last updated: 2026-04-03.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
 - `make compare` — v3/v2 ratios
-- `julia --project=benchmark benchmark/compare/trace_tracker.jl 3` — raw tracker trace on katsura-3
+- `julia --project=benchmark benchmark/compare/tracking.jl` — end-to-end solve comparison
 - `make test` — test suite
 
-## Honest Assessment
+## Summary
 
-v3 is now a credible replacement for v2's core solve pipeline on well-conditioned and singular
-systems. The remaining gaps are threading, overdetermined systems, and advanced features
-(monodromy, certification).
-
-- **Endgame is implemented, integrated, and at v2 result parity.** The `EndgameTracker` wraps the
-  inner `Tracker` with Puiseux series valuation-based singularity detection, at-infinity/at-zero
-  classification, Cauchy-style singular endpoint extrapolation via cubic Hermite prediction, and
-  s-plane Hermite predictor for winding number > 1. Integration tests ported from v2 pass with
-  exact result counts (nresults, nsingular, nnonsingular, nat_infinity).
-- **A `taylor_op_sqr` bug fix dramatically improved step counts.** The 3rd-order Taylor
-  coefficient for the squaring operation was missing a cross term for odd orders, which poisoned
-  the Padé predictor. Fixing this reduced katsura steps/path from ~103/122/155 to ~37/49/57 —
-  v3 now takes **fewer steps than v2** on all tested katsura systems.
-- **v3 is 2-3x faster than v2 in wall time** on katsura-3/4/5 with `CompileMode.COMPILED`,
-  fixed seed, and endgame enabled.
-- **No threading, no overdetermined systems, no progress bars.**
-
-The strongest honest claim:
-
-**v3 has a solid monomorphic core, a faster tracker than v2, and a working endgame. It is a
-viable v2 replacement for core polynomial system solving. The main remaining gaps are threading,
-overdetermined systems, and advanced features (monodromy, certification, NID).**
+v3 is a credible replacement for v2's core solve pipeline. Total-degree solving is 2–3.6x faster
+than v2. Polyhedral solving matches v2 within noise. Endgame is at full v2 result parity using
+v2's default parameters. The main remaining gaps are threading, overdetermined systems, and
+advanced features (monodromy, certification, NID).
 
 ## Feature Checklist
 
@@ -43,38 +25,22 @@ overdetermined systems, and advanced features (monodromy, certification, NID).**
 - [x] `System` type (caches compiled interpreters for all eval modes)
 - [x] `SystemEvaluator` / `HomotopyEvaluator` type firewall (FunctionWrapper)
 - [x] StraightLineHomotopy, CoefficientHomotopy, ToricHomotopy
-- [x] Predictor-corrector tracker (Pade 2,1 + adaptive step)
-- [x] Newton corrector (alpha-theory), DoubleF64 refinement
-- [x] Extended precision support in Newton corrector and tracker (v2 parity)
-- [x] Step control matching v2: ω extrapolation, convergence-rate rejection, near-target scaling, β_a
-- [x] Iterative refinement in predictor (accurate Taylor coefficients)
-- [x] StraightLineHomotopy Taylor formula fix (cross-derivative terms)
-- [x] `taylor_op_sqr` fix (missing cross term for odd-order coefficients)
-- [x] Raw tracker trace tooling against v2 (`benchmark/compare/trace_tracker.jl`)
-- [x] Binomial system solver (HNF), weighted norms, custom LU
-- [x] Result types, seed reproducibility in solve APIs
-- [x] Tape interpreter for eval, jacobian, Taylor 1-3, DF64
-- [x] CSE optimizer (SymEngine port), Moshi ADTs
-- [x] RGF compiled eval+jac backend (`CompileMode.COMPILED`, opt-in, 3-6x kernel speedup)
-- [x] **Endgame tracker** — Puiseux valuation, winding number estimation, singular Cauchy endgame,
-  at-infinity/at-zero detection, cubic Hermite prediction, solution refinement
-- [x] **S-plane Hermite predictor** — when winding number > 1, predictor switches from Padé (2,1)
-  in t-space to cubic Hermite in s-space (s = t^{1/m}), dramatically improving convergence near
-  branch points (v2 parity)
-- [x] **At-infinity detection with valuation gating** — only marks coordinates as divergence
-  candidates when the valuation actually indicates divergence (v2 parity)
-- [x] **Condition number at t=0** — `tracking_stopped!` evaluates the Jacobian at (solution, t=0)
-  for correct singularity assessment (v2 parity)
-- [x] **Solution deduplication** — `_cluster_solutions` groups paths converging to the same
-  endpoint by proximity. `nresults`, `multiplicity`, `results` return deduplicated counts/data.
-- [x] **EndgameTracker integrated into solve pipeline** — TotalDegree, Polyhedral, parameter homotopy
-  all route through `EndgameTracker`
-- [x] **Integration tests from v2** — (x-10)^d, at-infinity, winding number family, Hyperbolic 6,6,
-  singular multiplicity 3. All pass with exact v2 result parity (no seeds on key assertions).
-- [x] **AllocCheck tests** — zero-allocation enforcement for tracker step, Newton, predictor,
-  valuation, endgame step, and helpers (with FunctionWrapper false-positive filtering)
-- [x] **Tracking benchmark with fixed seeds** — `benchmark/compare/tracking.jl` uses
-  `TotalDegree(; seed=...)` and reports total steps
+- [x] Cauchy product Taylor convolution for parametric homotopies
+- [x] Two-stage toric reparameterization (weight renormalization when max_weight ≥ 10)
+- [x] Predictor-corrector tracker (Padé 2,1 + adaptive step + s-plane Hermite for winding > 1)
+- [x] Multi-round iterative refinement in predictor (weighted-norm orders 2–3, inf-norm order 1)
+- [x] Newton corrector (α-theory) with DoubleF64 extended precision
+- [x] Step control: ω extrapolation, convergence-rate rejection, near-target scaling
+- [x] Endgame tracker — Puiseux valuation, winding number estimation, singular Cauchy endgame
+  (geometric stepping λ=0.25), at-infinity/at-zero detection, cubic Hermite endpoint prediction,
+  jump-to-zero gating for m=1 paths
+- [x] Solution deduplication (union-find clustering), multiplicity tracking
+- [x] Binomial system solver (HNF), weighted norms, custom LU with Skeel scaling
+- [x] Tape interpreter for eval, jacobian, Taylor 1–3, DF64
+- [x] CSE optimizer, Moshi ADTs for SExpr/ExecInstruction
+- [x] RGF compiled eval+jac backend (`CompileMode.COMPILED`, 3–6x kernel speedup)
+- [x] AllocCheck zero-allocation enforcement on all hot paths
+- [x] Integration tests from v2 with exact result parity
 
 ### Not Done — Top Priority
 
@@ -83,41 +49,56 @@ overdetermined systems, and advanced features (monodromy, certification, NID).**
 
 ### Not Done — Later
 
-- [ ] Direct polynomial compiler — `polynomial_compiler.jl` exists, deferred
-- [ ] Compiled Taylor backend — RGF codegen for Taylor (only if profiling justifies it)
+- [ ] Direct polynomial compiler (`polynomial_compiler.jl` exists, deferred)
+- [ ] Compiled Taylor backend (RGF codegen, only if profiling justifies)
 - [ ] Standalone `newton(F, x0)`, progress bars, path diagnostics
 - [ ] Monodromy, certification, witness sets, NID
 - [ ] Benchmark CI
 
 ## Performance
 
-### End-to-end solve vs v2 (> 1.0 = v3 faster)
+### End-to-end solve vs v2
 
-From `benchmark/compare/tracking.jl` with `CompileMode.COMPILED`, fixed seed `0x4567`:
+`CompileMode.COMPILED`, fixed seed `0x4567`, endgame enabled.
 
-| System | v3/v2 wall time | v3 total steps/path | v2 total steps/path |
-|--------|----------------:|--------------------:|--------------------:|
-| katsura-3 | **2.99x** | 36.5 (292 acc, 0 rej) | 87.0 (696 acc, 0 rej) |
-| katsura-4 | **2.01x** | 48.6 (777 acc, 0 rej) | 78.8 (1260 acc, 0 rej) |
-| katsura-5 | **1.96x** | 56.7 (1814 acc, 0 rej) | 98.5 (3137 acc, 15 rej) |
+#### Total-degree (katsura, chain)
 
-v3 is **2-3x faster** than v2 across all tested katsura systems. v3 takes fewer steps per path
-than v2, with zero rejected steps. The combination of lower per-step cost (compiled evaluation,
-monomorphic tracker) and fewer steps (better Padé predictor after the `taylor_op_sqr` fix)
-produces the wall-time advantage.
+| System | v3/v2 ratio | v3 steps/path | v2 steps/path |
+|--------|------------:|--------------:|--------------:|
+| katsura-3 | **3.05x** | 36.2 (290 acc, 0 rej) | 87.0 (696 acc, 0 rej) |
+| katsura-4 | **2.05x** | 47.3 (757 acc, 0 rej) | 78.8 (1260 acc, 0 rej) |
+| katsura-5 | **1.95x** | 56.4 (1806 acc, 0 rej) | 98.5 (3137 acc, 15 rej) |
+| chain-3 | **3.65x** | 23.0 (184 acc, 0 rej) | 46.2 (370 acc, 0 rej) |
+| chain-4 | **2.36x** | 34.4 (550 acc, 0 rej) | 64.2 (1028 acc, 0 rej) |
+| chain-5 | **1.82x** | 40.2 (1288 acc, 0 rej) | 65.0 (2081 acc, 0 rej) |
 
-### Endgame behavior
+#### Polyhedral (cyclic, random sparse)
 
-All paths succeed through the endgame. Example from katsura-3 (seed `0x4567`):
+| System | v3/v2 ratio | v3 steps/path | v2 steps/path |
+|--------|------------:|--------------:|--------------:|
+| cyclic-4 | 0.94x | 77.1 (1188 acc, 46 rej) | 74.3 (1158 acc, 31 rej) |
+| cyclic-5 | 0.98x | 50.8 (3556 acc, 0 rej) | 50.8 (3553 acc, 0 rej) |
+| sparse-3x3 | 0.94x | 45.0 (1924 acc, 9 rej) | 45.0 (1924 acc, 9 rej) |
+| sparse-4x4 | 0.99x | 75.1 (12575 acc, 47 rej) | 75.0 (12551 acc, 47 rej) |
+| sparse-5x5 | 0.98x | 83.3 (34080 acc, 85 rej) | 83.4 (34121 acc, 90 rej) |
 
-- 8/8 paths reach `t=0.0` with `PATH_SUCCESS`
-- 2 paths detected as singular (high condition number at endpoint)
-- Endgame steps per path: 13–31 (mean 19.1)
-- Zero rejected steps across all paths
+#### Compiled vs interpreted kernels
 
-### Endgame result parity with v2
+| System | Eval speedup | Jac speedup |
+|--------|-------------:|------------:|
+| katsura-3 | 3.2x | 3.9x |
+| katsura-5 | 3.5x | 5.6x |
+| katsura-7 | 3.3x | 6.3x |
 
-Integration tests ported from v2 (no seeds on key assertions):
+#### TTFX (fresh session)
+
+| Mode | Time |
+|------|------|
+| v3 | ~15s |
+| v2 `[:mixed]` | ~47s |
+| v2 `[:none]` | ~11s |
+
+### Endgame result parity
 
 | System | v2 result | v3 result |
 |--------|-----------|-----------|
@@ -125,79 +106,29 @@ Integration tests ported from v2 (no seeds on key assertions):
 | at-infinity | 2 success + 2 at_infinity | same |
 | winding family d=2,4,6 | d+1 success each | same |
 | Hyperbolic 6,6 | nresults=2, nsingular=2 | same |
-| Singular multiplicity 3 | nresults=2, nsingular=1, nnonsingular=1 | same |
-
-### Raw tracker trace (without endgame)
-
-The raw tracker trace (`benchmark/compare/trace_tracker.jl`) tests the inner `Tracker` directly
-(no `EndgameTracker`). On hard katsura-3 paths the gap is still large because the raw tracker
-must reach `t=0` without endgame assistance:
-
-- worst raw path: Next `155 / 115 / 270` accepted/rejected/total
-- same path in HC v2 raw tracker: `27 / 0 / 27`
-
-This gap is expected — v2's raw tracker also benefits from its overall pipeline structure. With
-`EndgameTracker`, v3 handles these paths efficiently (see solve results above).
-
-### v3 compiled vs v3 interpreted (`make benchmark` → compile_modes group)
-
-| Metric | Eval speedup | Jac speedup | Build overhead |
-|--------|-------------:|------------:|---------------:|
-| katsura-3 | 3.2x | 3.9x | 1.42x |
-| katsura-5 | 3.5x | 5.6x | 1.29x |
-| katsura-7 | 3.3x | 6.3x | 1.22x |
-
-End-to-end solve speedup remains modest because eval is only part of total step cost.
-
-### TTFX (fresh session)
-
-| Mode | Time |
-|------|------|
-| v3 total | ~15s |
-| v2 total `[:mixed]` | ~47s |
-| v2 solve-only `[:none]` | ~11s |
-| v2 second system `[:mixed]` | ~6s |
-
-v3 still wins clearly against v2 default `:mixed`, which is the main architectural motivation for
-the rewrite.
-
-### Tracker component breakdown
-
-The old conclusion still holds: raw eval kernels are not the bottleneck. Predictor updates,
-Newton correction, and step acceptance dominate.
+| singular multiplicity 3 | nresults=2, nsingular=1, nnonsingular=1 | same |
 
 ## Open Items
 
-### Performance / correctness
+### Correctness
 
-1. **Threading** — main performance blocker for large systems (cyclic-7 has 924 paths)
-2. **Overdetermined systems** — `RandomizedSystem` + excess solution check needed
-3. **Invalid-start metadata leak** — `PathResult` can expose stale tracker metadata
-   from earlier state unless the invalid-start path resets fields explicitly
+1. **Mohab system failure** — all 900 paths terminate with `STEP_SIZE_TOO_SMALL`. The system has
+   O(10^19) integer coefficients; v2 finds 693 nonsingular solutions. Likely needs coefficient
+   scaling or gamma tuning. Tracked in `test/v2_parity_test.jl` as `@test_broken`.
+
+### Performance
+
+2. **Threading** — main blocker for large systems (cyclic-7 has 924 paths)
+3. **Overdetermined systems** — `RandomizedSystem` + excess solution check
 
 ### Architecture debt
 
-4. **Direct polynomial compiler** — validate and promote for polynomial input
-5. **Fragile DynamicPolynomials introspection** — `_variable_creation_id` uses reflection
-6. **Uncached SExpr hashes** — Moshi refactor removed `_hash` fields
-7. **O(n^2) `_stable_sort!`** — insertion sort on potentially large vertex lists
-8. **Magic constant 10000** — scratch slot placeholder base, unguarded
+3. Direct polynomial compiler — validate and promote
+4. Fragile DynamicPolynomials introspection (`_variable_creation_id`)
+5. Uncached SExpr hashes (Moshi refactor removed `_hash` fields)
+6. O(n²) `_stable_sort!` on potentially large vertex lists
+7. Magic constant 10000 (scratch slot placeholder base)
 
-### Infrastructure debt
+### Infrastructure
 
-9. **No benchmark CI** — regressions go unnoticed
-
-## Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| CommonSolve | `init`/`solve!` interface |
-| DynamicPolynomials | `@polyvar`, user-facing polynomial input |
-| EnumX | Scoped enums (TrackerCode, PathResultCode, CompileMode, etc.) |
-| FixedSizeArrays | FSVec/FSMat (size not in type parameter) |
-| FunctionWrappers | Type erasure for SystemEvaluator/HomotopyEvaluator |
-| LinearAlgebra | stdlib LU/QR |
-| MixedSubdivisions | BKK mixed volume for polyhedral start system |
-| Moshi | `@data` ADT for SExpr and ExecInstruction |
-| MultivariatePolynomials | Abstract polynomial interface, differentiation |
-| RuntimeGeneratedFunctions | Compiled eval/jac backend (`CompileMode.COMPILED`) |
+8. No benchmark CI — regressions go unnoticed

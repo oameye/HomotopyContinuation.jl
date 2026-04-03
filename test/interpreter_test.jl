@@ -95,6 +95,34 @@ end
         @test u[1] ≈ 4.0 + 0im
     end
 
+    @testset "execute_taylor! with TaylorVector parameters (Cauchy product)" begin
+        # f(x1, x2; p1) = p1*x1^2 + x2  with x1(t) = 1+t, x2(t) = 0, p1(t) = 2+3t
+        # f(t) = (2+3t)*(1+t)^2 + 0 = (2+3t)(1+2t+t²) = 2+7t+8t²+3t³ (truncated at order 2)
+        # [f]₀ = 2, [f]₁ = 7, [f]₂ = 8
+        seq = make_param_sequence()
+        TTS = TruncatedTaylorSeries{3, ComplexF64}
+        I = Interpreter(Vector{TTS}, seq)
+
+        mat = FSMat{ComplexF64}(zeros(ComplexF64, 3, 2))
+        mat[1, 1] = 1.0; mat[2, 1] = 1.0; mat[3, 1] = 0.0  # x1(t) = 1+t
+        mat[1, 2] = 0.0; mat[2, 2] = 0.0; mat[3, 2] = 0.0  # x2(t) = 0
+        tx = TaylorVector{3, ComplexF64}(mat)
+
+        tp_mat = FSMat{ComplexF64}(zeros(ComplexF64, 3, 1))
+        tp_mat[1, 1] = 2.0  # p₀
+        tp_mat[2, 1] = 3.0  # p₁
+        tp_mat[3, 1] = 0.0  # p₂
+        tp = TaylorVector{3, ComplexF64}(tp_mat)
+
+        u = zeros(ComplexF64, 1)
+        execute_taylor!(u, Val(0), I, tx, tp)
+        @test u[1] ≈ 2.0 + 0im
+        execute_taylor!(u, Val(1), I, tx, tp)
+        @test u[1] ≈ 7.0 + 0im
+        execute_taylor!(u, Val(2), I, tx, tp)
+        @test u[1] ≈ 8.0 + 0im
+    end
+
     @testset "SExpr compound constructors copy arg vectors" begin
         add_args = SExprT[SExpr.SVar(1), SExpr.SVar(2)]
         mul_args = SExprT[SExpr.SVar(1), SExpr.SVar(2)]

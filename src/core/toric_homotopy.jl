@@ -9,13 +9,20 @@ struct ToricHomotopy <: AbstractHomotopy
     system_coeffs::FSVec{ComplexF64}     # base coefficients c_j
     weights::FSVec{Float64}              # w_j per coefficient
     t_weights::FSVec{Float64}            # cached t^{w_j} for real t
-    coeffs::FSVec{ComplexF64}            # c_j * t^{w_j} -- current values (mutated)
-    dt_coeffs::FSVec{ComplexF64}         # w_j * c_j * t^{w_j-1} (mutated)
+    coeffs::FSVec{ComplexF64}            # p₀ = c_j * t^{w_j} -- current values (mutated)
+    dt_coeffs::FSVec{ComplexF64}         # p₁ = w_j * c_j * t^{w_j-1} (mutated)
+    d2t_coeffs::FSVec{ComplexF64}        # p₂ = w(w-1)/2 * c_j * t^{w_j-2} (mutated)
+    d3t_coeffs::FSVec{ComplexF64}        # p₃ = w(w-1)(w-2)/6 * c_j * t^{w_j-3} (mutated)
     t_cache::Base.RefValue{ComplexF64}
     dt_cache::Base.RefValue{ComplexF64}  # cached t for dt_coeffs
-    # Scratch
+    d2t_cache::Base.RefValue{ComplexF64} # cached t for d2t_coeffs
+    d3t_cache::Base.RefValue{ComplexF64} # cached t for d3t_coeffs
+    # Scratch buffers
     u_cache::FSVec{ComplexF64}
     U_cache::FSMat{ComplexF64}
+    # Parameter TaylorVectors for Cauchy product convolution
+    tp2::TaylorVector{3, ComplexF64}     # [p₀, p₁, p₂] for Val(2)
+    tp3::TaylorVector{4, ComplexF64}     # [p₀, p₁, p₂, p₃] for Val(3)
 end
 
 function ToricHomotopy(
@@ -36,12 +43,18 @@ function ToricHomotopy(
         FSVec{ComplexF64}(flat_coeffs),
         FSVec{Float64}(zeros(nparams)),                  # weights
         FSVec{Float64}(zeros(nparams)),                  # t_weights
-        FSVec{ComplexF64}(zeros(ComplexF64, nparams)),   # coeffs
-        FSVec{ComplexF64}(zeros(ComplexF64, nparams)),   # dt_coeffs
+        FSVec{ComplexF64}(zeros(ComplexF64, nparams)),   # coeffs (p₀)
+        FSVec{ComplexF64}(zeros(ComplexF64, nparams)),   # dt_coeffs (p₁)
+        FSVec{ComplexF64}(zeros(ComplexF64, nparams)),   # d2t_coeffs (p₂)
+        FSVec{ComplexF64}(zeros(ComplexF64, nparams)),   # d3t_coeffs (p₃)
+        Ref(complex(NaN)),
+        Ref(complex(NaN)),
         Ref(complex(NaN)),
         Ref(complex(NaN)),
         FSVec{ComplexF64}(zeros(ComplexF64, m)),
         FSMat{ComplexF64}(zeros(ComplexF64, m, n)),
+        TaylorVector{3, ComplexF64}(nparams),
+        TaylorVector{4, ComplexF64}(nparams),
     )
 end
 
@@ -100,6 +113,8 @@ function update_weights!(
 
     H.t_cache[] = complex(NaN)
     H.dt_cache[] = complex(NaN)
+    H.d2t_cache[] = complex(NaN)
+    H.d3t_cache[] = complex(NaN)
 
     return s_min, s_max
 end
@@ -171,6 +186,97 @@ function _update_toric_dt_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
     return nothing
 end
 
+## ── Higher-order parameter Taylor coefficients ──────────────────────────────
+#
+# For the toric homotopy p_j(t) = c_j * t^{w_j}, the Taylor coefficients around
+# the current t are:
+#   p₀ = c_j * t^w              (stored in coeffs)
+#   p₁ = w * c_j * t^{w-1}      (stored in dt_coeffs)
+#   p₂ = w(w-1)/2 * c_j * t^{w-2}
+#   p₃ = w(w-1)(w-2)/6 * c_j * t^{w-3}
+
+function _update_toric_d2t_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
+    if H.d2t_cache[] == t
+        return nothing
+    end
+    _update_toric_coeffs!(H, t)
+    tr = real(t)
+    if tr > 0 && isreal(t)
+        @fastmath t_inv = inv(tr)
+        t_inv2 = t_inv * t_inv
+        @inbounds for i in eachindex(H.d2t_coeffs)
+            w = H.weights[i]
+            # w(w-1)/2 vanishes for w=0 and w=1
+            if w > 0.0 && w != 1.0
+                H.d2t_coeffs[i] = 0.5 * w * (w - 1.0) * H.system_coeffs[i] * H.t_weights[i] * t_inv2
+            else
+                H.d2t_coeffs[i] = zero(ComplexF64)
+            end
+        end
+    elseif tr == 0.0 && isreal(t)
+        # At t=0: only w=2 gives finite nonzero (t^0 = 1)
+        @inbounds for i in eachindex(H.d2t_coeffs)
+            w = H.weights[i]
+            H.d2t_coeffs[i] = (w == 2.0) ? H.system_coeffs[i] : zero(ComplexF64)
+        end
+    else
+        @fastmath t_inv = inv(t)
+        t_inv2 = t_inv * t_inv
+        @inbounds for i in eachindex(H.d2t_coeffs)
+            w = H.weights[i]
+            if w > 0.0 && w != 1.0
+                H.d2t_coeffs[i] = 0.5 * w * (w - 1.0) * H.coeffs[i] * t_inv2
+            else
+                H.d2t_coeffs[i] = zero(ComplexF64)
+            end
+        end
+    end
+    H.d2t_cache[] = t
+    return nothing
+end
+
+function _update_toric_d3t_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
+    if H.d3t_cache[] == t
+        return nothing
+    end
+    _update_toric_coeffs!(H, t)
+    tr = real(t)
+    if tr > 0 && isreal(t)
+        @fastmath t_inv = inv(tr)
+        t_inv3 = t_inv * t_inv * t_inv
+        @inbounds for i in eachindex(H.d3t_coeffs)
+            w = H.weights[i]
+            # w(w-1)(w-2)/6 vanishes for w=0, w=1, w=2
+            if w > 0.0 && w != 1.0 && w != 2.0
+                H.d3t_coeffs[i] = w * (w - 1.0) * (w - 2.0) / 6.0 *
+                    H.system_coeffs[i] * H.t_weights[i] * t_inv3
+            else
+                H.d3t_coeffs[i] = zero(ComplexF64)
+            end
+        end
+    elseif tr == 0.0 && isreal(t)
+        # At t=0: only w=3 gives finite nonzero (t^0 = 1)
+        @inbounds for i in eachindex(H.d3t_coeffs)
+            w = H.weights[i]
+            H.d3t_coeffs[i] = (w == 3.0) ? H.system_coeffs[i] : zero(ComplexF64)
+        end
+    else
+        @fastmath t_inv = inv(t)
+        t_inv3 = t_inv * t_inv * t_inv
+        @inbounds for i in eachindex(H.d3t_coeffs)
+            w = H.weights[i]
+            if w > 0.0 && w != 1.0 && w != 2.0
+                H.d3t_coeffs[i] = w * (w - 1.0) * (w - 2.0) / 6.0 *
+                    H.coeffs[i] * t_inv3
+            else
+                H.d3t_coeffs[i] = zero(ComplexF64)
+            end
+        end
+    end
+    H.d3t_cache[] = t
+    return nothing
+end
+
 ## ── Interface methods ────────────────────────────────────────────────────────
 
 function evaluate!(
@@ -214,27 +320,59 @@ function taylor!(
     return nothing
 end
 
-## taylor! order 2
+## taylor! order 2 and 3 — Cauchy product convolution via TaylorVector parameters
+#
+# H(x(t), t) = F(x(t); p(t)), Taylor coefficients computed via single system call:
+#   [H]_k = Σ_{j=0}^{k} [F(x)]_{k-j} · p_j
+# The interpreter's taylor_op_mul handles the Cauchy product automatically.
+
+@inline function _pack_param_taylor!(
+        H::ToricHomotopy, t::ComplexF64, ::Val{2},
+    )::Nothing
+    _update_toric_coeffs!(H, t)
+    _update_toric_dt_coeffs!(H, t)
+    _update_toric_d2t_coeffs!(H, t)
+    np = length(H.coeffs)
+    @inbounds for i in 1:np
+        H.tp2.data[1, i] = H.coeffs[i]
+        H.tp2.data[2, i] = H.dt_coeffs[i]
+        H.tp2.data[3, i] = H.d2t_coeffs[i]
+    end
+    return nothing
+end
+
+@inline function _pack_param_taylor!(
+        H::ToricHomotopy, t::ComplexF64, ::Val{3},
+    )::Nothing
+    _pack_param_taylor!(H, t, Val(2))
+    _update_toric_d3t_coeffs!(H, t)
+    np = length(H.coeffs)
+    @inbounds for i in 1:np
+        H.tp3.data[1, i] = H.tp2.data[1, i]
+        H.tp3.data[2, i] = H.tp2.data[2, i]
+        H.tp3.data[3, i] = H.tp2.data[3, i]
+        H.tp3.data[4, i] = H.d3t_coeffs[i]
+    end
+    return nothing
+end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::ToricHomotopy,
         tx::TaylorVector{3, ComplexF64}, t::ComplexF64;
         incremental::Bool = false,
     )::Nothing
-    _update_toric_coeffs!(H, t)
-    taylor!(u, Val(2), H.system, tx, H.coeffs)
+    _pack_param_taylor!(H, t, Val(2))
+    taylor!(u, Val(2), H.system, tx, H.tp2)
     return nothing
 end
-
-## taylor! order 3
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{3}, H::ToricHomotopy,
         tx::TaylorVector{4, ComplexF64}, t::ComplexF64;
         incremental::Bool = false,
     )::Nothing
-    _update_toric_coeffs!(H, t)
-    taylor!(u, Val(3), H.system, tx, H.coeffs)
+    _pack_param_taylor!(H, t, Val(3))
+    taylor!(u, Val(3), H.system, tx, H.tp3)
     return nothing
 end
 

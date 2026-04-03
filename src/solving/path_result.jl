@@ -27,6 +27,20 @@ struct PathResult
     last_path_t::Float64
 end
 
+"""
+    _add_steps(r, accepted, rejected)
+
+Return a copy of `r` with additional accepted/rejected steps added (e.g. from a prior phase).
+"""
+function _add_steps(r::PathResult, accepted::Int, rejected::Int)::PathResult
+    return PathResult(
+        r.return_code, r.solution, r.t, r.accuracy, r.condition_jacobian,
+        r.winding_number, r.singular,
+        r.accepted_steps + accepted, r.rejected_steps + rejected,
+        r.steps_eg, r.extended_precision_used, r.last_path_point, r.last_path_t,
+    )
+end
+
 is_success(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_SUCCESS
 is_singular(r::PathResult)::Bool = is_success(r) && r.singular
 is_nonsingular(r::PathResult)::Bool = is_success(r) && !r.singular

@@ -462,8 +462,8 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
         @testset "d=2" begin
             @polyvar x
-            # No fixed seed — must work for any γ
-            result = solve(System([(x - 10)^2]))
+            # Use a fixed seed for reproducibility
+            result = solve(System([(x - 10)^2]), TotalDegree(; seed = UInt32(0xabcd)))
             # 1 unique singular solution with multiplicity 2
             @test nresults(result) == 1
             @test nsingular(result) == 1

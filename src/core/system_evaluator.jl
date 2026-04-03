@@ -30,6 +30,22 @@ const SysTaylor3FW = FunctionWrapper{
         FSVec{ComplexF64}, TaylorVector{4, ComplexF64}, FSVec{ComplexF64},
     },
 }
+# Taylor with TaylorVector parameters (Cauchy product convolution for parametric homotopies)
+const SysTaylor1ParamFW = FunctionWrapper{
+    Nothing, Tuple{
+        FSVec{ComplexF64}, TaylorVector{2, ComplexF64}, TaylorVector{2, ComplexF64},
+    },
+}
+const SysTaylor2ParamFW = FunctionWrapper{
+    Nothing, Tuple{
+        FSVec{ComplexF64}, TaylorVector{3, ComplexF64}, TaylorVector{3, ComplexF64},
+    },
+}
+const SysTaylor3ParamFW = FunctionWrapper{
+    Nothing, Tuple{
+        FSVec{ComplexF64}, TaylorVector{4, ComplexF64}, TaylorVector{4, ComplexF64},
+    },
+}
 
 """
     SystemEvaluator
@@ -45,6 +61,9 @@ struct SystemEvaluator
     _taylor_1!::SysTaylor1FW
     _taylor_2!::SysTaylor2FW
     _taylor_3!::SysTaylor3FW
+    _taylor_1_param!::SysTaylor1ParamFW
+    _taylor_2_param!::SysTaylor2ParamFW
+    _taylor_3_param!::SysTaylor3ParamFW
     _size::Tuple{Int, Int}
     _nparameters::Int
 end
@@ -102,6 +121,32 @@ function taylor!(
     return nothing
 end
 
+## Dispatch: taylor! with TaylorVector parameters (Cauchy product convolution)
+
+function taylor!(
+        u::FSVec{ComplexF64}, ::Val{1}, S::SystemEvaluator,
+        tx::TaylorVector{2, ComplexF64}, tp::TaylorVector{2, ComplexF64},
+    )::Nothing
+    S._taylor_1_param!(u, tx, tp)
+    return nothing
+end
+
+function taylor!(
+        u::FSVec{ComplexF64}, ::Val{2}, S::SystemEvaluator,
+        tx::TaylorVector{3, ComplexF64}, tp::TaylorVector{3, ComplexF64},
+    )::Nothing
+    S._taylor_2_param!(u, tx, tp)
+    return nothing
+end
+
+function taylor!(
+        u::FSVec{ComplexF64}, ::Val{3}, S::SystemEvaluator,
+        tx::TaylorVector{4, ComplexF64}, tp::TaylorVector{4, ComplexF64},
+    )::Nothing
+    S._taylor_3_param!(u, tx, tp)
+    return nothing
+end
+
 ## Constructor from AbstractSystem
 
 function SystemEvaluator(F::AbstractSystem)
@@ -112,6 +157,9 @@ function SystemEvaluator(F::AbstractSystem)
         SysTaylor1FW((u, tx, p) -> (taylor!(u, Val(1), F, tx, p); nothing)),
         SysTaylor2FW((u, tx, p) -> (taylor!(u, Val(2), F, tx, p); nothing)),
         SysTaylor3FW((u, tx, p) -> (taylor!(u, Val(3), F, tx, p); nothing)),
+        SysTaylor1ParamFW((u, tx, tp) -> (taylor!(u, Val(1), F, tx, tp); nothing)),
+        SysTaylor2ParamFW((u, tx, tp) -> (taylor!(u, Val(2), F, tx, tp); nothing)),
+        SysTaylor3ParamFW((u, tx, tp) -> (taylor!(u, Val(3), F, tx, tp); nothing)),
         size(F),
         nparameters(F),
     )

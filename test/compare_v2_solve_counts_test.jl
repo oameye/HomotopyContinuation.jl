@@ -27,21 +27,25 @@ using HomotopyContinuation.ModelKit: @var
 
     @testset "katsura-3" begin
         @polyvar nx0 nx1 nx2 nx3
-        F3 = Next.System([
-            nx0 + 2nx1 + 2nx2 + 2nx3 - 1,
-            nx0^2 + 2nx1^2 + 2nx2^2 + 2nx3^2 - nx0,
-            2nx0 * nx1 + 2nx1 * nx2 + 2nx2 * nx3 - nx1,
-            nx1^2 + 2nx0 * nx2 + 2nx1 * nx3 - nx2,
-        ])
+        F3 = Next.System(
+            [
+                nx0 + 2nx1 + 2nx2 + 2nx3 - 1,
+                nx0^2 + 2nx1^2 + 2nx2^2 + 2nx3^2 - nx0,
+                2nx0 * nx1 + 2nx1 * nx2 + 2nx2 * nx3 - nx1,
+                nx1^2 + 2nx0 * nx2 + 2nx1 * nx3 - nx2,
+            ]
+        )
         r3 = Next.solve(F3)
 
         @var hx0 hx1 hx2 hx3
-        F2 = HC.ModelKit.System([
-            hx0 + 2hx1 + 2hx2 + 2hx3 - 1,
-            hx0^2 + 2hx1^2 + 2hx2^2 + 2hx3^2 - hx0,
-            2hx0 * hx1 + 2hx1 * hx2 + 2hx2 * hx3 - hx1,
-            hx1^2 + 2hx0 * hx2 + 2hx1 * hx3 - hx2,
-        ])
+        F2 = HC.ModelKit.System(
+            [
+                hx0 + 2hx1 + 2hx2 + 2hx3 - 1,
+                hx0^2 + 2hx1^2 + 2hx2^2 + 2hx3^2 - hx0,
+                2hx0 * hx1 + 2hx1 * hx2 + 2hx2 * hx3 - hx1,
+                hx1^2 + 2hx0 * hx2 + 2hx1 * hx3 - hx2,
+            ]
+        )
         r2 = HC.solve(F2; start_system = :total_degree, show_progress = false)
 
         @test Next.nresults(r3) == HC.nresults(r2)
@@ -79,20 +83,24 @@ using HomotopyContinuation.ModelKit: @var
         @polyvar nx nz
         ny = 1
         r3 = Next.solve(
-            Next.System([
-                0.75nx^4 + 1.5nx^2 * ny^2 - 2.5nx^2 * nz^2 + 0.75ny^4 - 2.5ny^2 * nz^2 + 0.75nz^4,
-                10nx^2 * nz + 10ny^2 * nz - 6nz^3,
-            ]),
+            Next.System(
+                [
+                    0.75nx^4 + 1.5nx^2 * ny^2 - 2.5nx^2 * nz^2 + 0.75ny^4 - 2.5ny^2 * nz^2 + 0.75nz^4,
+                    10nx^2 * nz + 10ny^2 * nz - 6nz^3,
+                ]
+            ),
             Next.TotalDegree(; seed = UInt32(1)),
         )
 
         @var hx hz
         hy = 1
         r2 = HC.solve(
-            HC.ModelKit.System([
-                0.75hx^4 + 1.5hx^2 * hy^2 - 2.5hx^2 * hz^2 + 0.75hy^4 - 2.5hy^2 * hz^2 + 0.75hz^4,
-                10hx^2 * hz + 10hy^2 * hz - 6hz^3,
-            ]);
+            HC.ModelKit.System(
+                [
+                    0.75hx^4 + 1.5hx^2 * hy^2 - 2.5hx^2 * hz^2 + 0.75hy^4 - 2.5hy^2 * hz^2 + 0.75hz^4,
+                    10hx^2 * hz + 10hy^2 * hz - 6hz^3,
+                ]
+            );
             start_system = :total_degree, seed = UInt32(1), show_progress = false,
         )
 
@@ -104,20 +112,24 @@ using HomotopyContinuation.ModelKit: @var
         @polyvar nx ny
         nz = 1
         r3 = Next.solve(
-            Next.System([
-                nx^2 + 2ny^2 + 2im * ny * nz,
-                (18 + 3im) * nx * ny + 7im * ny^2 - (3 - 18im) * nx * nz - 14ny * nz - 7im * nz^2,
-            ]),
+            Next.System(
+                [
+                    nx^2 + 2ny^2 + 2im * ny * nz,
+                    (18 + 3im) * nx * ny + 7im * ny^2 - (3 - 18im) * nx * nz - 14ny * nz - 7im * nz^2,
+                ]
+            ),
             Next.TotalDegree(; seed = UInt32(12345)),
         )
 
         @var hx hy
         hz = 1
         r2 = HC.solve(
-            HC.ModelKit.System([
-                hx^2 + 2hy^2 + 2im * hy * hz,
-                (18 + 3im) * hx * hy + 7im * hy^2 - (3 - 18im) * hx * hz - 14hy * hz - 7im * hz^2,
-            ]);
+            HC.ModelKit.System(
+                [
+                    hx^2 + 2hy^2 + 2im * hy * hz,
+                    (18 + 3im) * hx * hy + 7im * hy^2 - (3 - 18im) * hx * hz - 14hy * hz - 7im * hz^2,
+                ]
+            );
             start_system = :total_degree, seed = UInt32(12345), show_progress = false,
         )
 

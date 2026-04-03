@@ -124,22 +124,46 @@ function CommonSolve.init(F::System, alg::Polyhedral)::PolyhedralSolveCache
     seed = alg.seed
     n = F.nvars
 
+    # Seed the global RNG for reproducibility (v2 parity: v2 uses Random.seed!
+    # and both coefficient generation and MixedSubdivisions consume it).
+    Random.seed!(seed)
+
     # 1. Get support + target coefficients from the System
-    #    Copy only entries that need modification (zero column addition).
     source_support, source_coeffs = support_coefficients(F)
+
+    # 2. Generate start coefficients for ORIGINAL support FIRST (v2 parity:
+    #    coefficients are generated BEFORE zero column addition, using
+    #    cospi/sinpi for exact match with v2's cis2pi)
+    start_coeffs_orig = Vector{Vector{ComplexF64}}(undef, length(source_coeffs))
+    for i in eachindex(source_coeffs)
+        c = source_coeffs[i]
+        nrm = LinearAlgebra.norm(c, Inf)
+        start_coeffs_orig[i] = ComplexF64[
+            let r = rand(), φ = rand()
+                    (0.9 + 0.2 * r) * complex(cospi(2φ), sinpi(2φ)) * nrm
+            end
+                for _ in 1:length(c)
+        ]
+    end
+
+    # 3. Add zero columns to support and extend coefficients (v2 parity:
+    #    zero-column extensions use randn(ComplexF64) for start, 0.0 for target)
     support = Vector{Matrix{Int32}}(undef, length(source_support))
     target_coeffs = Vector{Vector{ComplexF64}}(undef, length(source_coeffs))
+    start_coeffs = Vector{Vector{ComplexF64}}(undef, length(source_coeffs))
     for (i, A) in enumerate(source_support)
         if has_zero_column(A)
             support[i] = A
             target_coeffs[i] = source_coeffs[i]
+            start_coeffs[i] = start_coeffs_orig[i]
         else
             support[i] = hcat(A, zeros(Int32, size(A, 1)))
             target_coeffs[i] = push!(copy(source_coeffs[i]), zero(ComplexF64))
+            start_coeffs[i] = vcat(start_coeffs_orig[i], randn(ComplexF64))
         end
     end
 
-    # 3. Compute mixed cells via MixedSubdivisions
+    # 4. Compute mixed cells via MixedSubdivisions
     result = MixedSubdivisions.fine_mixed_cells(support; show_progress = false)
     if result === nothing
         error("MixedSubdivisions.fine_mixed_cells returned nothing — could not compute mixed cells")
@@ -148,19 +172,6 @@ function CommonSolve.init(F::System, alg::Polyhedral)::PolyhedralSolveCache
 
     if isempty(mixed_cells)
         error("No mixed cells found — the system may have no isolated solutions")
-    end
-
-    # 4. Generate random start coefficients (near unit magnitude, random phase)
-    rng = Random.MersenneTwister(seed)
-    start_coeffs = Vector{Vector{ComplexF64}}(undef, length(target_coeffs))
-    for i in eachindex(target_coeffs)
-        c_target = target_coeffs[i]
-        nrm = LinearAlgebra.norm(c_target, Inf)
-        scale = max(nrm, 1.0)
-        start_coeffs[i] = ComplexF64[
-            (0.9 + 0.2 * rand(rng)) * cis(2π * rand(rng)) * scale
-                for _ in 1:length(c_target)
-        ]
     end
 
     # 5. Solve binomial systems for each mixed cell
@@ -183,12 +194,27 @@ function CommonSolve.init(F::System, alg::Polyhedral)::PolyhedralSolveCache
         _build_parametric_system(support, collect(_hc_x))
     param_system = System(
         param_polys; variables = param_vars, parameters = coeff_params,
+        compile = CompileMode.COMPILED,
     )
 
     # 7. Build toric homotopy (phase 1: t goes from 0 to 1)
+    #    Toric tracker uses conservative max_initial_step_size=0.2 (v2 convention)
     toric_H = ToricHomotopy(param_system.evaluator, start_coeffs)
     toric_heval = HomotopyEvaluator(toric_H)
-    toric_tracker = Tracker(toric_heval; options = alg.tracker_options)
+    toric_opts = TrackerOptions(;
+        max_steps = alg.tracker_options.max_steps,
+        max_step_size = alg.tracker_options.max_step_size,
+        max_initial_step_size = min(alg.tracker_options.max_initial_step_size, 0.2),
+        extended_precision = alg.tracker_options.extended_precision,
+        min_step_size = alg.tracker_options.min_step_size,
+        terminate_cond = alg.tracker_options.terminate_cond,
+        a = alg.tracker_options.a,
+        β_a = alg.tracker_options.β_a,
+        β_ω = alg.tracker_options.β_ω,
+        β_τ = alg.tracker_options.β_τ,
+        strict_β_τ = alg.tracker_options.strict_β_τ,
+    )
+    toric_tracker = Tracker(toric_heval; options = toric_opts)
 
     # 8. Build coefficient homotopy (phase 2: t goes from 1 to 0)
     flat_start = reduce(vcat, start_coeffs)
@@ -206,6 +232,96 @@ function CommonSolve.init(F::System, alg::Polyhedral)::PolyhedralSolveCache
         all_starts, seed,
         param_system,
     )
+end
+
+# ── Toric phase tracking with two-stage reparameterization ─────────────────
+
+"""
+    _init_toric!(tracker, x₀, t_start, t_end)
+
+Initialize the toric tracker with v2-tuned initial parameters:
+ω=20 (optimistic initial Lipschitz), μ=1e-12, max_initial_step_size=0.2.
+"""
+function _init_toric!(
+        tracker::Tracker,
+        x₀::AbstractVector{<:Number},
+        t_start::ComplexF64,
+        t_end::ComplexF64,
+    )::TrackerCode.T
+    # Pass ω/μ directly so init! skips init_newton (v2 parity:
+    # toric phase uses empirically-tuned parameters, not Newton-derived ones)
+    return init!(
+        tracker, x₀, t_start, t_end;
+        ω = 20.0, μ = 1.0e-12, max_initial_step_size = 0.2,
+    )
+end
+
+"""
+    _track_toric_phase!(tracker, H, x₀, min_weight, max_weight, support, lifting, cell)
+
+Track the toric phase with two-stage reparameterization for large weights.
+When max_weight >= 10, the path is split into two stages to avoid numerical
+issues from t^w where w is large and t is near 1.
+"""
+function _track_toric_phase!(
+        tracker::Tracker,
+        H::ToricHomotopy,
+        x₀::AbstractVector{ComplexF64},
+        min_weight::Float64,
+        max_weight::Float64,
+        support::Vector{Matrix{Int32}},
+        lifting::Vector{Vector{Int32}},
+        cell::MixedSubdivisions.MixedCell,
+    )::TrackerCode.T
+
+    if max_weight < 10.0
+        # Simple case: track directly from 0 to 1
+        code = _init_toric!(tracker, x₀, complex(0.0), complex(1.0))
+        if code != TrackerCode.TRACKING
+            return code
+        end
+        while tracker.state.code == TrackerCode.TRACKING
+            step!(tracker)
+        end
+        return tracker.state.code
+    end
+
+    # Two-stage reparameterization for large weights (matching v2):
+    # Stage 1: track from 0 to t₀
+    t₀ = clamp(0.1^(10.0 / max_weight), 0.9, 1.0 - 1.0e-6)
+    code = _init_toric!(tracker, x₀, complex(0.0), complex(t₀))
+    if code != TrackerCode.TRACKING
+        return code
+    end
+    while tracker.state.code == TrackerCode.TRACKING
+        step!(tracker)
+    end
+    if tracker.state.code != TrackerCode.TRACKER_SUCCESS
+        return tracker.state.code
+    end
+
+    # Stage 2: renormalize weights with max_weight=10, track from t_restart to 1
+    saved_ω = tracker.state.ω
+    saved_μ = tracker.state.μ
+
+    new_min_w, _ = update_weights!(H, support, lifting, cell; max_weight = 10.0)
+    t_restart = t₀^(1.0 / new_min_w)
+
+    # Re-init tracker from current solution at t_restart to 1.0
+    # Pass ω/μ from stage 1, keep step counters
+    code = init!(
+        tracker, tracker.state.x, complex(t_restart), complex(1.0);
+        ω = saved_ω, μ = saved_μ,
+        keep_steps = true,
+    )
+
+    if code != TrackerCode.TRACKING
+        return code
+    end
+    while tracker.state.code == TrackerCode.TRACKING
+        step!(tracker)
+    end
+    return tracker.state.code
 end
 
 # ── CommonSolve.solve!: two-phase path tracking ────────────────────────────
@@ -228,10 +344,22 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache)::Result
     # Phase 1 + Phase 2 for each start solution
     for (cell, x₀) in cache.start_solutions
         # Phase 1: Toric homotopy — track from t=0 to t=1
-        # Update weights for this mixed cell (normalize so min non-zero weight = 1)
-        update_weights!(toric_H, support, lifting, cell; min_weight = 1.0)
+        #
+        # Strategy (matching v2):
+        #   a) Normalize weights so min non-zero weight = 1.
+        #   b) If max_weight < 10: track directly from 0 to 1.
+        #   c) If max_weight >= 10: two-stage reparameterization:
+        #      1) Track from 0 to t₀ = clamp(0.1^(10/max_weight), 0.9, 1-1e-6)
+        #      2) Renormalize weights with max_weight=10, restart from t₀^(1/min_weight) to 1
+        #
+        # Initial tracker state: ω=20, μ=1e-12, max_initial_step_size=0.2
+        # (matches v2's empirically-tuned toric phase parameters)
+        min_w, max_w = update_weights!(toric_H, support, lifting, cell; min_weight = 1.0)
 
-        code = track!(toric_tracker, x₀; t₁ = complex(0.0), t₀ = complex(1.0))
+        code = _track_toric_phase!(
+            toric_tracker, toric_H, x₀, min_w, max_w,
+            support, lifting, cell
+        )
 
         if code != TrackerCode.TRACKER_SUCCESS
             # Toric phase failed — record failure and skip coefficient phase
@@ -239,12 +367,22 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache)::Result
             continue
         end
 
+        # Save toric-phase state before it's lost to the coefficient phase
+        toric_accepted = toric_tracker.state.accepted_steps
+        toric_rejected = toric_tracker.state.rejected_steps
+
         # Extract solution from toric phase into pre-allocated buffer
         copyto!(x_buffer, toric_tracker.state.x)
 
         # Phase 2: Coefficient homotopy — track from t=1 to t=0
-        track!(coeff_tracker, x_buffer)
-        push!(path_results, PathResult(coeff_tracker))
+        # Carry over the toric-phase accuracy estimate to match v2's coefficient handoff.
+        init!(coeff_tracker, x_buffer; μ = toric_tracker.state.μ)
+        while coeff_tracker.state.code == EndgameCode.TRACKING
+            step!(coeff_tracker)
+        end
+
+        # Accumulate toric-phase steps into the final PathResult (matching v2 convention)
+        push!(path_results, _add_steps(PathResult(coeff_tracker), toric_accepted, toric_rejected))
     end
 
     return Result(path_results, n_paths, cache.seed)

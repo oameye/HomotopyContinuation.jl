@@ -58,6 +58,10 @@ mutable struct EndgameState
     # Step counters
     steps_eg::Int
     ext_steps_eg_start::Int
+    # Jump-to-zero tracking: (prev_prev, prev) history of whether the tracker
+    # proposed a step reaching t=0. Used to gate singular endgame entry for
+    # m=1 paths (v2 parity).
+    jump_to_zero_attempted::Tuple{Bool, Bool}
     # At-infinity per-coordinate tracking
     const at_inf_starts::FSVec{Float64}
     const at_inf_abs_coords::FSVec{Float64}
@@ -84,6 +88,7 @@ function EndgameState(n::Int)
         FSVec{ComplexF64}(zeros(ComplexF64, n)),         # solution
         NaN, 1.0, false,                                 # accuracy, cond, singular
         0, typemax(Int),                                 # steps_eg, ext_steps_eg_start
+        (false, false),                                  # jump_to_zero_attempted
         FSVec{Float64}(fill(NaN, n)),                    # at_inf_starts
         FSVec{Float64}(fill(NaN, n)),                    # at_inf_abs_coords
         FSVec{Float64}(fill(NaN, n)),                    # at_inf_conds
@@ -130,6 +135,7 @@ function _reset_state!(state::EndgameState)::Nothing
     state.singular = false
     state.steps_eg = 0
     state.ext_steps_eg_start = typemax(Int)
+    state.jump_to_zero_attempted = (false, false)
     fill!(state.at_inf_starts, NaN)
     fill!(state.at_inf_abs_coords, NaN)
     fill!(state.at_inf_conds, NaN)
@@ -179,12 +185,22 @@ function init!(
         eg::EndgameTracker,
         x₀::AbstractVector{<:Number},
         t₁::ComplexF64 = complex(1.0),
-        t₀::ComplexF64 = complex(0.0),
+        t₀::ComplexF64 = complex(0.0);
+        ω::Float64 = NaN,
+        μ::Float64 = NaN,
+        max_initial_step_size::Float64 = Inf,
+        keep_steps::Bool = false,
     )::EndgameCode.T
     _reset_state!(eg.state)
     init!(eg.val)
 
-    tracker_code = init!(eg.tracker, x₀, t₁, t₀)
+    tracker_code = init!(
+        eg.tracker, x₀, t₁, t₀;
+        ω = ω,
+        μ = μ,
+        max_initial_step_size = max_initial_step_size,
+        keep_steps = keep_steps,
+    )
     if tracker_code != TrackerCode.TRACKING
         copyto!(eg.state.solution, eg.tracker.state.x)
         eg.state.accuracy = eg.tracker.state.accuracy
@@ -263,6 +279,24 @@ end
     return norm_val
 end
 
+# Row-scaled-only inf norm for J₀ (v2 parity: inf_norm(WS, row_scaling) without col_scaling)
+@inline function _row_scaled_inf_norm_matrix(
+        ws::MatrixWorkspace,
+        row_scaling::FSVec{Float64},
+    )::Float64
+    A = ws.A
+    m, n = size(A)
+    norm_val = -Inf
+    @inbounds for i in 1:m
+        row_sum = 0.0
+        for j in 1:n
+            row_sum += fast_abs(A[i, j])
+        end
+        norm_val = @fastmath max(norm_val, row_sum * row_scaling[i])
+    end
+    return norm_val
+end
+
 function _scaled_cond(
         ws::MatrixWorkspace,
         row_scaling::FSVec{Float64},
@@ -285,10 +319,8 @@ function _scaled_cond(
         ws.factorized || factorize!(ws)
         return _scaled_inf_norm_matrix(ws, row_scaling, col_scaling) *
             _inverse_inf_norm_est(
-            ws.lu,
-            row_scaling,
-            ws.inf_norm_est_work,
-            ws.inf_norm_est_rwork,
+            ws.lu, row_scaling, col_scaling,
+            ws.inf_norm_est_work, ws.inf_norm_est_rwork,
         )
     end
 end
@@ -394,6 +426,13 @@ function step!(eg::EndgameTracker)::Nothing
         return nothing
     end
 
+    # Track whether the proposed step was trying to reach t=0 (v2 parity:
+    # jump_to_zero_attempted gates singular endgame entry for m=1 paths).
+    # v2 checks `iszero(tracker.state.t′)` — whether the proposed target time is zero.
+    # In v3, for a backward segment (1→0), s′=0.0 means reaching the target.
+    seg = tracker.state.segment
+    is_jump_to_zero = !seg.forward && seg.s′ == 0.0
+
     # Regular tracker step
     accepted = step!(tracker)
 
@@ -403,6 +442,9 @@ function step!(eg::EndgameTracker)::Nothing
     end
 
     t = real(tracker.state.segment.t)
+
+    # Update jump-to-zero history: shift (prev_prev, prev) window.
+    state.jump_to_zero_attempted = (state.jump_to_zero_attempted[2], is_jump_to_zero)
 
     # Pre-endgame: just forward
     if t > opts.endgame_start
@@ -418,19 +460,28 @@ function step!(eg::EndgameTracker)::Nothing
 
     # Match v2: do not update valuation state until a tracker step was accepted.
     # Rejected steps keep the same predictor data and t-value.
-    accepted || return nothing
+    if !accepted
+        # Pragmatic parity fix: if the valuation from previous accepted endgame steps
+        # already certifies a singular endpoint, do not burn additional rejected
+        # regular-tracking steps near t=0 before switching to the singular endgame.
+        # Guard: only when enough valuation samples exist for a reliable winding estimate.
+        if state.in_endgame && eg.val.samples >= 3 && check_finite!(eg)
+            return nothing
+        end
+        return nothing
+    end
 
     # Update valuation
     update!(eg.val, tracker.predictor, t)
 
-    # Check for singular endpoint (unless only_nonsingular)
+    # Check for singular endpoint (need ≥2 valuation samples for reliable winding estimate).
     if !opts.only_nonsingular && eg.val.samples >= 2
         if check_finite!(eg)
             return nothing
         end
     end
 
-    # Check for at-infinity
+    # Check for at-infinity (need ≥2 valuation samples for reliable divergence estimate).
     if opts.at_infinity_check && eg.val.samples >= 2
         if check_at_infinity!(eg)
             return nothing
@@ -485,13 +536,17 @@ function check_finite!(eg::EndgameTracker)::Bool
 
     m, m_err = estimate_winding_number(val, n, opts.max_winding_number)
 
-    # Regular non-singular endpoint: m == 1 with reliable winding number
-    if m == 1 && m_err < opts.val_finite_tol
-        return false
-    end
-
-    # Winding number not reliable yet
-    if m_err > opts.val_finite_tol
+    if m_err < opts.val_finite_tol
+        # Winding number is reliable.
+        # For m=1: only enter singular endgame if a previous step attempted to
+        # jump directly to t=0 (v2 parity). This prevents spurious singular
+        # endgame entry for paths that are regular but have slightly noisy
+        # winding number estimates.
+        if m == 1 && !state.jump_to_zero_attempted[1]
+            return false
+        end
+    else
+        # Winding number not reliable yet
         return false
     end
 
@@ -759,7 +814,7 @@ function _predict_and_finalize!(eg::EndgameTracker, max_steps::Bool)::Nothing
     )
     updated!(ws)
     κ_0 = _scaled_cond(ws, state.row_scaling, state.col_scaling)
-    J0_norm = _scaled_inf_norm_matrix(ws, state.row_scaling, state.col_scaling)
+    J0_norm = _row_scaled_inf_norm_matrix(ws, state.row_scaling)
 
     # Acceptance criteria (v2 parity)
     accepted = state.accuracy < opts.singular_min_accuracy && (
@@ -793,17 +848,14 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
     tracker = eg.tracker
     opts = eg.options
     λ = opts.lambda
-    n = length(state.solution)
-
     t_current = real(tracker.state.segment.t)
     t_new = λ * t_current
 
-    # Track inner tracker to next geometric point using lightweight reinit
-    # (preserves step counters, norm, Jacobian state)
+    # Track inner tracker to next geometric point (v2 parity: init!(tracker, λ*t)
+    # preserves x, counters, norm, Jacobian, last_steps_failed)
     reinit!(tracker.state.segment, complex(t_current), complex(t_new))
     tracker.state.code = TrackerCode.TRACKING
     tracker.state.Δs_prev = 0.0
-    tracker.state.last_steps_failed = 0
     Δs = _compute_initial_stepsize(
         tracker.state, tracker.predictor, tracker.options, tracker.constants,
     )
@@ -812,7 +864,14 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
     while tracker.state.code == TrackerCode.TRACKING
         step!(tracker)
         state.steps_eg += 1
+        max_steps = false
         if state.steps_eg >= opts.max_endgame_steps
+            max_steps = true
+        elseif ext_steps(tracker.state) - state.ext_steps_eg_start >=
+                opts.max_endgame_extended_steps
+            max_steps = true
+        end
+        if max_steps
             if !isnan(state.accuracy) && state.accuracy < opts.singular_min_accuracy
                 state.singular = true
                 state.code = EndgameCode.SUCCESS
@@ -843,6 +902,7 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
     update!(eg.val, tracker.predictor, t_new)
 
     # Check winding number consistency
+    n = length(state.solution)
     m̂, m̂_err = estimate_winding_number(eg.val, n, opts.max_winding_number)
     if m̂_err > 0.1 || m̂ != state.winding_number
         switch_to_regular!(eg)

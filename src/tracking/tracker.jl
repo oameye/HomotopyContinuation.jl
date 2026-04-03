@@ -411,7 +411,11 @@ function init!(
         tracker::Tracker,
         x₀::AbstractVector{<:Number},
         t₁::ComplexF64 = complex(1.0),
-        t₀::ComplexF64 = complex(0.0),
+        t₀::ComplexF64 = complex(0.0);
+        ω::Float64 = NaN,
+        μ::Float64 = NaN,
+        max_initial_step_size::Float64 = Inf,
+        keep_steps::Bool = false,
     )::TrackerCode.T
     state = tracker.state
     pred = tracker.predictor
@@ -432,10 +436,12 @@ function init!(
     state.use_strict_β_τ = false
     state.cond_J_ẋ = NaN
     state.code = TrackerCode.TRACKING
-    state.accepted_steps = 0
-    state.rejected_steps = 0
-    state.ext_accepted_steps = 0
-    state.ext_rejected_steps = 0
+    if !keep_steps
+        state.accepted_steps = 0
+        state.rejected_steps = 0
+        state.ext_accepted_steps = 0
+        state.ext_rejected_steps = 0
+    end
     state.last_steps_failed = 0
 
     pred.t = complex(NaN)
@@ -446,36 +452,53 @@ function init!(
     init!(state.norm, state.x)
     init!(state.jacobian)
 
-    valid, ω, μ = init_newton!(
-        state.x̄, tracker.corrector, tracker.homotopy, state.x, t₁,
-        state.jacobian, state.norm, false,
-    )
-
-    if !valid && opts.extended_precision
-        valid, ω, μ = init_newton!(
+    # Compute any missing initialization data via Newton.
+    # This lets callers preserve a toric-phase μ while still deriving ω at the handoff.
+    if isnan(ω) || isnan(μ)
+        valid, ω_init, μ_init = init_newton!(
             state.x̄, tracker.corrector, tracker.homotopy, state.x, t₁,
-            state.jacobian, state.norm, true,
+            state.jacobian, state.norm, false,
         )
-        state.extended_prec = valid
-        state.used_extended_prec = valid
+
+        if !valid && opts.extended_precision
+            valid, ω_init, μ_init = init_newton!(
+                state.x̄, tracker.corrector, tracker.homotopy, state.x, t₁,
+                state.jacobian, state.norm, true,
+            )
+            state.extended_prec = valid
+            state.used_extended_prec = valid
+        end
+
+        if !valid
+            state.code = TrackerCode.TERMINATED_INVALID_STARTVALUE
+            return state.code
+        end
+
+        copyto!(state.x, state.x̄)
+        state.ω = isnan(ω) ? ω_init : ω
+        state.ω_prev = state.ω
+        state.μ = max(isnan(μ) ? μ_init : μ, eps())
+        state.accuracy = state.μ
+    else
+        # ω and μ provided — trust caller, skip Newton correction
+        state.ω = ω
+        state.ω_prev = ω
+        state.μ = max(μ, eps())
+        state.accuracy = max(μ, eps())
     end
 
-    if !valid
-        state.code = TrackerCode.TERMINATED_INVALID_STARTVALUE
-        return state.code
-    end
-
-    copyto!(state.x, state.x̄)
-    state.accuracy = max(μ, eps())
-    state.ω = ω
-    state.ω_prev = ω
-    state.μ = max(μ, eps())
-
+    # Initialize predictor (evaluate Jacobian + Taylor coefficients)
+    evaluate_and_jacobian!(
+        tracker.corrector.r, state.jacobian.workspace.A,
+        tracker.homotopy, state.x, t₁,
+    )
+    updated!(state.jacobian)
     update!(pred, tracker.homotopy, state.x, t₁, state.jacobian, state.norm)
     state.τ = pred.trust_region
     state.cond_J_ẋ = pred.cond_H_x
 
     Δs = _compute_initial_stepsize(state, pred, opts, tracker.constants)
+    Δs = min(Δs, max_initial_step_size)
     propose_step!(state.segment, Δs)
 
     return state.code
@@ -499,7 +522,6 @@ function resume_from!(tracker::Tracker, t₀::ComplexF64)::TrackerCode.T
     reinit!(state.segment, t_current, t₀)
     state.code = TrackerCode.TRACKING
     state.Δs_prev = 0.0
-    state.last_steps_failed = 0
 
     Δs = _compute_initial_stepsize(state, pred, opts, tracker.constants)
     propose_step!(state.segment, Δs)
