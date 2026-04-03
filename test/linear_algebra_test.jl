@@ -86,11 +86,12 @@ end
     WS = MatrixWorkspace(n, n)
     copyto!(WS.A, A_data)
     updated!(WS)
+    norm = WeightedNorm(FSVec{Float64}(ones(n)))
     x = FSVec{ComplexF64}(zeros(ComplexF64, n))
     LA.ldiv!(x, WS, FSVec{ComplexF64}(copy(b_data)))
     err_before = LA.norm(Vector(x) - x_true)
 
-    mixed_precision_iterative_refinement!(x, WS, FSVec{ComplexF64}(b_data))
+    mixed_precision_iterative_refinement!(x, WS, FSVec{ComplexF64}(b_data), norm)
     @test LA.norm(Vector(x) - x_true) <= err_before + 1.0e-14
 end
 
