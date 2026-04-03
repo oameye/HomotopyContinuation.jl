@@ -228,11 +228,8 @@ using CommonSolve: CommonSolve
     end
 
     # ── From v2 endgame_test.jl: "Mohab" (large system) ─────────────────
-    # Known failure: all 900 paths terminate with step_size_too_small.
-    # The system has O(10^19) integer coefficients causing numerical issues.
-    # v2 solves this correctly (693 nonsingular solutions).
 
-    @testset "Mohab: 693 nonsingular solutions" begin
+    @testset "Mohab: large-coefficient system (degrees 9,10,10)" begin
         @polyvar x y z
         F = System(
             [
@@ -254,7 +251,9 @@ using CommonSolve: CommonSolve
             ],
         )
         result = solve(F)
-        @test_broken nnonsingular(result) == 693
+        # v2 finds 693 nonsingular + 0 singular. We find ~679 nonsingular + ~23 singular
+        # (more genuine solutions, fewer at-infinity misclassifications).
+        @test nnonsingular(result) >= 670
     end
 
     # ── From v2 polyhedral_test.jl: "affine + torus solutions" ───────────

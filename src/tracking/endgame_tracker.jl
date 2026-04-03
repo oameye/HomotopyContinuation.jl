@@ -19,6 +19,7 @@ using LinearAlgebra: LinearAlgebra as LA
     sing_cond::Float64 = 1.0e14
     sing_accuracy::Float64 = 1.0e-12
     scaling_threshold::Float64 = -30.0
+    max_residual::Float64 = 1.0e-3
     refine_steps::Int = 3
     lambda::Float64 = 0.25
 end
@@ -244,6 +245,15 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
             eg.tracker.corrector.r, ws.A, eg.tracker.homotopy,
             state.solution, complex(0.0),
         )
+
+        # Residual sanity check: if ‖H(solution, 0)‖ is large, the path diverged
+        # to a spurious point. Reclassify as at-infinity rather than success.
+        residual = inf_norm(eg.tracker.corrector.r)
+        if residual > opts.max_residual
+            state.code = EndgameCode.AT_INFINITY
+            return nothing
+        end
+
         updated!(ws)
         skeel_row_scaling!(state.row_scaling, ws, state.col_scaling)
         factorize!(ws)

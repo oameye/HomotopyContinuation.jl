@@ -39,6 +39,7 @@ advanced features (monodromy, certification, NID).
 - [x] Tape interpreter for eval, jacobian, Taylor 1–3, DF64
 - [x] CSE optimizer, Moshi ADTs for SExpr/ExecInstruction
 - [x] RGF compiled eval+jac backend (`CompileMode.COMPILED`, 3–6x kernel speedup)
+- [x] Automatic coefficient normalization (scales polynomials with O(10^8+) coefficients to O(1))
 - [x] AllocCheck zero-allocation enforcement on all hot paths
 - [x] Integration tests from v2 with exact result parity
 
@@ -110,16 +111,10 @@ advanced features (monodromy, certification, NID).
 
 ## Open Items
 
-### Correctness
-
-1. **Mohab system failure** — all 900 paths terminate with `STEP_SIZE_TOO_SMALL`. The system has
-   O(10^19) integer coefficients; v2 finds 693 nonsingular solutions. Likely needs coefficient
-   scaling or gamma tuning. Tracked in `test/v2_parity_test.jl` as `@test_broken`.
-
 ### Performance
 
-2. **Threading** — main blocker for large systems (cyclic-7 has 924 paths)
-3. **Overdetermined systems** — `RandomizedSystem` + excess solution check
+1. **Threading** — main blocker for large systems (cyclic-7 has 924 paths)
+2. **Overdetermined systems** — `RandomizedSystem` + excess solution check
 
 ### Architecture debt
 

@@ -124,6 +124,23 @@ function _is_homogeneous(
     return true
 end
 
+## ── Polynomial normalization ────────────────────────────────────────────────
+
+function _normalize_polys(
+        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+    )
+    Base.@nospecialize polys
+    # Only normalize when coefficients are large enough to cause numerical issues.
+    # Threshold 1e8: systems with moderate coefficients (e.g. 100) are unchanged,
+    # but O(10^19) integer coefficients get scaled to O(1).
+    return map(polys) do p
+        coeffs = MP.coefficients(p)
+        nrm = maximum(c -> Float64(abs(c)), coeffs)
+        nrm <= 1.0e8 && return p
+        return p / nrm
+    end
+end
+
 ## ── FW-compatible wrapper functions ──────────────────────────────────────────
 
 
@@ -137,6 +154,8 @@ end
         compile::CompileMode.T,
     )::System
     Base.@nospecialize polys variables parameters
+    polys = _normalize_polys(polys)
+
     supp, coeffs = if nparams == 0
         support_coefficients(polys, variables)
     else
