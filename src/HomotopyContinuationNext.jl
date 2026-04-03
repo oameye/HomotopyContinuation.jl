@@ -19,6 +19,7 @@ RuntimeGeneratedFunctions.init(@__MODULE__)
 @enumx CompileMode::Int8 begin
     INTERPRETED
     COMPILED
+    COMPILED_ALL
 end
 
 export @polyvar, solve, System

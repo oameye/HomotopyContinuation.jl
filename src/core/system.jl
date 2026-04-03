@@ -181,10 +181,16 @@ end
             interp_t1, interp_t2, interp_t3,
             neqs, nvars, nparams,
         )
-    else  # CompileMode.COMPILED
+    elseif compile == CompileMode.COMPILED
         _build_compiled_evaluator(
-            seq_eval, seq_jac,
-            interp_df64, interp_t1, interp_t2, interp_t3,
+            seq_eval, seq_jac, interp_df64,
+            _build_taylor_fws(interp_t1, interp_t2, interp_t3),
+            neqs, nvars, nparams,
+        )
+    else  # CompileMode.COMPILED_ALL
+        _build_compiled_evaluator(
+            seq_eval, seq_jac, interp_df64,
+            _build_taylor_fws(seq_eval),
             neqs, nvars, nparams,
         )
     end

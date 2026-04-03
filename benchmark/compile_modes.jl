@@ -136,4 +136,84 @@ if abspath(PROGRAM_FILE) == @__FILE__
         t_c = @belapsed solve($sys_c)
         println("  katsura-$n: interp=$(round(t_i * 1.0e3; digits = 2))ms  compiled=$(round(t_c * 1.0e3; digits = 2))ms  speedup=$(round(t_i / t_c; digits = 2))x")
     end
+
+    println("\n── Taylor through SystemEvaluator ──")
+    using HomotopyContinuationNext: taylor!, TaylorVector
+    for n in [3, 5, 7]
+        @polyvar kv[1:(n + 1)]
+        F = _katsura(kv, n)
+        sys_i = System(F; compile = CompileMode.INTERPRETED)
+        sys_c = System(F; compile = CompileMode.COMPILED)
+        sys_a = System(F; compile = CompileMode.COMPILED_ALL)
+
+        m = n + 1
+        pv = FSVec{ComplexF64}(ComplexF64[])
+        for K in 1:3
+            N = K + 1
+            data = FSMat{ComplexF64}(randn(ComplexF64, N, m))
+            tx = TaylorVector{N, ComplexF64}(data)
+            u = FSVec{ComplexF64}(zeros(ComplexF64, m))
+
+            taylor!(u, Val(K), sys_i.evaluator, tx, pv)
+            taylor!(u, Val(K), sys_c.evaluator, tx, pv)
+            taylor!(u, Val(K), sys_a.evaluator, tx, pv)
+
+            t_i = @belapsed taylor!($u, Val($K), $(sys_i.evaluator), $tx, $pv)
+            t_c = @belapsed taylor!($u, Val($K), $(sys_c.evaluator), $tx, $pv)
+            t_a = @belapsed taylor!($u, Val($K), $(sys_a.evaluator), $tx, $pv)
+            println("  katsura-$n taylor_$K: interp=$(round(t_i * 1.0e9; digits = 1))ns  compiled=$(round(t_c * 1.0e9; digits = 1))ns  all=$(round(t_a * 1.0e9; digits = 1))ns  speedup=$(round(t_i / t_a; digits = 2))x")
+        end
+    end
+
+    println("\n── Taylor with TaylorVector parameters (production path) ──")
+    for n in [3, 5, 7]
+        @polyvar kv[1:(n + 1)]
+        @polyvar params[1:(n + 1)]
+        F_param = _katsura(kv, n)
+        # Make it parametric by multiplying each eq by a parameter
+        F_param = [params[i] * F_param[i] for i in eachindex(F_param)]
+        sys_i = System(F_param; parameters = collect(params), compile = CompileMode.INTERPRETED)
+        sys_c = System(F_param; parameters = collect(params), compile = CompileMode.COMPILED)
+        sys_a = System(F_param; parameters = collect(params), compile = CompileMode.COMPILED_ALL)
+
+        m = n + 1
+        for K in 1:3
+            N = K + 1
+            data_x = FSMat{ComplexF64}(randn(ComplexF64, N, m))
+            tx = TaylorVector{N, ComplexF64}(data_x)
+            data_p = FSMat{ComplexF64}(randn(ComplexF64, N, m))
+            tp = TaylorVector{N, ComplexF64}(data_p)
+            u = FSVec{ComplexF64}(zeros(ComplexF64, m))
+
+            taylor!(u, Val(K), sys_i.evaluator, tx, tp)
+            taylor!(u, Val(K), sys_c.evaluator, tx, tp)
+            taylor!(u, Val(K), sys_a.evaluator, tx, tp)
+
+            t_i = @belapsed taylor!($u, Val($K), $(sys_i.evaluator), $tx, $tp)
+            t_c = @belapsed taylor!($u, Val($K), $(sys_c.evaluator), $tx, $tp)
+            t_a = @belapsed taylor!($u, Val($K), $(sys_a.evaluator), $tx, $tp)
+            println("  katsura-$n taylor_$K(param): interp=$(round(t_i * 1.0e9; digits = 1))ns  compiled=$(round(t_c * 1.0e9; digits = 1))ns  all=$(round(t_a * 1.0e9; digits = 1))ns  speedup=$(round(t_i / t_a; digits = 2))x")
+        end
+    end
+
+    println("\n── End-to-end solve (COMPILED_ALL) ──")
+    for n in [3, 4, 5]
+        @polyvar kv[1:(n + 1)]
+        F = _katsura(kv, n)
+        sys_c = System(F; compile = CompileMode.COMPILED)
+        sys_a = System(F; compile = CompileMode.COMPILED_ALL)
+        solve(sys_c); solve(sys_a)
+        t_c = @belapsed solve($sys_c)
+        t_a = @belapsed solve($sys_a)
+        println("  katsura-$n: compiled=$(round(t_c * 1.0e3; digits = 2))ms  all=$(round(t_a * 1.0e3; digits = 2))ms  speedup=$(round(t_c / t_a; digits = 2))x")
+    end
+
+    println("\n── Build time (COMPILED_ALL) ──")
+    for n in [3, 5, 7]
+        @polyvar kv[1:(n + 1)]
+        F = _katsura(kv, n)
+        t_c = @belapsed System($F; compile = CompileMode.COMPILED)
+        t_a = @belapsed System($F; compile = CompileMode.COMPILED_ALL)
+        println("  katsura-$n: compiled=$(round(t_c / 1.0e-6; digits = 1))us  all=$(round(t_a / 1.0e-6; digits = 1))us  overhead=$(round(t_a / t_c; digits = 2))x")
+    end
 end

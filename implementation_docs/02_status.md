@@ -39,6 +39,7 @@ advanced features (monodromy, certification, NID).
 - [x] Tape interpreter for eval, jacobian, Taylor 1–3, DF64
 - [x] CSE optimizer, Moshi ADTs for SExpr/ExecInstruction
 - [x] RGF compiled eval+jac backend (`CompileMode.COMPILED`, 3–6x kernel speedup)
+- [x] RGF compiled Taylor backend (`CompileMode.COMPILED_ALL`, 1.3–1.7x Taylor kernel speedup, ~1.2x end-to-end)
 - [x] Automatic coefficient normalization (scales polynomials with O(10^8+) coefficients to O(1))
 - [x] AllocCheck zero-allocation enforcement on all hot paths
 - [x] Integration tests from v2 with exact result parity
@@ -51,7 +52,6 @@ advanced features (monodromy, certification, NID).
 ### Not Done — Later
 
 - [ ] Direct polynomial compiler (`polynomial_compiler.jl` exists, deferred)
-- [ ] Compiled Taylor backend (RGF codegen, only if profiling justifies)
 - [ ] Standalone `newton(F, x0)`, progress bars, path diagnostics
 - [ ] Monodromy, certification, witness sets, NID
 - [ ] Benchmark CI
@@ -90,6 +90,24 @@ advanced features (monodromy, certification, NID).
 | katsura-3 | 3.2x | 3.9x |
 | katsura-5 | 3.5x | 5.6x |
 | katsura-7 | 3.3x | 6.3x |
+
+#### COMPILED_ALL (compiled Taylor) vs COMPILED
+
+Scalar-parameter Taylor kernel (parameter-free systems):
+
+| System | Taylor 1 speedup | Taylor 2 speedup | Taylor 3 speedup | Solve speedup | Build overhead |
+|--------|------------------:|------------------:|------------------:|--------------:|---------------:|
+| katsura-3 | 1.48x | 1.66x | 1.69x | 1.09x | 1.65x |
+| katsura-5 | 1.54x | 1.52x | 1.54x | 1.08x | 1.41x |
+| katsura-7 | 1.70x | 1.63x | 1.69x | — | 1.30x |
+
+TaylorVector-parameter Taylor kernel (production path — CoefficientHomotopy/ToricHomotopy):
+
+| System | Taylor 1 speedup | Taylor 2 speedup | Taylor 3 speedup |
+|--------|------------------:|------------------:|------------------:|
+| katsura-3 | 1.51x | 1.55x | 1.45x |
+| katsura-5 | 1.38x | 1.61x | 1.28x |
+| katsura-7 | 1.30x | 1.55x | 1.27x |
 
 #### TTFX (fresh session)
 
