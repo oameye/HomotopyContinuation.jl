@@ -32,7 +32,7 @@ Verify: `isconcretetype(FixedSizeVector{Float64})` → `false`.
 
 Old code cached `_hash::UInt` at construction. Moshi `@data` SExpr recomputes hashes on every `hash()` call. For deeply nested expressions used as Dict/Set keys in CSE, this could regress build time on large systems. Not yet benchmarked on cyclic-7/8 Jacobians.
 
-### `_stable_sort!` is insertion sort (O(n^2))
+### `_stable_sort!` is insertion sort (O(n²))
 
 Replaces `sort!(..., alg=MergeSort)`. Fine for small arrays (<50) but used on `vertex_list` in `_optimize_instruction_order` which can be hundreds of elements for Jacobian tapes. Consider `sort!(..., alg=InsertionSort)` from Base.
 
@@ -43,6 +43,10 @@ LAPACK blocked factorization. Use `Matrix{ComplexF64}` with `LinearAlgebra.qrfac
 ### LU ipiv type differs for FSMat
 
 `lu!(FSMat)` returns `LU{ComplexF64, FSMat{ComplexF64}, FSVec{Int64}}` — not `Vector{BlasInt}`.
+
+### System{P, V} type parameters
+
+The `System` struct is parameterized on `P` (polynomial type) and `V` (variable type) from DynamicPolynomials. These only affect the `polys`, `parameters`, and `variables` fields — all evaluation goes through the type-erased `SystemEvaluator`. The parameters are invisible to the tracker.
 
 ## Design Decisions
 
@@ -73,3 +77,30 @@ Old approach: `@generated` functions with enum if-else chain and op-order tuning
 ### Moshi @data for SExpr — SHIPPED
 
 Old: abstract type hierarchy with 9 concrete subtypes → `Vector{SExpr}` was abstractly typed, forcing dynamic dispatch in CSE. New: `@data SExpr` gives single concrete type `SExprT`. All Dict/Set operations use `SExprT` directly.
+
+### RuntimeGeneratedFunctions for compiled mode — SHIPPED
+
+`codegen.jl` (299 lines) generates Julia functions from `InstructionSequence` at runtime via `@RuntimeGeneratedFunction`. Three modes:
+- `INTERPRETED`: all operations go through the tape interpreter
+- `COMPILED`: RGF for eval + jacobian, interpreter for Taylor (3–6x kernel speedup)
+- `COMPILED_ALL`: RGF for eval, jacobian, and Taylor orders 1–3 (~1.3x additional Taylor speedup, ~1.2x end-to-end)
+
+Build overhead for `COMPILED_ALL` is 1.3–1.65x vs `COMPILED`, but the Taylor kernel wins compound over many path steps.
+
+### Builder/worker-state threading pattern — SHIPPED
+
+Thread-safe parallel path tracking via reconstruction, not cloning. Each `Builder` struct stores immutable data (degrees, system, γ, options) and produces a fresh `WorkerState` with independent mutable state per call. `_clone_system_evaluator` creates new interpreter tapes from shared `InstructionSequence`s and preserves `CompileMode` (re-generates RGFs for COMPILED/COMPILED_ALL). OhMyThreads `@tasks`/`@local` creates one worker state per task, not per path.
+
+Alternative considered: `deepcopy` — rejected because it copies immutable data wastefully and doesn't handle RGFs correctly.
+
+### Task-local RNG for reproducibility — SHIPPED
+
+`solve()` uses `Random.MersenneTwister(seed)` passed explicitly to all `rand`/`randn` calls instead of mutating global RNG with `Random.seed!`. Polyhedral init passes a custom `_lifting_sampler` closure to `MixedSubdivisions.fine_mixed_cells` that draws from the local rng. Same seed → same RNG stream → full reproducibility, but thread-safe for nested parallel calls.
+
+### Union-find solution clustering — SHIPPED
+
+`Result` constructor automatically deduplicates successful paths using O(k²) pairwise comparison with union-find. Tolerance: `max(atol, rtol * max(‖s1‖, ‖s2‖))` in infinity norm. Transitive and order-independent. `multiplicity` tracks cluster sizes.
+
+### Coefficient normalization — SHIPPED
+
+Systems with O(10⁸+) coefficients are automatically scaled to O(1) at construction time to improve numerical conditioning in the tracker.

@@ -13,6 +13,7 @@ using FixedSizeArrays: FixedSizeArray
 import FunctionWrappers: FunctionWrapper
 using CommonSolve: CommonSolve
 using MixedSubdivisions: MixedSubdivisions
+using OhMyThreads: @tasks, @set, @local
 using RuntimeGeneratedFunctions: RuntimeGeneratedFunctions, @RuntimeGeneratedFunction
 RuntimeGeneratedFunctions.init(@__MODULE__)
 
@@ -29,6 +30,7 @@ export nresults, results, multiplicity
 export is_success, is_singular, is_nonsingular, is_at_infinity, is_real
 export TotalDegree, Polyhedral, Result, PathResult
 export EndgameOptions, EndgameTracker
+export Serial, Threaded
 
 const MP = MultivariatePolynomials
 # Concrete type aliases — FixedSizeVector{T} alone is NOT concrete because
@@ -74,9 +76,12 @@ include("tracking/predictor.jl")
 include("tracking/tracker.jl")
 include("tracking/valuation.jl")
 include("tracking/endgame_tracker.jl")
+include("solving/executor.jl")
+include("solving/worker_state.jl")
 include("solving/binomial_system.jl")
 include("solving/path_result.jl")
 include("solving/total_degree.jl")
+include("solving/builder.jl")
 include("solving/polyhedral.jl")
 include("solving/result.jl")
 include("solving/solve.jl")

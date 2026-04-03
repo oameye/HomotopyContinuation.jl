@@ -40,6 +40,7 @@ struct System{P, V}
     _interp_t1::Interpreter{Vector{TruncatedTaylorSeries{2, ComplexF64}}}
     _interp_t2::Interpreter{Vector{TruncatedTaylorSeries{3, ComplexF64}}}
     _interp_t3::Interpreter{Vector{TruncatedTaylorSeries{4, ComplexF64}}}
+    compile_mode::CompileMode.T
 end
 
 ## ── System constructor ──────────────────────────────────────────────────────
@@ -204,6 +205,7 @@ end
         supp, coeffs,
         interp_f64, interp_df64, interp_jac,
         interp_t1, interp_t2, interp_t3,
+        compile,
     )
 end
 

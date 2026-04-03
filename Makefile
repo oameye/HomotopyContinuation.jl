@@ -13,6 +13,9 @@ test: ## Run all tests in parallel (via ParallelTestRunner)
 test-serial: ## Run all tests serially (for debugging)
 	$(JULIA) --project=test test/runtests.jl --jobs=1
 
+test-threaded: ## Run solve tests with multiple threads (exercises Threaded executor)
+	$(JULIA) -t auto --project -e 'using TestEnv; TestEnv.activate(); include("test/solve_test.jl")'
+
 benchmark: ## Run benchmarks
 	$(JULIA) --project=benchmark benchmark/runbenchmarks.jl
 
