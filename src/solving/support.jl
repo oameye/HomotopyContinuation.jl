@@ -35,8 +35,8 @@ function support_coefficients(
                 end
             end
         end
-        # Sort columns by descending total degree, then descending lexicographic
-        # (v2 parity: matches HC ModelKit's td_order for identical RNG paths)
+        # Sort columns by descending total degree, then descending lexicographic.
+        # This canonical ordering ensures coefficient indices match the support.
         perm = _td_order_perm(S)
         supports[k] = S[:, perm]
         coeffs[k] = c[perm]
@@ -50,7 +50,6 @@ end
 
 Compute permutation that sorts support columns by descending total degree,
 with ties broken by descending lexicographic order of exponent vectors.
-Matches v2's `td_order` for identical monomial ordering.
 """
 function _td_order_perm(S::Matrix{Int32})::Vector{Int}
     ncols = size(S, 2)

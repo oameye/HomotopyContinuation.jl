@@ -60,7 +60,7 @@ mutable struct EndgameState
     ext_steps_eg_start::Int
     # Jump-to-zero tracking: (prev_prev, prev) history of whether the tracker
     # proposed a step reaching t=0. Used to gate singular endgame entry for
-    # m=1 paths (v2 parity).
+    # m=1 paths — prevents spurious singular endgame entry for regular paths.
     jump_to_zero_attempted::Tuple{Bool, Bool}
     # At-infinity per-coordinate tracking
     const at_inf_starts::FSVec{Float64}
@@ -236,9 +236,9 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
         @inbounds for i in eachindex(state.col_scaling)
             state.col_scaling[i] = ts.norm.weights[i]
         end
-        # Evaluate Jacobian at (solution, t=0) to get condition at the target (v2 parity).
-        # The tracker's workspace holds the Jacobian at its last position, which may be
-        # at t > 0. Re-evaluating at t=0 gives the correct singularity assessment.
+        # Evaluate Jacobian at (solution, t=0) to assess singularity at the target.
+        # The tracker's workspace holds the Jacobian at its last position (t > 0),
+        # which is not the right place for the singularity classification.
         ws = ts.jacobian.workspace
         evaluate_and_jacobian!(
             eg.tracker.corrector.r, ws.A, eg.tracker.homotopy,
@@ -279,7 +279,7 @@ end
     return norm_val
 end
 
-# Row-scaled-only inf norm for J₀ (v2 parity: inf_norm(WS, row_scaling) without col_scaling)
+# Row-scaled-only inf norm for J₀ (no col_scaling — used for singular endgame acceptance)
 @inline function _row_scaled_inf_norm_matrix(
         ws::MatrixWorkspace,
         row_scaling::FSVec{Float64},
@@ -426,10 +426,10 @@ function step!(eg::EndgameTracker)::Nothing
         return nothing
     end
 
-    # Track whether the proposed step was trying to reach t=0 (v2 parity:
-    # jump_to_zero_attempted gates singular endgame entry for m=1 paths).
-    # v2 checks `iszero(tracker.state.t′)` — whether the proposed target time is zero.
-    # In v3, for a backward segment (1→0), s′=0.0 means reaching the target.
+    # Track whether the proposed step was trying to reach t=0.
+    # This gates singular endgame entry for m=1 paths: only enter the singular
+    # endgame if a previous step already attempted to jump directly to zero.
+    # For a backward segment (1→0), s′=0.0 means the step targets the endpoint.
     seg = tracker.state.segment
     is_jump_to_zero = !seg.forward && seg.s′ == 0.0
 
@@ -458,7 +458,7 @@ function step!(eg::EndgameTracker)::Nothing
     end
     state.steps_eg += 1
 
-    # Match v2: do not update valuation state until a tracker step was accepted.
+    # Only update valuation state after an accepted tracker step.
     # Rejected steps keep the same predictor data and t-value.
     if !accepted
         # Pragmatic parity fix: if the valuation from previous accepted endgame steps
@@ -526,7 +526,7 @@ function check_finite!(eg::EndgameTracker)::Bool
     # Guard: only consider the singular endgame if all coordinates have finite
     # valuations. Without this gate, at-infinity paths (val_x ≈ −1) would
     # erroneously enter the singular endgame before check_at_infinity! runs.
-    # This matches v2's `is_finite(...) || return false` guard.
+    # Without this gate, at-infinity paths would enter the singular endgame.
     is_finite(
         val;
         finite_tol = opts.val_finite_tol,
@@ -539,9 +539,8 @@ function check_finite!(eg::EndgameTracker)::Bool
     if m_err < opts.val_finite_tol
         # Winding number is reliable.
         # For m=1: only enter singular endgame if a previous step attempted to
-        # jump directly to t=0 (v2 parity). This prevents spurious singular
-        # endgame entry for paths that are regular but have slightly noisy
-        # winding number estimates.
+        # jump directly to t=0. This prevents spurious singular endgame entry
+        # for paths that are regular but have slightly noisy winding estimates.
         if m == 1 && !state.jump_to_zero_attempted[1]
             return false
         end
@@ -816,7 +815,7 @@ function _predict_and_finalize!(eg::EndgameTracker, max_steps::Bool)::Nothing
     κ_0 = _scaled_cond(ws, state.row_scaling, state.col_scaling)
     J0_norm = _row_scaled_inf_norm_matrix(ws, state.row_scaling)
 
-    # Acceptance criteria (v2 parity)
+    # Acceptance criteria for singular endpoint prediction
     accepted = state.accuracy < opts.singular_min_accuracy && (
         (
             m > 1 && κ_sample > opts.min_cond &&
@@ -851,8 +850,8 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
     t_current = real(tracker.state.segment.t)
     t_new = λ * t_current
 
-    # Track inner tracker to next geometric point (v2 parity: init!(tracker, λ*t)
-    # preserves x, counters, norm, Jacobian, last_steps_failed)
+    # Track inner tracker to next geometric point via lightweight segment reinit
+    # (preserves x, counters, norm, Jacobian, last_steps_failed)
     reinit!(tracker.state.segment, complex(t_current), complex(t_new))
     tracker.state.code = TrackerCode.TRACKING
     tracker.state.Δs_prev = 0.0
@@ -885,7 +884,7 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
     end
 
     # Inner tracker failed to reach t_new — attempt finalization with existing
-    # samples if we have enough, otherwise give up (v2 parity).
+    # samples if we have enough, otherwise give up.
     if tracker.state.code != TrackerCode.TRACKER_SUCCESS
         if state.singular_steps >= 2
             _predict_and_finalize!(eg, true)
@@ -922,7 +921,7 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
     acc = predict_endpoint!(eg)
 
     if state.singular_steps == 2
-        # Always store the first prediction (v2 parity). Convergence acceptance
+        # Always store the first prediction. Convergence acceptance
         # happens in _predict_and_finalize!, not here.
         state.accuracy = acc
         copyto!(state.solution, state.prediction)

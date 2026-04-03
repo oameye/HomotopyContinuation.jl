@@ -117,8 +117,8 @@ function PathResult(eg::EndgameTracker)
     ts = eg.tracker.state
     success = state.code == EndgameCode.SUCCESS
 
-    # Match v2 semantics: only successful endgame paths report the extrapolated
-    # endpoint at t=0. Failed or truncated paths report the actual last tracker point.
+    # Only successful endgame paths report the extrapolated endpoint at t=0.
+    # Failed or truncated paths report the actual last tracker point.
     solution = if success
         Vector{ComplexF64}(state.solution)
     else

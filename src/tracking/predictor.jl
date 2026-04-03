@@ -101,7 +101,7 @@ function update!(
     # Fixed-precision refinement + condition estimate
     δ = fixed_precision_iterative_refinement!(xtemp, J.workspace, u, norm)
     pred.cond_H_x = δ / eps()
-    # Multi-round mixed-precision refinement for accurate Taylor coefficients (v2 parity)
+    # Multi-round mixed-precision refinement for accurate Taylor coefficients
     if δ > 1.0e-10
         iterative_refinement!(xtemp, J.workspace, u; tol = 1.0e-10, max_iters = 5)
     end
@@ -116,9 +116,8 @@ function update!(
         pred.method = PredictionMethod.HERMITE
         pred.trust_region = n0 / max(n1, 1.0e-30)
         if isnan(pred.local_error)
-            # Match v2's Hermite-mode bootstrap. This seeds the initial
-            # local-error estimate from the first-derivative scale rather than
-            # the generic Padé trust-region formula.
+            # Hermite-mode bootstrap: seed the initial local-error estimate from
+            # the first-derivative scale rather than the Padé trust-region formula.
             pred.local_error = (n1 / max(n0, 1.0e-30))^3
         end
         return nothing

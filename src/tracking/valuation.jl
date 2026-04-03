@@ -59,7 +59,7 @@ function init!(val::Valuation)::Nothing
     return nothing
 end
 
-# Non-uniform 2-point finite difference (v2 parity: valuation.jl:138)
+# Non-uniform 2-point finite difference for valuation derivative estimates
 @inline function _finite_diff(
         f3::Float64, s3::Float64, f2::Float64, s2::Float64, f1::Float64, s1::Float64,
     )::Float64

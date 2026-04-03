@@ -583,7 +583,7 @@ function fixed_precision_iterative_refinement!(
 end
 
 # ---------------------------------------------------------------------------
-# Multi-round Mixed-Precision Iterative Refinement (v2 parity)
+# Multi-round Mixed-Precision Iterative Refinement
 # ---------------------------------------------------------------------------
 
 """
@@ -594,7 +594,7 @@ Perform multiple rounds of mixed-precision iterative refinement until the
 relative correction reaches `tol` or convergence stalls.
 
 When `norm::WeightedNorm` is given, uses weighted-norm refinement.
-Without `norm`, uses inf-norm refinement (v2 parity for dx/dt).
+Without `norm`, uses inf-norm refinement (appropriate for dx/dt coefficients).
 """
 function iterative_refinement!(
         x::AbstractVector{ComplexF64},

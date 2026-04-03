@@ -5,7 +5,7 @@
 #
 # Taylor computation uses Cauchy product convolution: parameter Taylor coefficients
 # are packed into a TaylorVector and passed through the SystemEvaluator FunctionWrapper,
-# so the interpreter's taylor_op_mul handles the convolution automatically (v2 parity).
+# so the interpreter's taylor_op_mul handles the convolution automatically.
 
 struct CoefficientHomotopy <: AbstractHomotopy
     system::SystemEvaluator
@@ -49,7 +49,7 @@ Base.size(H::CoefficientHomotopy) = size(H.system)
 
 @inline function _update_coeffs!(H::CoefficientHomotopy, t::ComplexF64)::Nothing
     H.t_cache[] == t && return nothing
-    # Use real arithmetic when t is real to avoid complex multiply roundoff (v2 parity)
+    # Use real arithmetic when t is real to avoid complex multiply roundoff
     if isreal(t)
         s = real(t)
         s1 = 1.0 - s

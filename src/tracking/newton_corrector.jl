@@ -194,8 +194,8 @@ function newton!(
                 )
             end
         else
-            # Update omega at second iteration only (v2 parity: ω set once at i=1,
-            # not updated at later iterations)
+            # Update ω at k=1 only — later iterations have tiny corrections where
+            # numerical noise dominates the ratio ‖Δx_k‖/‖Δx_{k-1}‖²
             if k == 1 && norm_Δx_prev > eps()
                 norm_Δx_prev_sq = norm_Δx_prev * norm_Δx_prev
                 ω = 2.0 * norm_Δx / norm_Δx_prev_sq
@@ -218,7 +218,8 @@ function newton!(
         norm_Δx_sq = norm_Δx * norm_Δx
         if ω * norm_Δx_sq < 2.0 * μ * sqrt_1m2ha
             # One more eval+solve to get accuracy estimate.
-            # V2 parity: final solve does NOT use row scaling (passes J without norm).
+            # Final accuracy solve without row scaling — the accuracy estimate
+            # should reflect the unscaled residual, not the preconditioned one.
             evaluate_and_jacobian!(r, J.workspace.A, H, x̄, t)
             updated!(J)
 
@@ -326,7 +327,7 @@ function init_newton!(
     Δx = NC.Δx
     r = NC.r
 
-    # First Newton step from x₀ to get initial residual size (v2 parity)
+    # First Newton step from x₀ to get initial residual size
     evaluate_and_jacobian!(r, J.workspace.A, H, x₀, t)
     updated!(J)
     if extended_precision
@@ -336,7 +337,8 @@ function init_newton!(
     LA.ldiv!(Δx, J, r, norm)
     v = weighted_norm(Δx, norm) + eps()
 
-    # x̄ = x₀ (v2 parity: perturbation is from x₀, not from x₀ - Δx)
+    # Perturb from x₀ directly — using x₀ - Δx would couple the perturbation
+    # direction to the Newton correction quality
     copyto!(x̄, x₀)
 
     # Perturbation strategy: try up to 3 times with decreasing perturbation
@@ -346,7 +348,7 @@ function init_newton!(
     valid = false
 
     for _attempt in 1:3
-        # Perturb from x₀: x̄ = x₀ + ε * weights (v2 parity)
+        # Perturb from x₀: x̄ = x₀ + ε * weights
         @inbounds for i in eachindex(x̄)
             x̄[i] = x₀[i] + ε * norm.weights[i]
         end
@@ -371,8 +373,8 @@ function init_newton!(
             x̄[i] -= Δx[i]
         end
 
-        # Second step: evaluate RESIDUAL ONLY at x̄, reuse Jacobian from first step
-        # (v2 parity: uses evaluate!, not evaluate_and_jacobian!)
+        # Second step: evaluate residual only at x̄, reuse Jacobian from first step
+        # (the Jacobian changes slowly for small corrections)
         if extended_precision
             _copy_df64!(NC.x_ext, x̄)
             evaluate!(r, H, NC.x_ext, t)
@@ -380,7 +382,7 @@ function init_newton!(
             evaluate!(r, H, x̄, t)
         end
         LA.ldiv!(Δx, J, r, norm)
-        norm_Δx₁ = weighted_norm(Δx, norm) + eps()  # v2 parity: adds eps()
+        norm_Δx₁ = weighted_norm(Δx, norm) + eps()  # prevent zero-division in ω estimate
 
         if norm_Δx₁ < a * norm_Δx₀
             # Apply second correction

@@ -141,7 +141,7 @@ function _compute_initial_stepsize(
     e = pred.local_error
     τ = pred.trust_region
 
-    # Fallback for infinite/NaN local error (v2 parity: use conservative estimate)
+    # Fallback for infinite/NaN local error — use a conservative estimate
     if !isfinite(e) || e <= 0
         e = 1.0e5
     end
@@ -163,7 +163,7 @@ function _update_stepsize!(
     p = pred.order
 
     if result.return_code == NewtonCode.NEWT_CONVERGED
-        # ω extrapolation: predict ω trend to take larger steps (v2 parity)
+        # ω extrapolation: predict ω trend to take larger steps
         ω = clamp(state.ω + 2 * (state.ω - state.ω_prev), state.ω, 8 * state.ω)
         e = pred.local_error
         τ = state.τ
@@ -183,7 +183,7 @@ function _update_stepsize!(
 
         Δs = min(nanmin(Δs₁, Δs₂), opts.max_step_size)
 
-        # Near-target refinement (v2 parity)
+        # Near-target refinement: tighten step size when close to endpoint
         if state.use_strict_β_τ && dist_to_target(state.segment) < Δs
             Δs *= opts.strict_β_τ
         end
@@ -197,7 +197,8 @@ function _update_stepsize!(
             Δs = min(Δs, state.Δs_prev)
         end
     else
-        # Convergence-rate-based rejection reduction (v2 parity)
+        # Convergence-rate-based rejection: use Newton convergence rate θ to
+        # estimate how much to reduce step size
         # Use Newton convergence rate θ to estimate how much to reduce step size
         j = result.iters - 2
         Θ_j = j > 0 ? nthroot(result.θ, 1 << j) : result.θ

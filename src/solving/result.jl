@@ -141,7 +141,7 @@ end
     nresults(r; only_real, only_nonsingular, only_singular)
 
 Number of unique solutions (deduplicated by proximity). This is the primary
-solution count — it matches v2's `nresults`.
+solution count.
 """
 function nresults(
         r::Result;
@@ -212,8 +212,8 @@ end
 """
     solutions(r; only_real)
 
-Return nonsingular solutions (deduplicated). Matches v2 semantics: singular solutions
-are excluded by default — use `results(r; only_singular=true)` to access them.
+Return nonsingular solutions (deduplicated). Singular solutions are excluded by
+default — use `results(r; only_singular=true)` to access them.
 """
 function solutions(r::Result; only_real::Bool = false, real_tol::Float64 = DEFAULT_REAL_TOL)::Vector{Vector{ComplexF64}}
     out = Vector{ComplexF64}[]
@@ -246,7 +246,7 @@ function real_solutions(r::Result; tol::Float64 = DEFAULT_REAL_TOL)::Vector{Vect
 end
 
 # Unique solution counts (deduplicated)
-# nsolutions matches v2: nonsingular only. Use nresults for all (singular + nonsingular).
+# nsolutions: nonsingular only. Use nresults for all (singular + nonsingular).
 nsolutions(r::Result)::Int = nnonsingular(r)
 
 function nsingular(r::Result)::Int
@@ -259,6 +259,6 @@ end
 
 nat_infinity(r::Result)::Int = count(is_at_infinity, r.path_results)
 
-# nreal matches v2: nonsingular real solutions only
+# nreal: nonsingular real solutions only
 nreal(r::Result; tol::Float64 = DEFAULT_REAL_TOL)::Int =
     count(c -> !r.path_results[first(c)].singular && is_real(r.path_results[first(c)]; tol = tol), r.clusters)

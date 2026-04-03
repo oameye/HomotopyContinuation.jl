@@ -124,16 +124,16 @@ function CommonSolve.init(F::System, alg::Polyhedral)::PolyhedralSolveCache
     seed = alg.seed
     n = F.nvars
 
-    # Seed the global RNG for reproducibility (v2 parity: v2 uses Random.seed!
-    # and both coefficient generation and MixedSubdivisions consume it).
+    # Seed the global RNG so that coefficient generation and MixedSubdivisions
+    # produce reproducible results for a given seed.
     Random.seed!(seed)
 
     # 1. Get support + target coefficients from the System
     source_support, source_coeffs = support_coefficients(F)
 
-    # 2. Generate start coefficients for ORIGINAL support FIRST (v2 parity:
-    #    coefficients are generated BEFORE zero column addition, using
-    #    cospi/sinpi for exact match with v2's cis2pi)
+    # 2. Generate start coefficients for ORIGINAL support FIRST.
+    #    Coefficients must be generated before zero column addition so the RNG
+    #    stream is deterministic. cospi/sinpi give exact values at rational π.
     start_coeffs_orig = Vector{Vector{ComplexF64}}(undef, length(source_coeffs))
     for i in eachindex(source_coeffs)
         c = source_coeffs[i]
@@ -146,8 +146,8 @@ function CommonSolve.init(F::System, alg::Polyhedral)::PolyhedralSolveCache
         ]
     end
 
-    # 3. Add zero columns to support and extend coefficients (v2 parity:
-    #    zero-column extensions use randn(ComplexF64) for start, 0.0 for target)
+    # 3. Add zero columns to support and extend coefficients.
+    #    Zero-column extensions use randn(ComplexF64) for start, 0.0 for target.
     support = Vector{Matrix{Int32}}(undef, length(source_support))
     target_coeffs = Vector{Vector{ComplexF64}}(undef, length(source_coeffs))
     start_coeffs = Vector{Vector{ComplexF64}}(undef, length(source_coeffs))
@@ -198,7 +198,7 @@ function CommonSolve.init(F::System, alg::Polyhedral)::PolyhedralSolveCache
     )
 
     # 7. Build toric homotopy (phase 1: t goes from 0 to 1)
-    #    Toric tracker uses conservative max_initial_step_size=0.2 (v2 convention)
+    #    Toric tracker uses conservative max_initial_step_size=0.2
     toric_H = ToricHomotopy(param_system.evaluator, start_coeffs)
     toric_heval = HomotopyEvaluator(toric_H)
     toric_opts = TrackerOptions(;
@@ -248,8 +248,8 @@ function _init_toric!(
         t_start::ComplexF64,
         t_end::ComplexF64,
     )::TrackerCode.T
-    # Pass ω/μ directly so init! skips init_newton (v2 parity:
-    # toric phase uses empirically-tuned parameters, not Newton-derived ones)
+    # Pass ω/μ directly so init! skips init_newton — the toric phase uses
+    # empirically-tuned parameters since exact start solutions are known
     return init!(
         tracker, x₀, t_start, t_end;
         ω = 20.0, μ = 1.0e-12, max_initial_step_size = 0.2,
@@ -286,7 +286,7 @@ function _track_toric_phase!(
         return tracker.state.code
     end
 
-    # Two-stage reparameterization for large weights (matching v2):
+    # Two-stage reparameterization for large weights:
     # Stage 1: track from 0 to t₀
     t₀ = clamp(0.1^(10.0 / max_weight), 0.9, 1.0 - 1.0e-6)
     code = _init_toric!(tracker, x₀, complex(0.0), complex(t₀))
@@ -345,15 +345,11 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache)::Result
     for (cell, x₀) in cache.start_solutions
         # Phase 1: Toric homotopy — track from t=0 to t=1
         #
-        # Strategy (matching v2):
+        # Strategy:
         #   a) Normalize weights so min non-zero weight = 1.
         #   b) If max_weight < 10: track directly from 0 to 1.
-        #   c) If max_weight >= 10: two-stage reparameterization:
-        #      1) Track from 0 to t₀ = clamp(0.1^(10/max_weight), 0.9, 1-1e-6)
-        #      2) Renormalize weights with max_weight=10, restart from t₀^(1/min_weight) to 1
-        #
-        # Initial tracker state: ω=20, μ=1e-12, max_initial_step_size=0.2
-        # (matches v2's empirically-tuned toric phase parameters)
+        #   c) If max_weight >= 10: two-stage reparameterization to avoid
+        #      t^w precision loss for large w (see _track_toric_phase!).
         min_w, max_w = update_weights!(toric_H, support, lifting, cell; min_weight = 1.0)
 
         code = _track_toric_phase!(
@@ -375,13 +371,13 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache)::Result
         copyto!(x_buffer, toric_tracker.state.x)
 
         # Phase 2: Coefficient homotopy — track from t=1 to t=0
-        # Carry over the toric-phase accuracy estimate to match v2's coefficient handoff.
+        # Carry over the toric-phase accuracy estimate to the coefficient phase.
         init!(coeff_tracker, x_buffer; μ = toric_tracker.state.μ)
         while coeff_tracker.state.code == EndgameCode.TRACKING
             step!(coeff_tracker)
         end
 
-        # Accumulate toric-phase steps into the final PathResult (matching v2 convention)
+        # Accumulate toric-phase steps into the final PathResult
         push!(path_results, _add_steps(PathResult(coeff_tracker), toric_accepted, toric_rejected))
     end
 
