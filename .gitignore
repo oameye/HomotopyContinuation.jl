@@ -12,3 +12,4 @@ docs/build/
 benchmarks_output.json
 .DS_Store
 .claude/*
+*.codex
