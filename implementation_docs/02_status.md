@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-04-03.
+Last updated: 2026-07-16.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
@@ -12,9 +12,9 @@ Last updated: 2026-04-03.
 
 v3 is a credible replacement for v2's core solve pipeline. Total-degree solving is 1.8–3.6x faster
 than v2. Polyhedral solving matches v2 within noise (0.95–1.01x). TTFX (load + first solve) is
-22.5s vs v2's 45s. Endgame is at full v2 result parity using v2's default parameters. The main
-remaining gaps are threading, overdetermined systems, and advanced features (monodromy,
-certification, NID).
+22.5s vs v2's 45s. Endgame is at full v2 result parity using v2's default parameters. Threading
+and overdetermined systems are done. The main remaining gaps are advanced features (monodromy,
+certification, NID) and a distributed executor.
 
 ## Feature Checklist
 
@@ -24,7 +24,8 @@ certification, NID).
 - [x] Total-degree and polyhedral start systems
 - [x] Parameter homotopy (CoefficientHomotopy with linear parameter interpolation)
 - [x] `System{P,V}` type (caches compiled interpreters for all eval modes, stores original MP polys)
-- [x] `SystemEvaluator` / `HomotopyEvaluator` type firewall (FunctionWrapper, 9/10 wrappers each)
+- [x] `SystemEvaluator` / `HomotopyEvaluator` type firewall (FunctionWrapper, 10 wrappers each,
+  including a DF64-output evaluate for extended-precision residual combining)
 - [x] StraightLineHomotopy, CoefficientHomotopy, ToricHomotopy
 - [x] Cauchy product Taylor convolution for parametric homotopies
 - [x] Two-stage toric reparameterization (weight renormalization when max_weight ≥ 10)
@@ -46,12 +47,13 @@ certification, NID).
 - [x] Integration tests from v2 with exact result parity
 - [x] Threading via OhMyThreads.jl — `Serial`/`Threaded` executor types, builder/worker-state
   pattern for thread-safe evaluator cloning, `@tasks`/`@local` work distribution
+- [x] Overdetermined systems: `RandomizedSystem` square-up (identity block plus random fold of
+  the lowest-degree equations, permutation keeps degrees exact), wired into total-degree
+  (squared-up evaluator) and polyhedral (merged support/coefficients), excess-solution
+  filtering post-pass (Newton on the original system for nonsingular endpoints, residual
+  comparison for singular ones), `PATH_EXCESS_SOLUTION` result code and `nexcess_solutions`
 
-### Not Done — Top Priority
-
-- [ ] **Overdetermined systems** — applicability blocker
-
-### Not Done — Later
+### Not Done
 
 - [ ] **Distributed executor** — extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
 - [ ] Direct polynomial compiler (`polynomial_compiler.jl` exists, deferred)
@@ -61,7 +63,7 @@ certification, NID).
 
 ## Test Suite
 
-25 test files run in parallel via ParallelTestRunner (`make test`, default 10 workers):
+26 test files run in parallel via ParallelTestRunner (`make test`, default 10 workers):
 
 | Category | Files | Purpose |
 |----------|-------|---------|
@@ -72,7 +74,7 @@ certification, NID).
 | Model kit | `interpreter_test.jl`, `codegen_test.jl`, `instruction_count_test.jl`, `taylor_test.jl`, `polynomial_input_test.jl` | Tape execution, RGF codegen, instruction regression, Taylor series |
 | Core | `core_test.jl` | System/Homotopy construction and evaluation |
 | Tracking | `tracking_test.jl`, `endgame_test.jl` | Newton, predictor, path tracking, valuation, winding |
-| Solving | `solve_test.jl`, `binomial_system_test.jl`, `polyhedral_regression_test.jl` | End-to-end solving, executor dispatch, serial/threaded consistency, binomial HNF, polyhedral regression |
+| Solving | `solve_test.jl`, `binomial_system_test.jl`, `polyhedral_regression_test.jl`, `overdetermined_test.jl` | End-to-end solving, executor dispatch, serial/threaded consistency, binomial HNF, polyhedral regression, square-up + excess-solution filtering |
 | v2 parity | `compare_v2_primitives_test.jl`, `compare_v2_solve_counts_test.jl`, `compare_v2_solve_match_test.jl`, `v2_parity_test.jl` | Primitive matching, solution counts, solution values, overall parity |
 | Misc | `utils_test.jl` | SegmentStepper, stable_sort, etc. |
 
@@ -161,10 +163,6 @@ v3's higher package load time (6.25s vs 1.30s) is due to precompiling more code 
 | singular multiplicity 3 | nresults=2, nsingular=1, nnonsingular=1 | same |
 
 ## Open Items
-
-### Performance
-
-1. **Overdetermined systems** — `RandomizedSystem` + excess solution check
 
 ### Architecture debt
 

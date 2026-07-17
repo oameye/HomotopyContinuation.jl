@@ -117,6 +117,21 @@ function Result(path_results::Vector{PathResult}, tracked_paths::Int, seed::UInt
     return Result(path_results, tracked_paths, seed, clusters, multiplicity)
 end
 
+"""
+    _finalize_result(path_results, tracked_paths, seed, excess_checker) -> Result
+
+Shared tail of every `solve!` method: reclassify excess solutions of an
+overdetermined solve (no-op when the checker is `nothing`), then assemble
+the `Result`.
+"""
+function _finalize_result(
+        path_results::Vector{PathResult}, tracked_paths::Int, seed::UInt32,
+        excess_checker::Union{ExcessSolutionChecker, Nothing},
+    )::Result
+    _check_excess_solutions!(path_results, excess_checker)
+    return Result(path_results, tracked_paths, seed)
+end
+
 function Base.show(io::IO, r::Result)
     n_nonsing = nnonsingular(r)
     n_real = nreal(r)
@@ -126,11 +141,15 @@ function Base.show(io::IO, r::Result)
     if n_sing > 0
         print(io, " • ", n_sing, " singular solutions\n")
     end
-    n_failed = r.tracked_paths - count(is_success, r.path_results)
+    n_excess = nexcess_solutions(r)
+    if n_excess > 0
+        print(io, " • ", n_excess, " excess solutions\n")
+    end
+    n_at_inf = nat_infinity(r)
+    n_failed = r.tracked_paths - count(is_success, r.path_results) - n_excess - n_at_inf
     if n_failed > 0
         print(io, " • ", n_failed, " paths failed\n")
     end
-    n_at_inf = nat_infinity(r)
     if n_at_inf > 0
         print(io, " • ", n_at_inf, " paths at infinity\n")
     end
@@ -258,6 +277,14 @@ function nnonsingular(r::Result)::Int
 end
 
 nat_infinity(r::Result)::Int = count(is_at_infinity, r.path_results)
+
+"""
+    nexcess_solutions(r) -> Int
+
+Number of paths whose endpoint solves the squared-up randomized system but not
+the original overdetermined system. Always 0 for square systems.
+"""
+nexcess_solutions(r::Result)::Int = count(is_excess_solution, r.path_results)
 
 # nreal: nonsingular real solutions only
 nreal(r::Result; tol::Float64 = DEFAULT_REAL_TOL)::Int =

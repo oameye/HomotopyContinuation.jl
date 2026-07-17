@@ -507,6 +507,27 @@ end
         @test u[2] ≈ 5.0 + 0im
     end
 
+    # Mid-path H(x,t) ≈ 0 means γt·G(x) and (1-t)·F(x) cancel while each term
+    # is O(1). The DF64 evaluate! must combine unrounded DF64 residuals; a
+    # Float64 round of G and F before combining floors |H| at 1e-16.
+    @testset "StraightLineHomotopy: DF64 extended precision" begin
+        @polyvar x
+        eval_F = System([x^2 - 2])
+        start_eval = HC._total_degree_startevaluator([2])
+        H = StraightLineHomotopy(start_eval, eval_F.evaluator; γ = ComplexF64(1.0))
+
+        # H(x,t) = t(x²-1) + (1-t)(x²-2) = x² - 2 + t, root x = √1.5 at t = 0.5
+        setprecision(BigFloat, 512) do
+            xb = sqrt(big"1.5")
+            x_hi = Float64(xb)
+            x_lo = Float64(xb - x_hi)
+            x_df = FSVec{ComplexDF64}([ComplexDF64(DoubleF64(x_hi, x_lo))])
+            u = FSVec{ComplexF64}(zeros(ComplexF64, 1))
+            evaluate!(u, H, x_df, ComplexF64(0.5))
+            @test abs(u[1]) < 1.0e-28
+        end
+    end
+
     @testset "StraightLineHomotopy: jacobian via finite differences" begin
         @polyvar x y
         eval_G = System([x^2 - 1, x * y + y^2])

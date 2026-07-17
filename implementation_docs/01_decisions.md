@@ -104,3 +104,7 @@ Alternative considered: `deepcopy` — rejected because it copies immutable data
 ### Coefficient normalization — SHIPPED
 
 Systems with O(10⁸+) coefficients are automatically scaled to O(1) at construction time to improve numerical conditioning in the tracker.
+
+### Overdetermined parameter homotopy stays rectangular (SHIPPED, matches v2)
+
+Square-up and excess filtering apply only to total-degree/polyhedral start systems; the parameter-homotopy path tracks the rectangular system directly with least-squares QR Newton, exactly like v2. No randomization means no excess solutions, and squaring up would introduce them. Shared tradeoff with v2: a least-squares stationary point can be reported as success.

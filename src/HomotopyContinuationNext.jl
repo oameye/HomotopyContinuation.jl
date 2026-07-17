@@ -26,8 +26,9 @@ end
 export @polyvar, solve, System
 export CompileMode
 export solutions, real_solutions, nsolutions, nreal, nsingular, nnonsingular, nat_infinity
+export nexcess_solutions
 export nresults, results, multiplicity
-export is_success, is_singular, is_nonsingular, is_at_infinity, is_real
+export is_success, is_singular, is_nonsingular, is_at_infinity, is_real, is_excess_solution
 export TotalDegree, Polyhedral, Result, PathResult
 export EndgameOptions, EndgameTracker
 export Serial, Threaded
@@ -66,6 +67,7 @@ include("core/abstract_types.jl")
 include("core/system_evaluator.jl")
 include("solving/support.jl")
 include("core/system.jl")
+include("core/randomized_system.jl")
 include("core/homotopy_evaluator.jl")
 include("core/straight_line_homotopy.jl")
 include("core/coefficient_homotopy.jl")
@@ -80,6 +82,7 @@ include("solving/executor.jl")
 include("solving/worker_state.jl")
 include("solving/binomial_system.jl")
 include("solving/path_result.jl")
+include("solving/excess_solution.jl")
 include("solving/total_degree.jl")
 include("solving/builder.jl")
 include("solving/polyhedral.jl")

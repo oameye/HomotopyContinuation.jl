@@ -25,6 +25,35 @@ function (b::StraightLineBuilder)()::TrackingWorkerState
 end
 
 """
+    RandomizedStraightLineBuilder
+
+Builder for TotalDegree homotopy against a squared-up overdetermined target.
+The randomization block `A` and permutation are shared read-only across workers;
+each worker gets a fresh `RandomizedSystem` (independent scratch buffers) around
+a fresh clone of the target evaluator.
+"""
+struct RandomizedStraightLineBuilder{S <: System}
+    degrees::Vector{Int}          # squared-up degrees (length n)
+    target_system::S
+    A::FSMat{ComplexF64}
+    perm::Vector{Int}
+    γ::ComplexF64
+    tracker_options::TrackerOptions
+    endgame_options::EndgameOptions
+end
+
+function (b::RandomizedStraightLineBuilder)()::TrackingWorkerState
+    start_eval = _total_degree_startevaluator(b.degrees)
+    inner_eval = _clone_system_evaluator(b.target_system)
+    target_eval = _randomized_evaluator(inner_eval, b.A, b.perm)
+    H = StraightLineHomotopy(start_eval, target_eval; γ = b.γ)
+    heval = HomotopyEvaluator(H)
+    tracker = Tracker(heval; options = b.tracker_options)
+    eg = EndgameTracker(tracker, b.endgame_options)
+    return TrackingWorkerState(eg)
+end
+
+"""
     CoefficientBuilder
 
 Builder for parameter homotopy via CoefficientHomotopy.

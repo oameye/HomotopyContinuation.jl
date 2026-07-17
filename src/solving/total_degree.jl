@@ -59,6 +59,16 @@ function evaluate!(
     return nothing
 end
 
+function evaluate!(
+        u::FSVec{ComplexDF64}, F::TotalDegreeStartSystem,
+        x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    @inbounds for i in eachindex(u)
+        u[i] = _total_degree_value(x[i], F.degrees[i])
+    end
+    return nothing
+end
+
 function evaluate_and_jacobian!(
         u::FSVec{ComplexF64}, U::FSMat{ComplexF64},
         F::TotalDegreeStartSystem, x::FSVec{ComplexF64}, p::FSVec{ComplexF64},

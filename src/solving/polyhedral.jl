@@ -58,7 +58,7 @@ end
 Holds pre-built trackers and start solutions for the two-phase polyhedral homotopy.
 Created by `CommonSolve.init`.
 """
-struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S <: System}
+struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S <: System, C}
     executor::E
     builder::B
     toric_tracker::Tracker
@@ -70,6 +70,51 @@ struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S <: 
     seed::UInt32
     # GC roots for interpreters — must be kept alive for FunctionWrapper closures
     _param_system::S
+    # ExcessSolutionChecker for overdetermined systems, Nothing for square ones
+    excess_checker::C
+end
+
+# ── Helper: randomize support/coefficients for overdetermined systems ───────
+
+"""
+    _randomize_support(support, coeffs, A, perm) -> (support, coeffs)
+
+Support and coefficients of the squared-up system G = [I A]·(F∘perm). Row i of G
+is `F_perm[i] + Σ_j A[i,j]·F_perm[n+j]`, so its support is the union of the
+combined supports with linearly combined coefficients. Duplicate monomials are
+merged; exponent columns are sorted for a deterministic result.
+"""
+function _randomize_support(
+        support::Vector{Matrix{Int32}},
+        coeffs::Vector{Vector{ComplexF64}},
+        A::FSMat{ComplexF64},
+        perm::Vector{Int},
+    )::Tuple{Vector{Matrix{Int32}}, Vector{Vector{ComplexF64}}}
+    n, k = size(A)
+    new_support = Vector{Matrix{Int32}}(undef, n)
+    new_coeffs = Vector{Vector{ComplexF64}}(undef, n)
+    for i in 1:n
+        acc = Dict{Vector{Int32}, ComplexF64}()
+        S_i = support[perm[i]]
+        c_i = coeffs[perm[i]]
+        for t in axes(S_i, 2)
+            col = S_i[:, t]
+            acc[col] = get(acc, col, zero(ComplexF64)) + c_i[t]
+        end
+        for j in 1:k
+            S_j = support[perm[n + j]]
+            c_j = coeffs[perm[n + j]]
+            a = A[i, j]
+            for t in axes(S_j, 2)
+                col = S_j[:, t]
+                acc[col] = get(acc, col, zero(ComplexF64)) + a * c_j[t]
+            end
+        end
+        exponents = sort!(collect(keys(acc)))
+        new_support[i] = reduce(hcat, exponents)
+        new_coeffs[i] = ComplexF64[acc[e] for e in exponents]
+    end
+    return new_support, new_coeffs
 end
 
 # ── Helper: build parametric system from support ────────────────────────────
@@ -127,13 +172,26 @@ function CommonSolve.init(
         exec::AbstractExecutor = Threaded(),
     )::PolyhedralSolveCache
     seed = alg.seed
+    _check_square_or_overdetermined(F)
+    m = size(F.evaluator)[1]
     n = F.nvars
 
     # Task-local RNG seeded from user seed — deterministic without mutating global state.
     rng = Random.MersenneTwister(seed)
 
-    # 1. Get support + target coefficients from the System
+    # 1. Get support + target coefficients from the System.
+    #    Overdetermined systems are squared up first: the polyhedral machinery
+    #    (mixed cells, parametric system, both homotopy phases) then operates on
+    #    the support of G = [I A]·(F∘perm) and never sees the original system.
     source_support, source_coeffs = support_coefficients(F)
+    excess_checker = if m > n
+        A, perm, checker = _square_up(rng, F)
+        source_support, source_coeffs =
+            _randomize_support(source_support, source_coeffs, A, perm)
+        checker
+    else
+        nothing
+    end
 
     # 2. Generate start coefficients for ORIGINAL support FIRST.
     #    Coefficients must be generated before zero column addition so the RNG
@@ -244,6 +302,7 @@ function CommonSolve.init(
         support, lifting,
         all_starts, seed,
         param_system,
+        excess_checker,
     )
 end
 
@@ -381,7 +440,7 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache{Serial})::Result
         push!(path_results, _add_steps(PathResult(coeff_tracker), toric_accepted, toric_rejected))
     end
 
-    return Result(path_results, n_paths, cache.seed)
+    return _finalize_result(path_results, n_paths, cache.seed, cache.excess_checker)
 end
 
 # ── CommonSolve.solve!: threaded two-phase path tracking ─────────────────
@@ -424,5 +483,5 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache{Threaded})::Result
         end
     end
 
-    return Result(results, n_paths, cache.seed)
+    return _finalize_result(results, n_paths, cache.seed, cache.excess_checker)
 end

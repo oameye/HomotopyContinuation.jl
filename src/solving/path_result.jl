@@ -4,6 +4,7 @@
     PATH_SUCCESS
     PATH_AT_INFINITY
     PATH_AT_ZERO
+    PATH_EXCESS_SOLUTION
     PATH_TERMINATED_ACCURACY
     PATH_TERMINATED_ILL_CONDITIONED
     PATH_TERMINATED_MAX_STEPS
@@ -45,6 +46,20 @@ is_success(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_SUCCESS
 is_singular(r::PathResult)::Bool = is_success(r) && r.singular
 is_nonsingular(r::PathResult)::Bool = is_success(r) && !r.singular
 is_at_infinity(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_AT_INFINITY
+is_excess_solution(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_EXCESS_SOLUTION
+
+"""
+    _with_return_code(r, code)
+
+Return a copy of `r` with the return code replaced (used to reclassify excess solutions).
+"""
+function _with_return_code(r::PathResult, code::PathResultCode.T)::PathResult
+    return PathResult(
+        code, r.solution, r.t, r.accuracy, r.condition_jacobian,
+        r.winding_number, r.singular, r.accepted_steps, r.rejected_steps,
+        r.steps_eg, r.extended_precision_used, r.last_path_point, r.last_path_t,
+    )
+end
 
 function is_real(r::PathResult; tol::Float64 = DEFAULT_REAL_TOL)::Bool
     return is_success(r) && all(x -> abs(imag(x)) < tol * max(1.0, abs(x)), r.solution)

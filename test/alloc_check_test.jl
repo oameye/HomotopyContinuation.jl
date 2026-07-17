@@ -12,6 +12,7 @@ using DynamicPolynomials: @polyvar
 using FixedSizeArrays: FixedSizeArray
 
 const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
+const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 # ---------------------------------------------------------------------------
 # Helper: filter out known FunctionWrappers false positives
@@ -95,6 +96,94 @@ end
                 (
                     FSVec{ComplexF64}, NewtonCorrector, HomotopyEvaluator, FSVec{ComplexF64},
                     ComplexF64, Jacobian, WeightedNorm, Float64, Float64, Bool, Bool,
+                ),
+            )
+        )
+    end
+
+    # ── RandomizedSystem (overdetermined square-up) ──────────────────────
+    # Inner evaluation goes through SystemEvaluator (FunctionWrappers
+    # boundary, filtered); the randomization fold itself must not allocate.
+
+    @testset "RandomizedSystem" begin
+        @test isempty(
+            _real_allocs(
+                HC.evaluate!,
+                (FSVec{ComplexF64}, HC.RandomizedSystem, FSVec{ComplexF64}, FSVec{ComplexF64}),
+            )
+        )
+        @test isempty(
+            _real_allocs(
+                HC.evaluate!,
+                (FSVec{ComplexF64}, HC.RandomizedSystem, FSVec{HC.ComplexDF64}, FSVec{ComplexF64}),
+            )
+        )
+        @test isempty(
+            _real_allocs(
+                HC.evaluate!,
+                (FSVec{HC.ComplexDF64}, HC.RandomizedSystem, FSVec{HC.ComplexDF64}, FSVec{ComplexF64}),
+            )
+        )
+        @test isempty(
+            _real_allocs(
+                HC.evaluate_and_jacobian!,
+                (
+                    FSVec{ComplexF64}, FSMat{ComplexF64}, HC.RandomizedSystem,
+                    FSVec{ComplexF64}, FSVec{ComplexF64},
+                ),
+            )
+        )
+        @test isempty(
+            _real_allocs(
+                HC.taylor!,
+                (
+                    FSVec{ComplexF64}, Val{1}, HC.RandomizedSystem,
+                    TaylorVector{2, ComplexF64}, FSVec{ComplexF64},
+                ),
+            )
+        )
+        @test isempty(
+            _real_allocs(
+                HC.taylor!,
+                (
+                    FSVec{ComplexF64}, Val{2}, HC.RandomizedSystem,
+                    TaylorVector{3, ComplexF64}, FSVec{ComplexF64},
+                ),
+            )
+        )
+        @test isempty(
+            _real_allocs(
+                HC.taylor!,
+                (
+                    FSVec{ComplexF64}, Val{3}, HC.RandomizedSystem,
+                    TaylorVector{4, ComplexF64}, FSVec{ComplexF64},
+                ),
+            )
+        )
+        @test isempty(
+            _real_allocs(
+                HC.taylor!,
+                (
+                    FSVec{ComplexF64}, Val{1}, HC.RandomizedSystem,
+                    TaylorVector{2, ComplexF64}, TaylorVector{2, ComplexF64},
+                ),
+            )
+        )
+        @test isempty(
+            _real_allocs(
+                HC.taylor!,
+                (
+                    FSVec{ComplexF64}, Val{2}, HC.RandomizedSystem,
+                    TaylorVector{3, ComplexF64}, TaylorVector{3, ComplexF64},
+                ),
+            )
+        )
+        @test isempty(
+            _real_allocs(
+                HC.taylor!,
+                (
+                    FSVec{ComplexF64}, Val{3}, HC.RandomizedSystem,
+                    TaylorVector{4, ComplexF64}, TaylorVector{4, ComplexF64},
                 ),
             )
         )

@@ -2,12 +2,31 @@
 #
 # Pattern: solve(F, alg, exec) = solve!(init(F, alg, exec))
 
-struct SolveCache{E <: AbstractExecutor, B}
+struct SolveCache{E <: AbstractExecutor, B, C}
     executor::E
     builder::B
     tracker::EndgameTracker
     start_solutions::Vector{Vector{ComplexF64}}
     seed::UInt32
+    # ExcessSolutionChecker for overdetermined systems, Nothing for square ones
+    excess_checker::C
+end
+
+"""
+    _check_square_or_overdetermined(F)
+
+Throw for underdetermined input (positive-dimensional solution set).
+"""
+function _check_square_or_overdetermined(F::System)::Nothing
+    m, n = size(F.evaluator)
+    m >= n || throw(
+        ArgumentError(
+            "The system has $m equation(s) in $n variables. The solution set is " *
+                "positive-dimensional; only square or overdetermined systems with " *
+                "finitely many solutions are supported.",
+        ),
+    )
+    return nothing
 end
 
 # ── CommonSolve.init: System + TotalDegree ────────────────────────────────
@@ -17,22 +36,37 @@ function CommonSolve.init(
         exec::AbstractExecutor = Threaded(),
     )::SolveCache
     seed = alg.seed
-
-    start_evaluator = _total_degree_startevaluator(F.degrees)
-    starts = _total_degree_solutions(F.degrees)
+    _check_square_or_overdetermined(F)
+    m, n = size(F.evaluator)
 
     rng = Random.MersenneTwister(seed)
     γ = cis(2π * rand(rng))
-    H = StraightLineHomotopy(start_evaluator, F.evaluator; γ = γ)
+
+    if m > n
+        A, perm, excess_checker = _square_up(rng, F)
+        target_evaluator = _randomized_evaluator(F.evaluator, A, perm)
+        degrees = F.degrees[perm[1:n]]
+        builder = RandomizedStraightLineBuilder(
+            degrees, F, A, perm, γ, alg.tracker_options, alg.endgame_options,
+        )
+    else
+        target_evaluator = F.evaluator
+        degrees = F.degrees
+        excess_checker = nothing
+        builder = StraightLineBuilder(
+            F.degrees, F, γ, alg.tracker_options, alg.endgame_options,
+        )
+    end
+
+    start_evaluator = _total_degree_startevaluator(degrees)
+    starts = _total_degree_solutions(degrees)
+
+    H = StraightLineHomotopy(start_evaluator, target_evaluator; γ = γ)
     heval = HomotopyEvaluator(H)
     tracker = Tracker(heval; options = alg.tracker_options)
     eg = EndgameTracker(tracker, alg.endgame_options)
 
-    builder = StraightLineBuilder(
-        F.degrees, F, γ, alg.tracker_options, alg.endgame_options,
-    )
-
-    return SolveCache(exec, builder, eg, starts, seed)
+    return SolveCache(exec, builder, eg, starts, seed, excess_checker)
 end
 
 # ── CommonSolve.solve!: serial ─────────────────────────────────────────────
@@ -47,7 +81,9 @@ function CommonSolve.solve!(cache::SolveCache{Serial})::Result
         push!(path_results, PathResult(eg))
     end
 
-    return Result(path_results, length(cache.start_solutions), cache.seed)
+    return _finalize_result(
+        path_results, length(cache.start_solutions), cache.seed, cache.excess_checker,
+    )
 end
 
 # ── CommonSolve.solve!: threaded ───────────────────────────────────────────
@@ -65,7 +101,7 @@ function CommonSolve.solve!(cache::SolveCache{Threaded})::Result
         results[i] = PathResult(ws.tracker)
     end
 
-    return Result(results, n_paths, cache.seed)
+    return _finalize_result(results, n_paths, cache.seed, cache.excess_checker)
 end
 
 # ── Convenience: solve(F, alg, exec) ─────────────────────────────────────
@@ -129,6 +165,7 @@ function CommonSolve.init(
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
     )::SolveCache
+    _check_square_or_overdetermined(F)
     @assert nparameters(F) > 0 "System must have parameters for parameter homotopy"
     @assert length(start_parameters) == nparameters(F) "start_parameters length must match nparameters"
     @assert length(target_parameters) == nparameters(F) "target_parameters length must match nparameters"
@@ -144,5 +181,5 @@ function CommonSolve.init(
 
     start_sols = [Vector{ComplexF64}(ComplexF64.(s)) for s in starts]
 
-    return SolveCache(exec, builder, eg, start_sols, seed)
+    return SolveCache(exec, builder, eg, start_sols, seed, nothing)
 end

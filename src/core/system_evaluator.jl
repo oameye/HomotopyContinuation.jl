@@ -9,6 +9,14 @@ const SysEvalDF64FW = FunctionWrapper{
         FSVec{ComplexF64}, FSVec{ComplexDF64}, FSVec{ComplexF64},
     },
 }
+# DF64 output variant: consumers that combine several system evaluations
+# (homotopy mixing, randomization fold) need the unrounded residual, since the
+# cancellation between the combined terms is exactly what DF64 is there for.
+const SysEvalDF64OutFW = FunctionWrapper{
+    Nothing, Tuple{
+        FSVec{ComplexDF64}, FSVec{ComplexDF64}, FSVec{ComplexF64},
+    },
+}
 const SysEvalJacFW = FunctionWrapper{
     Nothing, Tuple{
         FSVec{ComplexF64}, FSMat{ComplexF64},
@@ -57,6 +65,7 @@ eliminating runtime dispatch on hot paths.
 struct SystemEvaluator
     _evaluate!::SysEvalFW
     _evaluate_df64!::SysEvalDF64FW
+    _evaluate_df64_out!::SysEvalDF64OutFW
     _evaluate_and_jacobian!::SysEvalJacFW
     _taylor_1!::SysTaylor1FW
     _taylor_2!::SysTaylor2FW
@@ -86,6 +95,14 @@ function evaluate!(
         x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
     )::Nothing
     S._evaluate_df64!(u, x, p)
+    return nothing
+end
+
+function evaluate!(
+        u::FSVec{ComplexDF64}, S::SystemEvaluator,
+        x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    S._evaluate_df64_out!(u, x, p)
     return nothing
 end
 
@@ -153,6 +170,7 @@ function SystemEvaluator(F::AbstractSystem)
     return SystemEvaluator(
         SysEvalFW((u, x, p) -> (evaluate!(u, F, x, p); nothing)),
         SysEvalDF64FW((u, x, p) -> (evaluate!(u, F, x, p); nothing)),
+        SysEvalDF64OutFW((u, x, p) -> (evaluate!(u, F, x, p); nothing)),
         SysEvalJacFW((u, U, x, p) -> (evaluate_and_jacobian!(u, U, F, x, p); nothing)),
         SysTaylor1FW((u, tx, p) -> (taylor!(u, Val(1), F, tx, p); nothing)),
         SysTaylor2FW((u, tx, p) -> (taylor!(u, Val(2), F, tx, p); nothing)),

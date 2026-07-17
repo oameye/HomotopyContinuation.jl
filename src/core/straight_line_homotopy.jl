@@ -66,17 +66,20 @@ function evaluate!(
 end
 
 ## evaluate! DF64 variant
+#
+# The two terms cancel along the path (H(x,t) ≈ 0), so evaluate both systems
+# with DF64 output and combine in extended precision, rounding only on store.
 
 function evaluate!(
         u::FSVec{ComplexF64}, H::StraightLineHomotopy,
         x::FSVec{ComplexDF64}, t::ComplexF64,
     )::Nothing
-    evaluate!(H.u_start, H.start, x, _EMPTY_PARAMS)
-    evaluate!(H.u_target, H.target, x, _EMPTY_PARAMS)
+    evaluate!(H.ū_start, H.start, x, _EMPTY_PARAMS)
+    evaluate!(H.ū_target, H.target, x, _EMPTY_PARAMS)
     γt = H.γ * t
     t1 = one(ComplexF64) - t
     @inbounds for i in eachindex(u)
-        u[i] = γt * H.u_start[i] + t1 * H.u_target[i]
+        u[i] = ComplexF64(γt * H.ū_start[i] + t1 * H.ū_target[i])
     end
     return nothing
 end
