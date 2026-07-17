@@ -107,7 +107,7 @@ include("minors_polys.jl")
     # The fold G_i = F_i + Σ_j A[i,j]·F_j cancels at an excess solution (G = 0
     # while F stays O(1)). Rounding the inner F-residual to Float64 before the
     # fold floors |G| at 1e-16 there; folding in DF64 reaches the 1e-32 noise
-    # floor, matching v2. This is what the DF64-output evaluator path is for.
+    # floor. This is what the DF64-output evaluator path is for.
     @testset "RandomizedSystem DF64 extended precision" begin
         @polyvar x y
         F = System([x^2 + y^2 - 1, x - y, x * y - 0.5])
@@ -226,14 +226,11 @@ include("minors_polys.jl")
         @test_throws ArgumentError solve(F, Polyhedral(; seed = UInt32(1)), Serial())
     end
 
-    # ── Ports of v2's overdetermined test cases ──────────────────────────
-
-    # v2 test/solve_test.jl "overdetermined > 3 by 5 minors": 10 equations of
-    # degree 6 in 3 variables. The squared-up system tracks 6³ = 216 paths of
-    # which exactly 80 end at solutions of the original system and 136 are
-    # excess solutions of the randomization.
-    @testset "v2 port: 3 by 5 minors" begin
-        F = System(v2_minors_polys())
+    # 10 equations of degree 6 in 3 variables. The squared-up system tracks
+    # 6³ = 216 paths of which exactly 80 end at solutions of the original
+    # system and 136 are excess solutions of the randomization.
+    @testset "3 by 5 minors" begin
+        F = System(minors_polys())
         @test size(F.evaluator) == (10, 3)
         result = solve(F, TotalDegree(; seed = UInt32(0x1234)), Threaded())
         @test result.tracked_paths == 216
@@ -241,9 +238,9 @@ include("minors_polys.jl")
         @test nexcess_solutions(result) == 136
     end
 
-    # v2 test/solve_test.jl: underdetermined input throws for total degree and
-    # polyhedral, both affine and projective (v2: FiniteException, v3: ArgumentError).
-    @testset "v2 port: underdetermined throws" begin
+    # Underdetermined input throws for total degree and polyhedral, both
+    # affine and projective.
+    @testset "underdetermined throws" begin
         @polyvar x y z
         affine_under = System([2.3 * x^2 + 1.2 * y^2 + 3 * x - 2 * y + 3])
         @test_throws ArgumentError solve(affine_under, TotalDegree(; seed = UInt32(2)), Serial())
@@ -254,9 +251,9 @@ include("minors_polys.jl")
         @test_throws ArgumentError solve(proj_under, Polyhedral(; seed = UInt32(2)), Serial())
     end
 
-    # v2 test/solve_test.jl parameter homotopy: underdetermined systems throw
-    # (v2: FiniteException(1)), affine and projective variants.
-    @testset "v2 port: parameter homotopy underdetermined throws" begin
+    # Parameter homotopy: underdetermined systems throw, affine and
+    # projective variants.
+    @testset "parameter homotopy underdetermined throws" begin
         @polyvar x y z a b
         F = System([x^2 - a]; variables = [x, y], parameters = [a, b])
         @test_throws ArgumentError solve(
@@ -271,9 +268,9 @@ include("minors_polys.jl")
         )
     end
 
-    # v2 test/systems_test.jl "RandomizedSystem": evaluation consistency for a
-    # randomized parametric system (3 equations, 2 variables, 2 parameters).
-    @testset "v2 port: RandomizedSystem with parameters" begin
+    # Evaluation consistency for a randomized parametric system
+    # (3 equations, 2 variables, 2 parameters).
+    @testset "RandomizedSystem with parameters" begin
         @polyvar x y a b
         g = System(
             [

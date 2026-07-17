@@ -27,7 +27,7 @@ using LinearAlgebra: cond
         @test rejected_steps(r) == r.rejected_steps
     end
 
-    @testset "steps is the total of accepted + rejected (v2 convention)" begin
+    @testset "steps is the total of accepted + rejected" begin
         @test steps(r) == r.accepted_steps + r.rejected_steps
         @test steps(r) >= accepted_steps(r)
     end
@@ -51,7 +51,7 @@ using LinearAlgebra: cond
         @test occursin("steps", str)
     end
 
-    @testset "v2-parity predicates partition the paths" begin
+    @testset "predicates partition the paths" begin
         # Every path is exactly one of: success, at-infinity, excess, or failed.
         for pr in prs
             n = is_success(pr) + is_at_infinity(pr) + HC.is_excess_solution(pr) + is_failed(pr)
@@ -64,7 +64,7 @@ using LinearAlgebra: cond
         end
     end
 
-    @testset "cond is an alias for condition_jacobian (v2 parity)" begin
+    @testset "cond is an alias for condition_jacobian" begin
         @test cond(r) == condition_jacobian(r)
     end
 
@@ -91,14 +91,14 @@ using LinearAlgebra: cond
         end
     end
 
-    @testset "is_real positional and Base.isreal overloads (v2 parity)" begin
+    @testset "is_real positional and Base.isreal overloads" begin
         sr = first(filter(is_success, prs))
         @test is_real(sr, 1.0e-6) == is_real(sr; tol = 1.0e-6)
         @test isreal(sr) == is_real(sr)
         @test isreal(sr, 1.0e-6) == is_real(sr; tol = 1.0e-6)
     end
 
-    @testset "Result-level v2-parity accessors" begin
+    @testset "Result-level accessors" begin
         @test seed(res) == UInt32(0x1234)
         @test ntracked(res) == length(prs)
         @test failed(res) == filter(is_failed, prs)
@@ -108,7 +108,7 @@ using LinearAlgebra: cond
         @test singular(res) == HC.results(res; only_singular = true)
     end
 
-    @testset "statistics summarizes the result (v2 ResultStatistics)" begin
+    @testset "statistics summarizes the result" begin
         st = statistics(res)
         @test st isa ResultStatistics
         @test st.nonsingular == HC.nnonsingular(res)

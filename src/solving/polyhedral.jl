@@ -314,8 +314,8 @@ end
 """
     _init_toric!(tracker, x₀, t_start, t_end)
 
-Initialize the toric tracker with v2-tuned initial parameters:
-ω=20 (optimistic initial Lipschitz), μ=1e-12, max_initial_step_size=0.2.
+Initialize the toric tracker with ω=20 (optimistic initial Lipschitz),
+μ=1e-12, and max_initial_step_size=0.2.
 """
 function _init_toric!(
         tracker::Tracker,

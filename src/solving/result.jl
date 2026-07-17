@@ -15,6 +15,14 @@ Two solutions are considered identical if their infinity-norm distance is
 ≤ `max(atol, rtol * max(norm(s1), norm(s2)))`. Uses union-find to compute
 connected components over the tolerance graph, so the result is transitive
 and order-independent: if A≈B and B≈C then A, B, C are always in one cluster.
+
+Candidate pairs are found with a sort-and-window sweep instead of a full O(k²)
+scan: paths are sorted by the 1-Lipschitz-bounded projection
+`Re(x₁) + Im(x₁)`, and a pair at inf-distance `d` differs by at most `2d` in
+that key, so only pairs within a `2W` key window (`W` = the largest possible
+pair tolerance) need the exact distance check. Typical cost is O(k log k);
+the worst case (all keys within one window) degrades gracefully to an
+O(k²) pairwise scan.
 """
 function _cluster_solutions(
         path_results::Vector{PathResult};
@@ -58,17 +66,33 @@ function _cluster_solutions(
         return nothing
     end
 
-    # Build edges: O(k²) pairwise distance check
+    # Precompute norms and projection keys. The key is 1-Lipschitz in each of
+    # Re(x₁) and Im(x₁), so inf_distance(s1, s2) ≤ tol implies
+    # |key1 - key2| ≤ 2 tol.
+    norms = Vector{Float64}(undef, k)
+    keys = Vector{Float64}(undef, k)
+    max_norm = 0.0
     for j in 1:k
-        i1 = success_idx[j]
-        sol_j = path_results[i1].solution
-        norm_j = inf_norm(sol_j)
-        for l in (j + 1):k
-            i2 = success_idx[l]
-            sol_l = path_results[i2].solution
-            norm_l = inf_norm(sol_l)
-            d = inf_distance(sol_j, sol_l)
-            tol = max(atol, rtol * max(norm_j, norm_l))
+        sol = path_results[success_idx[j]].solution
+        norms[j] = inf_norm(sol)
+        keys[j] = isempty(sol) ? 0.0 : real(sol[1]) + imag(sol[1])
+        max_norm = max(max_norm, norms[j])
+    end
+    # Largest tolerance any pair can have; window in key space is twice that.
+    window = 2.0 * max(atol, rtol * max_norm)
+    order = sortperm(keys)
+
+    # Build edges: sorted sweep, comparing only pairs within the key window
+    for a in 1:k
+        j = order[a]
+        sol_j = path_results[success_idx[j]].solution
+        norm_j = norms[j]
+        key_j = keys[j]
+        for b in (a + 1):k
+            l = order[b]
+            keys[l] - key_j > window && break
+            d = inf_distance(sol_j, path_results[success_idx[l]].solution)
+            tol = max(atol, rtol * max(norm_j, norms[l]))
             if d <= tol
                 _union!(j, l)
             end
@@ -183,8 +207,8 @@ nfailed(r::Result)::Int = count(is_failed, r.path_results)
 """
     ResultStatistics
 
-Summary counts for a [`Result`](@ref), produced by [`statistics`](@ref). Mirrors
-v2's `ResultStatistics`; every field is an `Int`.
+Summary counts for a [`Result`](@ref), produced by [`statistics`](@ref).
+Every field is an `Int`.
 """
 struct ResultStatistics
     total::Int

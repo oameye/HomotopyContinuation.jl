@@ -8,6 +8,7 @@
     TERMINATED_ACCURACY_LIMIT
     TERMINATED_ILL_CONDITIONED
     TERMINATED_INVALID_STARTVALUE
+    TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN
     TERMINATED_STEP_SIZE_TOO_SMALL
 end
 
@@ -24,6 +25,32 @@ end
     β_τ::Float64 = 0.4
     strict_β_τ::Float64 = 0.3
 end
+
+# Preset option sets; strict_β_τ = min(0.75 β_τ, 0.4).
+
+"""
+    DEFAULT_TRACKER_OPTIONS
+
+[`TrackerOptions`](@ref) with a good balance between robustness and efficiency
+(the same as `TrackerOptions()`).
+"""
+const DEFAULT_TRACKER_OPTIONS = TrackerOptions()
+
+"""
+    FAST_TRACKER_OPTIONS
+
+[`TrackerOptions`](@ref) which trade speed against a higher chance of path
+jumping.
+"""
+const FAST_TRACKER_OPTIONS = TrackerOptions(; β_ω = 2.0, β_τ = 0.75, strict_β_τ = 0.4)
+
+"""
+    CONSERVATIVE_TRACKER_OPTIONS
+
+[`TrackerOptions`](@ref) which trade robustness against some speed.
+"""
+const CONSERVATIVE_TRACKER_OPTIONS =
+    TrackerOptions(; β_ω = 4.0, β_τ = 0.25, strict_β_τ = 0.1875)
 
 # Precomputed constants derived from TrackerOptions.a
 struct TrackerConstants
@@ -199,7 +226,6 @@ function _update_stepsize!(
     else
         # Convergence-rate-based rejection: use Newton convergence rate θ to
         # estimate how much to reduce step size
-        # Use Newton convergence rate θ to estimate how much to reduce step size
         j = result.iters - 2
         Θ_j = j > 0 ? nthroot(result.θ, 1 << j) : result.θ
         h_Θ_j = _h(Θ_j)
@@ -350,7 +376,7 @@ function step!(tracker::Tracker)::Bool
     predict!(state.x̂, pred, state.segment.Δt)
     update!(state.norm, state.x̂)
 
-    # Newton correct (positional args — no kwargs overhead)
+    # Newton correct
     result = newton!(
         state.x̄, tracker.corrector, H, state.x̂, state.segment.t′,
         state.jacobian, state.norm,
@@ -400,6 +426,19 @@ end
 # ---------------------------------------------------------------------------
 # init! — initialize tracker for a new path
 # ---------------------------------------------------------------------------
+
+"""
+    _start_jacobian_corank(A) -> Int
+
+Corank of the start-point Jacobian, used to distinguish a rank-deficient start
+Jacobian from a generic invalid start value. Returns 0 (generic) when the
+matrix contains non-finite entries and cannot be classified.
+"""
+function _start_jacobian_corank(A::FSMat{ComplexF64})::Int
+    M = Matrix{ComplexF64}(A)
+    all(isfinite, M) || return 0
+    return size(M, 2) - LA.rank(M; rtol = 1.0e-14)
+end
 
 """
     init!(tracker::Tracker, x₀, t₁, t₀) -> TrackerCode.T
@@ -471,7 +510,19 @@ function init!(
         end
 
         if !valid
-            state.code = TrackerCode.TERMINATED_INVALID_STARTVALUE
+            # Classify the failure: re-evaluate the Jacobian at the original
+            # start point and check its rank. Cold path, so the allocating
+            # rank computation is fine.
+            evaluate_and_jacobian!(
+                tracker.corrector.r, state.jacobian.workspace.A,
+                tracker.homotopy, state.x, t₁,
+            )
+            corank = _start_jacobian_corank(state.jacobian.workspace.A)
+            state.code = if corank > 0
+                TrackerCode.TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN
+            else
+                TrackerCode.TERMINATED_INVALID_STARTVALUE
+            end
             return state.code
         end
 

@@ -82,8 +82,47 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         H = StraightLineHomotopy(eval_G.evaluator, eval_G.evaluator; γ = ComplexF64(1.0))
         tracker = Tracker(HomotopyEvaluator(H))
 
+        # At the origin the Jacobian diag(2x, 2y) vanishes: the invalid start
+        # is classified as singular-Jacobian.
         code = track!(tracker, ComplexF64[0.0, 0.0])
-        @test code == TrackerCode.TERMINATED_INVALID_STARTVALUE
+        @test code == TrackerCode.TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN
+    end
+
+    @testset "tracker option presets" begin
+        d = HC.DEFAULT_TRACKER_OPTIONS
+        f = HC.FAST_TRACKER_OPTIONS
+        c = HC.CONSERVATIVE_TRACKER_OPTIONS
+        @test d isa TrackerOptions && f isa TrackerOptions && c isa TrackerOptions
+        @test d == TrackerOptions()
+        @test f.β_τ == 0.75 && f.β_ω == 2.0
+        @test f.strict_β_τ == min(0.75 * f.β_τ, 0.4)
+        @test c.β_τ == 0.25 && c.β_ω == 4.0
+        @test c.strict_β_τ == min(0.75 * c.β_τ, 0.4)
+
+        # Both presets still track a simple path end to end.
+        @polyvar x y
+        G = [x^2 - 1, y^2 - 1]
+        F = [x^2 - 2, y^2 - 3]
+        eval_G, eval_F = System(G), System(F)
+        for opts in (f, c)
+            H = StraightLineHomotopy(eval_G.evaluator, eval_F.evaluator; γ = cis(0.9))
+            tracker = Tracker(HomotopyEvaluator(H); options = opts)
+            code = track!(tracker, ComplexF64[1.0, 1.0])
+            @test code == TrackerCode.TRACKER_SUCCESS
+        end
+    end
+
+    @testset "_start_jacobian_corank classifies the start Jacobian" begin
+        n = 3
+        A = FSMat{ComplexF64}(Matrix{ComplexF64}(LA.I, n, n))
+        @test HC._start_jacobian_corank(A) == 0
+        Z = FSMat{ComplexF64}(zeros(ComplexF64, n, n))
+        @test HC._start_jacobian_corank(Z) == n
+        R1 = FSMat{ComplexF64}(ComplexF64[1 2 3; 2 4 6; 3 6 9])  # rank 1
+        @test HC._start_jacobian_corank(R1) == 2
+        # Non-finite entries cannot be classified: fall back to corank 0 (generic)
+        N = FSMat{ComplexF64}(fill(ComplexF64(NaN), n, n))
+        @test HC._start_jacobian_corank(N) == 0
     end
 
     # ── Tracker: end-to-end ───────────────────────────────────────────────
@@ -320,7 +359,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
         code = track!(tracker, ComplexF64[1.0, 1.0, 1.0, 1.0])
         @test code == TrackerCode.TRACKER_SUCCESS
-        # Should complete in fewer than 1000 steps (v2 does ~100-200)
+        # Should complete in fewer than 1000 steps
         @test tracker.state.accepted_steps < 1000
         @test tracker.state.rejected_steps < 50
     end

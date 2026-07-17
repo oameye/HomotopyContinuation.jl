@@ -1,5 +1,4 @@
 # DoubleF64 — extended-precision arithmetic using error-free transformations.
-# Ported from HomotopyContinuation.jl v2 (src/DoubleDouble.jl).
 # Transcendental functions (exp, log, sin, cos, tan, asin, acos, atan) are omitted
 # as they are not needed for polynomial system solving.
 
@@ -151,9 +150,8 @@ Base.one(::Type{DoubleF64}) = DoubleF64(1.0, 0.0)
 #   `convert(::Type{T}, ::DoubleF64) where T <: Number` methods. The broad form
 #   supersedes Base's generic number-conversion methods and triggers a large
 #   invalidation cascade.
-#   Measured with SnoopCompile on a minimal reproduction, the old broad method
-#   shape caused 419 unique invalidations; the narrowed shape used here causes
-#   15, a reduction of 404 invalidations.
+#   Measured with SnoopCompile on a minimal reproduction, the broad method
+#   shape causes 419 unique invalidations; the narrowed shape used here causes 15.
 # - We still provide the practical interop surface used by the package and by
 #   generic Julia code: common signed/unsigned integer targets, common float
 #   targets, and abstract `Integer`/`Signed`/`Unsigned` entry points.
@@ -416,7 +414,7 @@ end
 """
     square(x::DoubleF64)
 
-Compute `x * x` more efficiently than `x * x`.
+Compute `x * x` more efficiently than the generic product of two `DoubleF64`s.
 """
 @inline function square(a::DoubleF64)
     p1, p2 = two_square(a.hi)

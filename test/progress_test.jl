@@ -55,7 +55,7 @@ end
         @test stats.nonsingular_real == HC.nreal(res)
     end
 
-    @testset "showvalues includes the live solution counts (v2 parity)" begin
+    @testset "showvalues includes the live solution counts" begin
         stats = HC.ProgressStats()
         stats.nonsingular = 3
         stats.nonsingular_real = 2

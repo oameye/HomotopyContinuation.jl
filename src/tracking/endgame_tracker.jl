@@ -35,6 +35,7 @@ end
     TERMINATED_ACCURACY_LIMIT
     TERMINATED_ILL_CONDITIONED
     TERMINATED_INVALID_STARTVALUE
+    TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN
     TERMINATED_STEP_SIZE_TOO_SMALL
 end
 
@@ -171,6 +172,8 @@ function _tracker_code_to_endgame_code(code::TrackerCode.T)::EndgameCode.T
         return EndgameCode.TERMINATED_ILL_CONDITIONED
     elseif code == TrackerCode.TERMINATED_INVALID_STARTVALUE
         return EndgameCode.TERMINATED_INVALID_STARTVALUE
+    elseif code == TrackerCode.TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN
+        return EndgameCode.TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN
     elseif code == TrackerCode.TERMINATED_STEP_SIZE_TOO_SMALL
         return EndgameCode.TERMINATED_STEP_SIZE_TOO_SMALL
     else
@@ -471,8 +474,8 @@ function step!(eg::EndgameTracker)::Nothing
     # Only update valuation state after an accepted tracker step.
     # Rejected steps keep the same predictor data and t-value.
     if !accepted
-        # Pragmatic parity fix: if the valuation from previous accepted endgame steps
-        # already certifies a singular endpoint, do not burn additional rejected
+        # If the valuation from previous accepted endgame steps already
+        # certifies a singular endpoint, do not burn additional rejected
         # regular-tracking steps near t=0 before switching to the singular endgame.
         # Guard: only when enough valuation samples exist for a reliable winding estimate.
         if state.in_endgame && eg.val.samples >= 3 && check_finite!(eg)
@@ -536,7 +539,6 @@ function check_finite!(eg::EndgameTracker)::Bool
     # Guard: only consider the singular endgame if all coordinates have finite
     # valuations. Without this gate, at-infinity paths (val_x ≈ −1) would
     # erroneously enter the singular endgame before check_at_infinity! runs.
-    # Without this gate, at-infinity paths would enter the singular endgame.
     is_finite(
         val;
         finite_tol = opts.val_finite_tol,

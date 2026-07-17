@@ -268,8 +268,8 @@ end
 #
 # Instead of dispatching to 25 separate methods via variant_storage (which returns
 # a 25-way Union and triggers dynamic dispatch), we generate a single function with
-# an if-elseif chain on `isa` checks. This compiles to tag comparisons — equivalent
-# to the old enum-based dispatch, avoiding any vtable lookup.
+# an if-elseif chain on `isa` checks, which compiles to tag comparisons with no
+# vtable lookup.
 
 function _build_execute_call(op::OpType.T, fn_name::Symbol)
     args = Expr[]
@@ -454,8 +454,9 @@ Base.@propagate_inbounds function execute_taylor!(
     end
     @inbounds execute_taylor_instructions!(I.tape, I.instructions)
 
-    # Extract order-K coefficients into u
-    fill!(u, zero(eltype(u)))
+    # Extract order-K coefficients into u (skip the zero-fill when every
+    # output index is assigned, mirroring _extract_u!)
+    I.sequence.all_u_assigned || fill!(u, zero(eltype(u)))
     @inbounds for (i, k) in I.sequence.u_assignments
         u[i] = I.tape[k][K]
     end

@@ -3,9 +3,7 @@
 using DynamicPolynomials: @polyvar
 
 # The maximal minors of a 3 by 5 matrix: 10 equations of degree 6 in 3 variables.
-# Ported verbatim from HomotopyContinuation.jl v2 test/test_systems.jl `minors()`
-# (same Float64 coefficients; only the variable macro differs).
-function v2_minors_polys()
+function minors_polys()
     @polyvar x y z
     exprs = [
         -(19 / 2) * x^6 - (306679 / 75600) * x^5 * y +

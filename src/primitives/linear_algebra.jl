@@ -1,6 +1,5 @@
 # MatrixWorkspace — efficient repeated solution of square or overdetermined
 # linear systems Ax = b, with custom LU/QR factorizations.
-# Ported from HomotopyContinuation.jl v2 (src/linear_algebra.jl, lines 1-410).
 
 const LA = LinearAlgebra
 
@@ -577,6 +576,7 @@ end
 # ---------------------------------------------------------------------------
 
 """
+    iterative_refinement!(x, M, b, norm, tol, max_iters)
     iterative_refinement!(x, M, b, norm; tol, max_iters)
 
 Perform multiple rounds of mixed-precision iterative refinement until the
@@ -588,15 +588,27 @@ function iterative_refinement!(
         x::AbstractVector{ComplexF64},
         M::MatrixWorkspace,
         b::AbstractVector{ComplexF64},
-        norm::WeightedNorm;
-        tol::Float64 = sqrt(eps()),
-        max_iters::Int = 3,
+        norm::WeightedNorm,
+        tol::Float64,
+        max_iters::Int,
     )
     refine!() = mixed_precision_iterative_refinement!(x, M, b, norm)
     return _iterative_refinement_loop!(refine!, tol, max_iters)
 end
 
+function iterative_refinement!(
+        x::AbstractVector{ComplexF64},
+        M::MatrixWorkspace,
+        b::AbstractVector{ComplexF64},
+        norm::WeightedNorm;
+        tol::Float64 = sqrt(eps()),
+        max_iters::Int = 3,
+    )
+    return iterative_refinement!(x, M, b, norm, tol, max_iters)
+end
+
 """
+    iterative_refinement!(x, M, b, tol, max_iters)
     iterative_refinement!(x, M, b; tol, max_iters)
 
 Perform multiple rounds of mixed-precision iterative refinement until the
@@ -607,12 +619,22 @@ Uses inf-norm refinement (appropriate for dx/dt coefficients).
 function iterative_refinement!(
         x::AbstractVector{ComplexF64},
         M::MatrixWorkspace,
+        b::AbstractVector{ComplexF64},
+        tol::Float64,
+        max_iters::Int,
+    )
+    refine!() = _mixed_precision_refinement_infnorm!(x, M, b)
+    return _iterative_refinement_loop!(refine!, tol, max_iters)
+end
+
+function iterative_refinement!(
+        x::AbstractVector{ComplexF64},
+        M::MatrixWorkspace,
         b::AbstractVector{ComplexF64};
         tol::Float64 = sqrt(eps()),
         max_iters::Int = 3,
     )
-    refine!() = _mixed_precision_refinement_infnorm!(x, M, b)
-    return _iterative_refinement_loop!(refine!, tol, max_iters)
+    return iterative_refinement!(x, M, b, tol, max_iters)
 end
 
 # Shared refinement loop — Julia specializes on the concrete type of `refine!`,

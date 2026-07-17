@@ -1,6 +1,5 @@
 ## System — compiled polynomial system with cached interpreter pipeline.
 #
-# Merges the old PolynomialSystemInfo + SystemEvaluator into a single user-facing type.
 # The System constructor runs the full pipeline:
 #   MP polynomials → SExpr → CSE → InstructionSequence → Interpreters → FunctionWrappers
 
@@ -66,6 +65,12 @@ Compiles the full interpreter pipeline and caches everything for reuse.
 `compile` controls the evaluation backend:
 - `CompileMode.INTERPRETED` (default): tape-based interpreter
 - `CompileMode.COMPILED`: RuntimeGeneratedFunctions compiled eval + Jacobian, interpreter Taylor
+- `CompileMode.COMPILED_ALL`: additionally compiles the Taylor kernels
+
+`INTERPRETED` is the default because it skips runtime code generation, so the
+first `solve` starts tracking immediately. The compiled modes trade a
+per-system compilation pause for modestly faster solves; worthwhile when
+repeatedly solving the same system.
 """
 function System(
         polys::AbstractVector{<:MP.AbstractPolynomialLike};

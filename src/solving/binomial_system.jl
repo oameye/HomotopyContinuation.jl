@@ -1,5 +1,4 @@
 # BinomialSystemSolver — solve binomial systems x^A = b arising from mixed cells.
-# Ported from HomotopyContinuation.jl v2 (src/binomial_system.jl).
 #
 # Given a mixed cell from MixedSubdivisions, extract and solve the binomial system
 # x^A = b where A is an n×n integer matrix of exponent differences and b is a complex
@@ -15,6 +14,10 @@ struct BinomialSystemSolver
     b::Vector{ComplexF64}
     H::Matrix{Int64}
     U::Matrix{Int64}
+    # BigInt HNF buffers for the overflow fallback (cold path, entries are
+    # reassigned wholesale — never mutated via GMP in place)
+    H_big::Matrix{BigInt}
+    U_big::Matrix{BigInt}
     γ::Vector{Float64}           # angles of b
     μ::Vector{Float64}           # log magnitudes workspace
     Aᵀ::Matrix{Float64}
@@ -30,13 +33,17 @@ function BinomialSystemSolver(n::Int; max_d_hat::Int = 1)
     b = zeros(ComplexF64, n)
     H = zeros(Int64, n, n)
     U = zeros(Int64, n, n)
+    H_big = [big(0) for _ in 1:n, _ in 1:n]
+    U_big = [big(0) for _ in 1:n, _ in 1:n]
     γ = zeros(Float64, n)
     μ = zeros(Float64, n)
     Aᵀ = zeros(Float64, n, n)
     μ_df64 = zeros(DoubleF64, n)
     αs = zeros(DoubleF64, n)
     unit_roots_table = zeros(Int32, n, max_d_hat)
-    return BinomialSystemSolver(A, b, H, U, γ, μ, Aᵀ, μ_df64, αs, unit_roots_table)
+    return BinomialSystemSolver(
+        A, b, H, U, H_big, U_big, γ, μ, Aᵀ, μ_df64, αs, unit_roots_table,
+    )
 end
 
 """
@@ -55,30 +62,110 @@ function solve_binomial!(
         coeffs::Vector{Vector{ComplexF64}},
         cell::MixedSubdivisions.MixedCell,
     )::Int
-    n = size(BSS.A, 1)
-
-    # 1. Extract A, b from the mixed cell
     _init_binomial!(BSS, support, coeffs, cell)
+    return _solve_binomial_core!(X, BSS)
+end
 
-    # 2. Compute Hermite Normal Form: A·U = H
-    _hnf!(BSS.H, BSS.U, BSS.A)
+"""
+    solve_binomial!(X, BSS, A, b) -> Int
 
-    # 3. Compute d_hat = product of diagonal of H
-    d_hat = 1
-    @inbounds for i in 1:n
-        d_hat *= Int(BSS.H[i, i])
+Direct entry: solve `x^A = b` for the given exponent matrix and rhs, bypassing
+mixed-cell extraction. Same contract as the mixed-cell method.
+"""
+function solve_binomial!(
+        X::Matrix{ComplexF64},
+        BSS::BinomialSystemSolver,
+        A::Matrix{Int32},
+        b::Vector{ComplexF64},
+    )::Int
+    copyto!(BSS.A, A)
+    copyto!(BSS.b, b)
+    return _solve_binomial_core!(X, BSS)
+end
+
+# Fast path in Int64; on overflow (checked arithmetic throws) or a residual
+# validation failure, redo the HNF and the angular solve in BigInt/BigFloat.
+function _solve_binomial_core!(X::Matrix{ComplexF64}, BSS::BinomialSystemSolver)::Int
+    d_hat = try
+        _hnf!(BSS.H, BSS.U, BSS.A)
+        d = _solve_from_hnf!(X, BSS, BSS.H, BSS.U)
+        if !_validate_result(X, BSS, d)
+            _hnf_big!(BSS.H_big, BSS.U_big, BSS.A)
+            d = _solve_from_hnf!(X, BSS, BSS.H_big, BSS.U_big)
+        end
+        d
+    catch e
+        e isa OverflowError || rethrow(e)
+        _hnf_big!(BSS.H_big, BSS.U_big, BSS.A)
+        _solve_from_hnf!(X, BSS, BSS.H_big, BSS.U_big)
     end
-
-    # 4. Fill unit roots combinations table
-    _fill_unit_roots_table!(BSS, d_hat)
-
-    # 5. Compute angular part (phases)
-    _compute_angular_part!(X, BSS, d_hat)
-
-    # 6. Compute magnitude part
-    _compute_magnitude!(X, BSS, d_hat)
-
     return d_hat
+end
+
+function _solve_from_hnf!(
+        X::Matrix{ComplexF64},
+        BSS::BinomialSystemSolver,
+        H::Matrix{Int64},
+        U::Matrix{Int64},
+    )::Int
+    d_hat = _d_hat_from_diagonal(H)
+    _fill_unit_roots_table!(BSS, H, d_hat)
+    _compute_angular_part!(X, BSS, H, U, d_hat)
+    _compute_magnitude!(X, BSS, d_hat)
+    return d_hat
+end
+
+function _solve_from_hnf!(
+        X::Matrix{ComplexF64},
+        BSS::BinomialSystemSolver,
+        H::Matrix{BigInt},
+        U::Matrix{BigInt},
+    )::Int
+    d_hat = _d_hat_from_diagonal(H)
+    _fill_unit_roots_table!(BSS, H, d_hat)
+    _compute_angular_part!(X, BSS, H, U, d_hat)
+    _compute_magnitude!(X, BSS, d_hat)
+    return d_hat
+end
+
+# d_hat = product of the (positive) diagonal of H
+function _d_hat_from_diagonal(H::Union{Matrix{Int64}, Matrix{BigInt}})::Int
+    d_hat = 1
+    @inbounds for i in 1:size(H, 1)
+        d_hat *= Int(H[i, i])
+    end
+    return d_hat
+end
+
+"""
+    _validate_result(X, BSS, d_hat) -> Bool
+
+Check that every computed solution actually satisfies `x^A = b` up to a relative
+residual of `1e-8`. A failure signals that the Int64 HNF lost precision and the
+BigInt path should be taken.
+"""
+function _validate_result(
+        X::Matrix{ComplexF64}, BSS::BinomialSystemSolver, d_hat::Int,
+    )::Bool
+    A = BSS.A
+    b = BSS.b
+    n = size(A, 1)
+    @inbounds for k in 1:d_hat, j in 1:n
+        r = complex(1.0)
+        for i in 1:n
+            aij = A[i, j]
+            if aij < 0
+                r /= X[i, k]^(-Int(aij))
+            elseif aij > 0
+                r *= X[i, k]^Int(aij)
+            end
+        end
+        r -= b[j]
+        if !(fast_abs(r) <= max(fast_abs(b[j]) * 1.0e-8, 1.0e-8))
+            return false
+        end
+    end
+    return true
 end
 
 # --------------------------------------------------------------------------
@@ -168,6 +255,76 @@ function _hnf!(H::Matrix{Int64}, U::Matrix{Int64}, A::Matrix{Int32})::Nothing
 end
 
 """
+    _hnf_big!(H, U, A)
+
+BigInt version of [`_hnf!`](@ref) for the overflow fallback. Same Kannan-Bachem
+algorithm without checked arithmetic (BigInt cannot overflow). Allocates freely;
+only runs when the Int64 path failed, so performance is irrelevant.
+"""
+function _hnf_big!(H::Matrix{BigInt}, U::Matrix{BigInt}, A::Matrix{Int32})::Nothing
+    n = size(A, 1)
+    @inbounds for j in 1:n, i in 1:n
+        H[i, j] = big(A[i, j])
+        U[i, j] = i == j ? big(1) : big(0)
+    end
+
+    @inbounds for i in 1:(n - 1)
+        ii = i + 1
+        for j in 1:i
+            if !iszero(H[j, j]) || !iszero(H[j, ii])
+                r, p, q = gcdx(H[j, j], H[j, ii])
+                d_j = -(H[j, ii] ÷ r)
+                d_ii = H[j, j] ÷ r
+                for k in 1:n
+                    h_kj, h_kii = H[k, j], H[k, ii]
+                    H[k, j] = h_kj * p + h_kii * q
+                    H[k, ii] = h_kj * d_j + h_kii * d_ii
+
+                    u_kj, u_kii = U[k, j], U[k, ii]
+                    U[k, j] = u_kj * p + u_kii * q
+                    U[k, ii] = u_kj * d_j + u_kii * d_ii
+                end
+            end
+            if j > 1
+                _reduce_off_diagonal_big!(H, U, j)
+            end
+        end
+        _reduce_off_diagonal_big!(H, U, ii)
+    end
+
+    if n == 1
+        if H[1, 1] < 0
+            H[1, 1] = -H[1, 1]
+            U[1, 1] = -U[1, 1]
+        end
+    end
+
+    return nothing
+end
+
+@inline function _reduce_off_diagonal_big!(
+        H::Matrix{BigInt}, U::Matrix{BigInt}, k::Int,
+    )::Nothing
+    n = size(H, 1)
+    @inbounds if H[k, k] < 0
+        for i in 1:n
+            H[i, k] = -H[i, k]
+            U[i, k] = -U[i, k]
+        end
+    end
+    @inbounds for z in 1:(k - 1)
+        if !iszero(H[z, z])
+            r = -cld(H[k, z], H[z, z])
+            for i in 1:n
+                U[i, z] = U[i, z] + r * U[i, k]
+                H[i, z] = H[i, z] + r * H[i, k]
+            end
+        end
+    end
+    return nothing
+end
+
+"""
     _cdiv(x, y)
 
 Ceiling division: smallest integer d such that d * y >= x (for positive y).
@@ -198,15 +355,15 @@ end
 # Fill unit roots combinations table
 # --------------------------------------------------------------------------
 
-function _fill_unit_roots_table!(BSS::BinomialSystemSolver, d_hat::Int)::Nothing
-    H = BSS.H
+function _fill_unit_roots_table!(
+        BSS::BinomialSystemSolver,
+        H::Union{Matrix{Int64}, Matrix{BigInt}},
+        d_hat::Int,
+    )::Nothing
     n = size(H, 1)
 
-    # Resize table if needed (reallocate — struct fields are not const)
+    # The table cannot grow; the caller must pre-allocate via max_d_hat.
     if size(BSS.unit_roots_table, 2) < d_hat
-        # We need to create a new table; but since the struct is immutable
-        # we work with the existing allocation if possible.
-        # The caller should pre-allocate large enough via max_d_hat.
         throw(
             DimensionMismatch(
                 "unit_roots_table has $(size(BSS.unit_roots_table, 2)) columns but needs $d_hat",
@@ -236,10 +393,10 @@ end
 function _compute_angular_part!(
         X::Matrix{ComplexF64},
         BSS::BinomialSystemSolver,
+        H::Matrix{Int64},
+        U::Matrix{Int64},
         d_hat::Int,
     )::Nothing
-    H = BSS.H
-    U = BSS.U
     b = BSS.b
     γ = BSS.γ
     μ_df64 = BSS.μ_df64
@@ -281,6 +438,65 @@ function _compute_angular_part!(
         α_f64 = Float64(α)
         X[j, i] = complex(cospi(2.0 * α_f64), sinpi(2.0 * α_f64))
         αs[j] = α
+    end
+
+    return nothing
+end
+
+# BigInt/BigFloat variant for the overflow fallback. Working precision scales
+# with the bit size of the HNF entries. Cold path: allocates BigFloats freely.
+function _compute_angular_part!(
+        X::Matrix{ComplexF64},
+        BSS::BinomialSystemSolver,
+        H::Matrix{BigInt},
+        U::Matrix{BigInt},
+        d_hat::Int,
+    )::Nothing
+    b = BSS.b
+    γ = BSS.γ
+    unit_roots_table = BSS.unit_roots_table
+    n = size(H, 1)
+
+    p = 1
+    for j in 1:n, i in 1:n
+        p = max(p, ndigits(H[i, j]; base = 2), ndigits(U[i, j]; base = 2))
+    end
+    prec = max(32 * cld(p + 53, 32), 64)
+
+    inv_2π = 1.0 / (2.0 * π)
+    @inbounds for i in 1:n
+        γ[i] = angle(b[i]) * inv_2π
+    end
+
+    setprecision(BigFloat, prec) do
+        μ = [BigFloat(0.0) for _ in 1:n]
+        αs = [BigFloat(0.0) for _ in 1:n]
+        two = BigFloat(2.0)
+        @inbounds for j in 1:n
+            for i in 1:n
+                μij = BigFloat(γ[i]) * U[i, j]
+                if μij < -1 || μij > 1
+                    μij = rem(μij, two, RoundNearest)
+                end
+                μ[j] += μij
+            end
+            μ[j] = rem(μ[j], two, RoundNearest)
+        end
+
+        @inbounds for i in 1:d_hat, j in n:-1:1
+            α = (μ[j] + Int(unit_roots_table[j, i])) / H[j, j]
+            for k in n:-1:(j + 1)
+                αk = (αs[k] * H[k, j]) / H[j, j]
+                α -= αk
+                if α < -1 || α > 1
+                    α = rem(α, two, RoundNearest)
+                end
+            end
+            α = rem(α, two, RoundNearest)
+            α_f64 = Float64(α)
+            X[j, i] = complex(cospi(2.0 * α_f64), sinpi(2.0 * α_f64))
+            αs[j] = α
+        end
     end
 
     return nothing

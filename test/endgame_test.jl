@@ -145,8 +145,9 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
             H = StraightLineHomotopy(G.evaluator, G.evaluator; γ = ComplexF64(1.0))
             tracker = Tracker(HomotopyEvaluator(H))
             eg = EndgameTracker(tracker)
+            # Zero Jacobian at the origin → singular-Jacobian classification
             code = HC.init!(eg, ComplexF64[0.0, 0.0])
-            @test code == EndgameCode.TERMINATED_INVALID_STARTVALUE
+            @test code == EndgameCode.TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN
         end
 
         @testset "track!: linear system succeeds" begin
@@ -419,8 +420,9 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
             code = HC.track!(eg, ComplexF64[2.0, 0.0])
 
             pr = PathResult(eg)
-            @test code == EndgameCode.TERMINATED_INVALID_STARTVALUE
-            @test pr.return_code == PathResultCode.PATH_TERMINATED_INVALID_START
+            # At (2, 0) the second Jacobian row 2y vanishes → singular start
+            @test code == EndgameCode.TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN
+            @test pr.return_code == PathResultCode.PATH_TERMINATED_INVALID_START_SINGULAR_JACOBIAN
             @test pr.solution == ComplexF64[2.0, 0.0]
             @test pr.last_path_point == ComplexF64[2.0, 0.0]
             @test pr.t == 1.0
@@ -454,7 +456,6 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
     # ══════════════════════════════════════════════════════════════════════
     # Integration tests — real polynomial systems through full solve pipeline
-    # Ported from HomotopyContinuation.jl v2 endgame_test.jl
     # ══════════════════════════════════════════════════════════════════════
 
     @testset "Integration: (x-10)^d singular roots" begin
@@ -477,14 +478,14 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
             result = solve(System([(x - 10)^6]))
             # Most paths detect winding number 6
             @test count(r -> r.winding_number == 6, result.path_results) >= 4
-            # Convergence at multiplicity 6 is hard — v2 also gets 0 solutions here
+            # Convergence at multiplicity 6 is hard; 0 solutions is expected here
         end
     end
 
     @testset "Integration: at-infinity detection" begin
         using HomotopyContinuationNext: solve, TotalDegree, nat_infinity
 
-        # "Beyond Polyhedral Homotopy" example from v2:
+        # "Beyond Polyhedral Homotopy" example:
         # 2 finite solutions, 2 paths diverge to infinity
         @polyvar x y
         result = solve(
@@ -523,9 +524,9 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
             ]
         )
         result = solve(F, TotalDegree(; seed = UInt32(1)))
-        # All 12 paths detect winding number 3 (v2 parity)
+        # All 12 paths detect winding number 3
         @test count(r -> r.winding_number == 3, result.path_results) == 12
-        # 2 unique singular solutions after deduplication (v2 parity: nresults=2, nsingular=2)
+        # 2 unique singular solutions after deduplication
         @test nresults(result) == 2
         @test nsingular(result) == 2
     end
@@ -533,7 +534,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
     @testset "Integration: singular system with multiplicity 3" begin
         using HomotopyContinuationNext: solve, TotalDegree, nsingular, nnonsingular, nresults
 
-        # 1 singular + 1 nonsingular solution (dehomogenized: z=1, v2 parity)
+        # 1 singular + 1 nonsingular solution (dehomogenized: z=1)
         @polyvar x y
         z = 1
         F = System(
@@ -543,7 +544,6 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
             ]
         )
         result = solve(F, TotalDegree(; seed = UInt32(12345)))
-        # v2 parity: nresults=2, nsingular=1, nnonsingular=1
         @test nresults(result) == 2
         @test nsingular(result) == 1
         @test nnonsingular(result) == 1

@@ -103,7 +103,7 @@ function update!(
     pred.cond_H_x = δ / eps()
     # Multi-round mixed-precision refinement for accurate Taylor coefficients
     if δ > 1.0e-10
-        iterative_refinement!(xtemp, J.workspace, u; tol = 1.0e-10, max_iters = 5)
+        iterative_refinement!(xtemp, J.workspace, u, 1.0e-10, 5)
     end
     @inbounds for i in 1:n
         pred.tx3.data[2, i] = xtemp[i]
@@ -138,7 +138,7 @@ function update!(
     end
     LA.ldiv!(xtemp, J, u)
     if δ > 1.0e-10
-        iterative_refinement!(xtemp, J.workspace, u, norm; tol = 1.0e-10, max_iters = 4)
+        iterative_refinement!(xtemp, J.workspace, u, norm, 1.0e-10, 4)
     end
     @inbounds for i in 1:n
         pred.tx3.data[3, i] = xtemp[i]
@@ -156,7 +156,7 @@ function update!(
     end
     LA.ldiv!(xtemp, J, u)
     if δ > 1.0e-4
-        iterative_refinement!(xtemp, J.workspace, u, norm; tol = 1.0e-4, max_iters = 3)
+        iterative_refinement!(xtemp, J.workspace, u, norm, 1.0e-4, 3)
     end
     @inbounds for i in 1:n
         pred.tx3.data[4, i] = xtemp[i]

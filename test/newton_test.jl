@@ -33,9 +33,9 @@ using DynamicPolynomials: @polyvar
         @test r.residual < 1.0e-14
     end
 
-    @testset "extended_precision defaults to false (v2 parity)" begin
+    @testset "extended_precision defaults to false" begin
         # The default call must reproduce the explicit `extended_precision = false`
-        # call bit-for-bit (v2's default), not the extended-precision one.
+        # call bit-for-bit, not the extended-precision one.
         x0 = [root + 0.05, root - 0.05]
         @test newton(F, x0).x == newton(F, x0; extended_precision = false).x
     end
@@ -54,6 +54,32 @@ using DynamicPolynomials: @polyvar
         @test is_success(r)
         @test r.residual < 1.0e-10
         @test abs(r.x[1] - root) < 1.0e-8
+    end
+
+    # ── Underdetermined (m < n): column-pivoted QR least-squares step ─────
+    @testset "underdetermined system converges to a point on the variety" begin
+        # One equation, two unknowns: the unit circle.
+        C = System([x^2 + y^2 - 1])
+        r = newton(C, [1.1, 0.2])
+        @test is_success(r)
+        @test abs(r.x[1]^2 + r.x[2]^2 - 1) < 1.0e-10
+    end
+
+    @testset "underdetermined with preallocated cache" begin
+        C = System([x^2 + y^2 - 1])
+        cache = NewtonCache(C)
+        r1 = newton(C, [1.1, 0.2]; cache = cache)
+        r2 = newton(C, [0.1, -1.3]; cache = cache)
+        @test is_success(r1)
+        @test is_success(r2)
+        @test abs(r2.x[1]^2 + r2.x[2]^2 - 1) < 1.0e-10
+    end
+
+    @testset "underdetermined extended precision" begin
+        C = System([x^2 + y^2 - 1])
+        r = newton(C, [1.1, 0.2]; extended_precision = true)
+        @test is_success(r)
+        @test r.residual < 1.0e-14
     end
 
     # ── Preallocated cache: repeated calls reuse the workspace ─────────────

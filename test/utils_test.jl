@@ -1,9 +1,28 @@
 using Test
 using HomotopyContinuationNext:
-    fast_abs, nanmin, nanmax, nthroot,
+    fast_abs, nanmin, nanmax, nthroot, _stable_sort!, _stable_sort_by!,
     SegmentStepper, reinit!, propose_step!, step_success!, is_done, dist_to_target
+using Random: MersenneTwister
 
 @testset "Utility functions" begin
+    @testset "_stable_sort! / _stable_sort_by!: sorted and stable at all sizes" begin
+        rng = MersenneTwister(11)
+        # Sizes straddling the small-input cutoff, including empty and degenerate.
+        for n in (0, 1, 2, 17, 32, 33, 100, 1000)
+            v = rand(rng, UInt32(1):UInt32(50), n)
+            sorted = _stable_sort!(copy(v), isless)
+            @test sorted == sort(v)
+
+            # Stability: sort (key, id) pairs by key only; ids within equal keys
+            # must keep their original order.
+            pairs = [(rand(rng, 1:5), i) for i in 1:n]
+            bykey = _stable_sort_by!(copy(pairs), first)
+            @test bykey == sort(pairs; by = first)  # Base sort is stable by default
+            ltkey = _stable_sort!(copy(pairs), (a, b) -> isless(a[1], b[1]))
+            @test ltkey == bykey
+        end
+    end
+
     @testset "fast_abs" begin
         @test fast_abs(3.0 + 4.0im) ≈ 5.0
         @test fast_abs(-3.0) == 3.0

@@ -101,7 +101,7 @@ end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::HomotopyEvaluator,
-        tx::TaylorVector{3, ComplexF64}, t::ComplexF64;
+        tx::TaylorVector{3, ComplexF64}, t::ComplexF64,
         incremental::Bool = false,
     )::Nothing
     H._taylor_2!(u, tx, t, incremental)
@@ -110,7 +110,7 @@ end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{3}, H::HomotopyEvaluator,
-        tx::TaylorVector{4, ComplexF64}, t::ComplexF64;
+        tx::TaylorVector{4, ComplexF64}, t::ComplexF64,
         incremental::Bool = false,
     )::Nothing
     H._taylor_3!(u, tx, t, incremental)

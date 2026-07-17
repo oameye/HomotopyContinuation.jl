@@ -1,4 +1,3 @@
-
 # **Mutable justification:** updated in place as each path completes; a single
 # instance is shared (lock-guarded) across the threaded solve.
 mutable struct ProgressStats

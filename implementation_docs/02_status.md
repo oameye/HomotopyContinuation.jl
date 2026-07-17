@@ -36,12 +36,14 @@ certification, NID) and a distributed executor.
 - [x] Endgame tracker — Puiseux valuation, winding number estimation, singular Cauchy endgame
   (geometric stepping λ=0.25), at-infinity/at-zero detection, cubic Hermite endpoint prediction,
   jump-to-zero gating for m=1 paths
-- [x] Solution deduplication (union-find clustering), multiplicity tracking
-- [x] Binomial system solver (HNF), weighted norms, custom LU with Skeel scaling
+- [x] Solution deduplication (union-find clustering, sort-and-window candidate sweep
+  scaling to thousands of paths), multiplicity tracking
+- [x] Binomial system solver (HNF with BigInt/BigFloat overflow fallback and result
+  validation, v2 parity), weighted norms, custom LU with Skeel scaling
 - [x] Tape interpreter for eval, jacobian, Taylor 1–3, DF64
 - [x] CSE optimizer, Moshi ADTs for SExpr/ExecInstruction
 - [x] RGF compiled eval+jac backend (`CompileMode.COMPILED`, 3–6x kernel speedup)
-- [x] RGF compiled Taylor backend (`CompileMode.COMPILED_ALL`, 1.3–1.7x Taylor kernel speedup, ~1.2x end-to-end)
+- [x] RGF compiled Taylor backend (`CompileMode.COMPILED_ALL`, 1.3–1.7x Taylor kernel speedup, 1.2–1.4x end-to-end vs `INTERPRETED`)
 - [x] Automatic coefficient normalization (scales polynomials with O(10^8+) coefficients to O(1))
 - [x] AllocCheck zero-allocation enforcement on all hot paths
 - [x] Integration tests from v2 with exact result parity
@@ -53,7 +55,11 @@ certification, NID) and a distributed executor.
   filtering post-pass (Newton on the original system for nonsingular endpoints, residual
   comparison for singular ones), `PATH_EXCESS_SOLUTION` result code and `nexcess_solutions`
 - [x] Standalone `newton(F, x0)` at v2 parity (`extended_precision` defaults to `false`; `norm` arg
-  omitted since v3 is inf-norm only)
+  omitted since v3 is inf-norm only; underdetermined m < n supported via column-pivoted QR)
+- [x] Invalid-start classification: singular start Jacobian reported as
+  `TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN` (v2 parity)
+- [x] Tracker option presets `DEFAULT/FAST/CONSERVATIVE_TRACKER_OPTIONS` (v2's
+  TrackerParameters presets)
 - [x] Path diagnostics at full v2 accessor parity on `PathResult` (incl. `path_number`, `start_solution`,
   `valuation`, `multiplicity`, `cond`, `is_failed`/`is_finite`) and `Result` (`seed`, `ntracked`,
   `failed`, `at_infinity`, `nonsingular`, `singular`, `nfailed`, `statistics`)
@@ -65,6 +71,11 @@ certification, NID) and a distributed executor.
 - [ ] **Distributed executor** — extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
 - [ ] Direct polynomial compiler (`polynomial_compiler.jl` exists, deferred)
 - [ ] Monodromy, certification, witness sets, NID
+- [ ] Group-action symmetry in dedup (needs a `GroupActions` API design; see
+  `03_v2_improvement_opportunities.md` item 2)
+- [ ] Compile-mode benchmark, v2 side: v3 `COMPILED_ALL` vs v2 `:all`, plus
+  fresh-session first-solve per v3 default candidate (see `04_compile_modes.md`
+  TODO; the v3-only matrix is measured, `benchmark/compile_modes_e2e.jl`)
 - [ ] Benchmark CI
 
 ## Test Suite
@@ -117,21 +128,41 @@ Measured 2026-04-03, Julia 1.12.5, single-threaded.
 
 #### Compiled vs interpreted kernels
 
+Raw `SystemEvaluator` kernels. These speedups do not carry to end-to-end
+solves (see the next table): through the `StraightLineHomotopy` they shrink to
+1.7–2.0x, and Taylor plus linear algebra dominate the tracker step.
+
 | System | Eval speedup | Jac speedup |
 |--------|-------------:|------------:|
 | katsura-3 | 3.35x | 3.82x |
 | katsura-5 | 3.65x | 5.04x |
 | katsura-7 | 3.29x | 6.74x |
 
+#### End-to-end solve per compile mode
+
+Measured 2026-07-17, serial executor, speedup vs `INTERPRETED`
+(`benchmark/compile_modes_e2e.jl`; analysis in `04_compile_modes.md`):
+
+| System | INTERPRETED | COMPILED | COMPILED_ALL |
+|--------|------------:|---------:|-------------:|
+| katsura-3 | 0.91ms | 1.10x | 1.18x |
+| katsura-5 | 8.79ms | 1.15x | 1.25x |
+| katsura-7 | 64.98ms | 1.23x | 1.33x |
+| katsura-9 | 482.94ms | 1.27x | 1.41x |
+
 #### COMPILED_ALL (compiled Taylor) vs INTERPRETED
 
 Scalar-parameter Taylor kernel (parameter-free systems, speedup = interp/all):
 
-| System | Taylor 1 speedup | Taylor 2 speedup | Taylor 3 speedup | Solve speedup | Build overhead |
+| System | Taylor 1 speedup | Taylor 2 speedup | Taylor 3 speedup | Solve speedup vs COMPILED | Build overhead |
 |--------|------------------:|------------------:|------------------:|--------------:|---------------:|
 | katsura-3 | 1.66x | 1.72x | 1.62x | 1.09x | 1.62x |
 | katsura-5 | 1.73x | 1.59x | 1.61x | 1.09x | 1.39x |
-| katsura-7 | 1.74x | 1.65x | 1.76x | — | 1.29x |
+| katsura-7 | 1.74x | 1.65x | 1.76x | 1.08x | 1.29x |
+
+(The solve column is `COMPILED_ALL` vs `COMPILED`, not vs `INTERPRETED`;
+katsura-7 value measured 2026-07-17. Re-measured 2026-07-17 at katsura 3/5/7/9
+the ratio is 1.08–1.10x across all sizes.)
 
 TaylorVector-parameter Taylor kernel (production path — CoefficientHomotopy/ToricHomotopy):
 

@@ -210,7 +210,7 @@ using CommonSolve: CommonSolve
         @test nsolutions(result) >= 1
     end
 
-    @testset "Polyhedral: default endgame options (v2 parity)" begin
+    @testset "Polyhedral: default endgame options" begin
         alg = Polyhedral()
         @test alg.endgame_options.lambda == 0.25
         @test alg.endgame_options.min_cond == 1.0e6

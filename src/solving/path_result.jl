@@ -10,6 +10,7 @@
     PATH_TERMINATED_MAX_STEPS
     PATH_TERMINATED_STEP_SIZE
     PATH_TERMINATED_INVALID_START
+    PATH_TERMINATED_INVALID_START_SINGULAR_JACOBIAN
 end
 
 struct PathResult
@@ -69,7 +70,7 @@ is_failed(r::PathResult)::Bool =
 """
     is_finite(r::PathResult)
 
-`true` if `r` is a finite solution. As in v2 this coincides with success.
+`true` if `r` is a finite solution; coincides with success.
 """
 is_finite(r::PathResult)::Bool = is_success(r)
 Base.isfinite(r::PathResult)::Bool = is_finite(r)
@@ -116,8 +117,8 @@ rejected_steps(r::PathResult)::Int = r.rejected_steps
 """
     steps(r::PathResult)
 
-Total number of steps the path tracker performed (accepted + rejected). Matches
-the v2 convention; endgame steps are reported separately (see [`Base.show`](@ref)).
+Total number of steps the path tracker performed (accepted + rejected).
+Endgame steps are reported separately (see [`Base.show`](@ref)).
 """
 steps(r::PathResult)::Int = accepted_steps(r) + rejected_steps(r)
 
@@ -147,7 +148,7 @@ last_path_point(r::PathResult)::Tuple{Vector{ComplexF64}, Float64} =
     cond(r::PathResult)
 
 Estimated condition number of the Jacobian at the endpoint. Alias for
-[`condition_jacobian`](@ref), matching v2's `LinearAlgebra.cond(::PathResult)`.
+[`condition_jacobian`](@ref).
 """
 LA.cond(r::PathResult)::Float64 = r.condition_jacobian
 
@@ -181,7 +182,7 @@ the enclosing [`Result`](@ref). `0` for non-success paths or an unclustered resu
 """
 multiplicity(r::PathResult)::Int = r.multiplicity
 
-# v2-parity positional / Base overloads for `is_real`.
+# Positional / Base overloads for `is_real`.
 is_real(r::PathResult, tol::Float64)::Bool = is_real(r; tol = tol)
 Base.isreal(r::PathResult; tol::Float64 = DEFAULT_REAL_TOL)::Bool = is_real(r; tol = tol)
 Base.isreal(r::PathResult, tol::Float64)::Bool = is_real(r; tol = tol)
@@ -245,6 +246,8 @@ function _tracker_code_to_path_code(code::TrackerCode.T)::PathResultCode.T
         return PathResultCode.PATH_TERMINATED_ILL_CONDITIONED
     elseif code == TrackerCode.TERMINATED_INVALID_STARTVALUE
         return PathResultCode.PATH_TERMINATED_INVALID_START
+    elseif code == TrackerCode.TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN
+        return PathResultCode.PATH_TERMINATED_INVALID_START_SINGULAR_JACOBIAN
     elseif code == TrackerCode.TERMINATED_STEP_SIZE_TOO_SMALL
         return PathResultCode.PATH_TERMINATED_STEP_SIZE
     else
@@ -269,6 +272,8 @@ function _endgame_code_to_path_code(code::EndgameCode.T)::PathResultCode.T
         return PathResultCode.PATH_TERMINATED_ILL_CONDITIONED
     elseif code == EndgameCode.TERMINATED_INVALID_STARTVALUE
         return PathResultCode.PATH_TERMINATED_INVALID_START
+    elseif code == EndgameCode.TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN
+        return PathResultCode.PATH_TERMINATED_INVALID_START_SINGULAR_JACOBIAN
     elseif code == EndgameCode.TERMINATED_STEP_SIZE_TOO_SMALL
         return PathResultCode.PATH_TERMINATED_STEP_SIZE
     else
@@ -356,8 +361,7 @@ function PathResult(
     end
 
     # Per-coordinate Puiseux valuation, recorded only once the endgame has taken
-    # enough samples to make `val_x` meaningful (empty otherwise, matching v2's
-    # `nothing`).
+    # enough samples to make `val_x` meaningful (empty otherwise).
     valuation = eg.val.samples > 0 ? Vector{Float64}(eg.val.val_x) : Float64[]
 
     return PathResult(

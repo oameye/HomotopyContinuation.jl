@@ -6,8 +6,17 @@ const DEFAULT_REAL_TOL = 1.0e-6
 nanmin(a, b) = isnan(a) ? b : (isnan(b) ? a : min(a, b))
 nanmax(a, b) = isnan(a) ? b : (isnan(b) ? a : max(a, b))
 
+# Insertion sort is O(n²); beyond this cutoff a stable MergeSort wins. The
+# vertex lists sorted during System construction can reach thousands of entries.
+const _STABLE_SORT_CUTOFF = 32
+
 function _stable_sort!(values::Vector{T}, lt::F)::Vector{T} where {T, F}
-    for i in 2:length(values)
+    n = length(values)
+    if n > _STABLE_SORT_CUTOFF
+        sort!(values; alg = MergeSort, lt = lt)
+        return values
+    end
+    for i in 2:n
         value = values[i]
         j = i - 1
         while j >= 1 && lt(value, values[j])
@@ -20,7 +29,12 @@ function _stable_sort!(values::Vector{T}, lt::F)::Vector{T} where {T, F}
 end
 
 function _stable_sort_by!(values::Vector{T}, by::F)::Vector{T} where {T, F}
-    for i in 2:length(values)
+    n = length(values)
+    if n > _STABLE_SORT_CUTOFF
+        sort!(values; alg = MergeSort, by = by)
+        return values
+    end
+    for i in 2:n
         value = values[i]
         value_key = by(value)
         j = i - 1

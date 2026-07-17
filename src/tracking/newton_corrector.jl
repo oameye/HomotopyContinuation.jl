@@ -118,7 +118,6 @@ end
             extended_precision=false, accurate_μ=false) → NewtonCorrectorResult
 
 Perform Newton correction on predicted point `x₀`. Writes corrected point into `x̄`.
-All arguments are positional for hot-path performance (no kwargs overhead).
 
 - `ω`: Lipschitz constant estimate
 - `μ`: accuracy target

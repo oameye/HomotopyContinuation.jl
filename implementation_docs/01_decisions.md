@@ -82,10 +82,10 @@ Old: abstract type hierarchy with 9 concrete subtypes → `Vector{SExpr}` was ab
 
 `codegen.jl` (299 lines) generates Julia functions from `InstructionSequence` at runtime via `@RuntimeGeneratedFunction`. Three modes:
 - `INTERPRETED`: all operations go through the tape interpreter
-- `COMPILED`: RGF for eval + jacobian, interpreter for Taylor (3–6x kernel speedup)
-- `COMPILED_ALL`: RGF for eval, jacobian, and Taylor orders 1–3 (~1.3x additional Taylor speedup, ~1.2x end-to-end)
+- `COMPILED`: RGF for eval + jacobian, interpreter for Taylor (3–6x kernel speedup, but only 1.1–1.3x end-to-end; see `04_compile_modes.md`)
+- `COMPILED_ALL`: RGF for eval, jacobian, and Taylor orders 1–3 (Taylor kernels 1.2–1.8x, end-to-end 1.2–1.4x vs `INTERPRETED`)
 
-Build overhead for `COMPILED_ALL` is 1.3–1.65x vs `COMPILED`, but the Taylor kernel wins compound over many path steps.
+Build overhead for `COMPILED_ALL` is 1.3–1.65x vs `COMPILED`, but it strictly dominates `COMPILED` in steady state (a consistent extra ~1.09x).
 
 ### Builder/worker-state threading pattern — SHIPPED
 
