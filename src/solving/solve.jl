@@ -10,6 +10,7 @@ struct SolveCache{E <: AbstractExecutor, B, C}
     seed::UInt32
     # ExcessSolutionChecker for overdetermined systems, Nothing for square ones
     excess_checker::C
+    show_progress::Bool
 end
 
 """
@@ -33,7 +34,8 @@ end
 
 function CommonSolve.init(
         F::System, alg::TotalDegree,
-        exec::AbstractExecutor = Threaded(),
+        exec::AbstractExecutor = Threaded();
+        show_progress::Bool = true,
     )::SolveCache
     seed = alg.seed
     _check_square_or_overdetermined(F)
@@ -66,23 +68,28 @@ function CommonSolve.init(
     tracker = Tracker(heval; options = alg.tracker_options)
     eg = EndgameTracker(tracker, alg.endgame_options)
 
-    return SolveCache(exec, builder, eg, starts, seed, excess_checker)
+    return SolveCache(exec, builder, eg, starts, seed, excess_checker, show_progress)
 end
 
 # ── CommonSolve.solve!: serial ─────────────────────────────────────────────
 
 function CommonSolve.solve!(cache::SolveCache{Serial})::Result
     eg = cache.tracker
+    n_paths = length(cache.start_solutions)
     path_results = PathResult[]
-    sizehint!(path_results, length(cache.start_solutions))
+    sizehint!(path_results, n_paths)
 
-    for x₀ in cache.start_solutions
+    progress = make_progress(n_paths, cache.show_progress)
+    stats = ProgressStats()
+    for (k, x₀) in enumerate(cache.start_solutions)
         track!(eg, x₀)
-        push!(path_results, PathResult(eg))
+        pr = PathResult(eg; path_number = k, start_solution = Vector{ComplexF64}(x₀))
+        push!(path_results, pr)
+        update_progress!(progress, k, stats, pr)
     end
 
     return _finalize_result(
-        path_results, length(cache.start_solutions), cache.seed, cache.excess_checker,
+        path_results, n_paths, cache.seed, cache.excess_checker,
     )
 end
 
@@ -94,11 +101,20 @@ function CommonSolve.solve!(cache::SolveCache{Threaded})::Result
     n_paths = length(starts)
     results = Vector{PathResult}(undef, n_paths)
 
+    progress = make_progress(n_paths, cache.show_progress)
+    stats = ProgressStats()
+    counter = Threads.Atomic{Int}(0)
+    plock = ReentrantLock()
+
     @tasks for i in eachindex(starts)
         @set ntasks = nt
         @local ws = cache.builder()
         track!(ws.tracker, starts[i])
-        results[i] = PathResult(ws.tracker)
+        results[i] = PathResult(ws.tracker; path_number = i, start_solution = Vector{ComplexF64}(starts[i]))
+        if progress !== nothing
+            k = Threads.atomic_add!(counter, 1) + 1
+            @lock plock update_progress!(progress, k, stats, results[i])
+        end
     end
 
     return _finalize_result(results, n_paths, cache.seed, cache.excess_checker)
@@ -114,21 +130,23 @@ Solve a polynomial system using homotopy continuation.
 function solve(
         F::System,
         alg::TotalDegree = TotalDegree(),
-        exec::AbstractExecutor = Threaded(),
+        exec::AbstractExecutor = Threaded();
+        show_progress::Bool = true,
     )::Result
-    return CommonSolve.solve!(CommonSolve.init(F, alg, exec))
+    return CommonSolve.solve!(CommonSolve.init(F, alg, exec; show_progress = show_progress))
 end
 
-function solve(F::System, exec::AbstractExecutor)::Result
-    return solve(F, TotalDegree(), exec)
+function solve(F::System, exec::AbstractExecutor; show_progress::Bool = true)::Result
+    return solve(F, TotalDegree(), exec; show_progress = show_progress)
 end
 
 function solve(
         F::System,
         alg::Polyhedral,
-        exec::AbstractExecutor = Threaded(),
+        exec::AbstractExecutor = Threaded();
+        show_progress::Bool = true,
     )::Result
-    return CommonSolve.solve!(CommonSolve.init(F, alg, exec))
+    return CommonSolve.solve!(CommonSolve.init(F, alg, exec; show_progress = show_progress))
 end
 
 # ── Parameter homotopy ─────────────────────────────────────────────────────
@@ -142,6 +160,7 @@ function solve(
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
+        show_progress::Bool = true,
     )::Result
     return CommonSolve.solve!(
         CommonSolve.init(
@@ -151,6 +170,7 @@ function solve(
             seed = seed,
             tracker_options = tracker_options,
             endgame_options = endgame_options,
+            show_progress = show_progress,
         ),
     )
 end
@@ -164,6 +184,7 @@ function CommonSolve.init(
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
+        show_progress::Bool = true,
     )::SolveCache
     _check_square_or_overdetermined(F)
     @assert nparameters(F) > 0 "System must have parameters for parameter homotopy"
@@ -181,5 +202,5 @@ function CommonSolve.init(
 
     start_sols = [Vector{ComplexF64}(ComplexF64.(s)) for s in starts]
 
-    return SolveCache(exec, builder, eg, start_sols, seed, nothing)
+    return SolveCache(exec, builder, eg, start_sols, seed, nothing, show_progress)
 end

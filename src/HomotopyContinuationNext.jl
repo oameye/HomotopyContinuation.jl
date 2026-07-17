@@ -3,6 +3,7 @@ module HomotopyContinuationNext
 using LinearAlgebra: LinearAlgebra
 using Random: Random
 using Printf: Printf
+using ProgressMeter: ProgressMeter
 
 using EnumX: @enumx
 using Moshi.Data: @data, variant_storage, variant_storage_type
@@ -26,11 +27,18 @@ end
 export @polyvar, solve, System
 export CompileMode
 export solutions, real_solutions, nsolutions, nreal, nsingular, nnonsingular, nat_infinity
-export nexcess_solutions
+export nexcess_solutions, nfailed
 export nresults, results, multiplicity
 export is_success, is_singular, is_nonsingular, is_at_infinity, is_real, is_excess_solution
+export is_failed, is_finite
 export TotalDegree, Polyhedral, Result, PathResult
+export path_results, seed, ntracked, failed, at_infinity, nonsingular, singular
+export statistics, ResultStatistics
+export solution, accuracy, residual, steps, accepted_steps, rejected_steps
+export winding_number, condition_jacobian, last_path_point
+export path_number, start_solution, valuation
 export EndgameOptions, EndgameTracker
+export newton, NewtonResult, NewtonCache, NewtonReturnCode
 export Serial, Threaded
 
 const MP = MultivariatePolynomials
@@ -74,6 +82,7 @@ include("core/coefficient_homotopy.jl")
 include("core/toric_homotopy.jl")
 
 include("tracking/newton_corrector.jl")
+include("tracking/newton.jl")
 include("tracking/predictor.jl")
 include("tracking/tracker.jl")
 include("tracking/valuation.jl")
@@ -82,6 +91,7 @@ include("solving/executor.jl")
 include("solving/worker_state.jl")
 include("solving/binomial_system.jl")
 include("solving/path_result.jl")
+include("solving/progress.jl")
 include("solving/excess_solution.jl")
 include("solving/total_degree.jl")
 include("solving/builder.jl")

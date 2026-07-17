@@ -52,12 +52,18 @@ certification, NID) and a distributed executor.
   (squared-up evaluator) and polyhedral (merged support/coefficients), excess-solution
   filtering post-pass (Newton on the original system for nonsingular endpoints, residual
   comparison for singular ones), `PATH_EXCESS_SOLUTION` result code and `nexcess_solutions`
+- [x] Standalone `newton(F, x0)` at v2 parity (`extended_precision` defaults to `false`; `norm` arg
+  omitted since v3 is inf-norm only)
+- [x] Path diagnostics at full v2 accessor parity on `PathResult` (incl. `path_number`, `start_solution`,
+  `valuation`, `multiplicity`, `cond`, `is_failed`/`is_finite`) and `Result` (`seed`, `ntracked`,
+  `failed`, `at_infinity`, `nonsingular`, `singular`, `nfailed`, `statistics`)
+- [x] Progress bars via ProgressMeter.jl (`show_progress` kwarg on `solve`/`init`, threaded, with v2's
+  live `showvalues` counts and `delay=0.3` suppression)
 
 ### Not Done
 
 - [ ] **Distributed executor** — extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
 - [ ] Direct polynomial compiler (`polynomial_compiler.jl` exists, deferred)
-- [ ] Standalone `newton(F, x0)`, progress bars, path diagnostics
 - [ ] Monodromy, certification, witness sets, NID
 - [ ] Benchmark CI
 

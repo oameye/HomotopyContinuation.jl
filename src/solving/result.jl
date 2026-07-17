@@ -114,7 +114,112 @@ end
 
 function Result(path_results::Vector{PathResult}, tracked_paths::Int, seed::UInt32)
     clusters, multiplicity = _cluster_solutions(path_results)
-    return Result(path_results, tracked_paths, seed, clusters, multiplicity)
+    # Stamp each path with its multiplicity so `multiplicity(::PathResult)`
+    # reports the cluster size without a back-reference to the `Result`.
+    prs = PathResult[_with_multiplicity(pr, multiplicity[i]) for (i, pr) in enumerate(path_results)]
+    return Result(prs, tracked_paths, seed, clusters, multiplicity)
+end
+
+"""
+    path_results(r::Result)
+
+The full vector of per-path [`PathResult`](@ref)s, including failures and
+excess solutions. Use this for path-level diagnostics; `results(r)` returns
+only the deduplicated successful solutions.
+"""
+path_results(r::Result)::Vector{PathResult} = r.path_results
+
+"""
+    seed(r::Result)
+
+The random seed used to generate the start system, for reproducing the solve.
+"""
+seed(r::Result)::UInt32 = r.seed
+
+"""
+    ntracked(r::Result)
+
+Total number of paths that were tracked.
+"""
+ntracked(r::Result)::Int = r.tracked_paths
+
+"""
+    failed(r::Result)
+
+The path results whose tracking failed (see [`is_failed`](@ref)).
+"""
+failed(r::Result)::Vector{PathResult} = filter(is_failed, r.path_results)
+
+"""
+    at_infinity(r::Result)
+
+The path results that diverged to infinity or zero (see [`is_at_infinity`](@ref)).
+"""
+at_infinity(r::Result)::Vector{PathResult} = filter(is_at_infinity, r.path_results)
+
+"""
+    nonsingular(r::Result; only_real = false)
+
+The unique non-singular solutions as [`PathResult`](@ref)s.
+"""
+nonsingular(r::Result; only_real::Bool = false, real_tol::Float64 = DEFAULT_REAL_TOL)::Vector{PathResult} =
+    results(r; only_nonsingular = true, only_real = only_real, real_tol = real_tol)
+
+"""
+    singular(r::Result; only_real = false)
+
+The unique singular solutions as [`PathResult`](@ref)s.
+"""
+singular(r::Result; only_real::Bool = false, real_tol::Float64 = DEFAULT_REAL_TOL)::Vector{PathResult} =
+    results(r; only_singular = true, only_real = only_real, real_tol = real_tol)
+
+"""
+    nfailed(r::Result) -> Int
+
+Number of paths whose tracking failed.
+"""
+nfailed(r::Result)::Int = count(is_failed, r.path_results)
+
+"""
+    ResultStatistics
+
+Summary counts for a [`Result`](@ref), produced by [`statistics`](@ref). Mirrors
+v2's `ResultStatistics`; every field is an `Int`.
+"""
+struct ResultStatistics
+    total::Int
+    nonsingular::Int
+    singular::Int
+    real::Int
+    real_nonsingular::Int
+    real_singular::Int
+    at_infinity::Int
+    excess_solution::Int
+    failed::Int
+end
+
+"""
+    statistics(r::Result; real_tol = DEFAULT_REAL_TOL) -> ResultStatistics
+
+Aggregate solution counts for `r` (deduplicated unique solutions, plus raw
+per-path failure / at-infinity / excess counts).
+"""
+function statistics(r::Result; real_tol::Float64 = DEFAULT_REAL_TOL)::ResultStatistics
+    n_nonsingular = nnonsingular(r)
+    n_singular = nsingular(r)
+    n_real_nonsingular = nreal(r; tol = real_tol)
+    n_real_singular = nresults(r; only_real = true, only_singular = true, real_tol = real_tol)
+    return ResultStatistics(
+        n_nonsingular + n_singular,
+        n_nonsingular,
+        n_singular,
+        n_real_nonsingular + n_real_singular,
+        n_real_nonsingular,
+        n_real_singular,
+        nat_infinity(r),
+        nexcess_solutions(r),
+        nfailed(r),
+    )
 end
 
 """

@@ -72,6 +72,7 @@ struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S <: 
     _param_system::S
     # ExcessSolutionChecker for overdetermined systems, Nothing for square ones
     excess_checker::C
+    show_progress::Bool
 end
 
 # ── Helper: randomize support/coefficients for overdetermined systems ───────
@@ -169,7 +170,8 @@ end
 
 function CommonSolve.init(
         F::System, alg::Polyhedral,
-        exec::AbstractExecutor = Threaded(),
+        exec::AbstractExecutor = Threaded();
+        show_progress::Bool = true,
     )::PolyhedralSolveCache
     seed = alg.seed
     _check_square_or_overdetermined(F)
@@ -303,6 +305,7 @@ function CommonSolve.init(
         all_starts, seed,
         param_system,
         excess_checker,
+        show_progress,
     )
 end
 
@@ -413,8 +416,11 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache{Serial})::Result
     n = size(support[1], 1)
     x_buffer = Vector{ComplexF64}(undef, n)
 
+    progress = make_progress(n_paths, cache.show_progress)
+    stats = ProgressStats()
+
     # Phase 1 + Phase 2 for each start solution
-    for (cell, x₀) in cache.start_solutions
+    for (k, (cell, x₀)) in enumerate(cache.start_solutions)
         min_w, max_w = update_weights!(toric_H, support, lifting, cell; min_weight = 1.0)
 
         code = _track_toric_phase!(
@@ -423,7 +429,9 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache{Serial})::Result
         )
 
         if code != TrackerCode.TRACKER_SUCCESS
-            push!(path_results, PathResult(toric_tracker))
+            pr = PathResult(toric_tracker; path_number = k, start_solution = Vector{ComplexF64}(x₀))
+            push!(path_results, pr)
+            update_progress!(progress, k, stats, pr)
             continue
         end
 
@@ -437,7 +445,12 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache{Serial})::Result
             step!(coeff_tracker)
         end
 
-        push!(path_results, _add_steps(PathResult(coeff_tracker), toric_accepted, toric_rejected))
+        pr = _add_steps(
+            PathResult(coeff_tracker; path_number = k, start_solution = Vector{ComplexF64}(x₀)),
+            toric_accepted, toric_rejected,
+        )
+        push!(path_results, pr)
+        update_progress!(progress, k, stats, pr)
     end
 
     return _finalize_result(path_results, n_paths, cache.seed, cache.excess_checker)
@@ -453,6 +466,11 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache{Threaded})::Result
     support = cache.support
     lifting = cache.lifting
 
+    progress = make_progress(n_paths, cache.show_progress)
+    stats = ProgressStats()
+    counter = Threads.Atomic{Int}(0)
+    plock = ReentrantLock()
+
     @tasks for i in eachindex(starts)
         @set ntasks = nt
         @local ws = cache.builder()
@@ -467,7 +485,7 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache{Threaded})::Result
         )
 
         if code != TrackerCode.TRACKER_SUCCESS
-            results[i] = PathResult(ws.toric_tracker)
+            results[i] = PathResult(ws.toric_tracker; path_number = i, start_solution = Vector{ComplexF64}(x₀))
         else
             toric_accepted = ws.toric_tracker.state.accepted_steps
             toric_rejected = ws.toric_tracker.state.rejected_steps
@@ -479,7 +497,15 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache{Threaded})::Result
                 step!(ws.coeff_tracker)
             end
 
-            results[i] = _add_steps(PathResult(ws.coeff_tracker), toric_accepted, toric_rejected)
+            results[i] = _add_steps(
+                PathResult(ws.coeff_tracker; path_number = i, start_solution = Vector{ComplexF64}(x₀)),
+                toric_accepted, toric_rejected,
+            )
+        end
+
+        if progress !== nothing
+            k = Threads.atomic_add!(counter, 1) + 1
+            @lock plock update_progress!(progress, k, stats, results[i])
         end
     end
 

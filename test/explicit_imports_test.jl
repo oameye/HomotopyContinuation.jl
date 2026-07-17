@@ -8,6 +8,7 @@ using HomotopyContinuationNext
         HomotopyContinuationNext.OpType,
         HomotopyContinuationNext.SFuncKind,
         HomotopyContinuationNext.NewtonCode,
+        HomotopyContinuationNext.NewtonReturnCode,
         HomotopyContinuationNext.PredictionMethod,
         HomotopyContinuationNext.TrackerCode,
         HomotopyContinuationNext.PathResultCode,

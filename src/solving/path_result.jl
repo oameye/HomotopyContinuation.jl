@@ -17,6 +17,7 @@ struct PathResult
     solution::Vector{ComplexF64}
     t::Float64
     accuracy::Float64
+    residual::Float64
     condition_jacobian::Float64
     winding_number::Int
     singular::Bool
@@ -26,6 +27,10 @@ struct PathResult
     extended_precision_used::Bool
     last_path_point::Vector{ComplexF64}
     last_path_t::Float64
+    path_number::Int
+    start_solution::Vector{ComplexF64}
+    valuation::Vector{Float64}
+    multiplicity::Int
 end
 
 """
@@ -35,18 +40,166 @@ Return a copy of `r` with additional accepted/rejected steps added (e.g. from a 
 """
 function _add_steps(r::PathResult, accepted::Int, rejected::Int)::PathResult
     return PathResult(
-        r.return_code, r.solution, r.t, r.accuracy, r.condition_jacobian,
+        r.return_code, r.solution, r.t, r.accuracy, r.residual, r.condition_jacobian,
         r.winding_number, r.singular,
         r.accepted_steps + accepted, r.rejected_steps + rejected,
         r.steps_eg, r.extended_precision_used, r.last_path_point, r.last_path_t,
+        r.path_number, r.start_solution, r.valuation, r.multiplicity,
     )
 end
 
 is_success(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_SUCCESS
 is_singular(r::PathResult)::Bool = is_success(r) && r.singular
 is_nonsingular(r::PathResult)::Bool = is_success(r) && !r.singular
-is_at_infinity(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_AT_INFINITY
+
+is_at_infinity(r::PathResult)::Bool =
+    r.return_code == PathResultCode.PATH_AT_INFINITY ||
+    r.return_code == PathResultCode.PATH_AT_ZERO
 is_excess_solution(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_EXCESS_SOLUTION
+
+"""
+    is_failed(r::PathResult)
+
+`true` if the path neither succeeded, diverged to infinity/zero, nor was flagged
+as an excess solution (i.e. tracking terminated for a numerical reason).
+"""
+is_failed(r::PathResult)::Bool =
+    !(is_success(r) || is_at_infinity(r) || is_excess_solution(r))
+
+"""
+    is_finite(r::PathResult)
+
+`true` if `r` is a finite solution. As in v2 this coincides with success.
+"""
+is_finite(r::PathResult)::Bool = is_success(r)
+Base.isfinite(r::PathResult)::Bool = is_finite(r)
+
+# ── Diagnostic accessors ────────────────────────────────────────────────────
+# Per-path outcome inspection: the solution and its quality (accuracy, residual,
+# conditioning) plus the tracking effort that produced it (step counts, winding).
+
+"""
+    solution(r::PathResult)
+
+The solution vector stored in `r`.
+"""
+solution(r::PathResult)::Vector{ComplexF64} = r.solution
+
+"""
+    accuracy(r::PathResult)
+
+Estimated accuracy of the solution (the final Newton update norm at the endpoint).
+"""
+accuracy(r::PathResult)::Float64 = r.accuracy
+
+"""
+    residual(r::PathResult)
+
+Infinity norm `‖H(x, t)‖∞` of the homotopy at the reported endpoint.
+"""
+residual(r::PathResult)::Float64 = r.residual
+
+"""
+    accepted_steps(r::PathResult)
+
+Number of accepted tracker steps along the path.
+"""
+accepted_steps(r::PathResult)::Int = r.accepted_steps
+
+"""
+    rejected_steps(r::PathResult)
+
+Number of rejected tracker steps along the path.
+"""
+rejected_steps(r::PathResult)::Int = r.rejected_steps
+
+"""
+    steps(r::PathResult)
+
+Total number of steps the path tracker performed (accepted + rejected). Matches
+the v2 convention; endgame steps are reported separately (see [`Base.show`](@ref)).
+"""
+steps(r::PathResult)::Int = accepted_steps(r) + rejected_steps(r)
+
+"""
+    winding_number(r::PathResult)
+
+Estimated winding number of a singular endpoint (`0` when not estimated).
+"""
+winding_number(r::PathResult)::Int = r.winding_number
+
+"""
+    condition_jacobian(r::PathResult)
+
+Estimated condition number of the Jacobian at the endpoint.
+"""
+condition_jacobian(r::PathResult)::Float64 = r.condition_jacobian
+
+"""
+    last_path_point(r::PathResult)
+
+The tracker's last `(point, t)` on the path before the endgame extrapolation.
+"""
+last_path_point(r::PathResult)::Tuple{Vector{ComplexF64}, Float64} =
+    (r.last_path_point, r.last_path_t)
+
+"""
+    cond(r::PathResult)
+
+Estimated condition number of the Jacobian at the endpoint. Alias for
+[`condition_jacobian`](@ref), matching v2's `LinearAlgebra.cond(::PathResult)`.
+"""
+LA.cond(r::PathResult)::Float64 = r.condition_jacobian
+
+"""
+    path_number(r::PathResult)
+
+Index of the path (start solution) that produced `r`, or `0` if not recorded.
+"""
+path_number(r::PathResult)::Int = r.path_number
+
+"""
+    start_solution(r::PathResult)
+
+The start solution the path was tracked from, or an empty vector if not recorded.
+"""
+start_solution(r::PathResult)::Vector{ComplexF64} = r.start_solution
+
+"""
+    valuation(r::PathResult)
+
+The per-coordinate Puiseux valuation estimated during the endgame, or an empty
+vector when the endgame did not sample a valuation for this path.
+"""
+valuation(r::PathResult)::Vector{Float64} = r.valuation
+
+"""
+    multiplicity(r::PathResult)
+
+Multiplicity of the solution (size of its deduplication cluster), filled in by
+the enclosing [`Result`](@ref). `0` for non-success paths or an unclustered result.
+"""
+multiplicity(r::PathResult)::Int = r.multiplicity
+
+# v2-parity positional / Base overloads for `is_real`.
+is_real(r::PathResult, tol::Float64)::Bool = is_real(r; tol = tol)
+Base.isreal(r::PathResult; tol::Float64 = DEFAULT_REAL_TOL)::Bool = is_real(r; tol = tol)
+Base.isreal(r::PathResult, tol::Float64)::Bool = is_real(r; tol = tol)
+
+function Base.show(io::IO, ::MIME"text/plain", r::PathResult)
+    println(io, "PathResult:")
+    println(io, " • return_code: ", r.return_code)
+    println(io, " • solution: ", r.solution)
+    println(io, " • accuracy: ", r.accuracy)
+    println(io, " • residual: ", r.residual)
+    println(io, " • condition_jacobian: ", r.condition_jacobian)
+    r.winding_number > 0 && println(io, " • winding_number: ", r.winding_number)
+    print(
+        io, " • steps: ", steps(r), " (", r.accepted_steps, " accepted, ",
+        r.rejected_steps, " rejected); ", r.steps_eg, " endgame",
+    )
+    return
+end
 
 """
     _with_return_code(r, code)
@@ -55,9 +208,25 @@ Return a copy of `r` with the return code replaced (used to reclassify excess so
 """
 function _with_return_code(r::PathResult, code::PathResultCode.T)::PathResult
     return PathResult(
-        code, r.solution, r.t, r.accuracy, r.condition_jacobian,
+        code, r.solution, r.t, r.accuracy, r.residual, r.condition_jacobian,
         r.winding_number, r.singular, r.accepted_steps, r.rejected_steps,
         r.steps_eg, r.extended_precision_used, r.last_path_point, r.last_path_t,
+        r.path_number, r.start_solution, r.valuation, r.multiplicity,
+    )
+end
+
+"""
+    _with_multiplicity(r, m)
+
+Return a copy of `r` with its `multiplicity` field set to `m` (filled in by the
+`Result` constructor once solutions have been clustered).
+"""
+function _with_multiplicity(r::PathResult, m::Int)::PathResult
+    return PathResult(
+        r.return_code, r.solution, r.t, r.accuracy, r.residual, r.condition_jacobian,
+        r.winding_number, r.singular, r.accepted_steps, r.rejected_steps,
+        r.steps_eg, r.extended_precision_used, r.last_path_point, r.last_path_t,
+        r.path_number, r.start_solution, r.valuation, m,
     )
 end
 
@@ -107,14 +276,33 @@ function _endgame_code_to_path_code(code::EndgameCode.T)::PathResultCode.T
     end
 end
 
+# Residual ‖H(x, t)‖∞ of the endpoint, evaluated in-place into `scratch`
+# (reuses the corrector residual buffer — safe at end of path).
+function _homotopy_residual!(
+        scratch::FSVec{ComplexF64}, H::HomotopyEvaluator,
+        x::FSVec{ComplexF64}, t::ComplexF64,
+    )::Float64
+    evaluate!(scratch, H, x, t)
+    return inf_norm(scratch)
+end
+
 # Tracker-only PathResult — used for polyhedral toric phase failures (no endgame needed)
-function PathResult(tracker::Tracker)
+function PathResult(
+        tracker::Tracker;
+        path_number::Int = 0,
+        start_solution::Vector{ComplexF64} = ComplexF64[],
+    )
     state = tracker.state
+    t = real(state.segment.t)
+    residual = _homotopy_residual!(
+        tracker.corrector.r, tracker.homotopy, state.x, state.segment.t,
+    )
     return PathResult(
         _tracker_code_to_path_code(state.code),
         Vector{ComplexF64}(state.x),
-        real(state.segment.t),
+        t,
         state.accuracy,
+        residual,
         state.cond_J_ẋ,
         0,
         false,
@@ -123,11 +311,19 @@ function PathResult(tracker::Tracker)
         0,
         state.used_extended_prec,
         Vector{ComplexF64}(state.x),
-        real(state.segment.t),
+        t,
+        path_number,
+        start_solution,
+        Float64[],   # no endgame valuation for a tracker-only result
+        0,
     )
 end
 
-function PathResult(eg::EndgameTracker)
+function PathResult(
+        eg::EndgameTracker;
+        path_number::Int = 0,
+        start_solution::Vector{ComplexF64} = ComplexF64[],
+    )
     state = eg.state
     ts = eg.tracker.state
     success = state.code == EndgameCode.SUCCESS
@@ -151,11 +347,25 @@ function PathResult(eg::EndgameTracker)
     # Fall back to tracker accuracy if endgame accuracy was never set
     accuracy = isnan(state.accuracy) ? ts.accuracy : state.accuracy
 
+    # Residual of the reported endpoint: evaluate H at the extrapolated solution
+    # (t = 0) for success, otherwise at the tracker's actual terminal point.
+    residual = if success
+        _homotopy_residual!(eg.tracker.corrector.r, eg.tracker.homotopy, state.solution, complex(0.0))
+    else
+        _homotopy_residual!(eg.tracker.corrector.r, eg.tracker.homotopy, ts.x, ts.segment.t)
+    end
+
+    # Per-coordinate Puiseux valuation, recorded only once the endgame has taken
+    # enough samples to make `val_x` meaningful (empty otherwise, matching v2's
+    # `nothing`).
+    valuation = eg.val.samples > 0 ? Vector{Float64}(eg.val.val_x) : Float64[]
+
     return PathResult(
         _endgame_code_to_path_code(state.code),
         solution,
         t,
         accuracy,
+        residual,
         state.cond,
         state.winding_number,
         state.singular,
@@ -165,5 +375,9 @@ function PathResult(eg::EndgameTracker)
         ts.used_extended_prec,
         Vector{ComplexF64}(ts.x),  # last_path_point: tracker's actual position
         real(ts.segment.t),        # last_path_t: tracker's actual t
+        path_number,
+        start_solution,
+        valuation,
+        0,
     )
 end

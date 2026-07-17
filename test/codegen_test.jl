@@ -1,6 +1,5 @@
 using Test
-using RuntimeGeneratedFunctions: RuntimeGeneratedFunctions, @RuntimeGeneratedFunction
-RuntimeGeneratedFunctions.init(@__MODULE__)
+using RuntimeGeneratedFunctions: RuntimeGeneratedFunctions
 import HomotopyContinuationNext as HC
 using HomotopyContinuationNext:
     System, Interpreter, InstructionSequence, CompileMode,
@@ -15,6 +14,8 @@ using FixedSizeArrays: FixedSizeArray
 
 const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
 const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
+
+_rgf(expr) = RuntimeGeneratedFunctions.RuntimeGeneratedFunction(HC, HC, expr)
 
 @testset "Code Generation" begin
 
@@ -34,7 +35,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         expr = _instruction_sequence_to_eval_expr(seq)
         @test expr isa Expr
 
-        fn = @RuntimeGeneratedFunction(HC, expr)
+        fn = _rgf(expr)
 
         x = ComplexF64[0.3, 0.5, -0.2, 0.1]
         u_compiled = zeros(ComplexF64, 4)
@@ -52,7 +53,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         seq = sys._interp_f64.sequence
 
         expr = _instruction_sequence_to_eval_expr(seq)
-        fn = @RuntimeGeneratedFunction(HC, expr)
+        fn = _rgf(expr)
 
         u_compiled = zeros(ComplexF64, 1)
         fn(u_compiled, ComplexF64[0.5], ComplexF64[2.0, 3.0])
@@ -77,7 +78,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         seq_jac = sys._interp_jac.sequence
 
         expr = _instruction_sequence_to_jac_expr(seq_jac)
-        fn = @RuntimeGeneratedFunction(HC, expr)
+        fn = _rgf(expr)
 
         x = ComplexF64[0.3, 0.5, -0.2, 0.1]
         u_c = zeros(ComplexF64, 4)
@@ -172,7 +173,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         expr = _instruction_sequence_to_taylor_expr(seq, Val(K))
         @test expr isa Expr
 
-        fn = @RuntimeGeneratedFunction(HC, expr)
+        fn = _rgf(expr)
 
         nvars = 4
         data = FSMat{ComplexF64}(randn(ComplexF64, N, nvars))
@@ -196,7 +197,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         N = K + 1
 
         expr = _instruction_sequence_to_taylor_expr(seq, Val(K))
-        fn = @RuntimeGeneratedFunction(HC, expr)
+        fn = _rgf(expr)
 
         data = FSMat{ComplexF64}(randn(ComplexF64, N, 1))
         tx = TaylorVector{N, ComplexF64}(data)
@@ -221,7 +222,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         N = K + 1
 
         expr = _instruction_sequence_to_taylor_param_expr(seq, Val(K))
-        fn = @RuntimeGeneratedFunction(HC, expr)
+        fn = _rgf(expr)
 
         data_x = FSMat{ComplexF64}(randn(ComplexF64, N, 1))
         tx = TaylorVector{N, ComplexF64}(data_x)
@@ -246,7 +247,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         N = K + 1
 
         expr = _instruction_sequence_to_taylor_param_expr(seq, Val(K))
-        fn = @RuntimeGeneratedFunction(HC, expr)
+        fn = _rgf(expr)
 
         data_x = FSMat{ComplexF64}(randn(ComplexF64, N, 4))
         tx = TaylorVector{N, ComplexF64}(data_x)
