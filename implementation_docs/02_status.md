@@ -204,8 +204,6 @@ v3's higher package load time (6.25s vs 1.30s) is due to precompiling more code 
 ### Architecture debt
 
 3. Direct polynomial compiler — validate and promote (`polynomial_compiler.jl:6` TODO)
-4. Fragile DynamicPolynomials introspection (`_variable_creation_id`)
-5. Uncached SExpr hashes (Moshi refactor removed `_hash` fields)
 
 ### Infrastructure
 

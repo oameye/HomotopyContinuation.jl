@@ -24,13 +24,13 @@ Verify: `isconcretetype(FixedSizeVector{Float64})` → `false`.
 
 `TapeCompiler` gives scratch slots their own disjoint negative range during compilation: constants are positive (`1..nconstants`), params/vars occupy `[-(nparams+nvars), -1]`, and scratch grows downward from `-(nparams+nvars+1)` (`_scratch_base`). Collisions are impossible for any number of constants (registered lazily, so their count is unknown at slot init) or scratch slots. Everything is remapped to the final contiguous layout in `_build_slot_remap`.
 
-### DynamicPolynomials introspection is fragile
+### Variable ordering uses the public comparison operator
 
-`_variable_creation_id` uses `hasfield`/`getfield` reflection into `variable_order.order.id` for deterministic variable ordering. This can break across DynamicPolynomials versions.
+Canonical variable order is creation order. `_lt_variable` obtains it from the public comparison operator (`isless`), since DynamicPolynomials variables compare with the first-created variable as the "largest" (creation order is the reverse of `isless`). This avoids reflecting into DP-internal fields (`variable_order.order.id`), which is not a stable API. Falls back to symbol-name order for variable types without a comparison.
 
 ### SExpr hashes are NOT cached (since Moshi refactor)
 
-Old code cached `_hash::UInt` at construction. Moshi `@data` SExpr recomputes hashes on every `hash()` call. For deeply nested expressions used as Dict/Set keys in CSE, this could regress build time on large systems. Not yet benchmarked on cyclic-7/8 Jacobians.
+Old code cached `_hash::UInt` at construction; Moshi `@data` SExpr recomputes hashes on every `hash()` call. Measured negligible: ~260 ns per top-level cyclic-8 equation hash, and full `System(...)` construction (CSE, hashing, tape compile, FunctionWrappers) stays under 7 ms through cyclic-8/katsura-10, far below the ~16 s first-solve TTFX. Not worth caching.
 
 ### `qr!` on FSMat returns QRCompactWY, not QR
 

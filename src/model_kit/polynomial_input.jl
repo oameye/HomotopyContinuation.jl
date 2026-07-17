@@ -9,24 +9,13 @@
 # NOTE: MP.variables is only defined on concrete polynomial types (DynamicPolynomials),
 # not on the abstract MP.AbstractPolynomialLike. JET flags calls on abstract types.
 # We call it on individual polynomials (which are always concrete at runtime).
-@inline function _variable_creation_id(v)
-    if hasfield(typeof(v), :variable_order)
-        variable_order = getfield(v, :variable_order)
-        if hasfield(typeof(variable_order), :order)
-            order = getfield(variable_order, :order)
-            if hasfield(typeof(order), :id)
-                return getfield(order, :id)
-            end
-        end
-    end
-    return nothing
-end
 
+# Canonical order is creation order, which DP exposes as the reverse of `isless`
+# (first-created variable compares largest). Symbol-name fallback for types
+# without a comparison.
 @inline function _lt_variable(a, b)
-    id_a = _variable_creation_id(a)
-    id_b = _variable_creation_id(b)
-    if !(isnothing(id_a) || isnothing(id_b))
-        return id_a < id_b
+    if applicable(isless, a, b)
+        return isless(b, a)
     end
     return string(Symbol(a)) < string(Symbol(b))
 end
