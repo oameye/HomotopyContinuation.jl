@@ -20,9 +20,9 @@ field::FSVec{Float64}
 
 Verify: `isconcretetype(FixedSizeVector{Float64})` → `false`.
 
-### Magic constant 10000 (scratch slot base)
+### Scratch slot namespace
 
-`TapeCompiler` uses offset 10001 for scratch slots during compilation, remapped to final layout afterward. Systems with >10000 constants+params+vars would collide. Unlikely in practice but not guarded.
+`TapeCompiler` gives scratch slots their own disjoint negative range during compilation: constants are positive (`1..nconstants`), params/vars occupy `[-(nparams+nvars), -1]`, and scratch grows downward from `-(nparams+nvars+1)` (`_scratch_base`). Collisions are impossible for any number of constants (registered lazily, so their count is unknown at slot init) or scratch slots. Everything is remapped to the final contiguous layout in `_build_slot_remap`.
 
 ### DynamicPolynomials introspection is fragile
 
@@ -31,10 +31,6 @@ Verify: `isconcretetype(FixedSizeVector{Float64})` → `false`.
 ### SExpr hashes are NOT cached (since Moshi refactor)
 
 Old code cached `_hash::UInt` at construction. Moshi `@data` SExpr recomputes hashes on every `hash()` call. For deeply nested expressions used as Dict/Set keys in CSE, this could regress build time on large systems. Not yet benchmarked on cyclic-7/8 Jacobians.
-
-### `_stable_sort!` is insertion sort (O(n²))
-
-Replaces `sort!(..., alg=MergeSort)`. Fine for small arrays (<50) but used on `vertex_list` in `_optimize_instruction_order` which can be hundreds of elements for Jacobian tapes. Consider `sort!(..., alg=InsertionSort)` from Base.
 
 ### `qr!` on FSMat returns QRCompactWY, not QR
 

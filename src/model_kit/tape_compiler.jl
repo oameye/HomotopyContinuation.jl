@@ -63,7 +63,7 @@ end
 
 """Emit an instruction and return the output tape slot. Unused input slots are filled with the last provided arg."""
 function _emit!(c::TapeCompiler, op::OpType.T, a1::Int32, a2::Int32 = a1, a3::Int32 = a2, a4::Int32 = a3)::Int32
-    c.next_slot += Int32(1)
+    c.next_slot -= Int32(1)
     push!(c.instructions, _instruction((a1, a2, a3, a4), op, c.next_slot))
     return c.next_slot
 end
@@ -115,7 +115,7 @@ function _tape_pow!(c::TapeCompiler, a::Int32, k::Int)::Int32
         return _emit!(c, OpType.OP_INVSQR, a)
     else
         # OP_POW_INT: second arg is the integer exponent stored directly
-        c.next_slot += Int32(1)
+        c.next_slot -= Int32(1)
         slot = c.next_slot
         push!(
             c.instructions,
@@ -431,7 +431,7 @@ end
 
 ## ── Entry point ─────────────────────────────────────────────────────────────
 
-const _SCRATCH_OFFSET = Int32(10000)
+_scratch_base(nvars::Int, nparams::Int) = Int32(-(nparams + nvars))
 
 function _initialize_placeholder_slots!(
         compiler::TapeCompiler,
@@ -444,12 +444,13 @@ function _initialize_placeholder_slots!(
     for i in 1:nvars
         compiler.var_slots[i] = Int32(-(nparams + i))
     end
-    compiler.next_slot = _SCRATCH_OFFSET
+    compiler.next_slot = _scratch_base(nvars, nparams)
     return nothing
 end
 
 function _build_slot_remap(nconstants::Int, nparams::Int, nvars::Int, nscratch::Int)
     input_block_size = nconstants + nparams + nvars
+    scratch_base = _scratch_base(nvars, nparams)
     remap = Dict{Int32, Int32}()
 
     # Constants: identity mapping (k → k)
@@ -465,9 +466,9 @@ function _build_slot_remap(nconstants::Int, nparams::Int, nvars::Int, nscratch::
     for i in 1:nvars
         remap[Int32(-(nparams + i))] = Int32(vars_start + i - 1)
     end
-    # Scratch: high offsets → after input block
+    # Scratch: negative slots below the var/param block → after input block
     for k in 1:nscratch
-        remap[Int32(_SCRATCH_OFFSET + k)] = Int32(input_block_size + k)
+        remap[scratch_base - Int32(k)] = Int32(input_block_size + k)
     end
 
     return (
@@ -576,7 +577,7 @@ function _finalize_compiler(
         output_dim::Int,
     )::InstructionSequence
     nconstants = length(compiler.constants)
-    nscratch = Int(compiler.next_slot - _SCRATCH_OFFSET)
+    nscratch = Int(_scratch_base(nvars, nparams) - compiler.next_slot)
     layout = _build_slot_remap(nconstants, nparams, nvars, nscratch)
     remap = layout.remap
     assignment_plan = _plan_assignment_slots!(
@@ -656,7 +657,8 @@ function compile_to_instructions(
 
     # Use a two-pass approach with placeholder slots.
     # During compilation, constant slots use temporary 1-based indices.
-    # Var/param slots use negative placeholders. Scratch uses high offsets.
+    # Var/param slots use negative placeholders. Scratch uses a disjoint
+    # negative range below the var/param block.
     # After compilation, we remap everything to the final tape layout.
 
     _initialize_placeholder_slots!(compiler, nvars, nparams)
