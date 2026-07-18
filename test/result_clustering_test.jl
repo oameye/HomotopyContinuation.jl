@@ -7,7 +7,7 @@ using Random: MersenneTwister
 function fake_path_result(sol::Vector{ComplexF64}; success::Bool = true)
     code = success ? PathResultCode.PATH_SUCCESS : PathResultCode.PATH_TERMINATED_MAX_STEPS
     return PathResult(
-        code, sol, 0.0, 1.0e-12, 1.0e-12, 1.0, 1, false, 10, 0, 0, false,
+        code, sol, 0.0, 1.0e-12, 1.0, 1.0e-12, 1.0e-12, 1.0, 1, false, 10, 0, 0, false,
         copy(sol), 0.0, 0, ComplexF64[], Float64[], 0,
     )
 end

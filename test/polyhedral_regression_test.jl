@@ -12,7 +12,7 @@ using HomotopyContinuationNext:
     update_weights!, evaluate!, evaluate_and_jacobian!, taylor!,
     _update_toric_coeffs!, _update_toric_dt_coeffs!,
     _update_toric_d2t_coeffs!, _update_toric_d3t_coeffs!,
-    _copy_prefix!, _update_coeffs!, PolyhedralSolveCache, EndgameCode
+    _copy_prefix!, _update_p!, PolyhedralSolveCache, EndgameCode
 
 using DynamicPolynomials: @polyvar
 using CommonSolve: init as cs_init, solve! as cs_solve!
@@ -61,9 +61,9 @@ using CommonSolve: init as cs_init, solve! as cs_solve!
         taylor!(u2_full, Val(2), H, tx, t0)
 
         # System-only Taylor order 2 (no cross term — what old code computed)
-        _update_coeffs!(H, t0)
+        _update_p!(H, t0)
         u2_system_only = FSVec{ComplexF64}(zeros(ComplexF64, n))
-        taylor!(u2_system_only, Val(2), param_sys.evaluator, tx, H.coeffs)
+        taylor!(u2_system_only, Val(2), param_sys.evaluator, tx, H.p_t)
 
         # The cross term [B(x)]₁ · dp should make these differ
         dp = start - target
@@ -77,7 +77,7 @@ using CommonSolve: init as cs_init, solve! as cs_solve!
         tx1.data[1, 1] = tx.data[1, 1]
         tx1.data[2, 1] = tx.data[2, 1]
         u_cross = FSVec{ComplexF64}(zeros(ComplexF64, n))
-        taylor!(u_cross, Val(1), param_sys.evaluator, tx1, H.dt_coeffs)
+        taylor!(u_cross, Val(1), param_sys.evaluator, tx1, H.dp)
         @test cross_term ≈ u_cross[1] atol = 1.0e-12
     end
 
@@ -109,13 +109,13 @@ using CommonSolve: init as cs_init, solve! as cs_solve!
         tx2.data[1, 1] = x0[1]; tx2.data[2, 1] = x1; tx2.data[3, 1] = zero(ComplexF64)
 
         # Reference: compute via multi-call (the old approach)
-        _update_coeffs!(H, t0)
+        _update_p!(H, t0)
         u_sys = FSVec{ComplexF64}(zeros(ComplexF64, 1))
-        taylor!(u_sys, Val(2), param_sys.evaluator, tx2, H.coeffs)  # [B(x)]₂ · p₀
+        taylor!(u_sys, Val(2), param_sys.evaluator, tx2, H.p_t)  # [B(x)]₂ · p₀
         tx1 = TaylorVector{2, ComplexF64}(1)
         tx1.data[1, 1] = x0[1]; tx1.data[2, 1] = x1
         u_cross = FSVec{ComplexF64}(zeros(ComplexF64, 1))
-        taylor!(u_cross, Val(1), param_sys.evaluator, tx1, H.dt_coeffs)  # [B(x)]₁ · p₁
+        taylor!(u_cross, Val(1), param_sys.evaluator, tx1, H.dp)  # [B(x)]₁ · p₁
         ref_result = u_sys[1] + u_cross[1]
 
         # Actual: compute via homotopy (uses Cauchy product internally)

@@ -16,6 +16,8 @@ using HomotopyContinuationNext
         HomotopyContinuationNext.SExpr,  # Moshi @data module
         HomotopyContinuationNext.ExecInstruction,  # Moshi @data module
         HomotopyContinuationNext.EndgameCode,  # @enumx module
+        HomotopyContinuationNext.MonodromyCode,  # @enumx module
+        HomotopyContinuationNext.ReuseLoops,  # @enumx module
     )
 
     @test check_no_implicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing
@@ -48,6 +50,9 @@ using HomotopyContinuationNext
             :init, Symbol("solve!"), :solve,
             # Checked arithmetic for HNF in binomial_system.jl:
             :checked_add, :checked_mul,
+            # Base.broadcastable is the documented broadcast customization
+            # hook but is not declared public in Base:
+            :broadcastable,
         ),
     ) == nothing
     @test check_no_self_qualified_accesses(HomotopyContinuationNext) == nothing

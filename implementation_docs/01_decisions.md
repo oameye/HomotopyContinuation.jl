@@ -40,6 +40,37 @@ LAPACK blocked factorization. Use `Matrix{ComplexF64}` with `LinearAlgebra.qrfac
 
 `lu!(FSMat)` returns `LU{ComplexF64, FSMat{ComplexF64}, FSVec{Int64}}` — not `Vector{BlasInt}`.
 
+### `Base.n_avail` is not public
+
+ExplicitImports rejects it. To report the number of jobs waiting in a `Channel`
+(threaded monodromy progress display), maintain a manual
+`Threads.Atomic{Int}` counter: increment before every `push!` (via an
+`enqueue!` closure so no call site can forget), decrement when a worker
+receives a job. Clamp with `max(counter[], 0)` when reading, since the
+decrement races with the read.
+
+### Closures passed as `parameter_sampler` are JET-analyzed against every method
+
+`MonodromyLoop` has one method taking `AbstractVector` and one taking
+`LinearSubspace`; both call `parameter_sampler(base)`. JET analyzes a sampler
+closure against BOTH branches even if only one is reachable at runtime, so an
+anonymous `pp -> [0; randn(length(pp) - 1)]` fails the JET gate with
+`length(::LinearSubspace)`. Fix: use a named function with two methods, where
+the unreachable `LinearSubspace` method throws an `ArgumentError`
+(see `_zero_first_parameter_sampler` in `monodromy.jl`).
+
+### A comment between a docstring and a struct breaks attachment
+
+```julia
+"""
+    UniquePoints(...)
+"""
+# some comment here  <- docstring silently attaches to nothing
+struct UniquePoints{T, M, GA}
+```
+
+Move the comment inside the struct body or above the docstring.
+
 ### System{P, V} type parameters
 
 The `System` struct is parameterized on `P` (polynomial type) and `V` (variable type) from DynamicPolynomials. These only affect the `polys`, `parameters`, and `variables` fields — all evaluation goes through the type-erased `SystemEvaluator`. The parameters are invisible to the tracker.
@@ -100,6 +131,45 @@ Alternative considered: `deepcopy` — rejected because it copies immutable data
 ### Coefficient normalization — SHIPPED
 
 Systems with O(10⁸+) coefficients are automatically scaled to O(1) at construction time to improve numerical conditioning in the tracker.
+
+### Channel-based job queue for threaded monodromy (SHIPPED)
+
+Threaded `monodromy_solve` does not reuse the OhMyThreads `Threaded` executor
+from `solve()`. The monodromy workload is dynamic: a finished loop enqueues new
+loop jobs, workers update shared statistics mid-flight, and the coordinator
+decides termination (target count reached, heuristic stop) while work is in
+progress. OhMyThreads' static parallel-map shape cannot express this, so the
+port keeps v2's design: a `Channel{LoopTrackingJob}` with one task per thread,
+each owning a `MonodromyWorkerState` (fresh evaluator + tracker via the same
+`_clone_system_evaluator` mechanism the solve executor uses). This is the one
+place with two threading coordinators in the codebase; a shared dynamic work
+queue abstraction would currently serve exactly one consumer.
+
+### Explicit kwargs replace v2 option-bag splatting in monodromy (SHIPPED)
+
+v2 forwards `kwargs...` through `MonodromyOptions` and into nested solves. The
+repo rule forbids kwargs splatting (blocks inference), so every forwarding
+boundary (`monodromy_solve`, `verify_solution_completeness`, internal solves)
+enumerates its keywords explicitly. This is the main reason v3's
+`monodromy.jl` is ~280 lines larger than v2's.
+
+### Fresh `@polyvar` replaces v2's `@unique_var` (SHIPPED)
+
+`verify_solution_completeness` augments the system with new variables
+`t, v[1:m], a[1:n], λ`. v2 uses ModelKit's `@unique_var`; DynamicPolynomials
+variables are identity-distinct by construction, so a plain `@polyvar` inside
+the function body is sufficient. Substitution uses
+`MP.subs(f, p => p .+ λ .* v)` in place of v2's callable `System`.
+
+### Two solution-dedup mechanisms exist (known duplication)
+
+`Result` clustering (`_cluster_solutions` in `result.jl`, union-find with
+transitive closure) predates the monodromy port. The port added
+`UniquePoints`/`multiplicities` backed by `VoronoiTree` (first-match dedup,
+O(n log n), group-action aware), which is what v2 builds Result clustering on.
+Consolidating result clustering onto the VoronoiTree is a candidate follow-up
+(tracked in `02_status.md` open items) but touches solution-count semantics of
+every `solve()`, so it was kept out of the port.
 
 ### Overdetermined parameter homotopy stays rectangular (SHIPPED, matches v2)
 

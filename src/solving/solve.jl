@@ -32,11 +32,34 @@ end
 
 # ── CommonSolve.init: System + TotalDegree ────────────────────────────────
 
+function _total_degree_solve_cache(
+        exec::E,
+        builder::B,
+        target_evaluator::SystemEvaluator,
+        degrees::Vector{Int},
+        seed::UInt32,
+        excess_checker::C,
+        show_progress::Bool,
+        tracker_options::TrackerOptions,
+        endgame_options::EndgameOptions,
+        γ::ComplexF64,
+    )::SolveCache{E, B, C} where {E <: AbstractExecutor, B, C}
+    start_evaluator = _total_degree_startevaluator(degrees)
+    starts = _total_degree_solutions(degrees)
+
+    H = StraightLineHomotopy(start_evaluator, target_evaluator; γ = γ)
+    heval = HomotopyEvaluator(H)
+    tracker = Tracker(heval; options = tracker_options)
+    eg = EndgameTracker(tracker, endgame_options)
+
+    return SolveCache(exec, builder, eg, starts, seed, excess_checker, show_progress)
+end
+
 function CommonSolve.init(
         F::System, alg::TotalDegree,
         exec::AbstractExecutor = Threaded();
         show_progress::Bool = true,
-    )::SolveCache
+    )
     seed = alg.seed
     _check_square_or_overdetermined(F)
     m, n = size(F.evaluator)
@@ -51,24 +74,21 @@ function CommonSolve.init(
         builder = RandomizedStraightLineBuilder(
             degrees, F, A, perm, γ, alg.tracker_options, alg.endgame_options,
         )
+        return _total_degree_solve_cache(
+            exec, builder, target_evaluator, degrees, seed, excess_checker,
+            show_progress, alg.tracker_options, alg.endgame_options, γ,
+        )
     else
         target_evaluator = F.evaluator
         degrees = F.degrees
-        excess_checker = nothing
         builder = StraightLineBuilder(
             F.degrees, F, γ, alg.tracker_options, alg.endgame_options,
         )
+        return _total_degree_solve_cache(
+            exec, builder, target_evaluator, degrees, seed, nothing,
+            show_progress, alg.tracker_options, alg.endgame_options, γ,
+        )
     end
-
-    start_evaluator = _total_degree_startevaluator(degrees)
-    starts = _total_degree_solutions(degrees)
-
-    H = StraightLineHomotopy(start_evaluator, target_evaluator; γ = γ)
-    heval = HomotopyEvaluator(H)
-    tracker = Tracker(heval; options = alg.tracker_options)
-    eg = EndgameTracker(tracker, alg.endgame_options)
-
-    return SolveCache(exec, builder, eg, starts, seed, excess_checker, show_progress)
 end
 
 # ── CommonSolve.solve!: serial ─────────────────────────────────────────────
@@ -185,7 +205,7 @@ function CommonSolve.init(
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
         show_progress::Bool = true,
-    )::SolveCache
+    )
     _check_square_or_overdetermined(F)
     @assert nparameters(F) > 0 "System must have parameters for parameter homotopy"
     @assert length(start_parameters) == nparameters(F) "start_parameters length must match nparameters"
@@ -193,12 +213,12 @@ function CommonSolve.init(
 
     sp = ComplexF64.(start_parameters)
     tp = ComplexF64.(target_parameters)
-    H = CoefficientHomotopy(F.evaluator, sp, tp)
+    H = ParameterHomotopy(F.evaluator, sp, tp)
     heval = HomotopyEvaluator(H)
     tracker = Tracker(heval; options = tracker_options)
     eg = EndgameTracker(tracker, endgame_options)
 
-    builder = CoefficientBuilder(F, sp, tp, tracker_options, endgame_options)
+    builder = ParameterBuilder(F, sp, tp, tracker_options, endgame_options)
 
     start_sols = [Vector{ComplexF64}(ComplexF64.(s)) for s in starts]
 

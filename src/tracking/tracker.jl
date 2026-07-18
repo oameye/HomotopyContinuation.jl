@@ -446,6 +446,10 @@ end
 Initialize the tracker for tracking a path from `t₁` to `t₀` starting at `x₀`.
 Returns `TrackerCode.TRACKING` on success, or an error code if the start value
 is invalid.
+
+Warm-start kwargs: `ω` and `μ` seed the Newton certificates from a previous
+track of the same point (skipping the initial Newton correction when both are
+given), and `extended_precision = true` starts in extended precision.
 """
 function init!(
         tracker::Tracker,
@@ -454,6 +458,7 @@ function init!(
         t₀::ComplexF64 = complex(0.0);
         ω::Float64 = NaN,
         μ::Float64 = NaN,
+        extended_precision::Bool = false,
         max_initial_step_size::Float64 = Inf,
         keep_steps::Bool = false,
     )::TrackerCode.T
@@ -470,8 +475,8 @@ function init!(
     state.μ = eps()
     state.τ = Inf
     state.norm_Δx₀ = NaN
-    state.extended_prec = false
-    state.used_extended_prec = false
+    state.extended_prec = extended_precision
+    state.used_extended_prec = extended_precision
     state.keep_extended_prec = false
     state.use_strict_β_τ = false
     state.cond_J_ẋ = NaN
@@ -595,8 +600,14 @@ function track!(
         x₀::AbstractVector{ComplexF64};
         t₁::ComplexF64 = complex(1.0),
         t₀::ComplexF64 = complex(0.0),
+        ω::Float64 = NaN,
+        μ::Float64 = NaN,
+        extended_precision::Bool = false,
     )::TrackerCode.T
-    code = init!(tracker, x₀, t₁, t₀)
+    code = init!(
+        tracker, x₀, t₁, t₀;
+        ω = ω, μ = μ, extended_precision = extended_precision,
+    )
     if code != TrackerCode.TRACKING
         return code
     end

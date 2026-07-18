@@ -189,16 +189,6 @@ end
     end
 end
 
-# OP_MUL # a * b  (Cauchy product)
-# c[k] = Σ_{j=0}^{k} a[j] * b[k-j]  (0-indexed), i.e., val[k+1] = Σ_{j=1}^{k+1} a.val[j]*b.val[k+2-j]
-@generated function taylor_op_mul(a::TTS{N, T}, b::TTS{N, T}) where {N, T}
-    exprs = _cauchy_product_exprs(N)
-    return quote
-        Base.@_inline_meta
-        TTS($(Expr(:tuple, exprs...)))
-    end
-end
-
 # Helper: fold an Expr vector by addition (no closures)
 function _expr_sum(terms::Vector{Expr})::Expr
     acc = terms[1]
@@ -217,6 +207,16 @@ function _cauchy_product_exprs(N::Int)::Vector{Expr}
         exprs[k] = _expr_sum(terms)
     end
     return exprs
+end
+
+# OP_MUL # a * b  (Cauchy product)
+# c[k] = Σ_{j=0}^{k} a[j] * b[k-j]  (0-indexed), i.e., val[k+1] = Σ_{j=1}^{k+1} a.val[j]*b.val[k+2-j]
+@generated function taylor_op_mul(a::TTS{N, T}, b::TTS{N, T}) where {N, T}
+    exprs = _cauchy_product_exprs(N)
+    return quote
+        Base.@_inline_meta
+        TTS($(Expr(:tuple, exprs...)))
+    end
 end
 
 # OP_DIV # a / b  (quotient rule recurrence)

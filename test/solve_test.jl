@@ -6,7 +6,7 @@ using HomotopyContinuationNext: TotalDegree, Polyhedral, Result, PathResult,
     total_degree_count, SolveCache, PolyhedralSolveCache,
     Serial, Threaded,
     _clone_system_evaluator, TrackingWorkerState, PolyhedralWorkerState,
-    StraightLineBuilder, CoefficientBuilder, PolyhedralBuilder
+    StraightLineBuilder, ParameterBuilder, PolyhedralBuilder
 using DynamicPolynomials: @polyvar
 using FixedSizeArrays: FixedSizeArray
 using CommonSolve: CommonSolve

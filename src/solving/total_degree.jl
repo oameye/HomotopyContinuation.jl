@@ -156,10 +156,19 @@ function _total_degree_startevaluator(degrees::Vector{Int})::SystemEvaluator
 end
 
 function _total_degree_solutions(degrees::Vector{Int})::Vector{Vector{ComplexF64}}
-    roots = [cis.(2π .* (0:(d - 1)) ./ d) for d in degrees]
-    result = Vector{ComplexF64}[]
-    for combo in Iterators.product(roots...)
-        push!(result, ComplexF64[combo...])
+    n = length(degrees)
+    npaths = prod(degrees)
+    result = Vector{Vector{ComplexF64}}(undef, npaths)
+    for path_index in 0:(npaths - 1)
+        quotient = path_index
+        solution = Vector{ComplexF64}(undef, n)
+        @inbounds for variable_index in 1:n
+            degree = degrees[variable_index]
+            root_index, quotient = divrem(quotient, degree)
+            solution[variable_index] = cis(2π * quotient / degree)
+            quotient = root_index
+        end
+        result[path_index + 1] = solution
     end
     return result
 end

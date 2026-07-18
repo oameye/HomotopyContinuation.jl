@@ -192,6 +192,7 @@ function init!(
         t₀::ComplexF64 = complex(0.0);
         ω::Float64 = NaN,
         μ::Float64 = NaN,
+        extended_precision::Bool = false,
         max_initial_step_size::Float64 = Inf,
         keep_steps::Bool = false,
     )::EndgameCode.T
@@ -202,6 +203,7 @@ function init!(
         eg.tracker, x₀, t₁, t₀;
         ω = ω,
         μ = μ,
+        extended_precision = extended_precision,
         max_initial_step_size = max_initial_step_size,
         keep_steps = keep_steps,
     )
@@ -513,8 +515,14 @@ function track!(
         x₀::AbstractVector{<:Number};
         t₁::ComplexF64 = complex(1.0),
         t₀::ComplexF64 = complex(0.0),
+        ω::Float64 = NaN,
+        μ::Float64 = NaN,
+        extended_precision::Bool = false,
     )::EndgameCode.T
-    code = init!(eg, x₀, t₁, t₀)
+    code = init!(
+        eg, x₀, t₁, t₀;
+        ω = ω, μ = μ, extended_precision = extended_precision,
+    )
     if code != EndgameCode.TRACKING
         return code
     end

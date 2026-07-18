@@ -50,54 +50,75 @@
          │
          ▼
    Result{Vector{PathResult}} + clustering
+
+   Parameter families (optional):
+   monodromy_solve(F; ...) → MonodromyLoop (ParameterHomotopy round trips)
+         │  serial loop or Channel-based threaded coordinator
+         ▼
+   UniquePoints (VoronoiTree + GroupActions) dedup → MonodromyResult
+         │
+         ▼
+   verify_solution_completeness (trace test) / permutations / trace
 ```
 
 ## Package Layout
 
 ```
-src/                                         ~10,900 lines total
-├── HomotopyContinuationNext.jl      (84)    Main module, exports, type aliases
-├── utils.jl                         (175)   SegmentStepper, _stable_sort!, fast_abs
+src/                                         ~17,450 lines total
+├── HomotopyContinuationNext.jl      (120)   Main module, exports, type aliases
+├── utils.jl                         (189)   SegmentStepper, _stable_sort!, fast_abs
 ├── primitives/
-│   ├── double_f64.jl                (655)   DoubleF64, ComplexDF64
+│   ├── double_f64.jl                (653)   DoubleF64, ComplexDF64
 │   ├── norms.jl                     (201)   WeightedNorm (infinity norm only)
-│   └── linear_algebra.jl            (1094)  MatrixWorkspace, LU, QR, condition est.
+│   └── linear_algebra.jl            (1116)  MatrixWorkspace, LU, QR, condition est.
 ├── model_kit/
 │   ├── operations.jl                (157)   OpType enum (25 ops), op_* scalar functions
 │   ├── sexpr.jl                     (380)   Moshi @data SExpr ADT, canonicalization, poly_to_sexpr
 │   ├── cse.jl                       (588)   SymEngine CSE port: opt_cse + tree_cse
-│   ├── tape_compiler.jl             (670)   SExpr → InstructionSequence, fusion, register alloc
+│   ├── tape_compiler.jl             (672)   SExpr → InstructionSequence, fusion, register alloc
 │   ├── instruction_sequence.jl      (299)   Instruction, DAG reorder, linear-scan register alloc
-│   ├── interpreter.jl               (464)   ExecInstruction variants, execute!, execute_taylor!
-│   ├── codegen.jl                   (299)   RuntimeGeneratedFunctions for COMPILED/COMPILED_ALL
+│   ├── interpreter.jl               (465)   ExecInstruction variants, execute!, execute_taylor!
+│   ├── codegen.jl                   (300)   RuntimeGeneratedFunctions for COMPILED/COMPILED_ALL
 │   ├── taylor.jl                    (508)   TruncatedTaylorSeries, TaylorVector, taylor_op_*
 │   ├── symbolic_polynomial_compiler.jl (62) Active MP lowering path (poly→SExpr→CSE→tape)
 │   ├── polynomial_compiler.jl       (140)   Experimental direct path (NOT default, gated by TODO)
-│   └── polynomial_input.jl          (83)    Variable discovery, System construction orchestrator
+│   └── polynomial_input.jl          (72)    Variable discovery, System construction orchestrator
 ├── core/
 │   ├── abstract_types.jl            (76)    AbstractSystem, AbstractHomotopy interfaces
-│   ├── system.jl                    (259)   System type (caches compiled interpreters)
-│   ├── system_evaluator.jl          (166)   FunctionWrapper wrapper for AbstractSystem
+│   ├── system.jl                    (267)   System type (caches compiled interpreters)
+│   ├── system_evaluator.jl          (184)   FunctionWrapper wrapper for AbstractSystem
 │   ├── homotopy_evaluator.jl        (162)   FunctionWrapper wrapper for AbstractHomotopy
-│   ├── straight_line_homotopy.jl    (188)   γ·t·G(x) + (1-t)·F(x)
-│   ├── coefficient_homotopy.jl      (174)   Coefficient interpolation (parameter + polyhedral phase 2)
-│   └── toric_homotopy.jl            (400)   Toric deformation (polyhedral phase 1)
+│   ├── straight_line_homotopy.jl    (191)   γ·t·G(x) + (1-t)·F(x)
+│   ├── coefficient_homotopy.jl      (180)   Coefficient interpolation (polyhedral phase 2)
+│   ├── parameter_homotopy.jl        (219)   H(x,t) = F(x; t·p₁ + (1-t)·p₀), retargetable
+│   ├── toric_homotopy.jl            (400)   Toric deformation (polyhedral phase 1)
+│   ├── linear_subspace.jl           (562)   LinearSubspace, intrinsic/extrinsic descriptions, geodesics
+│   ├── subspace_homotopies.jl       (747)   Intrinsic/ExtrinsicSubspaceHomotopy, Grassmannian geodesic
+│   ├── affine_chart.jl              (274)   AffineChartSystem/Homotopy, on_affine_chart
+│   └── randomized_system.jl         (201)   Square-up for overdetermined systems
 ├── tracking/
-│   ├── tracker.jl                   (558)   Path tracker, adaptive step control
+│   ├── tracker.jl                   (620)   Path tracker, adaptive step control, warm start
 │   ├── predictor.jl                 (351)   Pade (2,1), Taylor coefficients, trust region
-│   ├── newton_corrector.jl          (425)   Alpha-theory Newton, DoubleF64 refinement
+│   ├── newton_corrector.jl          (424)   Alpha-theory Newton, DoubleF64 refinement
+│   ├── newton.jl                    (249)   Standalone newton(F, x0) API
 │   ├── valuation.jl                 (224)   Puiseux series valuation for endgame detection
-│   └── endgame_tracker.jl           (950)   Endgame state machine, singular endpoint handling
+│   └── endgame_tracker.jl           (960)   Endgame state machine, singular endpoint handling
 └── solving/
     ├── executor.jl                  (44)    AbstractExecutor, Serial, Threaded
     ├── worker_state.jl              (74)    TrackingWorkerState, PolyhedralWorkerState, _clone_system_evaluator
-    ├── builder.jl                   (86)    StraightLineBuilder, CoefficientBuilder, PolyhedralBuilder
-    ├── solve.jl                     (148)   solve() API, CommonSolve integration, serial/threaded dispatch
-    ├── total_degree.jl              (157)   Bezout start system
-    ├── polyhedral.jl                (428)   Two-phase: toric + coefficient, MixedSubdivisions
-    ├── binomial_system.jl           (328)   HNF binomial solver
-    ├── path_result.jl               (154)   PathResult (immutable, enum codes)
-    ├── result.jl                    (264)   Result, clustering, solutions(), real_solutions()
+    ├── builder.jl                   (117)   StraightLineBuilder, CoefficientBuilder, ParameterBuilder, PolyhedralBuilder
+    ├── solve.jl                     (206)   solve() API, CommonSolve integration, serial/threaded dispatch
+    ├── total_degree.jl              (167)   Bezout start system
+    ├── polyhedral.jl                (513)   Two-phase: toric + coefficient, MixedSubdivisions
+    ├── binomial_system.jl           (544)   HNF binomial solver
+    ├── excess_solution.jl           (156)   Excess-solution filtering for overdetermined square-up
+    ├── path_result.jl               (395)   PathResult (immutable, enum codes)
+    ├── result.jl                    (420)   Result, clustering, solutions(), real_solutions()
+    ├── progress.jl                  (55)    ProgressMeter integration
+    ├── voronoi_tree.jl              (275)   VoronoiTree nearest-point search structure
+    ├── unique_points.jl             (205)   UniquePoints, multiplicities, unique_points
+    ├── group_actions.jl             (116)   GroupActions, SymmetricGroup
+    ├── monodromy.jl                 (1860)  monodromy_solve, trace test, verify_solution_completeness
     └── support.jl                   (93)    Extract support/coefficients from MP
 ```
 
@@ -276,6 +297,41 @@ COMPILED/COMPILED_ALL re-generates `@RuntimeGeneratedFunction`s.
 OhMyThreads `@tasks`/`@local` handles work distribution — `@local` creates one worker state
 per task (amortized), not per path.
 
+### Monodromy Stack
+
+Ported from v2 (`HomotopyContinuation/src/monodromy.jl`) at full parity. See
+`docs/superpowers/specs/2026-07-17-monodromy-port-design.md` for the port spec
+and documented divergences.
+
+```julia
+monodromy_solve(F; parameter_sampler, group_actions, ...)  # or (F, sols, p₀)
+  ├── find_start_pair(F)          # Newton from a random point if no seed pair given
+  ├── MonodromyLoop               # p₀ → p₁ → p₂ → p₀ round trip
+  │     └── ParameterHomotopy     # reused across legs via start/target_parameters!
+  ├── UniquePoints{Vector{ComplexF64}, InfNorm, GA}
+  │     ├── VoronoiTree           # O(log n) nearest-point search
+  │     └── GroupActions          # orbit-aware dedup (SymmetricGroup, custom actions)
+  └── MonodromyResult             # solutions, permutations, trace, statistics
+```
+
+Serial execution runs loops in a plain while loop. Threaded execution
+(`threading = true`, default when `Threads.nthreads() > 1`) uses a
+Channel-based job queue rather than the OhMyThreads executor because the
+workload is dynamic: finished loops enqueue new loops and workers share
+statistics mid-flight (see `01_decisions.md`).
+
+`verify_solution_completeness` implements the trace test (del Campo/Rodriguez
+2017, Leykin/Rodriguez/Sottile 2018): it builds the augmented system
+`[F(x, p + λv); (Σaᵢxᵢ - 1)λ + t]`, runs an auxiliary monodromy with a
+zero-first-parameter sampler, and checks the numerical rank of the trace
+matrix via singular values.
+
+`LinearSubspace` (intrinsic + extrinsic descriptions, Grassmannian geodesics,
+`rand_subspace`, `geodesic_distance`) supports monodromy on positive-dimensional
+solution sets: `monodromy_solve` accepts a `LinearSubspace` in place of the
+parameter vector and moves it via `linear_subspace_homotopy`
+(IntrinsicSubspaceHomotopy by default).
+
 ## Interface Contracts
 
 ### AbstractSystem — must implement:
@@ -306,8 +362,12 @@ Optional: `set_solution!(x, y, t)`, `get_solution!(out, x, t)`, `start_parameter
 | Type | Formula | Used by |
 |------|---------|---------|
 | StraightLineHomotopy | H(x,t) = γ·t·G(x) + (1-t)·F(x) | TotalDegree |
-| CoefficientHomotopy | H(x,t) = F(x; t·start + (1-t)·target) | Polyhedral phase 2, parameter homotopy |
+| CoefficientHomotopy | H(x,t) = F(x; t·start + (1-t)·target) | Polyhedral phase 2 |
+| ParameterHomotopy | H(x,t) = F(x; t·p₁ + (1-t)·p₀), retargetable via start/target_parameters! | Parameter solve, monodromy loops |
 | ToricHomotopy | H(x,t) = F(x; c_j·t^{w_j}) | Polyhedral phase 1 |
+| IntrinsicSubspaceHomotopy | F restricted to a moving subspace, intrinsic coords (Grassmannian geodesic) | linear_subspace_homotopy (default) |
+| ExtrinsicSubspaceHomotopy | [F; interpolated extrinsic equations] | linear_subspace_homotopy (fallback) |
+| AffineChartHomotopy | H on a random affine chart of projective space | on_affine_chart |
 
 ## OpType Reference
 

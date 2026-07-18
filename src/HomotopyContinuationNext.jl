@@ -38,6 +38,16 @@ export solution, accuracy, residual, steps, accepted_steps, rejected_steps
 export winding_number, condition_jacobian, last_path_point
 export path_number, start_solution, valuation
 export EndgameOptions, EndgameTracker
+export ParameterHomotopy
+export GroupActions, SymmetricGroup
+export UniquePoints, search_in_radius, add!, multiplicities, unique_points
+export LinearSubspace, ExtrinsicDescription, IntrinsicDescription, Intrinsic, Extrinsic
+export intrinsic, extrinsic, is_linear, dim, codim, ambient_dim
+export rand_subspace, translate, geodesic, geodesic_distance, coord_change
+export IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy, set_subspaces!
+export AffineChartHomotopy, on_affine_chart, linear_subspace_homotopy
+export find_start_pair, monodromy_solve, verify_solution_completeness
+export MonodromyOptions, MonodromyResult, is_heuristic_stop, permutations, trace
 export newton, NewtonResult, NewtonCache, NewtonReturnCode
 export Serial, Threaded
 
@@ -75,10 +85,13 @@ include("core/abstract_types.jl")
 include("core/system_evaluator.jl")
 include("solving/support.jl")
 include("core/system.jl")
+include("core/linear_subspace.jl")
 include("core/randomized_system.jl")
 include("core/homotopy_evaluator.jl")
 include("core/straight_line_homotopy.jl")
-include("core/coefficient_homotopy.jl")
+include("core/linear_parameter_homotopy.jl")
+include("core/subspace_homotopies.jl")
+include("core/affine_chart.jl")
 include("core/toric_homotopy.jl")
 
 include("tracking/newton_corrector.jl")
@@ -87,6 +100,9 @@ include("tracking/predictor.jl")
 include("tracking/tracker.jl")
 include("tracking/valuation.jl")
 include("tracking/endgame_tracker.jl")
+include("solving/group_actions.jl")
+include("solving/voronoi_tree.jl")
+include("solving/unique_points.jl")
 include("solving/executor.jl")
 include("solving/worker_state.jl")
 include("solving/binomial_system.jl")
@@ -98,5 +114,7 @@ include("solving/builder.jl")
 include("solving/polyhedral.jl")
 include("solving/result.jl")
 include("solving/solve.jl")
+include("solving/monodromy.jl")
+# include("precompile.jl")
 
 end # module

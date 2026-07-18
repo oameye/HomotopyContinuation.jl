@@ -18,6 +18,8 @@ struct PathResult
     solution::Vector{ComplexF64}
     t::Float64
     accuracy::Float64
+    ω::Float64   # Newton contraction certificate at the endpoint (warm-start reuse)
+    μ::Float64   # limit accuracy certificate at the endpoint (warm-start reuse)
     residual::Float64
     condition_jacobian::Float64
     winding_number::Int
@@ -41,8 +43,8 @@ Return a copy of `r` with additional accepted/rejected steps added (e.g. from a 
 """
 function _add_steps(r::PathResult, accepted::Int, rejected::Int)::PathResult
     return PathResult(
-        r.return_code, r.solution, r.t, r.accuracy, r.residual, r.condition_jacobian,
-        r.winding_number, r.singular,
+        r.return_code, r.solution, r.t, r.accuracy, r.ω, r.μ, r.residual,
+        r.condition_jacobian, r.winding_number, r.singular,
         r.accepted_steps + accepted, r.rejected_steps + rejected,
         r.steps_eg, r.extended_precision_used, r.last_path_point, r.last_path_t,
         r.path_number, r.start_solution, r.valuation, r.multiplicity,
@@ -209,7 +211,8 @@ Return a copy of `r` with the return code replaced (used to reclassify excess so
 """
 function _with_return_code(r::PathResult, code::PathResultCode.T)::PathResult
     return PathResult(
-        code, r.solution, r.t, r.accuracy, r.residual, r.condition_jacobian,
+        code, r.solution, r.t, r.accuracy, r.ω, r.μ, r.residual,
+        r.condition_jacobian,
         r.winding_number, r.singular, r.accepted_steps, r.rejected_steps,
         r.steps_eg, r.extended_precision_used, r.last_path_point, r.last_path_t,
         r.path_number, r.start_solution, r.valuation, r.multiplicity,
@@ -224,7 +227,8 @@ Return a copy of `r` with its `multiplicity` field set to `m` (filled in by the
 """
 function _with_multiplicity(r::PathResult, m::Int)::PathResult
     return PathResult(
-        r.return_code, r.solution, r.t, r.accuracy, r.residual, r.condition_jacobian,
+        r.return_code, r.solution, r.t, r.accuracy, r.ω, r.μ, r.residual,
+        r.condition_jacobian,
         r.winding_number, r.singular, r.accepted_steps, r.rejected_steps,
         r.steps_eg, r.extended_precision_used, r.last_path_point, r.last_path_t,
         r.path_number, r.start_solution, r.valuation, m,
@@ -307,6 +311,8 @@ function PathResult(
         Vector{ComplexF64}(state.x),
         t,
         state.accuracy,
+        state.ω,
+        state.μ,
         residual,
         state.cond_J_ẋ,
         0,
@@ -369,6 +375,8 @@ function PathResult(
         solution,
         t,
         accuracy,
+        ts.ω,
+        ts.μ,
         residual,
         state.cond,
         state.winding_number,

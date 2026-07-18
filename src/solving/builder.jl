@@ -54,21 +54,23 @@ function (b::RandomizedStraightLineBuilder)()::TrackingWorkerState
 end
 
 """
-    CoefficientBuilder
+    ParameterBuilder
 
-Builder for parameter homotopy via CoefficientHomotopy.
+Builder for parameter homotopy via ParameterHomotopy (general parameter
+dependence; CoefficientHomotopy's tangent shortcut is only valid for systems
+linear and homogeneous in the parameters).
 """
-struct CoefficientBuilder{S <: System}
+struct ParameterBuilder{S <: System}
     param_system::S
-    start_coeffs::Vector{ComplexF64}
-    target_coeffs::Vector{ComplexF64}
+    start_parameters::Vector{ComplexF64}
+    target_parameters::Vector{ComplexF64}
     tracker_options::TrackerOptions
     endgame_options::EndgameOptions
 end
 
-function (b::CoefficientBuilder)()::TrackingWorkerState
+function (b::ParameterBuilder)()::TrackingWorkerState
     sys_eval = _clone_system_evaluator(b.param_system)
-    H = CoefficientHomotopy(sys_eval, b.start_coeffs, b.target_coeffs)
+    H = ParameterHomotopy(sys_eval, b.start_parameters, b.target_parameters)
     heval = HomotopyEvaluator(H)
     tracker = Tracker(heval; options = b.tracker_options)
     eg = EndgameTracker(tracker, b.endgame_options)

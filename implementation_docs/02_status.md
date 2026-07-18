@@ -1,20 +1,22 @@
 # Status
 
-Last updated: 2026-07-16.
+Last updated: 2026-07-17.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
 - `make compare` — v3/v2 ratios
 - `julia --project=benchmark benchmark/compare/tracking.jl` — end-to-end solve comparison
-- `make test` — test suite (28 test files, parallel via ParallelTestRunner)
+- `make test` — test suite (38 test files, parallel via ParallelTestRunner)
 
 ## Summary
 
 v3 is a credible replacement for v2's core solve pipeline. Total-degree solving is 1.8–3.6x faster
 than v2. Polyhedral solving matches v2 within noise (0.95–1.01x). TTFX (load + first solve) is
-22.5s vs v2's 45s. Endgame is at full v2 result parity using v2's default parameters. Threading
-and overdetermined systems are done. The main remaining gaps are advanced features (monodromy,
-certification, NID) and a distributed executor.
+~14.4s vs v2's 45s. Endgame is at full v2 result parity using v2's default parameters. Threading,
+overdetermined systems, parameter homotopies, and monodromy (full v2 parity including group
+actions, linear subspaces, and the trace test) are done. The main remaining gaps are
+certification, witness sets/NID, a distributed executor, and two input-layer features
+(rational expression input, system composition; see Not Done).
 
 ## Feature Checklist
 
@@ -65,14 +67,39 @@ certification, NID) and a distributed executor.
   `failed`, `at_infinity`, `nonsingular`, `singular`, `nfailed`, `statistics`)
 - [x] Progress bars via ProgressMeter.jl (`show_progress` kwarg on `solve`/`init`, threaded, with v2's
   live `showvalues` counts and `delay=0.3` suppression)
+- [x] `ParameterHomotopy` (linear parameter interpolation, retargetable via
+  `start_parameters!`/`target_parameters!`) and `solve(F, starts; start_parameters, target_parameters)`
+- [x] Tracker warm start (`track!` reusing ω/μ from a previous path; `ω`/`μ` accessors on `PathResult`)
+- [x] `GroupActions`/`SymmetricGroup` (orbit generation, composed actions)
+- [x] `VoronoiTree` and `UniquePoints` (group-action-aware nearest-point dedup),
+  `multiplicities`, `unique_points`
+- [x] `LinearSubspace`: intrinsic/extrinsic descriptions, `rand_subspace`, `translate`,
+  `geodesic`/`geodesic_distance` on the Grassmannian, `coord_change`
+- [x] Subspace homotopies (`IntrinsicSubspaceHomotopy`, `ExtrinsicSubspaceHomotopy`,
+  `linear_subspace_homotopy`) and affine charts (`on_affine_chart`, `AffineChartSystem`/`Homotopy`)
+- [x] `monodromy_solve` at full v2 parity: `find_start_pair`, serial and threaded
+  (Channel job queue) execution, `MonodromyOptions` (~27 explicit kwargs, no splatting),
+  `reuse_loops` (`:all`/`:random`/`:none`), heuristic stop, `target_solutions_count`,
+  equivalence classes via group actions, `LinearSubspace` parameters, permutations, trace
+- [x] `verify_solution_completeness` (trace test with augmented system, auxiliary monodromy,
+  singular-value trace check)
 
 ### Not Done
 
 - [ ] **Distributed executor** — extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
 - [ ] Direct polynomial compiler (`polynomial_compiler.jl` exists, deferred)
-- [ ] Monodromy, certification, witness sets, NID
-- [ ] Group-action symmetry in dedup (needs a `GroupActions` API design; see
-  `03_v2_improvement_opportunities.md` item 2)
+- [ ] Certification, witness sets, NID
+- [ ] **Non-polynomial (rational) expression input.** v2's ModelKit builds straight-line
+  programs, so systems like `u₁/x² + u₂` or triangulation objectives with `y[1:2] ./ y[3]`
+  work directly; v3's DynamicPolynomials input layer is polynomial-only. Blocks porting two
+  v2 monodromy testsets ("Monodromy rational functions", the triangulation system)
+- [ ] **System composition** (v2 `CompositionSystem`, `L₂ ∘ f ∘ L₁`): no v3 equivalent.
+  Blocks porting the v2 symmetroids monodromy test (305 solutions, custom `distance`;
+  the custom-distance kwarg itself is already supported)
+- [ ] Group-action symmetry in `Result` clustering (the `GroupActions` API and
+  group-action-aware `UniquePoints` now exist and monodromy uses them, but
+  `solve()`'s `Result` dedup still uses the plain union-find clustering; see
+  open items and `03_v2_improvement_opportunities.md` item 2)
 - [ ] Compile-mode benchmark, v2 side: v3 `COMPILED_ALL` vs v2 `:all`, plus
   fresh-session first-solve per v3 default candidate (see `04_compile_modes.md`
   TODO; the v3-only matrix is measured, `benchmark/compile_modes_e2e.jl`)
@@ -80,7 +107,7 @@ certification, NID) and a distributed executor.
 
 ## Test Suite
 
-26 test files run in parallel via ParallelTestRunner (`make test`, default 10 workers):
+38 test files run in parallel via ParallelTestRunner (`make test`, default 10 workers):
 
 | Category | Files | Purpose |
 |----------|-------|---------|
@@ -89,9 +116,10 @@ certification, NID) and a distributed executor.
 | Allocation | `alloc_check_test.jl` | Zero-allocation hot paths (norms, LA, predictor, Newton, tracker, endgame) |
 | Primitives | `double_f64_test.jl`, `norms_test.jl`, `linear_algebra_test.jl`, `operations_test.jl` | DoubleF64, WeightedNorm, MatrixWorkspace, op_* functions |
 | Model kit | `interpreter_test.jl`, `codegen_test.jl`, `instruction_count_test.jl`, `taylor_test.jl`, `polynomial_input_test.jl` | Tape execution, RGF codegen, instruction regression, Taylor series |
-| Core | `core_test.jl` | System/Homotopy construction and evaluation |
-| Tracking | `tracking_test.jl`, `endgame_test.jl` | Newton, predictor, path tracking, valuation, winding |
-| Solving | `solve_test.jl`, `binomial_system_test.jl`, `polyhedral_regression_test.jl`, `overdetermined_test.jl` | End-to-end solving, executor dispatch, serial/threaded consistency, binomial HNF, polyhedral regression, square-up + excess-solution filtering |
+| Core | `core_test.jl`, `linear_subspace_test.jl`, `parameter_homotopy_test.jl`, `subspace_homotopy_test.jl` | System/Homotopy construction and evaluation, subspaces, parameter/subspace homotopies, affine charts |
+| Tracking | `tracking_test.jl`, `endgame_test.jl`, `newton_test.jl`, `tracker_warmstart_test.jl` | Newton, predictor, path tracking, valuation, winding, warm start |
+| Solving | `solve_test.jl`, `binomial_system_test.jl`, `polyhedral_regression_test.jl`, `overdetermined_test.jl`, `result_clustering_test.jl`, `path_diagnostics_test.jl`, `progress_test.jl` | End-to-end solving, executor dispatch, serial/threaded consistency, binomial HNF, polyhedral regression, square-up + excess-solution filtering, clustering, diagnostics |
+| Monodromy | `monodromy_test.jl`, `voronoi_tree_test.jl`, `group_actions_test.jl` | monodromy_solve (serial + threaded), permutations, trace test, verify_solution_completeness, VoronoiTree, group actions |
 | v2 parity | `compare_v2_primitives_test.jl`, `compare_v2_solve_counts_test.jl`, `compare_v2_solve_match_test.jl`, `v2_parity_test.jl` | Primitive matching, solution counts, solution values, overall parity |
 | Misc | `utils_test.jl` | SegmentStepper, stable_sort, etc. |
 
@@ -174,20 +202,25 @@ TaylorVector-parameter Taylor kernel (production path — CoefficientHomotopy/To
 
 #### TTFX (fresh session)
 
+v3 measured 2026-07-17 (`benchmark/compare/ttfx.jl`); v2 numbers from 2026-04-03.
+
 | Metric | Time |
 |--------|------|
-| v3 package load | 6.25s |
-| v3 first solve() | 16.26s |
-| **v3 total (load + solve)** | **22.51s** |
+| v3 package load | 0.77s |
+| v3 first solve() | 13.61s |
+| **v3 total (load + solve)** | **14.38s** |
 | v2 package load | 1.30s |
 | v2 first solve() [:mixed] | 43.78s |
 | **v2 total [:mixed]** | **45.08s** |
 | v2 first solve() [:none] | 10.79s |
 | v2 second solve() (different system) | 5.72s |
 
-v3 is 2x faster than v2[:mixed] on first solve. v2[:none] (interpreter-only) is faster for
+v3 is ~3x faster than v2[:mixed] on first solve. v2[:none] (interpreter-only) is faster for
 first solve because it skips SymEngine compilation, but v3 wins on subsequent solves.
-v3's higher package load time (6.25s vs 1.30s) is due to precompiling more code upfront.
+The monodromy port (2026-07-17) added zero TTFX regression: first solve is 13.6s both at
+the pre-port HEAD (measured via a pristine git worktree) and after the port. The quality
+gate target of first solve < 5s predates these measurements and is currently unmet;
+closing that gap is an open item independent of the monodromy work.
 
 ### Endgame result parity
 
@@ -203,8 +236,19 @@ v3's higher package load time (6.25s vs 1.30s) is due to precompiling more code 
 
 ### Architecture debt
 
-3. Direct polynomial compiler — validate and promote (`polynomial_compiler.jl:6` TODO)
+3. Direct polynomial compiler: validate and promote (`polynomial_compiler.jl:6` TODO)
+4. Two solution-dedup mechanisms: `Result` clustering (`_cluster_solutions`, union-find)
+   and `UniquePoints`/`VoronoiTree` from the monodromy port. Consolidating `Result`
+   clustering onto the VoronoiTree would remove the duplication, make `solve()` dedup
+   group-action aware, and likely speed up large results, but changes solution-count
+   semantics (transitive closure vs first-match), so it needs its own tests
+   (see `01_decisions.md`, "Two solution-dedup mechanisms exist")
+5. Two threading coordinators: OhMyThreads executor for `solve()`, Channel job queue for
+   threaded monodromy. Justified by the dynamic monodromy workload; revisit only if a
+   third dynamic consumer appears
 
 ### Infrastructure
 
-8. No benchmark CI — regressions go unnoticed
+8. No benchmark CI: regressions go unnoticed
+9. TTFX gate (first solve < 5s) unmet: currently 13.6s, unchanged by the monodromy port.
+   Needs an invalidation/inference investigation (`julia-ttfx` skill)

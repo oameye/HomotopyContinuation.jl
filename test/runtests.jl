@@ -1,3 +1,3 @@
 using HomotopyContinuationNext
 using ParallelTestRunner: ParallelTestRunner
-ParallelTestRunner.runtests(HomotopyContinuationNext, ["test/", ARGS...])
+ParallelTestRunner.runtests(HomotopyContinuationNext, ARGS)
