@@ -1,12 +1,12 @@
 # Status
 
-Last updated: 2026-07-18.
+Last updated: 2026-07-19.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
 - `make compare` — v3/v2 ratios
 - `julia --project=benchmark benchmark/compare/tracking.jl` — end-to-end solve comparison
-- `make test` — test suite (40 test files, parallel via ParallelTestRunner)
+- `make test` runs the core suite (40 files, parallel via ParallelTestRunner) then the certification subpackage; `make test-cert` runs only the latter
 
 ## Summary
 
@@ -15,8 +15,11 @@ than v2. Polyhedral solving matches v2 within noise (0.95–1.01x). Cold load + 
 first solve is now ~10.6s without a precompile workload, versus v2's 45s. Endgame is at full v2
 result parity using v2's default parameters. Threading,
 overdetermined systems, parameter homotopies, and monodromy (full v2 parity including group
-actions, linear subspaces, and the trace test) are done. The main remaining gaps are
-certification, witness sets/NID, a distributed executor, and two input-layer features
+actions, linear subspaces, and the trace test) are done. Certification (Krawczyk interval
+method with arbitrary-precision Arb fallback) is at v2 parity and lives in a **separate
+`lib/HomotopyContinuationNextCertification` subpackage**, which keeps the heavy Arblib
+dependency out of core (core load dropped from about 1.6s to about 0.77s). The main remaining
+gaps are witness sets/NID, a distributed executor, and two input-layer features
 (rational expression input, system composition; see Not Done).
 
 ## Feature Checklist
@@ -85,16 +88,34 @@ certification, witness sets/NID, a distributed executor, and two input-layer fea
   equivalence classes via group actions, `LinearSubspace` parameters, permutations, trace
 - [x] `verify_solution_completeness` (trace test with augmented system, auxiliary monodromy,
   singular-value trace check)
+- [x] **Certification** (`certify`) at full v2 parity, in the **separate `lib/HomotopyContinuationNextCertification`
+  subpackage** (keeps Arblib out of core, so core load is ~0.77s; certification is the only Arblib
+  consumer). Krawczyk operator with ε-inflation over interval arithmetic (`Interval`/`IComplexF64`,
+  generic tape interpreter reused), arbitrary-precision Arb fallback (`AcbInterpreter` with in-place
+  ops + `setprecision!`, escalates 128→256 bits), `SolutionCertificate`/`ExtendedSolutionCertificate`,
+  all accessors and counts (`ncertified`, `nreal_certified`, `ndistinct_*`,
+  `is_real`/`is_complex`/`is_positive`), duplicate grouping via interval tree, `save`,
+  `show_straight_line_program`, and every input form
+  (`Result`/`PathResult`/`Vector`/single/`MonodromyResult`, positional and `target_parameters`).
+  Includes the 3264-conics regression (steiner system, 3264 distinct real certified).
+  Load with `using HomotopyContinuationNext, HomotopyContinuationNextCertification`
+- [x] **`DistinctCertifiedSolutions`** streaming accumulator (`add_solution!`,
+  `distinct_certified_solutions`/`!`, `certificates`, `solutions`): certifies and deduplicates
+  on the fly, thread-safe via a per-task `CertificationCache` (each carries its own cloned
+  `SystemEvaluator` so refinement newton never shares interpreter tapes), OhMyThreads `@tasks`/`@local`
 
 ### Not Done
 
 - [ ] **Distributed executor** — extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
 - [ ] Direct polynomial compiler (`polynomial_compiler.jl` exists, deferred)
-- [ ] Certification, witness sets, NID
+- [ ] Witness sets, numerical irreducible decomposition (NID)
 - [ ] **Non-polynomial (rational) expression input.** v2's ModelKit builds straight-line
   programs, so systems like `u₁/x² + u₂` or triangulation objectives with `y[1:2] ./ y[3]`
   work directly; v3's DynamicPolynomials input layer is polynomial-only. Blocks porting two
-  v2 monodromy testsets ("Monodromy rational functions", the triangulation system)
+  v2 monodromy testsets ("Monodromy rational functions", the triangulation system) and v2's
+  "certify uses approximate inverse of jacobian" certification testset (needs `log`/rational
+  input plus Combinatorics; its `approx_inv!` code path is already covered by the Arb-fallback
+  testset in `test/certification_test.jl`)
 - [ ] **System composition** (v2 `CompositionSystem`, `L₂ ∘ f ∘ L₁`): no v3 equivalent.
   Blocks porting the v2 symmetroids monodromy test (305 solutions, custom `distance`;
   the custom-distance kwarg itself is already supported)
@@ -222,6 +243,12 @@ build/init/solve from 14.44s to about 9.81s (32%) by isolating mutually exclusiv
 branches, using adaptive direct polynomial lowering, and stabilizing constructor types.
 See `05_ttfx_invalidations.md` for the full SnoopCompile, JET, Cthulhu, LLVM, and
 invalidation report.
+
+The 0.77s core load holds because certification (the sole consumer of the heavy Arblib
+dependency) is a separate `lib/` subpackage. Adding Arblib to core raised load to about 1.6s
+and roughly 50% more invalidation descendants (one Arblib `show` method alone accounted for
+about 2700), which is what motivated the split. Loading
+`HomotopyContinuationNextCertification` pays that Arblib cost only when certification is used.
 
 ### Endgame result parity
 

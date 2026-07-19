@@ -19,13 +19,29 @@ Key design decisions:
 ## Package layout
 
 ```
-src/HomotopyContinuationNext.jl     # Main module
+src/HomotopyContinuationNext.jl     # Main module (core, Arblib-free)
 src/primitives/                      # DoubleF64, norms, linear algebra
 src/model_kit/                       # SExpr, CSE, tape compiler, interpreter, Taylor
 src/core/                            # AbstractSystem/Homotopy, SystemEvaluator, homotopy types
 src/tracking/                        # Predictor, Newton, Tracker
 src/solving/                         # solve(), total degree, polyhedral, result types
 src/utils.jl                         # SegmentStepper, _stable_sort!, fast_abs, etc.
+
+lib/HomotopyContinuationNextCertification/   # Certification subpackage
+  src/interval_arithmetic.jl, interval_arblib.jl   # Interval / IComplexF64 + Arb bridge
+  src/acb_interpreter.jl                            # arbitrary-precision tape interpreter
+  src/certification.jl, certification_arb.jl        # certify(), Krawczyk + Arb fallback
+```
+
+**Certification is a separate subpackage.** It depends on Arblib (a heavy binary
+dep), so keeping it out of core is what makes core TTFX minimal (core load
+dropped from ~1.6s to ~0.77s). Every certificate type embeds an `AcbMatrix`, so
+a package extension is not possible (extensions cannot define/export types); a
+subpackage is the correct isolation. To certify:
+
+```julia
+using HomotopyContinuationNext, HomotopyContinuationNextCertification
+certify(F, solutions)
 ```
 
 ## Git policy
@@ -37,7 +53,8 @@ src/utils.jl                         # SegmentStepper, _stable_sort!, fast_abs, 
 All common tasks go through the Makefile:
 
 ```sh
-make test          # run all tests in parallel (ParallelTestRunner, 10 jobs)
+make test          # run core tests in parallel (ParallelTestRunner, 10 jobs), then the certification subpackage
+make test-cert     # run only the certification subpackage suite (threaded)
 make test-serial   # run all tests serially (for debugging)
 make benchmark     # run TTFX + steady-state benchmarks
 make compare       # compare primitives against HomotopyContinuation v2

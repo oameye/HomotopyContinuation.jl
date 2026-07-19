@@ -50,6 +50,10 @@ export find_start_pair, monodromy_solve, verify_solution_completeness
 export MonodromyOptions, MonodromyResult, is_heuristic_stop, permutations, trace
 export newton, NewtonResult, NewtonCache, NewtonReturnCode
 export Serial, Threaded
+# Certification (certify, SolutionCertificate, …) lives in the
+# HomotopyContinuationNextCertification subpackage (lib/), which depends on
+# Arblib. Keeping Arblib out of this core package is what makes core TTFX
+# minimal; load the subpackage to certify.
 
 const MP = MultivariatePolynomials
 # Concrete type aliases — FixedSizeVector{T} alone is NOT concrete because

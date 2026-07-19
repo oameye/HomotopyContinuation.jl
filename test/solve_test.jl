@@ -15,7 +15,7 @@ using CommonSolve: CommonSolve
 
     @testset "solve: linear system" begin
         @polyvar x y
-        result = solve(System([x - 2, y - 3]))
+        result = solve(System([x - 2, y - 3]); show_progress = false)
         @test nsolutions(result) == 1
         sols = solutions(result)
         @test length(sols) == 1
@@ -25,7 +25,7 @@ using CommonSolve: CommonSolve
 
     @testset "solve: quadratic system" begin
         @polyvar x y
-        result = solve(System([x^2 + y - 1, x * y - 0.5]))
+        result = solve(System([x^2 + y - 1, x * y - 0.5]); show_progress = false)
         @test nsolutions(result) >= 2
         for sol in solutions(result)
             @test abs(sol[1]^2 + sol[2] - 1) < 1.0e-6
@@ -35,7 +35,7 @@ using CommonSolve: CommonSolve
 
     @testset "solve: x^2-1, y^2-4 finds all real solutions" begin
         @polyvar x y
-        result = solve(System([x^2 - 1, y^2 - 4]))
+        result = solve(System([x^2 - 1, y^2 - 4]); show_progress = false)
         @test nsolutions(result) == 4
         rsols = real_solutions(result)
         @test length(rsols) == 4
@@ -56,7 +56,7 @@ using CommonSolve: CommonSolve
                 x1^2 + 2x0 * x2 + 2x1 * x3 - x2,
             ]
         )
-        result = solve(F)
+        result = solve(F; show_progress = false)
         @test nsolutions(result) >= 2
         for sol in solutions(result)
             residual = maximum(
@@ -76,8 +76,8 @@ using CommonSolve: CommonSolve
     @testset "solve: reproducible with seed" begin
         @polyvar x y
         F = System([x^2 + y - 1, x * y - 0.5])
-        r1 = solve(F, TotalDegree(; seed = UInt32(42)))
-        r2 = solve(F, TotalDegree(; seed = UInt32(42)))
+        r1 = solve(F, TotalDegree(; seed = UInt32(42)); show_progress = false)
+        r2 = solve(F, TotalDegree(; seed = UInt32(42)); show_progress = false)
         @test nsolutions(r1) == nsolutions(r2)
         # Compare as sets — solution ordering may differ even with same seed
         s1 = solutions(r1)
@@ -89,7 +89,7 @@ using CommonSolve: CommonSolve
 
     @testset "solve: explicit algorithm" begin
         @polyvar x y
-        result = solve(System([x^2 - 1, y - 2]), TotalDegree())
+        result = solve(System([x^2 - 1, y - 2]), TotalDegree(); show_progress = false)
         @test nsolutions(result) >= 1
         for sol in solutions(result)
             @test abs(sol[1]^2 - 1) < 1.0e-6
@@ -107,14 +107,14 @@ using CommonSolve: CommonSolve
 
     @testset "solve: complex-only solutions" begin
         @polyvar x y
-        result = solve(System([x^2 + 1, y - 1]))
+        result = solve(System([x^2 + 1, y - 1]); show_progress = false)
         @test nreal(result) == 0
         @test nsolutions(result) >= 1
     end
 
     @testset "Result: show" begin
         @polyvar x y
-        result = solve(System([x - 1, y - 2]))
+        result = solve(System([x - 1, y - 2]); show_progress = false)
         buf = IOBuffer()
         show(buf, result)
         s = String(take!(buf))
@@ -126,7 +126,7 @@ using CommonSolve: CommonSolve
         @polyvar x y
         opts = TrackerOptions(; max_steps = 100)
         alg = TotalDegree(; tracker_options = opts)
-        result = solve(System([x^2 - 1, y^2 - 1]), alg)
+        result = solve(System([x^2 - 1, y^2 - 1]), alg; show_progress = false)
         # Should still work with small max_steps for simple system
         @test nsolutions(result) >= 1
     end
@@ -140,7 +140,7 @@ using CommonSolve: CommonSolve
 
     @testset "Polyhedral: x²+y-1, xy-2" begin
         @polyvar x y
-        result = solve(System([x^2 + y - 1, x * y - 2]), Polyhedral())
+        result = solve(System([x^2 + y - 1, x * y - 2]), Polyhedral(); show_progress = false)
         # mixed volume = 3 for this system
         @test nsolutions(result) >= 2
         for sol in solutions(result)
@@ -151,7 +151,7 @@ using CommonSolve: CommonSolve
 
     @testset "Polyhedral: x²-1, y²-4 finds all solutions" begin
         @polyvar x y
-        result = solve(System([x^2 - 1, y^2 - 4]), Polyhedral())
+        result = solve(System([x^2 - 1, y^2 - 4]), Polyhedral(); show_progress = false)
         @test nsolutions(result) == 4
         rsols = real_solutions(result)
         @test length(rsols) == 4
@@ -171,7 +171,7 @@ using CommonSolve: CommonSolve
                 x1^2 + 2x0 * x2 + 2x1 * x3 - x2,
             ]
         )
-        result = solve(F, Polyhedral())
+        result = solve(F, Polyhedral(); show_progress = false)
         @test nsolutions(result) >= 2
         for sol in solutions(result)
             residual = maximum(
@@ -191,8 +191,8 @@ using CommonSolve: CommonSolve
     @testset "Polyhedral: reproducible with seed" begin
         @polyvar x y
         F = System([x^2 + y - 1, x * y - 0.5])
-        r1 = solve(F, Polyhedral(; seed = UInt32(42)))
-        r2 = solve(F, Polyhedral(; seed = UInt32(42)))
+        r1 = solve(F, Polyhedral(; seed = UInt32(42)); show_progress = false)
+        r2 = solve(F, Polyhedral(; seed = UInt32(42)); show_progress = false)
         @test nsolutions(r1) == nsolutions(r2)
         # Compare as sets: for each solution in r1, find a matching one in r2
         s1 = solutions(r1)
@@ -220,8 +220,8 @@ using CommonSolve: CommonSolve
         # For a sparse system, polyhedral should track fewer (or equal) paths
         @polyvar x y
         F = System([x^2 + y - 1, x * y - 2])
-        r_td = solve(F, TotalDegree())
-        r_ph = solve(F, Polyhedral())
+        r_td = solve(F, TotalDegree(); show_progress = false)
+        r_ph = solve(F, Polyhedral(); show_progress = false)
         # Both should find the same solutions
         @test nsolutions(r_td) == nsolutions(r_ph)
     end
@@ -233,8 +233,8 @@ using CommonSolve: CommonSolve
             System([x^2 + y^2 - 1, x * y - 0.25]),
         ]
         for F in systems
-            r_td = solve(F, TotalDegree(; seed = UInt32(1)))
-            r_ph = solve(F, Polyhedral(; seed = UInt32(1)))
+            r_td = solve(F, TotalDegree(; seed = UInt32(1)); show_progress = false)
+            r_ph = solve(F, Polyhedral(; seed = UInt32(1)); show_progress = false)
             @test nsolutions(r_td) == nsolutions(r_ph)
         end
     end
@@ -246,13 +246,13 @@ using CommonSolve: CommonSolve
         F = System([x^2 + a * y - 1, x * y - b]; parameters = [a, b])
         # Solve the non-parametric version at a=1, b=0.5 to get start solutions
         F_fixed = System([x^2 + 1.0 * y - 1, x * y - 0.5])
-        r1 = solve(F_fixed)
+        r1 = solve(F_fixed; show_progress = false)
         @test nsolutions(r1) >= 2
         # Track to new parameters a=2, b=1
         r2 = solve(
             F, solutions(r1);
             start_parameters = [1.0, 0.5],
-            target_parameters = [2.0, 1.0],
+            target_parameters = [2.0, 1.0], show_progress = false,
         )
         @test nsolutions(r2) >= 2
         # Verify solutions satisfy the target system
@@ -267,13 +267,13 @@ using CommonSolve: CommonSolve
         F = System([x^2 - a, y^2 - a]; parameters = [a])
         # Solve at a=1
         F_fixed = System([x^2 - 1, y^2 - 1])
-        r1 = solve(F_fixed)
+        r1 = solve(F_fixed; show_progress = false)
         @test nsolutions(r1) == 4
         # Track to a=4
         r2 = solve(
             F, solutions(r1);
             start_parameters = [1.0],
-            target_parameters = [4.0],
+            target_parameters = [4.0], show_progress = false,
         )
         @test nsolutions(r2) == 4
         rsols = real_solutions(r2)
@@ -288,7 +288,7 @@ using CommonSolve: CommonSolve
         @polyvar x y a
         F = System([x^2 - a, y - 1]; parameters = [a])
         F_fixed = System([x^2 - 1, y - 1])
-        r1 = solve(F_fixed)
+        r1 = solve(F_fixed; show_progress = false)
         cache = CommonSolve.init(
             F, solutions(r1);
             start_parameters = [1.0],
@@ -484,34 +484,34 @@ using CommonSolve: CommonSolve
 
     @testset "solve: TotalDegree + Serial" begin
         @polyvar x y
-        result = solve(System([x^2 - 1, y^2 - 4]), TotalDegree(), Serial())
+        result = solve(System([x^2 - 1, y^2 - 4]), TotalDegree(), Serial(); show_progress = false)
         @test nsolutions(result) == 4
         @test length(real_solutions(result)) == 4
     end
 
     @testset "solve: TotalDegree + Threaded" begin
         @polyvar x y
-        result = solve(System([x^2 - 1, y^2 - 4]), TotalDegree(), Threaded())
+        result = solve(System([x^2 - 1, y^2 - 4]), TotalDegree(), Threaded(); show_progress = false)
         @test nsolutions(result) == 4
         @test length(real_solutions(result)) == 4
     end
 
     @testset "solve: convenience executor method" begin
         @polyvar x y
-        result = solve(System([x^2 - 1, y^2 - 4]), Serial())
+        result = solve(System([x^2 - 1, y^2 - 4]), Serial(); show_progress = false)
         @test nsolutions(result) == 4
     end
 
     @testset "solve: Polyhedral + Serial" begin
         @polyvar x y
-        result = solve(System([x^2 - 1, y^2 - 4]), Polyhedral(), Serial())
+        result = solve(System([x^2 - 1, y^2 - 4]), Polyhedral(), Serial(); show_progress = false)
         @test nsolutions(result) == 4
         @test length(real_solutions(result)) == 4
     end
 
     @testset "solve: Polyhedral + Threaded" begin
         @polyvar x y
-        result = solve(System([x^2 - 1, y^2 - 4]), Polyhedral(), Threaded())
+        result = solve(System([x^2 - 1, y^2 - 4]), Polyhedral(), Threaded(); show_progress = false)
         @test nsolutions(result) == 4
         @test length(real_solutions(result)) == 4
     end
@@ -520,11 +520,11 @@ using CommonSolve: CommonSolve
         @polyvar x y a
         F = System([x^2 - a, y^2 - a]; parameters = [a])
         F_fixed = System([x^2 - 1, y^2 - 1])
-        r1 = solve(F_fixed)
+        r1 = solve(F_fixed; show_progress = false)
         r2 = solve(
             F, solutions(r1), Serial();
             start_parameters = [1.0],
-            target_parameters = [4.0],
+            target_parameters = [4.0], show_progress = false,
         )
         @test nsolutions(r2) == 4
         for sol in real_solutions(r2)
@@ -537,11 +537,11 @@ using CommonSolve: CommonSolve
         @polyvar x y a
         F = System([x^2 - a, y^2 - a]; parameters = [a])
         F_fixed = System([x^2 - 1, y^2 - 1])
-        r1 = solve(F_fixed)
+        r1 = solve(F_fixed; show_progress = false)
         r2 = solve(
             F, solutions(r1), Threaded();
             start_parameters = [1.0],
-            target_parameters = [4.0],
+            target_parameters = [4.0], show_progress = false,
         )
         @test nsolutions(r2) == 4
         for sol in real_solutions(r2)
@@ -553,8 +553,8 @@ using CommonSolve: CommonSolve
     @testset "Serial vs Threaded: full consistency" begin
         @polyvar x y
         F = System([x^2 + y - 1, x * y - 0.5])
-        r_serial = solve(F, TotalDegree(; seed = UInt32(99)), Serial())
-        r_threaded = solve(F, TotalDegree(; seed = UInt32(99)), Threaded())
+        r_serial = solve(F, TotalDegree(; seed = UInt32(99)), Serial(); show_progress = false)
+        r_threaded = solve(F, TotalDegree(; seed = UInt32(99)), Threaded(); show_progress = false)
 
         # Solution counts
         @test nsolutions(r_serial) == nsolutions(r_threaded)
@@ -580,8 +580,8 @@ using CommonSolve: CommonSolve
     @testset "Polyhedral: Serial vs Threaded consistency" begin
         @polyvar x y
         F = System([x^2 + y - 1, x * y - 0.5])
-        r_serial = solve(F, Polyhedral(; seed = UInt32(99)), Serial())
-        r_threaded = solve(F, Polyhedral(; seed = UInt32(99)), Threaded())
+        r_serial = solve(F, Polyhedral(; seed = UInt32(99)), Serial(); show_progress = false)
+        r_threaded = solve(F, Polyhedral(; seed = UInt32(99)), Threaded(); show_progress = false)
 
         @test nsolutions(r_serial) == nsolutions(r_threaded)
         @test r_serial.tracked_paths == r_threaded.tracked_paths
@@ -603,8 +603,8 @@ using CommonSolve: CommonSolve
                 x1^2 + 2x0 * x2 + 2x1 * x3 - x2,
             ],
         )
-        r_serial = solve(F, TotalDegree(; seed = UInt32(7)), Serial())
-        r_threaded = solve(F, TotalDegree(; seed = UInt32(7)), Threaded())
+        r_serial = solve(F, TotalDegree(; seed = UInt32(7)), Serial(); show_progress = false)
+        r_threaded = solve(F, TotalDegree(; seed = UInt32(7)), Threaded(); show_progress = false)
 
         @test nsolutions(r_serial) == nsolutions(r_threaded)
         @test r_serial.tracked_paths == r_threaded.tracked_paths

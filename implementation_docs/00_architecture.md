@@ -122,6 +122,37 @@ src/                                         ~17,450 lines total
     └── support.jl                   (93)    Extract support/coefficients from MP
 ```
 
+### Certification subpackage
+
+Solution certification lives in a **separate package** under `lib/`, not in core:
+
+```
+lib/HomotopyContinuationNextCertification/
+├── src/
+│   ├── interval_arithmetic.jl      Interval / IComplex / IComplexF64, inf_norm_bound, sqr
+│   ├── interval_arblib.jl          Acb ↔ Interval bridge (Arblib)
+│   ├── acb_interpreter.jl          AcbInterpreter: arbitrary-precision in-place tape interpreter
+│   ├── certification.jl            certify(), Krawczyk operator, certificate types, accumulator
+│   └── certification_arb.jl        Arb (extended-precision) Krawczyk fallback
+└── test/                           certification, interval, export-surface, and quality suites
+```
+
+It depends on core plus **Arblib** (a heavy binary dependency) and IntervalTrees.
+Certification is the *only* consumer of Arblib, so keeping it in a subpackage is
+what keeps core free of Arblib and its load-time and invalidation cost (core
+load dropped from about 1.6s to about 0.77s). A package extension cannot be used
+here because every certificate type embeds an `AcbMatrix` field, and Julia
+extensions cannot define or export new types into the parent module. To certify:
+
+```julia
+using HomotopyContinuationNext, HomotopyContinuationNextCertification
+certify(F, solutions)
+```
+
+The subpackage reaches into core internals (the tape interpreter, `System`,
+`_newton`, `_clone_system_evaluator`, the `ExecInstruction` ADT) via explicit
+qualified imports; it extends core `is_real`/`solutions` with certificate methods.
+
 ## Key Types
 
 ### CompileMode

@@ -174,3 +174,50 @@ every `solve()`, so it was kept out of the port.
 ### Overdetermined parameter homotopy stays rectangular (SHIPPED, matches v2)
 
 Square-up and excess filtering apply only to total-degree/polyhedral start systems; the parameter-homotopy path tracks the rectangular system directly with least-squares QR Newton, exactly like v2. No randomization means no excess solutions, and squaring up would introduce them. Shared tradeoff with v2: a least-squares stationary point can be reported as success.
+
+### Certification is a separate subpackage, not a package extension (SHIPPED)
+
+Certification is the only consumer of Arblib (a heavy binary dependency), and
+loading Arblib into core cost about 0.34s of load time and thousands of extra
+method invalidations. Moving certification to `lib/HomotopyContinuationNextCertification`
+takes Arblib out of core entirely (core load about 1.6s to about 0.77s). A
+package extension was considered and rejected: every certificate type embeds an
+`AcbMatrix` field, so the types cannot be defined without Arblib, and Julia
+extensions can only add methods to existing functions, never define or export
+new types into the parent. A subpackage is the only isolation that preserves the
+full exported certificate API. See `00_architecture.md` for the layout.
+
+### Certificate builders behind a type-parameter barrier (SHIPPED)
+
+`certify_solution` used to return `Union{SolutionCertificate,ExtendedSolutionCertificate}`
+because the `extended_certificate::Bool` flag chose the type at runtime. The flag
+is now resolved once at the `_certify` boundary and the concrete certificate type
+is threaded as a type parameter through `certify_solution` and
+`extended_prec_certify_solution`; small `_float64_certificate`/`_arb_certificate`/`_uncertified_certificate`
+builders dispatch on `::Type{CertT}`. Every function on the path now infers a
+concrete return type.
+
+### Arb fallback state is built lazily (SHIPPED)
+
+The arbitrary-precision `AcbCertCache` (several KB of Arb buffers) is only needed
+when the Float64 Krawczyk test fails, which is the exception. `CertificationCache`
+is therefore a `mutable struct` (justified) with `const` on every field except
+`arb`, which an inner constructor leaves undefined; `_arb(cache)` builds it on
+first use. The cache stores the two instruction sequences plus the size so it can
+build the fallback without holding a reference to `F`. Each cache is used by a
+single task, so the lazy init is not shared across threads.
+
+### Certification allocation hygiene (SHIPPED)
+
+The approximate inverse `C ≈ J⁻¹` is computed in place into a preallocated buffer
+via `inv!(lu!(copyto!(C_C64, J_C64)))` instead of `inv(J)` (which allocated a
+matrix per solution). The threaded certify driver reuses the caller-provided
+`CertificationCache` as one entry of a `Channel`-based cache pool rather than
+discarding it.
+
+### Interval-arithmetic boundary fixes (SHIPPED)
+
+Three interval boundary cases were corrected: `0 * Interval` now returns the zero
+*interval* (not a scalar, which broke type stability); `Interval(0)/Interval(0)`
+(and any `0 ∈ denominator`) returns a NaN interval instead of `[0,0]`; and
+`x^0` returns `one(x)` for every `x`, including intervals containing zero.

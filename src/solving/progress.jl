@@ -35,9 +35,8 @@ function _showvalues(stats::ProgressStats, ntracked::Int)
     )
 end
 
-function make_progress(n::Int, show::Bool; delay::Float64 = 0.3)
+function make_progress(n::Int, show::Bool; delay::Float64 = 0.3, desc::String = "Tracking $n paths... ")
     show || return nothing
-    desc = "Tracking $n paths... "
     # `barlen` is left unset so ProgressMeter auto-sizes the bar to the terminal
     # width (avoids depending on the internal `tty_width`).
     progress = ProgressMeter.Progress(n; dt = 0.2, desc = desc, output = stdout)
