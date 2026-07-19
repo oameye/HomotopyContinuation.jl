@@ -31,17 +31,18 @@ fresh-process improvements are:
 | Cold workflow | Before | After | Reduction |
 |---|---:|---:|---:|
 | Interpreted total degree, serial, quiet | 11.063 s | 9.840 s | 11.1% |
-| Interpreted polyhedral, serial, quiet | 20.870 s | 15.996 s | 23.4% |
-| Monodromy, serial, quiet | 17.056 s | 14.216 s | 16.7% |
+| Interpreted polyhedral, serial, quiet | 20.870 s | 14.767 s | 29.2% |
+| Monodromy, serial, quiet | 17.056 s | 14.179 s | 16.9% |
 | Monodromy, threaded, quiet | 17.232 s | 14.517 s | 15.8% |
 | Subspace monodromy with trace test | 25.849 s | 19.842 s | 23.2% |
 | Solution-completeness verification | 30.790 s | 25.217 s | 18.1% |
 | Total degree with visible progress | 11.045 s | 10.742 s | 2.7% |
 
-The largest remaining costs are real feature breadth: evaluator and Taylor
-FunctionWrapper construction, essential MixedSubdivisions regeneration and
-cell traversal, tracker/Newton compilation, subspace homotopies, and repeated
-monodromy/parameter-homotopy construction in completeness verification.
+The largest remaining costs are real feature breadth: the two parameter-Taylor
+FunctionWrappers actually used by polyhedral tracking, essential
+MixedSubdivisions regeneration and cell traversal, tracker/Newton compilation,
+subspace homotopies, and repeated monodromy/parameter-homotopy construction in
+completeness verification.
 
 ## Reproducible scope
 
@@ -346,6 +347,150 @@ polyhedral entries are now Taylor instruction execution/wrappers, tracker
 Newton/predictor inference, FunctionWrappers calls, and genuine
 MixedSubdivisions regeneration.
 
+### Capability-specific polyhedral Taylor evaluator
+
+A follow-up call-graph audit found that the general interpreted evaluator was
+still eagerly constructing six Taylor tapes/wrappers for `_SupportSystem`.
+Polyhedral tracking has a narrower contract:
+
+- first-order homotopy data comes from ordinary value/Jacobian evaluation;
+- `ToricHomotopy` and `CoefficientHomotopy` request parameter-Taylor orders 2
+  and 3;
+- they never request scalar-parameter Taylor orders 1--3 or
+  parameter-Taylor order 1.
+
+The support evaluator now constructs only the order-2 and order-3 parameter
+tapes and wrappers. Its four unreachable `SystemEvaluator` slots contain a
+shared fail-fast function, preserving the concrete, monomorphic evaluator
+layout without hiding an optional-value union in the tracker or compiling
+unused kernels. This is an internal capability restriction: ordinary public
+`System` evaluators retain all six Taylor modes. Regression tests assert both
+the two supported modes against a symbolic `System` and the explicit errors
+for unsupported internal modes.
+
+The first implementation duplicated the four ordinary evaluation closure
+types and erased most of the win. The retained implementation factors those
+wrappers into `_build_interpreted_evaluation_fws`, shared by ordinary and
+support-backed evaluators, so FunctionWrappers sees one callable type per
+signature.
+
+Fresh cold results are:
+
+| Workflow | Before capability split | After capability split | Reduction |
+|---|---:|---:|---:|
+| Interpreted, serial (median of three) | 15.996 s | 14.351 s | 10.3% |
+| Compiled, serial | 16.952 s | 15.353 s | 9.4% |
+| Compiled-all, serial | 17.519 s | 15.563 s | 11.2% |
+| Interpreted, one-task threaded | 16.474 s | 14.961 s | 9.2% |
+| Overdetermined, serial | 16.796 s | 14.972 s | 10.9% |
+
+The three interpreted-serial samples were 14.339 s, 14.351 s, and 14.462 s.
+Allocated bytes fell from about 2.36 GB to 2.20 GB. An immediate fresh
+SnoopCompile comparison moved hierarchical compiler accounting from 66.178 s
+to 65.369 s (1.2% lower), exclusive accounting from 16.481 s to 16.634 s
+(0.9% higher), and flattened nodes from 9,604 to 9,632 (0.3% higher). The
+small exclusive/node movement is retained and reported rather than presented
+as a compiler-graph reduction: the strong wall/allocation result comes from
+not materializing four tapes/wrappers, while the two real parameter kernels
+and the explicit shared-wrapper boundary still have to compile.
+
+Because the factored evaluation-wrapper constructor is also used by ordinary
+interpreted systems, total degree was checked separately in three fresh
+sessions: 9.933 s, 9.936 s, and 10.053 s (median 9.936 s versus the preceding
+9.840 s). The roughly 1% movement is within cold-run noise and shows no
+material cross-feature regression.
+
+### Positional tracker Taylor boundary
+
+The next tracker-construction audit separated honest concrete compilation from
+removable dispatch overhead. `Tracker`, `Predictor`, `NewtonCorrector`, and the
+two polyhedral `HomotopyEvaluator` instances all infer concrete return types;
+their remaining kernels are executed by tracking and cannot be removed or
+deferred without changing the work performed. The removable boundary was the
+order-2/order-3 `HomotopyEvaluator` closures: each called the underlying
+homotopy through `incremental=` keyword dispatch even though the wrapper had
+already received a concrete `Bool`. An intermediate implementation moved this
+work into positional `_taylor!(..., incremental)` kernels while retaining
+keyword compatibility wrappers.
+
+A complete call-graph and history audit showed that this compatibility was not
+useful. HomotopyContinuation v2's predictor passed `true` for orders 2 and 3,
+apparently reserving the argument for incremental tape reuse, but the generic
+`AbstractHomotopy` method immediately discarded it and every relevant concrete
+implementation ignored it. The current predictor has no incremental caller or
+state-reuse protocol. Retaining the argument would therefore preserve an
+unimplemented intention rather than behavior.
+
+Orders 2 and 3 now follow the order-1 contract directly: each built-in
+homotopy implements one positional `taylor!(u, Val(K), H, tx, t)` method. The
+`HomotopyEvaluator` closures call those methods directly; their
+`FunctionWrapper` signatures no longer contain the unused `Bool`; and the
+generic `_taylor!` bridge and generated keyword methods are gone. This was
+carried through `StraightLineHomotopy`, both `LinearParameterHomotopy` modes,
+`ToricHomotopy`, intrinsic and extrinsic subspace homotopies, and
+`AffineChartHomotopy`. External `AbstractHomotopy` implementations use the
+same five-argument contract.
+
+In fresh sessions, direct Parameter/Toric methods and their type-erased
+`HomotopyEvaluator` wrappers infer exactly `Nothing` for both orders. Targeted
+JET optimization reports are empty and Cthulhu independently reports exact
+`Nothing`. A repeated fresh interpreted-polyhedral SnoopCompile capture using
+SnoopCompile 3.2.5/SnoopCompileCore 3.1.2 produced 9,550 flattened nodes and
+zero `#taylor!#` roots. The earlier 9,355-node capture used the preceding
+analysis environment, so it is retained as historical evidence for removal of
+the keyword roots but is not presented as a paired node comparison with the
+current tool environment.
+
+Fresh cold samples were 14.777 s, 14.717 s, and 14.767 s (median 14.767 s,
+about 2.196 GB). This does not reproduce the preceding 14.351-second median,
+so no wall-time improvement is claimed for this pass. The current headline
+uses the latest median, reducing the cumulative measured polyhedral gain from
+31.2% to 29.2% rather than hiding the adverse sample.
+
+A support-only Taylor interpreter with 13 polynomial operations was also
+tested. It lowered the local support-evaluator inference root from about
+0.95 s to 0.62 s, but the general Taylor kernels remained necessary elsewhere
+in the same workflow. The additional executor therefore increased total nodes
+from 9,355 to 9,424. It was reverted: locally smaller inference is not useful
+when it duplicates the whole-workflow compiler graph.
+
+### Concrete monodromy builders and evaluator ownership
+
+The first vector-parameter monodromy worker was previously created by the same
+anonymous closure used to build additional threaded workers. Two independent
+problems followed:
+
+- the closure captured `F` at its declared `System` abstraction, so inference
+  traversed `_clone_system_evaluator` for interpreted, compiled, and
+  compiled-all systems even when the concrete input was interpreted;
+- the closure cloned `F.evaluator` for worker 1 even though no other owner uses
+  that evaluator during the solve. Only simultaneous additional workers need
+  independent mutable interpreter tapes.
+
+`ParameterMonodromyBuilder{S}` and `ChartParameterMonodromyBuilder{S}` now keep
+the concrete system type. Worker 1 consumes `F.evaluator` directly, while each
+additional threaded worker calls its concrete builder and receives a fresh
+clone. This is evaluator ownership reuse, not capability removal or deferred
+serial work: serial execution never needs the clone, and threaded execution
+still allocates one independent tape set per concurrently active worker.
+
+The paired fresh serial SnoopCompile capture changed from 9,594 to 8,885 nodes
+(7.4% lower) and from 16.464 s to 15.973 s of exclusive accounting (3.0%
+lower). All serial `_clone_system_evaluator` roots disappeared; before the
+change their inclusive subtree totaled 1.305 s and included all three compile
+modes. In the threaded capture exactly one concrete interpreted clone root
+remains (0.012 s inclusive), demonstrating that cloning is staged only where
+worker isolation requires it. The threaded builder has the exact inferred and
+Cthulhu return type
+`MonodromyWorkerState{ParameterHomotopy,Vector{ComplexF64}}`; its sole targeted
+JET report is the already-documented parameter-Taylor construction policy
+barrier.
+
+Fresh serial wall samples were 14.191 s, 14.179 s, and 14.158 s (median
+14.179 s, about 1.788 GB). The wall improvement over the preceding 14.216 s is
+only 0.3% and is not material; the retained win is the causal 709-node
+inference-graph reduction and removal of speculative compile-mode clones.
+
 ## Invalidations
 
 ### Package load
@@ -413,10 +558,11 @@ runtime invalidation descendants = 0
 precompile blockers from runtime invalidations = 0
 ```
 
-The fresh direct-support polyhedral capture again produced zero runtime trees
-and zero descendants. The new lowering defines methods only on package-owned
-functions and package-owned `_SupportSystem`/compiler types; it neither extends
-a dependency function nor inserts a method on an external type.
+The fresh post-positional-boundary polyhedral capture again produced zero
+runtime trees and zero descendants. The new lowering and shared wrapper constructor
+define methods only on package-owned functions and package-owned
+`_SupportSystem`/compiler types; neither extends a dependency function nor
+inserts a method on an external type.
 
 Some captures had stale instances, but with zero trees and zero blockers they
 were pre-existing load/dependency state, not invalidations caused by executing
@@ -436,7 +582,7 @@ blockers and 118 stale instances:
 
 The blocked inclusive timings are tiny (about 0.0004 s, 0.0007 s, and 0.0119 s
 for the shared collection edge). They are real and should not be called zero,
-but they do not explain the roughly 15.8-second first polyhedral execution.
+but they do not explain the roughly 14.4-second first polyhedral execution.
 The dependency-owned roots require upstream narrowing. The package-owned
 `isnan(::DoubleF64)` specialization is part of the required `AbstractFloat`
 interface and is the only local load-time blocker reached by this workload.
@@ -476,7 +622,9 @@ down from six deliberate reports to four: the input `System` builder, two solve
 policy barriers, and the input system-shape boundary. JET reports zero for
 `_build_support_instruction_sequence`, `_support_evaluator`, and
 `_support_system`; the synthetic parameter-system builder barrier is gone.
-Package-level correctness analysis still has zero reports.
+The post-capability-split targeted correctness and optimization reports for
+`_support_evaluator` and `_support_system` are also empty. Package-level
+correctness analysis still has zero reports.
 
 Current inferred return contracts include:
 
@@ -509,7 +657,8 @@ For the new path specifically, Cthulhu reports
 MixedSubdivisions failures throw at this internal boundary, so neither a union
 nor `Any` escapes into `CommonSolve.init`.
 
-For direct evaluator construction it reports exact `_SupportSystem`,
+For direct evaluator construction, including the capability split and shared
+evaluation-wrapper constructor, it reports exact `_SupportSystem`,
 `InstructionSequence`, and `SystemEvaluator` returns. The representative square
 `CommonSolve.init` return is exactly
 `PolyhedralSolveCache{Serial,PolyhedralBuilder{_SupportSystem},_SupportSystem,Nothing}`.
@@ -527,9 +676,12 @@ Two limitations remain visible:
 
 ## Verification
 
-- Full post-direct-evaluator suite: 40 files, 3,563/3,563 tests passed in 1m44.7s.
+- Full post-Taylor-contract source suite: 40 files, 3,571/3,571 tests passed
+  in 2m19.6s, including the evaluator-ownership assertions and all affected
+  homotopy families.
 - Canonical/public MixedSubdivisions equivalence plus direct/symbolic evaluator
-  value, Jacobian, clone, and Taylor-order parity: polyhedral regression 56/56.
+  value, Jacobian, clone, supported Taylor-order parity, and unsupported-mode
+  contract: polyhedral regression 72/72.
 - Coverage includes JET, Aqua, ExplicitImports, CheckConcreteStructs,
   AllocCheck, all compile modes, total-degree/polyhedral/parameter solves,
   overdetermined and singular systems, Newton, subspaces, monodromy parity,
@@ -540,33 +692,26 @@ Two limitations remain visible:
 
 Continue without PrecompileTools in this order:
 
-1. **Evaluator/Taylor wrapper architecture.** Consolidate or stage repeated
-   FunctionWrapper thunk construction without exposing large interpreter types
-   to tracker specialization. The direct-support capture attributes about
-   1.16 s inclusive to support-evaluator assembly, while Taylor instruction
-   execution and parameter-Taylor wrappers are the largest remaining local
-   entries. The previous fully parametric evaluator attempt regressed cold
-   solve time and remains rejected.
-2. **Tracker construction staging.** The first `ToricHomotopy` and
-   `CoefficientHomotopy` tracker stacks still infer Newton, predictor,
-   homotopy-evaluator, and endgame machinery together. Identify reusable
-   concrete construction layers without allowing tracker specialization on
-   captured interpreter types.
-3. **Monodromy evaluator reuse.** Reduce `_clone_system_evaluator` and repeated
-   MonodromySolver/parameter-Taylor construction, especially across
-   completeness verification's multiple phases.
-4. **Automatic subspace dispatch.** Move vector-parameter versus
+1. **Automatic subspace dispatch.** Move vector-parameter versus
    `LinearSubspace` result selection to a concrete outer method boundary if it
    improves both caller inference and cold time; do not merely exchange the
    current union for another speculative branch.
-5. **Large symbolic input.** Lower directly into a package-owned canonical
+2. **Completeness evaluator reuse.** The initial monodromy worker clone is now
+   gone. Audit whether the two sequential trace homotopies can safely retarget
+   and reuse one parameter tracker without retaining or sharing tapes from the
+   completed auxiliary monodromy phase.
+3. **Large symbolic input.** Lower directly into a package-owned canonical
    representation where possible, avoiding DynamicPolynomials arithmetic used
    only for normalization while retaining CSE for genuinely large systems.
-6. **Dependency invalidations upstream.** Narrow the broad DataStructures and
+4. **Taylor interpreter architecture.** The used order-2/order-3 kernels are
+   honest work. Revisit them only with a representation that replaces the
+   general executor across all consumers; the tested support-only executor
+   duplicated the graph and is rejected.
+5. **Dependency invalidations upstream.** Narrow the broad DataStructures and
    MultivariatePolynomials methods responsible for most load-time impact, and
    request a public MixedSubdivisions already-normalized iterator constructor
    so the current private 1.2.x integration can be removed.
-7. **Precompile only the irreducible remainder.** If the root-cause items above
+6. **Precompile only the irreducible remainder.** If the root-cause items above
    plateau, add the smallest safe representative workload and re-run every
    allocation-sensitive Taylor test for every compile mode.
 

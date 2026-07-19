@@ -100,7 +100,7 @@ end
 
 function HC.taylor!(
         u::AbstractVector, ::Val{K}, ::ManualSLH,
-        tx::TaylorVector, t::ComplexF64, incremental::Bool = false,
+        tx::TaylorVector, t::ComplexF64,
     ) where {K}
     fill!(u, zero(eltype(u)))
     return nothing

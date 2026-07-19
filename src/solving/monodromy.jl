@@ -782,10 +782,9 @@ mutable struct MonodromySolver{H, P, B, UP <: UniquePoints, MO <: MonodromyOptio
 end
 
 function _monodromy_solver_from_builder(
-        builder::B, n::Int, ::Type{P}, options::MO, chart::Vector{ComplexF64},
-        use_chart::Bool,
-    ) where {B, P, MO <: MonodromyOptions}
-    worker = builder()
+        worker::MonodromyWorkerState{H, P}, builder::B, n::Int,
+        options::MO, chart::Vector{ComplexF64}, use_chart::Bool,
+    ) where {H, P, B, MO <: MonodromyOptions}
     group_actions = options.equivalence_classes ? options.group_actions : nothing
     if group_actions !== nothing && use_chart
         group_actions = _ChartActions(chart, group_actions)
@@ -810,6 +809,61 @@ function _monodromy_solver_from_builder(
     )
 end
 
+function _parameter_monodromy_worker(
+        sys_eval::SystemEvaluator, p::Vector{ComplexF64}, n::Int,
+        tracker_options::TrackerOptions,
+    )::MonodromyWorkerState{ParameterHomotopy, Vector{ComplexF64}}
+    H = ParameterHomotopy(sys_eval, p, p)
+    tracker = Tracker(HomotopyEvaluator(H); options = tracker_options)
+    eg = EndgameTracker(tracker, EndgameOptions(; endgame_start = 0.0))
+    return MonodromyWorkerState(
+        H, eg, copy(p), zeros(ComplexF64, n), zeros(ComplexF64, n),
+    )
+end
+
+function _chart_parameter_monodromy_worker(
+        sys_eval::SystemEvaluator, p::Vector{ComplexF64},
+        chart::Vector{ComplexF64}, n::Int, tracker_options::TrackerOptions,
+    )::MonodromyWorkerState{
+        AffineChartHomotopy{ParameterHomotopy}, Vector{ComplexF64},
+    }
+    H = AffineChartHomotopy(ParameterHomotopy(sys_eval, p, p), chart)
+    tracker = Tracker(HomotopyEvaluator(H); options = tracker_options)
+    eg = EndgameTracker(tracker, EndgameOptions(; endgame_start = 0.0))
+    return MonodromyWorkerState(
+        H, eg, copy(p), zeros(ComplexF64, n), zeros(ComplexF64, n),
+    )
+end
+
+struct ParameterMonodromyBuilder{S <: System}
+    system::S
+    parameters::Vector{ComplexF64}
+    nvariables::Int
+    tracker_options::TrackerOptions
+end
+
+function (builder::ParameterMonodromyBuilder)()
+    return _parameter_monodromy_worker(
+        _clone_system_evaluator(builder.system), builder.parameters,
+        builder.nvariables, builder.tracker_options,
+    )
+end
+
+struct ChartParameterMonodromyBuilder{S <: System}
+    system::S
+    parameters::Vector{ComplexF64}
+    chart::Vector{ComplexF64}
+    nvariables::Int
+    tracker_options::TrackerOptions
+end
+
+function (builder::ChartParameterMonodromyBuilder)()
+    return _chart_parameter_monodromy_worker(
+        _clone_system_evaluator(builder.system), builder.parameters,
+        builder.chart, builder.nvariables, builder.tracker_options,
+    )
+end
+
 function MonodromySolver(
         F::System, p::Vector{ComplexF64};
         options::MonodromyOptions = MonodromyOptions(),
@@ -821,30 +875,20 @@ function MonodromySolver(
         # random affine chart. All workers must share the SAME chart so
         # deduplication is consistent.
         chart = randn(ComplexF64, n)
-        chart_builder = function ()
-            sys_eval = _clone_system_evaluator(F)
-            H = AffineChartHomotopy(ParameterHomotopy(sys_eval, p, p), chart)
-            tracker = Tracker(HomotopyEvaluator(H); options = tracker_options)
-            eg = EndgameTracker(tracker, EndgameOptions(; endgame_start = 0.0))
-            return MonodromyWorkerState(
-                H, eg, copy(p), zeros(ComplexF64, n), zeros(ComplexF64, n),
-            )
-        end
+        chart_builder = ChartParameterMonodromyBuilder(
+            F, p, chart, n, tracker_options,
+        )
+        worker = _chart_parameter_monodromy_worker(
+            F.evaluator, p, chart, n, tracker_options,
+        )
         return _monodromy_solver_from_builder(
-            chart_builder, n, Vector{ComplexF64}, options, chart, true,
+            worker, chart_builder, n, options, chart, true,
         )
     end
-    builder = function ()
-        sys_eval = _clone_system_evaluator(F)
-        H = ParameterHomotopy(sys_eval, p, p)
-        tracker = Tracker(HomotopyEvaluator(H); options = tracker_options)
-        eg = EndgameTracker(tracker, EndgameOptions(; endgame_start = 0.0))
-        return MonodromyWorkerState(
-            H, eg, copy(p), zeros(ComplexF64, n), zeros(ComplexF64, n),
-        )
-    end
+    builder = ParameterMonodromyBuilder(F, p, n, tracker_options)
+    worker = _parameter_monodromy_worker(F.evaluator, p, n, tracker_options)
     return _monodromy_solver_from_builder(
-        builder, n, Vector{ComplexF64}, options, ComplexF64[], false,
+        worker, builder, n, options, ComplexF64[], false,
     )
 end
 
@@ -881,8 +925,9 @@ function MonodromySolver(
             worker_chart,
         )
     end
+    worker = builder()
     return _monodromy_solver_from_builder(
-        builder, n, LinearSubspace{ComplexF64}, options, chart, projective,
+        worker, builder, n, options, chart, projective,
     )
 end
 

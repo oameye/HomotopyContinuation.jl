@@ -22,12 +22,12 @@ const HomTaylor1FW = FunctionWrapper{
 }
 const HomTaylor2FW = FunctionWrapper{
     Nothing, Tuple{
-        FSVec{ComplexF64}, TaylorVector{3, ComplexF64}, ComplexF64, Bool,
+        FSVec{ComplexF64}, TaylorVector{3, ComplexF64}, ComplexF64,
     },
 }
 const HomTaylor3FW = FunctionWrapper{
     Nothing, Tuple{
-        FSVec{ComplexF64}, TaylorVector{4, ComplexF64}, ComplexF64, Bool,
+        FSVec{ComplexF64}, TaylorVector{4, ComplexF64}, ComplexF64,
     },
 }
 const HomSetSolFW = FunctionWrapper{
@@ -102,18 +102,16 @@ end
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::HomotopyEvaluator,
         tx::TaylorVector{3, ComplexF64}, t::ComplexF64,
-        incremental::Bool = false,
     )::Nothing
-    H._taylor_2!(u, tx, t, incremental)
+    H._taylor_2!(u, tx, t)
     return nothing
 end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{3}, H::HomotopyEvaluator,
         tx::TaylorVector{4, ComplexF64}, t::ComplexF64,
-        incremental::Bool = false,
     )::Nothing
-    H._taylor_3!(u, tx, t, incremental)
+    H._taylor_3!(u, tx, t)
     return nothing
 end
 
@@ -143,16 +141,14 @@ function target_parameters!(H::HomotopyEvaluator, p::FSVec{ComplexF64})::Nothing
     return nothing
 end
 
-## Constructor from AbstractHomotopy
-
 function HomotopyEvaluator(H::AbstractHomotopy)
     return HomotopyEvaluator(
         HomEvalFW((u, x, t) -> (evaluate!(u, H, x, t); nothing)),
         HomEvalDF64FW((u, x, t) -> (evaluate!(u, H, x, t); nothing)),
         HomEvalJacFW((u, U, x, t) -> (evaluate_and_jacobian!(u, U, H, x, t); nothing)),
         HomTaylor1FW((u, x, t) -> (taylor!(u, Val(1), H, x, t); nothing)),
-        HomTaylor2FW((u, tx, t, inc) -> (taylor!(u, Val(2), H, tx, t; incremental = inc); nothing)),
-        HomTaylor3FW((u, tx, t, inc) -> (taylor!(u, Val(3), H, tx, t; incremental = inc); nothing)),
+        HomTaylor2FW((u, tx, t) -> (taylor!(u, Val(2), H, tx, t); nothing)),
+        HomTaylor3FW((u, tx, t) -> (taylor!(u, Val(3), H, tx, t); nothing)),
         HomSetSolFW((x, y, t) -> (set_solution!(x, H, y, t); nothing)),
         HomGetSolFW((out, x, t) -> (get_solution!(out, H, x, t); nothing)),
         HomParamsFW((p) -> (start_parameters!(H, p); nothing)),

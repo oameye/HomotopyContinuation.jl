@@ -200,20 +200,18 @@ end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::AffineChartHomotopy,
-        tx::TaylorVector{3, ComplexF64}, t::ComplexF64;
-        incremental::Bool = false,
+        tx::TaylorVector{3, ComplexF64}, t::ComplexF64,
     )::Nothing
-    taylor!(u, Val(2), H.homotopy, tx, t; incremental = incremental)
+    taylor!(u, Val(2), H.homotopy, tx, t)
     u[size(H.homotopy)[1] + 1] = zero(ComplexF64)
     return nothing
 end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{3}, H::AffineChartHomotopy,
-        tx::TaylorVector{4, ComplexF64}, t::ComplexF64;
-        incremental::Bool = false,
+        tx::TaylorVector{4, ComplexF64}, t::ComplexF64,
     )::Nothing
-    taylor!(u, Val(3), H.homotopy, tx, t; incremental = incremental)
+    taylor!(u, Val(3), H.homotopy, tx, t)
     u[size(H.homotopy)[1] + 1] = zero(ComplexF64)
     return nothing
 end

@@ -76,6 +76,10 @@ using HomotopyContinuationNext: MonodromySolver, MonodromyWorkerState, track_loo
     x0, p0 = find_start_pair(F)
     MS = MonodromySolver(F, ComplexF64.(p0))
     ws = MS.workers[1]
+    @test ws.homotopy.system === F.evaluator
+    cloned_ws = MS.builder()
+    @test cloned_ws.homotopy.system !== F.evaluator
+    @test cloned_ws.homotopy.system !== ws.homotopy.system
 
     # A p -> p track refines the start solution into a PathResult
     res0 = track_start!(ws, ComplexF64.(x0))

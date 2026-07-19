@@ -255,16 +255,47 @@ function _support_evaluator(
         nvariables::Int,
         nparams::Int,
     )::SystemEvaluator
-    # Fully interpreted evaluator with worker-local tapes over shared immutable
-    # sequences — the same construction the interpreted `System` clone path uses.
-    return _build_system_evaluator(
-        Interpreter(Vector{ComplexF64}, eval_sequence),
-        Interpreter(Vector{ComplexDF64}, eval_sequence),
-        Interpreter(Vector{ComplexF64}, jacobian_sequence),
-        Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, eval_sequence),
-        Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, eval_sequence),
-        Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, eval_sequence),
-        nequations, nvariables, nparams,
+    # Polyhedral tracking evaluates order 1 directly and requests Taylor
+    # coefficients only at orders 2 and 3, always with Taylor parameters.
+    # Constructing the general System evaluator here eagerly compiled four
+    # unreachable kernels (three scalar-parameter Taylor methods and the
+    # order-1 parameter-Taylor method), including an otherwise-unused order-1
+    # Taylor tape. Keep the concrete SystemEvaluator firewall, but make this
+    # narrower internal capability explicit with fail-fast wrappers.
+    interp_f64 = Interpreter(Vector{ComplexF64}, eval_sequence)
+    interp_df64 = Interpreter(Vector{ComplexDF64}, eval_sequence)
+    interp_jac = Interpreter(Vector{ComplexF64}, jacobian_sequence)
+    interp_t2 = Interpreter(
+        Vector{TruncatedTaylorSeries{3, ComplexF64}}, eval_sequence,
+    )
+    interp_t3 = Interpreter(
+        Vector{TruncatedTaylorSeries{4, ComplexF64}}, eval_sequence,
+    )
+    evaluation_fws = _build_interpreted_evaluation_fws(
+        interp_f64, interp_df64, interp_jac,
+    )
+    return SystemEvaluator(
+        evaluation_fws...,
+        SysTaylor1FW(_unsupported_support_taylor!),
+        SysTaylor2FW(_unsupported_support_taylor!),
+        SysTaylor3FW(_unsupported_support_taylor!),
+        SysTaylor1ParamFW(_unsupported_support_taylor!),
+        SysTaylor2ParamFW(
+            (u, tx, tp) -> (execute_taylor!(u, Val(2), interp_t2, tx, tp); nothing),
+        ),
+        SysTaylor3ParamFW(
+            (u, tx, tp) -> (execute_taylor!(u, Val(3), interp_t3, tx, tp); nothing),
+        ),
+        (nequations, nvariables),
+        nparams,
+    )
+end
+
+function _unsupported_support_taylor!(::Any, ::Any, ::Any)::Nothing
+    throw(
+        ArgumentError(
+            "the internal polyhedral support evaluator does not provide this Taylor mode",
+        )
     )
 end
 

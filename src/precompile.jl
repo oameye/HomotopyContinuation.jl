@@ -24,11 +24,13 @@ using PrecompileTools: @compile_workload, @setup_workload
             show_progress = false,
         )
 
-        overdetermined_system = System([
-            precompile_x^2 + precompile_y^2 - 1,
-            precompile_x - precompile_y,
-            precompile_x * precompile_y - 0.25,
-        ])
+        overdetermined_system = System(
+            [
+                precompile_x^2 + precompile_y^2 - 1,
+                precompile_x - precompile_y,
+                precompile_x * precompile_y - 0.25,
+            ]
+        )
         solve(overdetermined_system, algorithm, Serial(); show_progress = false)
 
         parameter_system = System(

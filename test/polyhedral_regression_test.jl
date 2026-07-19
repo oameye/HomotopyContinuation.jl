@@ -122,7 +122,10 @@ using Random: MersenneTwister
         evaluate!(u_support, cloned_evaluator, x, p)
         @test u_support ≈ u_reference
 
-        for order in 1:3
+        # The internal support evaluator is capability-specific: polyhedral
+        # homotopies evaluate order 1 directly and use parameter Taylor series
+        # only for orders 2 and 3.
+        for order in 2:3
             tx = TaylorVector{order + 1, ComplexF64}(2)
             tp = TaylorVector{order + 1, ComplexF64}(6)
             for i in axes(tx.data, 2), k in axes(tx.data, 1)
@@ -136,6 +139,18 @@ using Random: MersenneTwister
             taylor!(u_support, Val(order), support_system.evaluator, tx, tp)
             taylor!(u_reference, Val(order), reference.evaluator, tx, tp)
             @test u_support ≈ u_reference atol = 1.0e-12
+        end
+
+        tx1 = TaylorVector{2, ComplexF64}(2)
+        tp1 = TaylorVector{2, ComplexF64}(6)
+        @test_throws ArgumentError taylor!(
+            u_support, Val(1), support_system.evaluator, tx1, tp1,
+        )
+        for order in 1:3
+            tx = TaylorVector{order + 1, ComplexF64}(2)
+            @test_throws ArgumentError taylor!(
+                u_support, Val(order), support_system.evaluator, tx, p,
+            )
         end
     end
 

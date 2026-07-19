@@ -346,6 +346,27 @@ function _execute_jac_fw!(
     return nothing
 end
 
+function _build_interpreted_evaluation_fws(
+        interp_f64::Interpreter{Vector{ComplexF64}},
+        interp_df64::Interpreter{Vector{ComplexDF64}},
+        interp_jac::Interpreter{Vector{ComplexF64}},
+    )
+    return (
+        SysEvalFW(
+            (u, x, p) -> (_execute_eval_fw!(u, interp_f64, x, p); nothing),
+        ),
+        SysEvalDF64FW(
+            (u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing),
+        ),
+        SysEvalDF64OutFW(
+            (u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing),
+        ),
+        SysEvalJacFW(
+            (u, U, x, p) -> (_execute_jac_fw!(u, U, interp_jac, x, p); nothing),
+        ),
+    )
+end
+
 function _build_system_evaluator(
         interp_f64::Interpreter{Vector{ComplexF64}},
         interp_df64::Interpreter{Vector{ComplexDF64}},
@@ -375,11 +396,11 @@ function _build_system_evaluator(
     param_taylor = _dispatch_parameter_taylor_fws(
         param_builder, taylor_1, taylor_2, taylor_3, interp_t1, interp_t2, interp_t3,
     )
+    evaluation_fws = _build_interpreted_evaluation_fws(
+        interp_f64, interp_df64, interp_jac,
+    )
     return SystemEvaluator(
-        SysEvalFW((u, x, p) -> (_execute_eval_fw!(u, interp_f64, x, p); nothing)),
-        SysEvalDF64FW((u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing)),
-        SysEvalDF64OutFW((u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing)),
-        SysEvalJacFW((u, U, x, p) -> (_execute_jac_fw!(u, U, interp_jac, x, p); nothing)),
+        evaluation_fws...,
         taylor_1,
         taylor_2,
         taylor_3,

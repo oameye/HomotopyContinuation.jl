@@ -228,8 +228,7 @@ end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::LinearParameterHomotopy,
-        tx::TaylorVector{3, ComplexF64}, t::ComplexF64;
-        incremental::Bool = false,
+        tx::TaylorVector{3, ComplexF64}, t::ComplexF64,
     )::Nothing
     _pack_param_taylor!(H.tp2, H, t)
     taylor!(u, Val(2), H.system, tx, H.tp2)
@@ -238,8 +237,7 @@ end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{3}, H::LinearParameterHomotopy,
-        tx::TaylorVector{4, ComplexF64}, t::ComplexF64;
-        incremental::Bool = false,
+        tx::TaylorVector{4, ComplexF64}, t::ComplexF64,
     )::Nothing
     _pack_param_taylor!(H.tp3, H, t)
     taylor!(u, Val(3), H.system, tx, H.tp3)

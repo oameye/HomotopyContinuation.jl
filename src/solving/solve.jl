@@ -29,8 +29,8 @@ function _check_square_or_overdetermined(::UnderdeterminedShape, F::System)::Not
     throw(
         ArgumentError(
             "The system has $m equation(s) in $n variables. The solution set is " *
-            "positive-dimensional; only square or overdetermined systems with " *
-            "finitely many solutions are supported.",
+                "positive-dimensional; only square or overdetermined systems with " *
+                "finitely many solutions are supported.",
         ),
     )
 end

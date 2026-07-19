@@ -538,8 +538,7 @@ end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::IntrinsicSubspaceHomotopy,
-        tv::TaylorVector{3, ComplexF64}, t::ComplexF64;
-        incremental::Bool = false,
+        tv::TaylorVector{3, ComplexF64}, t::ComplexF64,
     )::Nothing
     γ, γ¹, γ², _ = taylor_γ!(H, t)
     x, x¹, x² = vectors(H.tx2)
@@ -561,8 +560,7 @@ end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{3}, H::IntrinsicSubspaceHomotopy,
-        tv::TaylorVector{4, ComplexF64}, t::ComplexF64;
-        incremental::Bool = false,
+        tv::TaylorVector{4, ComplexF64}, t::ComplexF64,
     )::Nothing
     γ, γ¹, γ², γ³ = taylor_γ!(H, t)
     x, x¹, x², x³ = vectors(H.tx3)
@@ -700,8 +698,7 @@ end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::ExtrinsicSubspaceHomotopy,
-        tv::TaylorVector{3, ComplexF64}, t::ComplexF64;
-        incremental::Bool = false,
+        tv::TaylorVector{3, ComplexF64}, t::ComplexF64,
     )::Nothing
     γ, γ¹, γ², _ = taylor_γ!(H, t)
     v, v¹, _ = vectors(tv)
@@ -721,8 +718,7 @@ end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{3}, H::ExtrinsicSubspaceHomotopy,
-        tv::TaylorVector{4, ComplexF64}, t::ComplexF64;
-        incremental::Bool = false,
+        tv::TaylorVector{4, ComplexF64}, t::ComplexF64,
     )::Nothing
     γ, γ¹, γ², γ³ = taylor_γ!(H, t)
     v, v¹, v², _ = vectors(tv)

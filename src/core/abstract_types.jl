@@ -45,7 +45,9 @@ function taylor! end
 
 # ── AbstractHomotopy interface ──
 
-# Required: evaluate!, evaluate_and_jacobian!, taylor! (defined above)
+# Required: evaluate!, evaluate_and_jacobian!, taylor! (defined above).
+# Higher-order homotopy Taylor methods use the same five-argument contract as
+# systems: taylor!(u, ::Val{K}, H, tx, t).
 # Required: Base.size(H) -> (nequations, nvariables)
 
 # Optional defaults:

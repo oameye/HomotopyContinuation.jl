@@ -131,8 +131,7 @@ end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::StraightLineHomotopy,
-        tx::TaylorVector{3, ComplexF64}, t::ComplexF64;
-        incremental::Bool = false,
+        tx::TaylorVector{3, ComplexF64}, t::ComplexF64,
     )::Nothing
     _copy_prefix!(H.tx1, tx)
     taylor!(H.u_cross_start, Val(1), H.start, H.tx1, _EMPTY_PARAMS)
@@ -151,8 +150,7 @@ end
 
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{3}, H::StraightLineHomotopy,
-        tx::TaylorVector{4, ComplexF64}, t::ComplexF64;
-        incremental::Bool = false,
+        tx::TaylorVector{4, ComplexF64}, t::ComplexF64,
     )::Nothing
     _copy_prefix!(H.tx2, tx)
     taylor!(H.u_cross_start, Val(2), H.start, H.tx2, _EMPTY_PARAMS)
