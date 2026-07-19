@@ -1,11 +1,11 @@
-## Experimental direct polynomial lowering
+## Direct polynomial lowering for small systems
 #
 # This backend lowers MultivariatePolynomials input directly to tape
 # instructions without going through the SExpr + CSE pipeline.
 #
-# TODO: validate instruction quality and steady-state runtime on a broader set
-# of benchmark systems before switching the public polynomial front-end over to
-# this backend.
+# The public frontend selects this backend for small systems where avoiding the
+# SExpr/CSE compiler materially reduces TTFX. Larger systems retain the symbolic
+# compiler because its global CSE produces substantially smaller tapes.
 
 struct MonomialKey
     data::Vector{Int32}
@@ -136,5 +136,10 @@ function _build_instruction_sequence_direct(
         end
     end
 
-    return _finalize_compiler(state.compiler, result_slots, nvars, nparams, output_dim)
+    # The direct compiler emits every dependency before its consumer. Running
+    # the generic DAG reorder here only rebuilds that ordering and adds cold
+    # compiler work; the symbolic frontend retains the reorder.
+    return _finalize_compiler(
+        Val(false), state.compiler, result_slots, nvars, nparams, output_dim,
+    )
 end

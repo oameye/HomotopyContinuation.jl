@@ -1,18 +1,19 @@
 # Status
 
-Last updated: 2026-07-17.
+Last updated: 2026-07-18.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
 - `make compare` — v3/v2 ratios
 - `julia --project=benchmark benchmark/compare/tracking.jl` — end-to-end solve comparison
-- `make test` — test suite (38 test files, parallel via ParallelTestRunner)
+- `make test` — test suite (40 test files, parallel via ParallelTestRunner)
 
 ## Summary
 
 v3 is a credible replacement for v2's core solve pipeline. Total-degree solving is 1.8–3.6x faster
-than v2. Polyhedral solving matches v2 within noise (0.95–1.01x). TTFX (load + first solve) is
-~14.4s vs v2's 45s. Endgame is at full v2 result parity using v2's default parameters. Threading,
+than v2. Polyhedral solving matches v2 within noise (0.95–1.01x). Cold load + construction +
+first solve is now ~10.6s without a precompile workload, versus v2's 45s. Endgame is at full v2
+result parity using v2's default parameters. Threading,
 overdetermined systems, parameter homotopies, and monodromy (full v2 parity including group
 actions, linear subspaces, and the trace test) are done. The main remaining gaps are
 certification, witness sets/NID, a distributed executor, and two input-layer features
@@ -25,7 +26,8 @@ certification, witness sets/NID, a distributed executor, and two input-layer fea
 - [x] `solve(F)` with CommonSolve.jl `init`/`solve!`
 - [x] Total-degree and polyhedral start systems
 - [x] Parameter homotopy (CoefficientHomotopy with linear parameter interpolation)
-- [x] `System{P,V}` type (caches compiled interpreters for all eval modes, stores original MP polys)
+- [x] `System{P,V,M,S}` type (compile mode `M` and square/overdetermined shape `S`
+  live in the type domain; caches interpreters for all eval modes and stores original MP polys)
 - [x] `SystemEvaluator` / `HomotopyEvaluator` type firewall (FunctionWrapper, 10 wrappers each,
   including a DF64-output evaluate for extended-precision residual combining)
 - [x] StraightLineHomotopy, CoefficientHomotopy, ToricHomotopy
@@ -202,25 +204,24 @@ TaylorVector-parameter Taylor kernel (production path — CoefficientHomotopy/To
 
 #### TTFX (fresh session)
 
-v3 measured 2026-07-17 (`benchmark/compare/ttfx.jl`); v2 numbers from 2026-04-03.
+Final v3 root-cause pass measured 2026-07-18; v2 numbers from 2026-04-03.
 
 | Metric | Time |
 |--------|------|
 | v3 package load | 0.77s |
-| v3 first solve() | 13.61s |
-| **v3 total (load + solve)** | **14.38s** |
+| v3 construction + init + first solve! | 9.80--9.83s |
+| **v3 total (load + construction + solve)** | **10.58--10.61s** |
 | v2 package load | 1.30s |
 | v2 first solve() [:mixed] | 43.78s |
 | **v2 total [:mixed]** | **45.08s** |
 | v2 first solve() [:none] | 10.79s |
 | v2 second solve() (different system) | 5.72s |
 
-v3 is ~3x faster than v2[:mixed] on first solve. v2[:none] (interpreter-only) is faster for
-first solve because it skips SymEngine compilation, but v3 wins on subsequent solves.
-The monodromy port (2026-07-17) added zero TTFX regression: first solve is 13.6s both at
-the pre-port HEAD (measured via a pristine git worktree) and after the port. The quality
-gate target of first solve < 5s predates these measurements and is currently unmet;
-closing that gap is an open item independent of the monodromy work.
+v3 is over 4x faster than v2[:mixed] on the cold workload. The root-cause pass reduced
+build/init/solve from 14.44s to about 9.81s (32%) by isolating mutually exclusive compiler
+branches, using adaptive direct polynomial lowering, and stabilizing constructor types.
+See `05_ttfx_invalidations.md` for the full SnoopCompile, JET, Cthulhu, LLVM, and
+invalidation report.
 
 ### Endgame result parity
 
@@ -236,7 +237,6 @@ closing that gap is an open item independent of the monodromy work.
 
 ### Architecture debt
 
-3. Direct polynomial compiler: validate and promote (`polynomial_compiler.jl:6` TODO)
 4. Two solution-dedup mechanisms: `Result` clustering (`_cluster_solutions`, union-find)
    and `UniquePoints`/`VoronoiTree` from the monodromy port. Consolidating `Result`
    clustering onto the VoronoiTree would remove the duplication, make `solve()` dedup
@@ -250,5 +250,5 @@ closing that gap is an open item independent of the monodromy work.
 ### Infrastructure
 
 8. No benchmark CI: regressions go unnoticed
-9. TTFX gate (first solve < 5s) unmet: currently 13.6s, unchanged by the monodromy port.
-   Needs an invalidation/inference investigation (`julia-ttfx` skill)
+9. TTFX gate (construction + first solve < 5s) remains unmet at about 9.81s after the
+   root-cause pass. PrecompileTools remains deliberately disabled pending a final last-mile pass.

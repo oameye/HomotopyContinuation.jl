@@ -394,27 +394,49 @@ function find_start_pair(
         atol::Float64 = 0.0,
         rtol::Float64 = 1.0e-12,
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Union{Nothing, Vector{ComplexF64}}}}
-    nvars = nvariables(F)
-    np = nparameters(F)
     refine_atol = atol > 0 ? atol : 1.0e-12
+    strategy = nparameters(F) == 0 ?
+        _parameter_free_start_pair : _parameterized_start_pair
+    # Parameter count is construction-time policy stored as a runtime field.
+    # Prevent inference from traversing both Newton-on-F and parameter-system
+    # construction for every automatic monodromy start.
+    strategy = Base.inferencebarrier(strategy)
+    return _dispatch_start_pair_strategy(
+        strategy, F, max_tries, refine_atol, rtol,
+    )
+end
 
-    if np == 0
-        # Parameter-free: Newton on F itself.
-        cache = NewtonCache(F)
-        for _ in 1:max_tries
-            x₀ = randn(ComplexF64, nvars)
-            res = newton(F, x₀; atol = 1.0e-8, cache = cache)
-            if res.return_code == NewtonReturnCode.NEWTON_SUCCESS
-                refined = newton(
-                    F, res.x; atol = refine_atol, rtol = rtol, cache = cache,
-                )
-                if refined.return_code == NewtonReturnCode.NEWTON_SUCCESS
-                    return (refined.x, nothing)
-                end
+@noinline function _dispatch_start_pair_strategy(
+        strategy::Function, F::System, max_tries::Int,
+        refine_atol::Float64, rtol::Float64,
+    )::Union{Nothing, Tuple{Vector{ComplexF64}, Union{Nothing, Vector{ComplexF64}}}}
+    Base.@nospecialize strategy F
+    return strategy(F, max_tries, refine_atol, rtol)
+end
+
+@noinline function _parameter_free_start_pair(
+        F::System, max_tries::Int, refine_atol::Float64, rtol::Float64,
+    )::Union{Nothing, Tuple{Vector{ComplexF64}, Nothing}}
+    nvars = nvariables(F)
+    cache = NewtonCache(F)
+    for _ in 1:max_tries
+        x₀ = randn(ComplexF64, nvars)
+        res = newton(F, x₀; atol = 1.0e-8, cache = cache)
+        if res.return_code == NewtonReturnCode.NEWTON_SUCCESS
+            refined = newton(
+                F, res.x; atol = refine_atol, rtol = rtol, cache = cache,
+            )
+            if refined.return_code == NewtonReturnCode.NEWTON_SUCCESS
+                return (refined.x, nothing)
             end
         end
-        return nothing
     end
+    return nothing
+end
+
+@noinline function _parameterized_start_pair(
+        F::System, max_tries::Int, refine_atol::Float64, rtol::Float64,
+    )::Union{Nothing, Tuple{Vector{ComplexF64}, Vector{ComplexF64}}}
 
     # 1. Linear-in-parameters fast path (prototype 1). Each attempt draws a
     # fresh random x₀ internally, so a `nothing` (bad draw) should retry, not
@@ -425,7 +447,20 @@ function find_start_pair(
         return pair
     end
 
-    # 2. Newton fallback on the joint system in (x, p) (prototype 2).
+    # The joint-Newton fallback is rare and much wider than the linear path.
+    # Cross a hard function barrier so successful linear starts do not compile
+    # it speculatively.
+    fallback = Base.inferencebarrier(_joint_newton_start_pair)
+    return _dispatch_start_pair_strategy(
+        fallback, F, max_tries, refine_atol, rtol,
+    )
+end
+
+@noinline function _joint_newton_start_pair(
+        F::System, max_tries::Int, refine_atol::Float64, rtol::Float64,
+    )::Union{Nothing, Tuple{Vector{ComplexF64}, Vector{ComplexF64}}}
+    nvars = nvariables(F)
+    np = nparameters(F)
     G = System(
         collect(F.polys);
         variables = [collect(F.variables); collect(F.parameters)],
@@ -1022,7 +1057,14 @@ function update_progress!(
         ProgressMeter.update!(progress, solutions)
         showvalues = make_showvalues(stats; queued = queued, solutions = solutions)
         ProgressMeter.finish!(progress; showvalues = showvalues)
-    elseif time() > progress.tlast + progress.dt
+    else
+        # ProgressMeter exposes these forwarded properties as `Float64` at
+        # runtime, but their inferred contracts are `Float64` and `Real`.
+        # Narrow them here so this optional UI branch does not introduce
+        # arithmetic dispatch into monodromy's compiler graph.
+        tlast = progress.tlast::Float64
+        dt = progress.dt::Float64
+        time() > tlast + dt || return nothing
         showvalues = make_showvalues(stats; queued = queued, solutions = solutions)
         ProgressMeter.update!(progress, solutions, showvalues = showvalues)
     end
@@ -1160,7 +1202,7 @@ end
 ################
 
 function _monodromy_solve!(
-        MS::MonodromySolver,
+        MS::MonodromySolver{H, P},
         X::AbstractVector{<:AbstractVector},
         p::P,
         seed::UInt32;
@@ -1168,19 +1210,109 @@ function _monodromy_solve!(
         threading::Bool,
         catch_interrupt::Bool,
         warning::Bool,
-    )::MonodromyResult where {P}
-    progress = if !show_progress
-        nothing
+    )::MonodromyResult{P, P} where {H, P}
+    runner = if threading
+        show_progress ?
+            _monodromy_threaded_with_progress! :
+            _monodromy_threaded_without_progress!
     else
-        desc = if MS.options.equivalence_classes
-            "Solutions (modulo group action) found:"
-        else
-            "Solutions found:"
-        end
-        prog = ProgressMeter.ProgressUnknown(; dt = 0.4, desc = desc, output = stdout)
-        prog.tlast += 0.3
-        prog
+        show_progress ?
+            _monodromy_serial_with_progress! :
+            _monodromy_serial_without_progress!
     end
+    # Threading and progress are invocation policy. Keep all four bodies out of
+    # one inferred union so a serial, quiet solve does not compile threaded
+    # scheduling or ProgressMeter.
+    runner = Base.inferencebarrier(runner)
+    return _dispatch_monodromy_policy(
+        runner, MS, X, p, seed, catch_interrupt, warning,
+    )
+end
+
+@noinline function _dispatch_monodromy_policy(
+        runner::Function, MS::MonodromySolver{H, P},
+        X::AbstractVector{<:AbstractVector}, p::P, seed::UInt32,
+        catch_interrupt::Bool, warning::Bool,
+    )::MonodromyResult{P, P} where {H, P}
+    Base.@nospecialize runner MS X p
+    return runner(MS, X, p, seed, catch_interrupt, warning)
+end
+
+
+function _make_monodromy_progress(MS::MonodromySolver)::ProgressMeter.ProgressUnknown
+    desc = if MS.options.equivalence_classes
+        "Solutions (modulo group action) found:"
+    else
+        "Solutions found:"
+    end
+    progress = ProgressMeter.ProgressUnknown(; dt = 0.4, desc = desc, output = stdout)
+    progress.tlast += 0.3
+    return progress
+end
+
+@noinline function _monodromy_serial_without_progress!(
+        MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
+        catch_interrupt::Bool, warning::Bool,
+    )::MonodromyResult{P, P} where {H, P}
+    return _monodromy_solve_body!(
+        MS, X, p, seed, nothing, Serial(), catch_interrupt, warning,
+    )
+end
+
+@noinline function _monodromy_serial_with_progress!(
+        MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
+        catch_interrupt::Bool, warning::Bool,
+    )::MonodromyResult{P, P} where {H, P}
+    return _monodromy_solve_body!(
+        MS, X, p, seed, _make_monodromy_progress(MS), Serial(),
+        catch_interrupt, warning,
+    )
+end
+
+@noinline function _monodromy_threaded_without_progress!(
+        MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
+        catch_interrupt::Bool, warning::Bool,
+    )::MonodromyResult{P, P} where {H, P}
+    return _monodromy_solve_body!(
+        MS, X, p, seed, nothing, Threaded(), catch_interrupt, warning,
+    )
+end
+
+@noinline function _monodromy_threaded_with_progress!(
+        MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
+        catch_interrupt::Bool, warning::Bool,
+    )::MonodromyResult{P, P} where {H, P}
+    return _monodromy_solve_body!(
+        MS, X, p, seed, _make_monodromy_progress(MS), Threaded(),
+        catch_interrupt, warning,
+    )
+end
+
+
+function _run_monodromy_loop!(
+        ::Serial, MS::MonodromySolver, results::Vector{PathResult},
+        seed::UInt32, progress,
+    )::MonodromyCode.T
+    return serial_monodromy_solve!(MS, results, seed, progress)
+end
+
+function _run_monodromy_loop!(
+        ::Threaded, MS::MonodromySolver, results::Vector{PathResult},
+        seed::UInt32, progress,
+    )::MonodromyCode.T
+    return threaded_monodromy_solve!(MS, results, seed, progress)
+end
+
+function _monodromy_solve_body!(
+        MS::MonodromySolver{H, P},
+        X::AbstractVector{<:AbstractVector},
+        p::P,
+        seed::UInt32,
+        progress,
+        executor::AbstractExecutor,
+        catch_interrupt::Bool,
+        warning::Bool,
+    )::MonodromyResult{P, P} where {H, P}
     MS.statistics = MonodromyStatistics()
     empty!(MS.unique_points)
     reset_trace!(MS)
@@ -1194,11 +1326,7 @@ function _monodromy_solve!(
         retcode = MonodromyCode.INVALID_STARTVALUE
     else
         try
-            retcode = if threading
-                threaded_monodromy_solve!(MS, results, seed, progress)
-            else
-                serial_monodromy_solve!(MS, results, seed, progress)
-            end
+            retcode = _run_monodromy_loop!(executor, MS, results, seed, progress)
         catch e
             if !catch_interrupt || !(
                     isa(e, InterruptException) ||

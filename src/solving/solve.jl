@@ -19,15 +19,20 @@ end
 Throw for underdetermined input (positive-dimensional solution set).
 """
 function _check_square_or_overdetermined(F::System)::Nothing
+    return _check_square_or_overdetermined(system_shape(F), F)
+end
+
+_check_square_or_overdetermined(::SquareShape, ::System)::Nothing = nothing
+_check_square_or_overdetermined(::OverdeterminedShape, ::System)::Nothing = nothing
+function _check_square_or_overdetermined(::UnderdeterminedShape, F::System)::Nothing
     m, n = size(F.evaluator)
-    m >= n || throw(
+    throw(
         ArgumentError(
             "The system has $m equation(s) in $n variables. The solution set is " *
-                "positive-dimensional; only square or overdetermined systems with " *
-                "finitely many solutions are supported.",
+            "positive-dimensional; only square or overdetermined systems with " *
+            "finitely many solutions are supported.",
         ),
     )
-    return nothing
 end
 
 # ── CommonSolve.init: System + TotalDegree ────────────────────────────────
@@ -62,44 +67,70 @@ function CommonSolve.init(
     )
     seed = alg.seed
     _check_square_or_overdetermined(F)
-    m, n = size(F.evaluator)
 
     rng = Random.MersenneTwister(seed)
     γ = cis(2π * rand(rng))
+    return _init_total_degree(system_shape(F), F, alg, exec, rng, γ, show_progress)
+end
 
-    if m > n
-        A, perm, excess_checker = _square_up(rng, F)
-        target_evaluator = _randomized_evaluator(F.evaluator, A, perm)
-        degrees = F.degrees[perm[1:n]]
-        builder = RandomizedStraightLineBuilder(
-            degrees, F, A, perm, γ, alg.tracker_options, alg.endgame_options,
-        )
-        return _total_degree_solve_cache(
-            exec, builder, target_evaluator, degrees, seed, excess_checker,
-            show_progress, alg.tracker_options, alg.endgame_options, γ,
-        )
-    else
-        target_evaluator = F.evaluator
-        degrees = F.degrees
-        builder = StraightLineBuilder(
-            F.degrees, F, γ, alg.tracker_options, alg.endgame_options,
-        )
-        return _total_degree_solve_cache(
-            exec, builder, target_evaluator, degrees, seed, nothing,
-            show_progress, alg.tracker_options, alg.endgame_options, γ,
-        )
-    end
+function _init_total_degree(
+        ::SquareShape, F::System, alg::TotalDegree, exec::AbstractExecutor,
+        ::Random.MersenneTwister, γ::ComplexF64, show_progress::Bool,
+    )
+    degrees = F.degrees
+    builder = StraightLineBuilder(
+        degrees, F, γ, alg.tracker_options, alg.endgame_options,
+    )
+    return _total_degree_solve_cache(
+        exec, builder, F.evaluator, degrees, alg.seed, nothing,
+        show_progress, alg.tracker_options, alg.endgame_options, γ,
+    )
+end
+
+function _init_total_degree(
+        ::OverdeterminedShape, F::System, alg::TotalDegree,
+        exec::AbstractExecutor, rng::Random.MersenneTwister,
+        γ::ComplexF64, show_progress::Bool,
+    )
+    n = F.nvars
+    A, perm, excess_checker = _square_up(rng, F)
+    target_evaluator = _randomized_evaluator(F.evaluator, A, perm)
+    degrees = F.degrees[perm[1:n]]
+    builder = RandomizedStraightLineBuilder(
+        degrees, F, A, perm, γ, alg.tracker_options, alg.endgame_options,
+    )
+    return _total_degree_solve_cache(
+        exec, builder, target_evaluator, degrees, alg.seed, excess_checker,
+        show_progress, alg.tracker_options, alg.endgame_options, γ,
+    )
 end
 
 # ── CommonSolve.solve!: serial ─────────────────────────────────────────────
 
 function CommonSolve.solve!(cache::SolveCache{Serial})::Result
+    solver = cache.show_progress ?
+        _solve_total_degree_serial_with_progress :
+        _solve_total_degree_serial_without_progress
+    solver = Base.inferencebarrier(solver)
+    return _dispatch_solve_policy(solver, cache)
+end
+
+@noinline function _dispatch_solve_policy(solver::Function, cache)::Result
+    Base.@nospecialize solver cache
+    return solver(cache)
+end
+
+@noinline _solve_total_degree_serial_without_progress(cache::SolveCache{Serial}) =
+    _solve_total_degree_serial(cache, nothing)
+@noinline _solve_total_degree_serial_with_progress(cache::SolveCache{Serial}) =
+    _solve_total_degree_serial(cache, make_progress(length(cache.start_solutions), true))
+
+function _solve_total_degree_serial(cache::SolveCache{Serial}, progress)::Result
     eg = cache.tracker
     n_paths = length(cache.start_solutions)
     path_results = PathResult[]
     sizehint!(path_results, n_paths)
 
-    progress = make_progress(n_paths, cache.show_progress)
     stats = ProgressStats()
     for (k, x₀) in enumerate(cache.start_solutions)
         track!(eg, x₀)
@@ -116,12 +147,24 @@ end
 # ── CommonSolve.solve!: threaded ───────────────────────────────────────────
 
 function CommonSolve.solve!(cache::SolveCache{Threaded})::Result
+    solver = cache.show_progress ?
+        _solve_total_degree_threaded_with_progress :
+        _solve_total_degree_threaded_without_progress
+    solver = Base.inferencebarrier(solver)
+    return _dispatch_solve_policy(solver, cache)
+end
+
+@noinline _solve_total_degree_threaded_without_progress(cache::SolveCache{Threaded}) =
+    _solve_total_degree_threaded(cache, nothing)
+@noinline _solve_total_degree_threaded_with_progress(cache::SolveCache{Threaded}) =
+    _solve_total_degree_threaded(cache, make_progress(length(cache.start_solutions), true))
+
+function _solve_total_degree_threaded(cache::SolveCache{Threaded}, progress)::Result
     nt = cache.executor.ntasks
     starts = cache.start_solutions
     n_paths = length(starts)
     results = Vector{PathResult}(undef, n_paths)
 
-    progress = make_progress(n_paths, cache.show_progress)
     stats = ProgressStats()
     counter = Threads.Atomic{Int}(0)
     plock = ReentrantLock()

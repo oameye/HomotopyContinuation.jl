@@ -53,6 +53,9 @@ using HomotopyContinuationNext
             # Base.broadcastable is the documented broadcast customization
             # hook but is not declared public in Base:
             :broadcastable,
+            # Deliberate construction-time compiler barrier used to isolate
+            # mutually exclusive TTFX-heavy backends:
+            :inferencebarrier,
         ),
     ) == nothing
     @test check_no_self_qualified_accesses(HomotopyContinuationNext) == nothing

@@ -219,7 +219,7 @@ The tracker/Newton/predictor hot paths are genuinely allocation-free
 (pre-allocated `FSVec`/`FSMat`/`TaylorVector` buffers, positional args,
 `@inbounds` column-major loops), consistent with the AllocCheck gate. The
 FunctionWrapper firewall is correctly monomorphic; all inspected struct fields are
-concrete (`SolveCache{E,B,C}`, `System{P,V}`, `Interpreter{V}` properly
+concrete (`SolveCache{E,B,C}`, `System{P,V,M,S}`, `Interpreter{V}` properly
 parametrized; `Union{ExcessSolutionChecker,Nothing}` only appears in the non-hot
 `_finalize_result`). The `@generated` Taylor ops and custom LU/QR are
 well-targeted.

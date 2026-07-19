@@ -576,6 +576,19 @@ function _finalize_compiler(
         nparams::Int,
         output_dim::Int,
     )::InstructionSequence
+    return _finalize_compiler(
+        Val(true), compiler, result_slots, nvars, nparams, output_dim,
+    )
+end
+
+function _finalize_compiler(
+        ::Val{OPTIMIZE_ORDER},
+        compiler::TapeCompiler,
+        result_slots::Vector{Int32},
+        nvars::Int,
+        nparams::Int,
+        output_dim::Int,
+    )::InstructionSequence where {OPTIMIZE_ORDER}
     nconstants = length(compiler.constants)
     nscratch = Int(_scratch_base(nvars, nparams) - compiler.next_slot)
     layout = _build_slot_remap(nconstants, nparams, nvars, nscratch)
@@ -589,7 +602,11 @@ function _finalize_compiler(
         assignment_plan.identity_instructions,
     )
 
-    instructions_opt = _optimize_instruction_order(core_instructions)
+    instructions_opt = if OPTIMIZE_ORDER
+        _optimize_instruction_order(core_instructions)
+    else
+        core_instructions
+    end
     instructions_final, space_needed, updated_scratch_range, updated_direct =
         _reduce_space(
         instructions_opt,

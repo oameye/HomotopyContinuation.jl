@@ -65,8 +65,36 @@ function _build_instruction_sequence(
         parameters::AbstractVector,
         include_jacobian::Bool,
     )::InstructionSequence
-    # TODO: switch to `_build_instruction_sequence_direct` once the direct
-    # polynomial compiler has been validated more broadly for instruction
-    # quality and hot-path runtime.
-    return _build_instruction_sequence_via_sexpr(polys, variables, parameters, include_jacobian)
+    lowerer = if _prefer_direct_polynomial_lowering(polys, variables, parameters)
+        _build_instruction_sequence_direct
+    else
+        _build_instruction_sequence_via_sexpr
+    end
+    # Both lowerers are singleton function types, so Julia can otherwise
+    # union-split through this construction-time policy even across the
+    # unspecialized call boundary below.
+    lowerer = Base.inferencebarrier(lowerer)
+    return _invoke_polynomial_lowerer(
+        lowerer, polys, variables, parameters, include_jacobian,
+    )
+end
+
+function _prefer_direct_polynomial_lowering(polys, variables, parameters)::Bool
+    length(variables) + length(parameters) <= 2 || return false
+    nterms = 0
+    for poly in polys
+        nterms += length(MP.terms(poly))
+        nterms <= 8 || return false
+    end
+    return true
+end
+
+# This is an intentional construction-time dispatch barrier. Keeping the
+# selected lowering function unspecialized prevents inference from compiling
+# both the direct and symbolic frontends for every System construction.
+@noinline function _invoke_polynomial_lowerer(
+        lowerer::Function, polys, variables, parameters, include_jacobian::Bool,
+    )::InstructionSequence
+    Base.@nospecialize lowerer polys variables parameters
+    return lowerer(polys, variables, parameters, include_jacobian)
 end

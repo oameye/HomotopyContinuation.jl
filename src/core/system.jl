@@ -21,7 +21,17 @@ solve(F)
 solve(F, Polyhedral())
 ```
 """
-struct System{P, V}
+abstract type SystemShape end
+struct UnderdeterminedShape <: SystemShape end
+struct SquareShape <: SystemShape end
+struct OverdeterminedShape <: SystemShape end
+
+abstract type SystemCompileStrategy end
+struct InterpretedCompile <: SystemCompileStrategy end
+struct CompiledCompile <: SystemCompileStrategy end
+struct CompiledAllCompile <: SystemCompileStrategy end
+
+struct System{P, V, M, S <: SystemShape}
     polys::FSVec{P}
     parameters::FSVec{V}
     variables::FSVec{V}
@@ -53,7 +63,28 @@ function System(
     neqs = length(polys)
     nvars = length(variables)
     nparams = length(parameters)
-    return _build_compiled_system(polys, variables, parameters, neqs, nvars, nparams, compile)
+    shape = if neqs < nvars
+        UnderdeterminedShape()
+    elseif neqs == nvars
+        SquareShape()
+    else
+        OverdeterminedShape()
+    end
+    builder = if compile == CompileMode.INTERPRETED
+        _build_interpreted_system
+    elseif compile == CompileMode.COMPILED
+        _build_codegen_system
+    else
+        _build_codegen_all_system
+    end
+    # The compile mode and shape are construction-time policy. Hide their
+    # closed unions from inference so the default path does not traverse all
+    # three code-generation backends or all three shape instantiations.
+    builder = Base.inferencebarrier(builder)
+    shape = Base.inferencebarrier(shape)
+    return _dispatch_system_build(
+        builder, polys, variables, parameters, neqs, nvars, nparams, shape,
+    )
 end
 
 """
@@ -87,6 +118,7 @@ end
 ## ── Accessors ────────────────────────────────────────────────────────────────
 
 Base.size(F::System)::Tuple{Int, Int} = size(F.evaluator)
+@inline system_shape(::System{P, V, M, S}) where {P, V, M, S} = S()
 degrees(F::System)::Vector{Int} = F.degrees
 nvariables(F::System)::Int = F.nvars
 nparameters(F::System)::Int = F.nparams
@@ -136,29 +168,72 @@ function _normalize_polys(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
     )
     Base.@nospecialize polys
-    # Only normalize when coefficients are large enough to cause numerical issues.
-    # Threshold 1e8: systems with moderate coefficients (e.g. 100) are unchanged,
-    # but O(10^19) integer coefficients get scaled to O(1).
+    # Canonicalize coefficients to a floating polynomial type even when no
+    # rescaling is required. Returning either the original integer polynomial
+    # or a divided floating polynomial made the rest of construction infer an
+    # abstract polynomial element type.
     return map(polys) do p
         coeffs = MP.coefficients(p)
         nrm = maximum(c -> Float64(abs(c)), coeffs)
-        nrm <= 1.0e8 && return p
-        return p / nrm
+        scale = nrm <= 1.0e8 ? 1.0 : nrm
+        return p / scale
     end
 end
 
 ## ── FW-compatible wrapper functions ──────────────────────────────────────────
 
 
-@noinline function _build_compiled_system(
+@noinline function _dispatch_system_build(
+        builder::Function,
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         variables::AbstractVector,
         parameters::AbstractVector,
         neqs::Int,
         nvars::Int,
         nparams::Int,
-        compile::CompileMode.T,
+        shape::SystemShape,
     )::System
+    Base.@nospecialize builder polys variables parameters shape
+    return builder(polys, variables, parameters, neqs, nvars, nparams, shape)
+end
+
+@noinline function _build_interpreted_system(
+        polys, variables, parameters, neqs::Int, nvars::Int, nparams::Int, shape,
+    )::System
+    Base.@nospecialize polys variables parameters shape
+    return _build_compiled_system(
+        InterpretedCompile(), polys, variables, parameters, neqs, nvars, nparams, shape,
+    )
+end
+
+@noinline function _build_codegen_system(
+        polys, variables, parameters, neqs::Int, nvars::Int, nparams::Int, shape,
+    )::System
+    Base.@nospecialize polys variables parameters shape
+    return _build_compiled_system(
+        CompiledCompile(), polys, variables, parameters, neqs, nvars, nparams, shape,
+    )
+end
+
+@noinline function _build_codegen_all_system(
+        polys, variables, parameters, neqs::Int, nvars::Int, nparams::Int, shape,
+    )::System
+    Base.@nospecialize polys variables parameters shape
+    return _build_compiled_system(
+        CompiledAllCompile(), polys, variables, parameters, neqs, nvars, nparams, shape,
+    )
+end
+
+@noinline function _build_compiled_system(
+        strategy::C,
+        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+        variables::AbstractVector,
+        parameters::AbstractVector,
+        neqs::Int,
+        nvars::Int,
+        nparams::Int,
+        ::S,
+    )::System where {C <: SystemCompileStrategy, S <: SystemShape}
     Base.@nospecialize polys variables parameters
     polys = _normalize_polys(polys)
 
@@ -181,36 +256,68 @@ end
     degs = Int[MP.maxdegree(p) for p in polys]
     is_homogeneous = _is_homogeneous(polys, variables)
 
-    evaluator = if compile == CompileMode.INTERPRETED
-        _build_system_evaluator(
-            interp_f64, interp_df64, interp_jac,
-            interp_t1, interp_t2, interp_t3,
-            neqs, nvars, nparams,
-        )
-    elseif compile == CompileMode.COMPILED
-        _build_compiled_evaluator(
-            seq_eval, seq_jac, interp_df64,
-            _build_taylor_fws(interp_t1, interp_t2, interp_t3),
-            neqs, nvars, nparams,
-        )
-    else  # CompileMode.COMPILED_ALL
-        _build_compiled_evaluator(
-            seq_eval, seq_jac, interp_df64,
-            _build_taylor_fws(seq_eval),
-            neqs, nvars, nparams,
-        )
-    end
+    evaluator = _build_mode_evaluator(
+        strategy, seq_eval, seq_jac,
+        interp_f64, interp_df64, interp_jac,
+        interp_t1, interp_t2, interp_t3,
+        neqs, nvars, nparams,
+    )
+    M = _compile_mode(strategy)
 
-    return System(
-        _to_fsvec(polys),
-        _to_fsvec(parameters),
-        _to_fsvec(variables),
+    fs_polys = _to_fsvec(polys)
+    fs_parameters = _to_fsvec(parameters)
+    fs_variables = _to_fsvec(variables)
+    return System{eltype(fs_polys), eltype(fs_variables), M, S}(
+        fs_polys,
+        fs_parameters,
+        fs_variables,
         evaluator, degs, nvars, nparams,
         Vector{Int}[], is_homogeneous,
         supp, coeffs,
         interp_f64, interp_df64, interp_jac,
         interp_t1, interp_t2, interp_t3,
-        compile,
+        M,
+    )
+end
+
+@inline _compile_mode(::InterpretedCompile) = CompileMode.INTERPRETED
+@inline _compile_mode(::CompiledCompile) = CompileMode.COMPILED
+@inline _compile_mode(::CompiledAllCompile) = CompileMode.COMPILED_ALL
+
+function _build_mode_evaluator(
+        ::InterpretedCompile, ::InstructionSequence, ::InstructionSequence,
+        interp_f64, interp_df64, interp_jac, interp_t1, interp_t2, interp_t3,
+        neqs::Int, nvars::Int, nparams::Int,
+    )::SystemEvaluator
+    return _build_system_evaluator(
+        interp_f64, interp_df64, interp_jac,
+        interp_t1, interp_t2, interp_t3,
+        neqs, nvars, nparams,
+    )
+end
+
+function _build_mode_evaluator(
+        ::CompiledCompile, seq_eval::InstructionSequence, seq_jac::InstructionSequence,
+        ::Interpreter{Vector{ComplexF64}}, interp_df64,
+        ::Interpreter{Vector{ComplexF64}}, interp_t1, interp_t2, interp_t3,
+        neqs::Int, nvars::Int, nparams::Int,
+    )::SystemEvaluator
+    return _build_compiled_evaluator(
+        seq_eval, seq_jac, interp_df64,
+        _build_taylor_fws(interp_t1, interp_t2, interp_t3),
+        neqs, nvars, nparams,
+    )
+end
+
+function _build_mode_evaluator(
+        ::CompiledAllCompile, seq_eval::InstructionSequence, seq_jac::InstructionSequence,
+        ::Interpreter{Vector{ComplexF64}}, interp_df64,
+        ::Interpreter{Vector{ComplexF64}}, ::Interpreter, ::Interpreter, ::Interpreter,
+        neqs::Int, nvars::Int, nparams::Int,
+    )::SystemEvaluator
+    return _build_compiled_evaluator(
+        seq_eval, seq_jac, interp_df64, _build_taylor_fws(seq_eval),
+        neqs, nvars, nparams,
     )
 end
 
@@ -250,18 +357,71 @@ function _build_system_evaluator(
         nvars::Int,
         nparams::Int,
     )::SystemEvaluator
+    taylor_1 = SysTaylor1FW(
+        (u, tx, p) -> (execute_taylor!(u, Val(1), interp_t1, tx, p); nothing),
+    )
+    taylor_2 = SysTaylor2FW(
+        (u, tx, p) -> (execute_taylor!(u, Val(2), interp_t2, tx, p); nothing),
+    )
+    taylor_3 = SysTaylor3FW(
+        (u, tx, p) -> (execute_taylor!(u, Val(3), interp_t3, tx, p); nothing),
+    )
+    param_builder = if iszero(nparams)
+        _build_zero_parameter_taylor_fws
+    else
+        _build_parameter_taylor_fws
+    end
+    param_builder = Base.inferencebarrier(param_builder)
+    param_taylor = _dispatch_parameter_taylor_fws(
+        param_builder, taylor_1, taylor_2, taylor_3, interp_t1, interp_t2, interp_t3,
+    )
     return SystemEvaluator(
         SysEvalFW((u, x, p) -> (_execute_eval_fw!(u, interp_f64, x, p); nothing)),
         SysEvalDF64FW((u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing)),
         SysEvalDF64OutFW((u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing)),
         SysEvalJacFW((u, U, x, p) -> (_execute_jac_fw!(u, U, interp_jac, x, p); nothing)),
-        SysTaylor1FW((u, tx, p) -> (execute_taylor!(u, Val(1), interp_t1, tx, p); nothing)),
-        SysTaylor2FW((u, tx, p) -> (execute_taylor!(u, Val(2), interp_t2, tx, p); nothing)),
-        SysTaylor3FW((u, tx, p) -> (execute_taylor!(u, Val(3), interp_t3, tx, p); nothing)),
+        taylor_1,
+        taylor_2,
+        taylor_3,
+        param_taylor...,
+        (neqs, nvars),
+        nparams,
+    )
+end
+
+@noinline function _dispatch_parameter_taylor_fws(
+        builder::Function, taylor_1, taylor_2, taylor_3,
+        interp_t1, interp_t2, interp_t3,
+    )
+    Base.@nospecialize builder taylor_1 taylor_2 taylor_3 interp_t1 interp_t2 interp_t3
+    return builder(taylor_1, taylor_2, taylor_3, interp_t1, interp_t2, interp_t3)
+end
+
+function _build_zero_parameter_taylor_fws(
+        taylor_1::SysTaylor1FW,
+        taylor_2::SysTaylor2FW,
+        taylor_3::SysTaylor3FW,
+        ::Any, ::Any, ::Any,
+    )
+    # A TaylorVector with zero parameter columns is equivalent to the ordinary
+    # empty-parameter call. Delegate to the already-built scalar wrappers so a
+    # parameter-free System does not compile three unused convolution kernels.
+    return (
+        SysTaylor1ParamFW((u, tx, ::TaylorVector{2, ComplexF64}) -> (taylor_1(u, tx, _EMPTY_PARAMS); nothing)),
+        SysTaylor2ParamFW((u, tx, ::TaylorVector{3, ComplexF64}) -> (taylor_2(u, tx, _EMPTY_PARAMS); nothing)),
+        SysTaylor3ParamFW((u, tx, ::TaylorVector{4, ComplexF64}) -> (taylor_3(u, tx, _EMPTY_PARAMS); nothing)),
+    )
+end
+
+function _build_parameter_taylor_fws(
+        ::Any, ::Any, ::Any,
+        interp_t1::Interpreter{Vector{TruncatedTaylorSeries{2, ComplexF64}}},
+        interp_t2::Interpreter{Vector{TruncatedTaylorSeries{3, ComplexF64}}},
+        interp_t3::Interpreter{Vector{TruncatedTaylorSeries{4, ComplexF64}}},
+    )
+    return (
         SysTaylor1ParamFW((u, tx, tp) -> (execute_taylor!(u, Val(1), interp_t1, tx, tp); nothing)),
         SysTaylor2ParamFW((u, tx, tp) -> (execute_taylor!(u, Val(2), interp_t2, tx, tp); nothing)),
         SysTaylor3ParamFW((u, tx, tp) -> (execute_taylor!(u, Val(3), interp_t3, tx, tp); nothing)),
-        (neqs, nvars),
-        nparams,
     )
 end

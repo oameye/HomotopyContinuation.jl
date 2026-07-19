@@ -168,6 +168,23 @@ end
 
 # ── CommonSolve.init: polys + Polyhedral ────────────────────────────────────
 
+function _polyhedral_source_data(
+        ::SquareShape, ::Random.MersenneTwister, F::System,
+    )
+    source_support, source_coeffs = support_coefficients(F)
+    return source_support, source_coeffs, nothing
+end
+
+function _polyhedral_source_data(
+        ::OverdeterminedShape, rng::Random.MersenneTwister, F::System,
+    )
+    source_support, source_coeffs = support_coefficients(F)
+    A, perm, checker = _square_up(rng, F)
+    randomized_support, randomized_coeffs =
+        _randomize_support(source_support, source_coeffs, A, perm)
+    return randomized_support, randomized_coeffs, checker
+end
+
 function CommonSolve.init(
         F::System, alg::Polyhedral,
         exec::AbstractExecutor = Threaded();
@@ -175,7 +192,6 @@ function CommonSolve.init(
     )::PolyhedralSolveCache
     seed = alg.seed
     _check_square_or_overdetermined(F)
-    m = size(F.evaluator)[1]
     n = F.nvars
 
     # Task-local RNG seeded from user seed — deterministic without mutating global state.
@@ -185,15 +201,8 @@ function CommonSolve.init(
     #    Overdetermined systems are squared up first: the polyhedral machinery
     #    (mixed cells, parametric system, both homotopy phases) then operates on
     #    the support of G = [I A]·(F∘perm) and never sees the original system.
-    source_support, source_coeffs = support_coefficients(F)
-    excess_checker = if m > n
-        A, perm, checker = _square_up(rng, F)
-        source_support, source_coeffs =
-            _randomize_support(source_support, source_coeffs, A, perm)
-        checker
-    else
-        nothing
-    end
+    source_support, source_coeffs, excess_checker =
+        _polyhedral_source_data(system_shape(F), rng, F)
 
     # 2. Generate start coefficients for ORIGINAL support FIRST.
     #    Coefficients must be generated before zero column addition so the RNG
@@ -402,6 +411,20 @@ end
 # ── CommonSolve.solve!: serial two-phase path tracking ───────────────────
 
 function CommonSolve.solve!(cache::PolyhedralSolveCache{Serial})::Result
+    solver = cache.show_progress ?
+        _solve_polyhedral_serial_with_progress :
+        _solve_polyhedral_serial_without_progress
+    solver = Base.inferencebarrier(solver)
+    return _dispatch_solve_policy(solver, cache)
+end
+
+
+@noinline _solve_polyhedral_serial_without_progress(cache::PolyhedralSolveCache{Serial}) =
+    _solve_polyhedral_serial(cache, nothing)
+@noinline _solve_polyhedral_serial_with_progress(cache::PolyhedralSolveCache{Serial}) =
+    _solve_polyhedral_serial(cache, make_progress(length(cache.start_solutions), true))
+
+function _solve_polyhedral_serial(cache::PolyhedralSolveCache{Serial}, progress)::Result
     toric_tracker = cache.toric_tracker
     coeff_tracker = cache.coeff_tracker
     toric_H = cache.toric_homotopy
@@ -416,7 +439,6 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache{Serial})::Result
     n = size(support[1], 1)
     x_buffer = Vector{ComplexF64}(undef, n)
 
-    progress = make_progress(n_paths, cache.show_progress)
     stats = ProgressStats()
 
     # Phase 1 + Phase 2 for each start solution
@@ -459,6 +481,19 @@ end
 # ── CommonSolve.solve!: threaded two-phase path tracking ─────────────────
 
 function CommonSolve.solve!(cache::PolyhedralSolveCache{Threaded})::Result
+    solver = cache.show_progress ?
+        _solve_polyhedral_threaded_with_progress :
+        _solve_polyhedral_threaded_without_progress
+    solver = Base.inferencebarrier(solver)
+    return _dispatch_solve_policy(solver, cache)
+end
+
+@noinline _solve_polyhedral_threaded_without_progress(cache::PolyhedralSolveCache{Threaded}) =
+    _solve_polyhedral_threaded(cache, nothing)
+@noinline _solve_polyhedral_threaded_with_progress(cache::PolyhedralSolveCache{Threaded}) =
+    _solve_polyhedral_threaded(cache, make_progress(length(cache.start_solutions), true))
+
+function _solve_polyhedral_threaded(cache::PolyhedralSolveCache{Threaded}, progress)::Result
     nt = cache.executor.ntasks
     starts = cache.start_solutions
     n_paths = length(starts)
@@ -466,7 +501,6 @@ function CommonSolve.solve!(cache::PolyhedralSolveCache{Threaded})::Result
     support = cache.support
     lifting = cache.lifting
 
-    progress = make_progress(n_paths, cache.show_progress)
     stats = ProgressStats()
     counter = Threads.Atomic{Int}(0)
     plock = ReentrantLock()

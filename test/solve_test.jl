@@ -463,9 +463,21 @@ using CommonSolve: CommonSolve
         @polyvar x y
         F_interp = System([x^2 - 1, y - 2])
         @test F_interp.compile_mode == CompileMode.INTERPRETED
+        @test HomotopyContinuationNext.system_shape(F_interp) isa
+            HomotopyContinuationNext.SquareShape
 
         F_compiled = System([x^2 - 1, y - 2]; compile = CompileMode.COMPILED)
         @test F_compiled.compile_mode == CompileMode.COMPILED
+        @test typeof(F_interp) != typeof(F_compiled)
+
+        F_under = System([x + y])
+        F_over = System([x^2 - 1, y - 2, x + y - 3])
+        @test HomotopyContinuationNext.system_shape(F_under) isa
+            HomotopyContinuationNext.UnderdeterminedShape
+        @test HomotopyContinuationNext.system_shape(F_over) isa
+            HomotopyContinuationNext.OverdeterminedShape
+        @test typeof(F_interp) != typeof(F_under)
+        @test typeof(F_interp) != typeof(F_over)
     end
 
     # ── Executor integration tests ───────────────────────────────────────
