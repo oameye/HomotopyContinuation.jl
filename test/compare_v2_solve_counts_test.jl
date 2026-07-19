@@ -15,7 +15,7 @@ using HomotopyContinuation.ModelKit: @var
 
     @testset "quadratic: x²+y-1, xy-2" begin
         @polyvar nx ny
-        r3 = Next.solve(Next.System([nx^2 + ny - 1, nx * ny - 2]))
+        r3 = Next.solve(Next.System([nx^2 + ny - 1, nx * ny - 2]); show_progress = false)
 
         @var hx hy
         r2 = HC.solve(HC.ModelKit.System([hx^2 + hy - 1, hx * hy - 2]); start_system = :total_degree, show_progress = false)
@@ -35,7 +35,7 @@ using HomotopyContinuation.ModelKit: @var
                 nx1^2 + 2nx0 * nx2 + 2nx1 * nx3 - nx2,
             ]
         )
-        r3 = Next.solve(F3)
+        r3 = Next.solve(F3; show_progress = false)
 
         @var hx0 hx1 hx2 hx3
         F2 = HC.ModelKit.System(
@@ -55,7 +55,8 @@ using HomotopyContinuation.ModelKit: @var
     @testset "at-infinity: 2 finite + 2 diverging" begin
         @polyvar nx ny
         r3 = Next.solve(
-            Next.System([2.3nx^2 + 1.2ny^2 + 3nx - 2ny + 3, 2.3nx^2 + 1.2ny^2 + 5nx + 2ny - 5]),
+            Next.System([2.3nx^2 + 1.2ny^2 + 3nx - 2ny + 3, 2.3nx^2 + 1.2ny^2 + 5nx + 2ny - 5]);
+            show_progress = false,
         )
 
         @var hx hy
@@ -70,7 +71,7 @@ using HomotopyContinuation.ModelKit: @var
 
     @testset "singular (x-10)^2" begin
         @polyvar nx
-        r3 = Next.solve(Next.System([(nx - 10)^2]), Next.TotalDegree(; seed = UInt32(42)))
+        r3 = Next.solve(Next.System([(nx - 10)^2]), Next.TotalDegree(; seed = UInt32(42)); show_progress = false)
 
         @var hx
         r2 = HC.solve(HC.ModelKit.System([(hx - 10)^2]); start_system = :total_degree, seed = UInt32(42), show_progress = false)
@@ -89,7 +90,7 @@ using HomotopyContinuation.ModelKit: @var
                     10nx^2 * nz + 10ny^2 * nz - 6nz^3,
                 ]
             ),
-            Next.TotalDegree(; seed = UInt32(1)),
+            Next.TotalDegree(; seed = UInt32(1)); show_progress = false,
         )
 
         @var hx hz
@@ -118,7 +119,7 @@ using HomotopyContinuation.ModelKit: @var
                     (18 + 3im) * nx * ny + 7im * ny^2 - (3 - 18im) * nx * nz - 14ny * nz - 7im * nz^2,
                 ]
             ),
-            Next.TotalDegree(; seed = UInt32(12345)),
+            Next.TotalDegree(; seed = UInt32(12345)); show_progress = false,
         )
 
         @var hx hy

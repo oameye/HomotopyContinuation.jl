@@ -69,7 +69,7 @@ end
         f₁ = (x^4 + y^4 - 1) * (x^2 + y^2 - 2) + x^5 * y
         f₂ = x^2 + 2x * y^2 - 2y^2 - 1 // 2
         F = System([f₁, f₂])
-        result = solve(F)
+        result = solve(F; show_progress = false)
 
         cert = certify(F, result; show_progress = false)
         @test cert isa CertificationResult
@@ -101,7 +101,7 @@ end
     @testset "circle ∩ line (2 real)" begin
         @polyvar x y
         F = System([x^2 + y^2 - 1, x - y])
-        res = solve(F)
+        res = solve(F; show_progress = false)
         cert = certify(F, res; show_progress = false)
         @test cert isa CertificationResult
         @test ncertified(cert) == 2
@@ -145,7 +145,7 @@ end
 
         # Solve with u₀ substituted, then certify against the parametric system.
         eqs_sub = [DP.subs(e, u[1] => u₀[1], u[2] => u₀[2]) for e in eqs]
-        res = solve(System(eqs_sub; variables = [x, y, λ[1]]))
+        res = solve(System(eqs_sub; variables = [x, y, λ[1]]); show_progress = false)
         cands = solutions(res)
         @test length(cands) == 36
 
@@ -169,7 +169,7 @@ end
     @testset "positive" begin
         @polyvar x y
         F = System([x^2 + y^2 - 1, x - y])
-        res = solve(F)
+        res = solve(F; show_progress = false)
         cert = certify(F, res; show_progress = false)
         # exactly one of ±(√½, √½) is positive in every coordinate
         @test count(is_positive, certificates(cert)) == 1
@@ -239,7 +239,7 @@ end
     @testset "duplicate detection" begin
         @polyvar x y
         F = System([x^2 + y^2 - 1, x - y])
-        s = solutions(solve(F))[1]
+        s = solutions(solve(F; show_progress = false))[1]
         cert = certify(F, [s, s, s]; show_progress = false)
         @test ncertified(cert) == 3
         @test ndistinct_certified(cert) == 1
@@ -252,7 +252,7 @@ end
     @testset "single solution and PathResult inputs" begin
         @polyvar x y
         F = System([x^2 + y^2 - 1, x - y])
-        res = solve(F)
+        res = solve(F; show_progress = false)
         s = solutions(res)[1]
         cert = certify(F, s; show_progress = false)
         @test ncertified(cert) == 1
@@ -266,7 +266,7 @@ end
     @testset "extended certificate" begin
         @polyvar x y
         F = System([x^2 + y^2 - 1, x - y])
-        res = solve(F)
+        res = solve(F; show_progress = false)
         cert = certify(F, res; extended_certificate = true, show_progress = false)
         @test ncertified(cert) == 2
         for c in certificates(cert)
