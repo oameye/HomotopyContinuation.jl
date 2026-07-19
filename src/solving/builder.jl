@@ -86,8 +86,8 @@ coupled toric homotopy + tracker.
 The coefficient vectors are shared read-only across workers. Thread safety relies on
 `ToricHomotopy` and `CoefficientHomotopy` constructors copying into independent buffers.
 """
-struct PolyhedralBuilder{S <: System}
-    param_system::S
+struct PolyhedralBuilder{S}
+    support_system::S
     start_coeffs::Vector{Vector{ComplexF64}}
     flat_start::Vector{ComplexF64}
     flat_target::Vector{ComplexF64}
@@ -98,12 +98,12 @@ end
 
 function (b::PolyhedralBuilder)()::PolyhedralWorkerState
     # Phase 1: toric — homotopy and tracker are coupled
-    toric_eval = _clone_system_evaluator(b.param_system)
+    toric_eval = _clone_system_evaluator(b.support_system)
     toric_H = ToricHomotopy(toric_eval, b.start_coeffs)
     toric_tracker = Tracker(HomotopyEvaluator(toric_H); options = b.toric_options)
 
     # Phase 2: coefficient
-    coeff_eval = _clone_system_evaluator(b.param_system)
+    coeff_eval = _clone_system_evaluator(b.support_system)
     coeff_H = CoefficientHomotopy(coeff_eval, b.flat_start, b.flat_target)
     coeff_tracker = EndgameTracker(
         Tracker(HomotopyEvaluator(coeff_H); options = b.tracker_options),

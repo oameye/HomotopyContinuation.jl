@@ -12,14 +12,132 @@ using HomotopyContinuationNext:
     update_weights!, evaluate!, evaluate_and_jacobian!, taylor!,
     _update_toric_coeffs!, _update_toric_dt_coeffs!,
     _update_toric_d2t_coeffs!, _update_toric_d3t_coeffs!,
-    _copy_prefix!, _update_p!, PolyhedralSolveCache, EndgameCode
+    _copy_prefix!, _update_p!, PolyhedralSolveCache, EndgameCode,
+    _canonical_mixed_cell_iterator, _fine_mixed_cells_canonical,
+    _support_system, _clone_system_evaluator, nparameters
 
 using DynamicPolynomials: @polyvar
 using CommonSolve: init as cs_init, solve! as cs_solve!
+using Random: MersenneTwister
 
 @testset "Polyhedral regression" begin
 
+    @testset "canonical support fast path matches MixedSubdivisions" begin
+        MS = HomotopyContinuationNext.MixedSubdivisions
+
+        # Fresh, deterministic sampler drawing from a seeded rng, so the public
+        # API and the canonical reconstruction see identical lifting streams.
+        make_sampler(seed) =
+        let rng = MersenneTwister(UInt32(seed))
+            (nterms::Int, attempt::Int = 1) ->
+            rand(rng, Int32(-2^(10 + attempt)):Int32(2^(10 + attempt)), nterms)
+        end
+
+        function check_parity(support, seed)
+            public_result = MS.fine_mixed_cells(
+                support, make_sampler(seed); show_progress = false,
+            )
+            canonical_result = _fine_mixed_cells_canonical(support, make_sampler(seed))
+
+            @test public_result !== nothing
+            public_cells, public_lifting = public_result
+            canonical_cells, canonical_lifting = canonical_result
+            @test canonical_lifting == public_lifting
+            @test length(canonical_cells) == length(public_cells)
+            for (canonical, public) in zip(canonical_cells, public_cells)
+                @test canonical.indices == public.indices
+                @test canonical.volume == public.volume
+                @test canonical.normal ≈ public.normal
+                @test canonical.β ≈ public.β
+                @test canonical.is_fine == public.is_fine
+            end
+            return canonical_lifting
+        end
+
+        # Small 2-variable system.
+        support2 = Matrix{Int32}[
+            Int32[0 2 0; 0 0 1],
+            Int32[0 1 0; 0 1 2],
+        ]
+        lifting2 = check_parity(support2, 0x51a7)
+
+        # Larger 3-variable, 3-equation system. This exercises the reconstructed
+        # CayleyIndexing / MixedCellTable(Traverser) / MixedCell layout with more
+        # configurations and a bigger Cayley matrix, so a MixedSubdivisions
+        # struct field-order change is far more likely to surface here than in
+        # the 2-variable case above.
+        support3 = Matrix{Int32}[
+            Int32[2 0 0 0; 0 1 0 0; 0 0 1 0],
+            Int32[0 1 0 0; 2 0 0 0; 0 0 1 0],
+            Int32[0 1 0 0; 0 0 1 0; 2 0 0 0],
+        ]
+        check_parity(support3, 0x2c9f)
+
+        iter = _canonical_mixed_cell_iterator(support2, lifting2)
+        @test iter.support === support2
+        @test_throws ErrorException _fine_mixed_cells_canonical(
+            support2, make_sampler(0x51a7); max_tries = 0,
+        )
+    end
+
     # ── 1. Taylor cross-term correctness ─────────────────────────────────
+
+    @testset "support-backed evaluator matches symbolic System" begin
+        support = Matrix{Int32}[
+            Int32[0 2 1; 0 0 1],
+            Int32[0 1 0; 0 1 2],
+        ]
+        support_system = _support_system(support)
+
+        @polyvar sx sy sp[1:6]
+        reference = System(
+            [
+                sp[1] + sp[2] * sx^2 + sp[3] * sx * sy,
+                sp[4] + sp[5] * sx * sy + sp[6] * sy^2,
+            ];
+            variables = [sx, sy], parameters = sp,
+        )
+
+        @test size(support_system.evaluator) == (2, 2)
+        @test nparameters(support_system.evaluator) == 6
+        @test length(support_system.eval_sequence.parameters_range) == 6
+
+        x = FSVec{ComplexF64}(ComplexF64[0.7 + 0.2im, -0.3 + 0.1im])
+        p = FSVec{ComplexF64}(
+            ComplexF64[1 + 0.1im, 2 - 0.2im, -1 + 0.3im, 0.5im, 1.5 + 0.2im, -0.7im],
+        )
+        u_support = FSVec{ComplexF64}(zeros(ComplexF64, 2))
+        u_reference = FSVec{ComplexF64}(zeros(ComplexF64, 2))
+        J_support = FSMat{ComplexF64}(zeros(ComplexF64, 2, 2))
+        J_reference = FSMat{ComplexF64}(zeros(ComplexF64, 2, 2))
+        evaluate_and_jacobian!(
+            u_support, J_support, support_system.evaluator, x, p,
+        )
+        evaluate_and_jacobian!(u_reference, J_reference, reference.evaluator, x, p)
+        @test u_support ≈ u_reference
+        @test J_support ≈ J_reference
+
+        cloned_evaluator = _clone_system_evaluator(support_system)
+        fill!(u_support, zero(ComplexF64))
+        evaluate!(u_support, cloned_evaluator, x, p)
+        @test u_support ≈ u_reference
+
+        for order in 1:3
+            tx = TaylorVector{order + 1, ComplexF64}(2)
+            tp = TaylorVector{order + 1, ComplexF64}(6)
+            for i in axes(tx.data, 2), k in axes(tx.data, 1)
+                tx.data[k, i] = complex(0.1 * k * i, -0.03 * k)
+            end
+            for i in axes(tp.data, 2), k in axes(tp.data, 1)
+                tp.data[k, i] = complex(0.05 * k * i, 0.02 * k)
+            end
+            fill!(u_support, zero(ComplexF64))
+            fill!(u_reference, zero(ComplexF64))
+            taylor!(u_support, Val(order), support_system.evaluator, tx, tp)
+            taylor!(u_reference, Val(order), reference.evaluator, tx, tp)
+            @test u_support ≈ u_reference atol = 1.0e-12
+        end
+    end
 
     @testset "CoefficientHomotopy Taylor order 2 includes cross term" begin
         # Build F(x; p) = p₁x² + p₂x + p₃ with p(t) = t·start + (1-t)·target.

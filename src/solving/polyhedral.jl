@@ -58,7 +58,7 @@ end
 Holds pre-built trackers and start solutions for the two-phase polyhedral homotopy.
 Created by `CommonSolve.init`.
 """
-struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S <: System, C}
+struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S, C}
     executor::E
     builder::B
     toric_tracker::Tracker
@@ -69,7 +69,7 @@ struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S <: 
     start_solutions::Vector{Tuple{MixedSubdivisions.MixedCell, Vector{ComplexF64}}}
     seed::UInt32
     # GC roots for interpreters — must be kept alive for FunctionWrapper closures
-    _param_system::S
+    _support_system::S
     # ExcessSolutionChecker for overdetermined systems, Nothing for square ones
     excess_checker::C
     show_progress::Bool
@@ -118,52 +118,177 @@ function _randomize_support(
     return new_support, new_coeffs
 end
 
-# ── Helper: build parametric system from support ────────────────────────────
+# ── Helper: build coefficient-parametric evaluator from support ─────────
 
 """
-    _build_parametric_system(support, variables) -> (polys, variables, coeff_params)
+    _SupportSystem
 
-Build MP polynomials with symbolic coefficient parameters from the given support matrices.
-Returns `(polys, variables, coeff_params)` where `coeff_params` is a flat vector of
-parameter variables `[c_1_1, c_1_2, ..., c_n_m_n]`.
+Minimal reconstruction data for `Fᵢ(x; p) = Σⱼ pᵢⱼ x^support[i][:,j]`.
+Polyhedral tracking needs only an evaluator and immutable instruction sequences
+for worker-local tapes; no symbolic variables or polynomial objects are needed.
 """
-function _build_parametric_system(
-        support::Vector{Matrix{Int32}},
-        variables::AbstractVector,
-    )
-    n = length(support)
-    n_coeffs = sum(size(A, 2) for A in support)
+struct _SupportSystem
+    evaluator::SystemEvaluator
+    eval_sequence::InstructionSequence
+    jacobian_sequence::InstructionSequence
+end
 
-    # Create parameter variables programmatically using DynamicPolynomials
-    VarType = typeof(variables[1])
-    coeff_vars = VarType[
-        VarType("_hc_c$(i)_$(j)") for i in 1:n for j in 1:size(support[i], 2)
-    ]
-
-    # Build polynomials: F_i = sum_j coeff_vars[offset+j] * prod(x_k^A[k,j])
-    # Build first polynomial to infer the concrete Polynomial type
-    m_1 = size(support[1], 2)
-    p1 = coeff_vars[1] * prod(variables[k]^Int(support[1][k, 1]) for k in 1:n)
-    for j in 2:m_1
-        monomial = prod(variables[k]^Int(support[1][k, j]) for k in 1:n)
-        p1 = p1 + coeff_vars[j] * monomial
+# Sparse (variable_slot, exponent) key for the monomial x^support[:, term],
+# optionally differentiated once wrt `derivative_variable` (0 = no derivative).
+# Shares `MonomialCache` with the symbolic-free polynomial frontend so identical
+# monomials collapse to a single tape slot.
+function _support_monomial_key(
+        compiler::TapeCompiler, support::Matrix{Int32},
+        term::Int, derivative_variable::Int,
+    )::MonomialKey
+    data = Int32[]
+    for variable in axes(support, 1)
+        exponent = support[variable, term]
+        variable == derivative_variable && (exponent -= one(Int32))
+        iszero(exponent) && continue
+        push!(data, compiler.var_slots[variable])
+        push!(data, exponent)
     end
-    PolyType = typeof(p1)
-    polys = PolyType[p1]
-    offset = m_1
-    for i in 2:n
-        A = support[i]
-        m_i = size(A, 2)
-        p = coeff_vars[offset + 1] * prod(variables[k]^Int(A[k, 1]) for k in 1:n)
-        for j in 2:m_i
-            monomial = prod(variables[k]^Int(A[k, j]) for k in 1:n)
-            p = p + coeff_vars[offset + j] * monomial
+    return MonomialKey(data)
+end
+
+# Returns the (parameter_slot, monomial_slot) pair for one support term, folding
+# an optional integer multiplier (the power-rule factor) into the tape.
+function _support_term_parts!(
+        cache::MonomialCache, parameter::Int, key::MonomialKey, multiplier::Int = 1,
+    )::Tuple{Int32, Int32}
+    monomial_slot = _monomial_slot!(cache, key)
+    if multiplier != 1
+        multiplier_slot = _get_constant_slot!(cache.compiler, ComplexF64(multiplier))
+        monomial_slot = _tape_mul!(cache.compiler, multiplier_slot, monomial_slot)
+    end
+    return cache.compiler.param_slots[parameter], monomial_slot
+end
+
+function _compile_support_equation!(
+        cache::MonomialCache, support::Matrix{Int32}, parameter_offset::Int,
+    )::Int32
+    terms = Vector{Tuple{Int32, Int32}}(undef, size(support, 2))
+    for term in axes(support, 2)
+        key = _support_monomial_key(cache.compiler, support, term, 0)
+        terms[term] = _support_term_parts!(cache, parameter_offset + term, key)
+    end
+    return _compile_sum_products!(cache.compiler, terms)
+end
+
+function _compile_support_derivative!(
+        cache::MonomialCache, support::Matrix{Int32},
+        parameter_offset::Int, variable::Int,
+    )::Int32
+    terms = Tuple{Int32, Int32}[]
+    for term in axes(support, 2)
+        exponent = support[variable, term]
+        iszero(exponent) && continue
+        key = _support_monomial_key(cache.compiler, support, term, variable)
+        push!(
+            terms,
+            _support_term_parts!(cache, parameter_offset + term, key, Int(exponent)),
+        )
+    end
+    isempty(terms) && return _get_constant_slot!(cache.compiler, zero(ComplexF64))
+    return _compile_sum_products!(cache.compiler, terms)
+end
+
+function _support_parameter_count(support::Vector{Matrix{Int32}})::Int
+    count = 0
+    for A in support
+        count += size(A, 2)
+    end
+    return count
+end
+
+function _build_support_instruction_sequence(
+        support::Vector{Matrix{Int32}}, include_jacobian::Bool,
+    )::InstructionSequence
+    nequations = length(support)
+    nvariables = size(first(support), 1)
+    nparams = _support_parameter_count(support)
+    compiler = TapeCompiler(nvariables, nparams)
+    _initialize_placeholder_slots!(compiler, nvariables, nparams)
+    cache = MonomialCache(compiler)
+
+    parameter_offsets = Vector{Int}(undef, nequations)
+    offset = 0
+    for equation in eachindex(support)
+        parameter_offsets[equation] = offset
+        offset += size(support[equation], 2)
+    end
+
+    result_slots = Int32[]
+    sizehint!(result_slots, nequations * (include_jacobian ? nvariables + 1 : 1))
+    for equation in eachindex(support)
+        push!(
+            result_slots,
+            _compile_support_equation!(
+                cache, support[equation], parameter_offsets[equation],
+            ),
+        )
+    end
+    if include_jacobian
+        for variable in 1:nvariables
+            for equation in eachindex(support)
+                push!(
+                    result_slots,
+                    _compile_support_derivative!(
+                        cache, support[equation], parameter_offsets[equation], variable,
+                    ),
+                )
+            end
         end
-        push!(polys, p)
-        offset += m_i
     end
 
-    return polys, collect(variables), coeff_vars
+    return _finalize_compiler(
+        Val(false), compiler, result_slots,
+        nvariables, nparams, nequations,
+    )
+end
+
+function _support_evaluator(
+        eval_sequence::InstructionSequence,
+        jacobian_sequence::InstructionSequence,
+        nequations::Int,
+        nvariables::Int,
+        nparams::Int,
+    )::SystemEvaluator
+    # Fully interpreted evaluator with worker-local tapes over shared immutable
+    # sequences — the same construction the interpreted `System` clone path uses.
+    return _build_system_evaluator(
+        Interpreter(Vector{ComplexF64}, eval_sequence),
+        Interpreter(Vector{ComplexDF64}, eval_sequence),
+        Interpreter(Vector{ComplexF64}, jacobian_sequence),
+        Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, eval_sequence),
+        Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, eval_sequence),
+        Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, eval_sequence),
+        nequations, nvariables, nparams,
+    )
+end
+
+function _support_system(support::Vector{Matrix{Int32}})::_SupportSystem
+    eval_sequence = _build_support_instruction_sequence(support, false)
+    jacobian_sequence = _build_support_instruction_sequence(support, true)
+    evaluator = _support_evaluator(
+        eval_sequence,
+        jacobian_sequence,
+        length(support),
+        size(first(support), 1),
+        _support_parameter_count(support),
+    )
+    return _SupportSystem(evaluator, eval_sequence, jacobian_sequence)
+end
+
+function _clone_system_evaluator(system::_SupportSystem)::SystemEvaluator
+    eval_sequence = system.eval_sequence
+    jacobian_sequence = system.jacobian_sequence
+    nequations, nvariables = size(system.evaluator)
+    nparams = nparameters(system.evaluator)
+    return _support_evaluator(
+        eval_sequence, jacobian_sequence, nequations, nvariables, nparams,
+    )
 end
 
 # ── CommonSolve.init: polys + Polyhedral ────────────────────────────────────
@@ -184,6 +309,103 @@ function _polyhedral_source_data(
         _randomize_support(source_support, source_coeffs, A, perm)
     return randomized_support, randomized_coeffs, checker
 end
+
+# `System` caches parameter-free supports as dense, nonnegative `Int32`
+# matrices. MixedSubdivisions' public matrix entry point deliberately accepts
+# arbitrary integer matrices, so it normalizes every support before building
+# the regeneration traverser. That normalization is redundant here and pulls
+# a broad reduction/broadcast graph into the cold polyhedral path.
+#
+# Constructing the traversers themselves is essential work. This narrow path
+# only skips the public API's normalization, progress, and deprecated
+# lifting-sampler branches. The exact typed public iterator already avoids its
+# generic integer conversion method. Keep this constructor synchronized with
+# `MixedSubdivisions.MixedCellIterator` (MixedSubdivisions 1.2.x).
+#
+# TODO(upstream): contribute a public non-normalizing entry point to
+# MixedSubdivisions (e.g. `MixedCellIterator(support, lifting; normalize=false)`
+# or a `RegenerationTraverser`-accepting `fine_mixed_cells`). The public
+# `traverser(support)` unconditionally calls `normalize_supports`, which is a
+# no-op for our already-nonnegative supports but costs ~1.5s of cold TTFX to
+# compile. Once such an entry point exists upstream, replace this hand-rebuilt
+# iterator (and its six internal-symbol dependencies) with the public call and
+# drop the explicit-imports allowlist entries.
+function _canonical_mixed_cell_iterator(
+        support::Vector{Matrix{Int32}},
+        lifting::Vector{Vector{Int32}},
+    )
+    n = length(support)
+
+    # Calling RegenerationTraverser directly is the key fast path: its public
+    # `traverser(support)` wrapper first calls `normalize_supports`.
+    start_traverser = MixedSubdivisions.RegenerationTraverser(support)
+
+    indices = fill((1, 2), n)
+    indexing = MixedSubdivisions.CayleyIndexing(Int[size(A, 2) for A in support])
+    cayley = MixedSubdivisions.cayley(support)
+    target_cell = MixedSubdivisions.MixedCellTable(
+        indices, cayley, indexing; fill_circuit_table = false,
+    )
+
+    n_lifts = sum(length, lifting)
+    target_lifting = Vector{Int32}(undef, n_lifts)
+    offset = 0
+    for lift in lifting
+        copyto!(target_lifting, offset + 1, lift, 1, length(lift))
+        offset += length(lift)
+    end
+    target_traverser = MixedSubdivisions.MixedCellTableTraverser(
+        target_cell,
+        cayley,
+        -target_lifting,
+        MixedSubdivisions.LexicographicOrdering(),
+    )
+
+    return MixedSubdivisions.MixedCellIterator(
+        start_traverser,
+        target_traverser,
+        support,
+        lifting,
+        MixedSubdivisions.MixedCell(n),
+        zeros(n, n),
+        zeros(n),
+    )
+end
+
+function _fine_mixed_cells_canonical(
+        support::Vector{Matrix{Int32}},
+        lifting_sampler;
+        max_tries::Int = 10,
+    )::Tuple{Vector{MixedSubdivisions.MixedCell}, Vector{Vector{Int32}}}
+    try
+        for attempt in 1:max_tries
+            lifting = Vector{Vector{Int32}}(undef, length(support))
+            for i in eachindex(support)
+                lifting[i] = lifting_sampler(size(support[i], 2), attempt)::Vector{Int32}
+            end
+
+            cells = MixedSubdivisions.MixedCell[]
+            all_valid = true
+            for cell in _canonical_mixed_cell_iterator(support, lifting)
+                if !MixedSubdivisions.is_fine(cell)
+                    all_valid = false
+                    break
+                end
+                push!(cells, copy(cell))
+            end
+            all_valid && return cells, lifting
+        end
+    catch err
+        if err isa InexactError || err isa LinearAlgebra.SingularException
+            return _fine_mixed_cells_failure()
+        end
+        rethrow()
+    end
+    return _fine_mixed_cells_failure()
+end
+
+@noinline _fine_mixed_cells_failure() =
+    error("MixedSubdivisions could not compute fine mixed cells")
 
 function CommonSolve.init(
         F::System, alg::Polyhedral,
@@ -240,11 +462,7 @@ function CommonSolve.init(
     # Custom lifting sampler that draws from our local rng for reproducibility.
     _lifting_sampler(nterms::Int, attempt::Int = 1) =
         rand(rng, Int32(-2^(10 + attempt)):Int32(2^(10 + attempt)), nterms)
-    result = MixedSubdivisions.fine_mixed_cells(support, _lifting_sampler; show_progress = false)
-    if result === nothing
-        error("MixedSubdivisions.fine_mixed_cells returned nothing — could not compute mixed cells")
-    end
-    mixed_cells, lifting = result
+    mixed_cells, lifting = _fine_mixed_cells_canonical(support, _lifting_sampler)
 
     if isempty(mixed_cells)
         error("No mixed cells found — the system may have no isolated solutions")
@@ -264,18 +482,13 @@ function CommonSolve.init(
         end
     end
 
-    # 6. Build parametric system from support
-    @polyvar _hc_x[1:n]
-    param_polys, param_vars, coeff_params =
-        _build_parametric_system(support, collect(_hc_x))
-    param_system = System(
-        param_polys; variables = param_vars, parameters = coeff_params,
-        compile = CompileMode.COMPILED,
-    )
+    # 6. Lower the cached support directly to the coefficient-parametric tape.
+    #    This avoids a synthetic DynamicPolynomials -> System compiler round trip.
+    support_system = _support_system(support)
 
     # 7. Build toric homotopy (phase 1: t goes from 0 to 1)
     #    Toric tracker uses conservative max_initial_step_size=0.2
-    toric_H = ToricHomotopy(param_system.evaluator, start_coeffs)
+    toric_H = ToricHomotopy(support_system.evaluator, start_coeffs)
     toric_heval = HomotopyEvaluator(toric_H)
     toric_opts = TrackerOptions(;
         max_steps = alg.tracker_options.max_steps,
@@ -295,7 +508,7 @@ function CommonSolve.init(
     # 8. Build coefficient homotopy (phase 2: t goes from 1 to 0)
     flat_start = reduce(vcat, start_coeffs)
     flat_target = reduce(vcat, target_coeffs)
-    coeff_H = CoefficientHomotopy(param_system.evaluator, flat_start, flat_target)
+    coeff_H = CoefficientHomotopy(support_system.evaluator, flat_start, flat_target)
     coeff_heval = HomotopyEvaluator(coeff_H)
     coeff_tracker = EndgameTracker(
         Tracker(coeff_heval; options = alg.tracker_options),
@@ -303,7 +516,7 @@ function CommonSolve.init(
     )
 
     builder = PolyhedralBuilder(
-        param_system, start_coeffs, flat_start, flat_target,
+        support_system, start_coeffs, flat_start, flat_target,
         toric_opts, alg.tracker_options, alg.endgame_options,
     )
 
@@ -312,7 +525,7 @@ function CommonSolve.init(
         toric_tracker, coeff_tracker, toric_H,
         support, lifting,
         all_starts, seed,
-        param_system,
+        support_system,
         excess_checker,
         show_progress,
     )

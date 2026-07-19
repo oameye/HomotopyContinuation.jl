@@ -1,6 +1,6 @@
 # Whole-package TTFX, inference, and invalidation report
 
-Last updated: 2026-07-18. Measurements use Julia 1.12.6 and
+Last updated: 2026-07-19. Measurements use Julia 1.12.6 and
 HomotopyContinuationNext. `src/precompile.jl` is disabled. No result in this
 report uses PrecompileTools; precompilation remains a last-mile option after
 root-cause work.
@@ -15,7 +15,9 @@ solution-completeness verification compile substantially broader graphs.
 The complete 28-workflow matrix found:
 
 - zero call-time invalidation trees in every workflow;
-- zero SnoopCompile precompile blockers in every workflow;
+- zero precompile blockers from call-time invalidations in every workflow;
+- eight small workload overlaps with package-load invalidation trees in the
+  representative polyhedral capture (one package-owned, seven dependency-owned);
 - package-level JET correctness analysis with zero errors;
 - first-execution cost dominated by genuine inference and LLVM generation,
   not by runtime invalidation;
@@ -29,7 +31,7 @@ fresh-process improvements are:
 | Cold workflow | Before | After | Reduction |
 |---|---:|---:|---:|
 | Interpreted total degree, serial, quiet | 11.063 s | 9.840 s | 11.1% |
-| Interpreted polyhedral, serial, quiet | 20.870 s | 20.252 s | 3.0% |
+| Interpreted polyhedral, serial, quiet | 20.870 s | 15.996 s | 23.4% |
 | Monodromy, serial, quiet | 17.056 s | 14.216 s | 16.7% |
 | Monodromy, threaded, quiet | 17.232 s | 14.517 s | 15.8% |
 | Subspace monodromy with trace test | 25.849 s | 19.842 s | 23.2% |
@@ -37,9 +39,9 @@ fresh-process improvements are:
 | Total degree with visible progress | 11.045 s | 10.742 s | 2.7% |
 
 The largest remaining costs are real feature breadth: evaluator and Taylor
-FunctionWrapper construction, MixedSubdivisions traversal, tracker/Newton
-compilation, subspace homotopies, and repeated monodromy/parameter-homotopy
-construction in completeness verification.
+FunctionWrapper construction, essential MixedSubdivisions regeneration and
+cell traversal, tracker/Newton compilation, subspace homotopies, and repeated
+monodromy/parameter-homotopy construction in completeness verification.
 
 ## Reproducible scope
 
@@ -140,8 +142,8 @@ Across the broad workloads, the shared leading exclusive costs were:
 
 Feature-specific additions were:
 
-- polyhedral: `MixedSubdivisions.normalize_supports`, traverser construction,
-  regeneration, and `exchange_column!`;
+- polyhedral: essential traverser construction, regeneration,
+  `exchange_column!`, parameter-Taylor wrappers, and the two tracker stacks;
 - subspaces: intrinsic/extrinsic Taylor closures, `LinearSubspace`, affine
   chart, and coordinate transformations;
 - monodromy: `MonodromySolver`, `_clone_system_evaluator`,
@@ -149,11 +151,14 @@ Feature-specific additions were:
 - completeness: two monodromy construction chains, parameter solves,
   polynomial merge, SVD, and the verification orchestration itself.
 
-Module-exclusive accounting for the representative polyhedral workload was
-led by HomotopyContinuationNext (8.80 s), Base (5.73 s), MixedSubdivisions
-(1.62 s), FunctionWrappers (1.06 s), DynamicPolynomials (0.87 s), and Printf
-(0.81 s). For serial monodromy it was HomotopyContinuationNext (9.52 s), Base
-(3.56 s), FunctionWrappers (1.05 s), and DynamicPolynomials (0.82 s).
+After direct support lowering, module-exclusive accounting for the
+representative polyhedral workload is led by HomotopyContinuationNext (7.60 s),
+Base (3.69 s), MixedSubdivisions (1.04 s), FunctionWrappers (0.99 s),
+DynamicPolynomials (0.68 s), and LinearAlgebra (0.59 s). The remaining
+DynamicPolynomials work belongs to construction of the user's input `System`,
+not to a synthetic polyhedral parameter system. For the earlier serial
+monodromy capture, HomotopyContinuationNext (9.52 s), Base (3.56 s),
+FunctionWrappers (1.05 s), and DynamicPolynomials (0.82 s) led the accounting.
 
 ## Retained root-cause changes
 
@@ -217,6 +222,130 @@ test as first suspected. ProgressMeter exposes `dt` through an inferred `Real`
 property although its runtime value is `Float64`. Concrete local assertions
 remove the `Float64 + Real` and `Float64 > Any` reports.
 
+### Polyhedral canonical-support fast path
+
+`System` already caches parameter-free supports as dense, nonnegative
+`Matrix{Int32}` values and coefficients as `Vector{ComplexF64}` values. The
+public MixedSubdivisions matrix entry point accepts arbitrary integer supports,
+so it recompiles and executes `normalize_supports` even though polynomial
+exponents cannot be negative here.
+
+The retained `_fine_mixed_cells_canonical` path constructs the same
+`MixedCellIterator` state directly from the trusted support cache. It keeps the
+regeneration traverser, target traverser, fine-cell checks, retry behavior, and
+overflow/singularity handling. It removes only redundant normalization plus
+the unused progress and deprecated one-argument lifting-sampler branches. It
+does not extend a MixedSubdivisions function, so it adds no type piracy or new
+method-table invalidation root. MixedSubdivisions 1.2.0 does not expose an
+equivalent public constructor; the six internal names are explicitly recorded
+in the ExplicitImports allowlist and covered by an equivalence regression test.
+Compatibility is capped to MixedSubdivisions 1.2.x until that private coupling
+is replaced or revalidated against a newer release.
+
+An exact before/after SnoopCompile capture of the interpreted serial workload
+showed:
+
+| Metric | Before fast path | After fast path | Reduction |
+|---|---:|---:|---:|
+| Compiler inclusive total | 86.126 s | 73.095 s | 15.1% |
+| Flattened exclusive total | 22.506 s | 20.700 s | 8.0% |
+| Inference nodes | 13,246 | 12,067 | 8.9% |
+| `normalize_supports` instances | 30 | 0 | 100% |
+| `normalize_supports` exclusive time | 0.243 s | 0 | 100% |
+
+Three independent direct cold runs were 18.695 s, 18.574 s, and 18.656 s
+(median 18.656 s, 2.71 GB allocated). The immediately preceding post-policy
+measurement was 20.252 s, so this isolated change removes another 7.9% of wall
+time. Cold validation across the other polyhedral entry points produced:
+
+| Workflow | Cold wall after fast path |
+|---|---:|
+| Compiled, serial | 18.509 s |
+| Compiled-all, serial | 18.913 s |
+| Interpreted, one-task threaded | 19.464 s |
+| Overdetermined, serial | 19.467 s |
+
+The exact typed public `MixedCellIterator` method was already avoiding its
+generic integer conversion overload; support conversion was therefore not a
+remaining cost. Traverser construction also cannot be skipped on a first
+solve: it is the algorithm state needed to enumerate mixed cells. The remaining
+polyhedral gap was therefore led by genuine regeneration (`exchange_column!`,
+`regeneration_stage_carry_over!`), the synthetic parametric start-system
+frontend, Taylor wrappers, and the two tracker stacks.
+
+### Direct support-backed polyhedral evaluator
+
+The next pass removes that synthetic frontend. The old cold path rebuilt a
+coefficient-parametric system in the following order:
+
+```text
+cached Matrix{Int32} support
+  -> DynamicPolynomials coefficient variables and monomials
+  -> general System normalization/lowering policy
+  -> eval and Jacobian instruction sequences
+  -> RuntimeGeneratedFunctions eval/Jacobian kernels
+  -> System fields unused by polyhedral tracking
+```
+
+Polyhedral tracking only needs the coefficient-linear evaluator
+`F_i(x; p) = sum_j p_ij * x^A_ij`, so `_SupportSystem` now stores only an
+evaluator plus immutable eval/Jacobian instruction sequences. A narrow support
+lowerer emits the tapes directly from `Vector{Matrix{Int32}}`. It caches powers
+and repeated monomials, emits analytic derivatives in column-major Jacobian
+order, and preserves the exact flattened coefficient-parameter ordering used
+by `ToricHomotopy` and `CoefficientHomotopy`. Worker-local clones rebuild only
+mutable interpreter tapes and FunctionWrappers from those immutable sequences.
+
+Coefficient/monomial pairs go through the tape compiler's fused product-sum
+reducer rather than emitting separate multiply and add instructions. On the
+representative two-equation parity system this reduced the first direct tapes
+from 10/20 to 8/14 eval/Jacobian instructions; the old symbolic path produced
+8/15. A fully warm 1,000-solve comparison was 98.5 microseconds per direct
+solve versus 94.1 microseconds for the former compiled evaluator (4.7% slower),
+while allocations fell from about 7.07 KB to 5.81 KB per solve (17.9% lower).
+The small steady-state trade is documented rather than hidden; restoring
+runtime-generated eval/Jacobian code would give back part of the cold graph
+this pass intentionally removes.
+
+This removes `_build_parametric_system`, all synthetic DynamicPolynomials
+arithmetic, the general small-versus-symbolic lowerer decision, CSE entry,
+`System` normalization/metadata construction, and runtime-generated eval and
+Jacobian code from the polyhedral path. The evaluator remains behind the
+existing concrete `SystemEvaluator` FunctionWrapper firewall; the rejected
+fully-parametric tracker design was not reintroduced.
+
+Three independent direct cold interpreted-serial runs after tape fusion were
+15.996 s, 15.845 s, and 16.132 s (median 15.996 s, about 2.36 GB allocated).
+Relative to the canonical-support result of 18.656 s and 2.71 GB, this is
+another 14.3% wall reduction and roughly 13% fewer allocated bytes. Relative
+to the original pre-policy 20.870 s measurement, the cumulative polyhedral
+reduction is 23.4%.
+
+| Workflow | Before direct evaluator | After direct evaluator | Reduction |
+|---|---:|---:|---:|
+| Interpreted, serial (median) | 18.656 s | 15.996 s | 14.3% |
+| Compiled, serial | 18.509 s | 16.952 s | 8.4% |
+| Compiled-all, serial | 18.913 s | 17.519 s | 7.4% |
+| Interpreted, one-task threaded | 19.464 s | 16.474 s | 15.4% |
+| Overdetermined, serial | 19.467 s | 16.796 s | 13.7% |
+
+A fresh SnoopCompile capture of the representative interpreted-serial workload
+showed the same structural reduction:
+
+| Metric | Canonical-support path | Direct evaluator | Reduction |
+|---|---:|---:|---:|
+| Compiler inclusive total | 73.095 s | 65.983 s | 9.7% |
+| Flattened exclusive total | 20.700 s | 16.178 s | 21.8% |
+| Inference nodes | 12,067 | 9,474 | 21.5% |
+
+The entire new support construction subtree is about 1.16 s inclusive in that
+capture; direct tape lowering is about 0.19 s inclusive. No
+`_build_parametric_system`, RuntimeGeneratedFunctions expression generation,
+or synthetic coefficient-polynomial construction remains. The highest
+polyhedral entries are now Taylor instruction execution/wrappers, tracker
+Newton/predictor inference, FunctionWrappers calls, and genuine
+MixedSubdivisions regeneration.
+
 ## Invalidations
 
 ### Package load
@@ -228,6 +357,12 @@ The isolated package-load capture recorded:
 - zero invalidated target MethodInstances owned by HomotopyContinuationNext;
 - seven inserted roots owned by HomotopyContinuationNext or its
   `ExecInstruction` submodule, with 52 summed descendants.
+
+The post-fast-path recapture kept the aggregate exactly at 62 trees and 6,170
+descendants. It observed six package-owned roots and 47 descendants because the
+five-descendant generated `ExecInstruction.variants` root was already satisfied
+by the active precompile cache. The numeric roots and their descendant counts
+were unchanged. The fast path itself inserts no external methods.
 
 `filtermod(HomotopyContinuationNext, trees)` answers which invalidated targets
 belong to the package. Root ownership must instead be read from
@@ -275,13 +410,36 @@ All 28 workload captures produced:
 ```text
 runtime invalidation trees = 0
 runtime invalidation descendants = 0
-precompile blockers = 0
+precompile blockers from runtime invalidations = 0
 ```
+
+The fresh direct-support polyhedral capture again produced zero runtime trees
+and zero descendants. The new lowering defines methods only on package-owned
+functions and package-owned `_SupportSystem`/compiler types; it neither extends
+a dependency function nor inserts a method on an external type.
 
 Some captures had stale instances, but with zero trees and zero blockers they
 were pre-existing load/dependency state, not invalidations caused by executing
 the feature. Remaining TTFX should therefore be attacked as compiler breadth,
 not as runtime invalidation.
+
+For completeness, pairing the representative polyhedral inference capture
+with the earlier package-load capture reports eight load-time precompile
+blockers and 118 stale instances:
+
+| Inserted root owner | Blocker paths | Blocked workload edge |
+|---|---:|---|
+| HomotopyContinuationNext | 1 | `isnan(::DoubleF64)` to `isunordered` |
+| StarAlgebras | 1 | broadcast `similar` to `restart_copyto_nonleaf!` |
+| MutableArithmetics | 1 | `MutatingStepRange.step` to `_collect` |
+| DataStructures | 5 | broad `merge!` methods to the same `_collect` edge |
+
+The blocked inclusive timings are tiny (about 0.0004 s, 0.0007 s, and 0.0119 s
+for the shared collection edge). They are real and should not be called zero,
+but they do not explain the roughly 15.8-second first polyhedral execution.
+The dependency-owned roots require upstream narrowing. The package-owned
+`isnan(::DoubleF64)` specialization is part of the required `AbstractFloat`
+interface and is the only local load-time blocker reached by this workload.
 
 ## Current JET report
 
@@ -293,7 +451,7 @@ runtime system-shape construction boundary.
 | Workflow family | Reports per workload | Current interpretation |
 |---|---:|---|
 | Total degree, all modes/executors | 4 | 2 policy, 1 builder, 1 shape |
-| Polyhedral, all modes/executors | 5--6 | 2 policy, 2--3 builders, 1 shape |
+| Polyhedral, all modes/executors | 4 | 2 policy, 1 builder, 1 shape |
 | Parameter homotopy | 3 | 1 policy, 1 builder, 1 shape |
 | Overdetermined/singular solve | 4--5 | policy/builders/shape only |
 | Large symbolic construction | 1 | selected system builder |
@@ -312,6 +470,13 @@ The nine recurring monodromy reports are concentrated in abstract polynomial
 variable discovery and construction of `SysEvalFW`, `SysEvalJacFW`, and the
 ordinary/parameter Taylor FunctionWrappers behind the deliberate evaluator
 type firewall. The earlier ProgressMeter arithmetic reports are gone.
+
+After direct support lowering, the targeted interpreted polyhedral report is
+down from six deliberate reports to four: the input `System` builder, two solve
+policy barriers, and the input system-shape boundary. JET reports zero for
+`_build_support_instruction_sequence`, `_support_evaluator`, and
+`_support_system`; the synthetic parameter-system builder barrier is gone.
+Package-level correctness analysis still has zero reports.
 
 Current inferred return contracts include:
 
@@ -336,6 +501,20 @@ the same concrete contracts for representative total-degree, polyhedral,
 parameter, Newton, intrinsic/extrinsic subspace, vector monodromy, unique-point,
 and clustering workflows.
 
+For the new path specifically, Cthulhu reports
+`MixedCellIterator{RegenerationTraverser}` for
+`_canonical_mixed_cell_iterator` and
+`Tuple{Vector{MixedCell},Vector{Vector{Int32}}}` for
+`_fine_mixed_cells_canonical`. Exhausted retries and the two recoverable
+MixedSubdivisions failures throw at this internal boundary, so neither a union
+nor `Any` escapes into `CommonSolve.init`.
+
+For direct evaluator construction it reports exact `_SupportSystem`,
+`InstructionSequence`, and `SystemEvaluator` returns. The representative square
+`CommonSolve.init` return is exactly
+`PolyhedralSolveCache{Serial,PolyhedralBuilder{_SupportSystem},_SupportSystem,Nothing}`.
+`Core.Compiler.return_type` agrees on every contract.
+
 Two limitations remain visible:
 
 - automatic subspace monodromy conservatively returns a union of vector- and
@@ -348,8 +527,9 @@ Two limitations remain visible:
 
 ## Verification
 
-- Full suite: 40 files, 3,524/3,524 tests passed in 1m57.8s.
-- Final focused suite after concrete monodromy result annotations: 322/322.
+- Full post-direct-evaluator suite: 40 files, 3,563/3,563 tests passed in 1m44.7s.
+- Canonical/public MixedSubdivisions equivalence plus direct/symbolic evaluator
+  value, Jacobian, clone, and Taylor-order parity: polyhedral regression 56/56.
 - Coverage includes JET, Aqua, ExplicitImports, CheckConcreteStructs,
   AllocCheck, all compile modes, total-degree/polyhedral/parameter solves,
   overdetermined and singular systems, Newton, subspaces, monodromy parity,
@@ -360,13 +540,18 @@ Two limitations remain visible:
 
 Continue without PrecompileTools in this order:
 
-1. **Polyhedral start construction.** Profile and reduce
-   MixedSubdivisions `normalize_supports`, traverser, regeneration, and support
-   conversion. This is now the largest isolated feature addition.
-2. **Evaluator/Taylor wrapper architecture.** Consolidate or stage repeated
+1. **Evaluator/Taylor wrapper architecture.** Consolidate or stage repeated
    FunctionWrapper thunk construction without exposing large interpreter types
-   to tracker specialization. The previous fully parametric evaluator attempt
-   regressed cold solve time and remains rejected.
+   to tracker specialization. The direct-support capture attributes about
+   1.16 s inclusive to support-evaluator assembly, while Taylor instruction
+   execution and parameter-Taylor wrappers are the largest remaining local
+   entries. The previous fully parametric evaluator attempt regressed cold
+   solve time and remains rejected.
+2. **Tracker construction staging.** The first `ToricHomotopy` and
+   `CoefficientHomotopy` tracker stacks still infer Newton, predictor,
+   homotopy-evaluator, and endgame machinery together. Identify reusable
+   concrete construction layers without allowing tracker specialization on
+   captured interpreter types.
 3. **Monodromy evaluator reuse.** Reduce `_clone_system_evaluator` and repeated
    MonodromySolver/parameter-Taylor construction, especially across
    completeness verification's multiple phases.
@@ -378,7 +563,9 @@ Continue without PrecompileTools in this order:
    representation where possible, avoiding DynamicPolynomials arithmetic used
    only for normalization while retaining CSE for genuinely large systems.
 6. **Dependency invalidations upstream.** Narrow the broad DataStructures and
-   MultivariatePolynomials methods responsible for most load-time impact.
+   MultivariatePolynomials methods responsible for most load-time impact, and
+   request a public MixedSubdivisions already-normalized iterator constructor
+   so the current private 1.2.x integration can be removed.
 7. **Precompile only the irreducible remainder.** If the root-cause items above
    plateau, add the smallest safe representative workload and re-run every
    allocation-sensitive Taylor test for every compile mode.

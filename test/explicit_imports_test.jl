@@ -56,6 +56,13 @@ using HomotopyContinuationNext
             # Deliberate construction-time compiler barrier used to isolate
             # mutually exclusive TTFX-heavy backends:
             :inferencebarrier,
+            # MixedSubdivisions 1.2.x has no public "already normalized"
+            # iterator constructor. The polyhedral canonical-support fast path
+            # deliberately mirrors its iterator setup to avoid recompiling
+            # normalize_supports for System's cached nonnegative Int32 data.
+            :RegenerationTraverser, :CayleyIndexing, :cayley,
+            :MixedCellTable, :MixedCellTableTraverser,
+            :LexicographicOrdering,
         ),
     ) == nothing
     @test check_no_self_qualified_accesses(HomotopyContinuationNext) == nothing
