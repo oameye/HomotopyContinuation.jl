@@ -40,6 +40,31 @@ independent_normal(p::AbstractVector)::Vector{ComplexF64} = randn(ComplexF64, le
 independent_normal(L::LinearSubspace)::LinearSubspace{ComplexF64} =
     convert(LinearSubspace{ComplexF64}, rand_subspace(ambient_dim(L); dim = dim(L)))
 
+"""
+    weighted_normal(p::AbstractVector)
+
+Sample a vector `q` where each entry `q[i]` is drawn from the complex normal
+distribution with variance `|p[i]|^2`.
+
+    weighted_normal(L::LinearSubspace)
+
+Sample a linear subspace `A x = a` where the entries of `A` and `a` are drawn
+from the complex normal distribution with variances `|B[i,j]|^2` and `|b[i]|^2`,
+where `L = {B x = b}`. Unlike [`independent_normal`](@ref), this preserves the
+zero structure of `L` (entries where `B`/`b` vanish stay zero), which is
+essential for the structured flag subspaces used in [`regeneration`](@ref) and
+[`decompose`](@ref).
+"""
+weighted_normal(p::AbstractVector)::Vector{ComplexF64} =
+    randn(ComplexF64, length(p)) .* abs.(p)
+function weighted_normal(L::LinearSubspace)::LinearSubspace{ComplexF64}
+    E = extrinsic(L)
+    B, b = E.A, E.b
+    A = randn(ComplexF64, size(B)...) .* abs.(B)
+    a = randn(ComplexF64, length(b)) .* abs.(b)
+    return convert(LinearSubspace{ComplexF64}, LinearSubspace(A, a))
+end
+
 #####################
 # Monodromy Options #
 #####################
@@ -161,8 +186,8 @@ function MonodromyLoop(base::LinearSubspace, parameter_sampler::PS) where {PS}
     # The second linear space is just a translation in order to perform a
     # trace test. To still find new solutions quickly we translate the linear
     # space by a larger distance.
-    # EQUAL SPACING of L, L₀₁, L₁ is load-bearing for the trace test
-    # (prototype 11): L₀₁ - L == L₁ - L₀₁ == v.
+    # EQUAL SPACING of L, L₀₁, L₁ is load-bearing for the trace test:
+    # L₀₁ - L == L₁ - L₀₁ == v.
     v = LA.rmul!(LA.normalize!(randn(ComplexF64, codim(L))), 5)
     L₀₁ = translate(L, v, Extrinsic)
     L₁ = translate(L₀₁, v, Extrinsic)
@@ -377,8 +402,6 @@ function permutations(r::MonodromyResult; reduced::Bool = true)::Matrix{Int}
     return A
 end
 
-## find_start_pair (spec 5.D)
-
 """
     find_start_pair(F::System; max_tries = 1_000, atol = 0.0, rtol = 1e-12)
 
@@ -438,7 +461,7 @@ end
         F::System, max_tries::Int, refine_atol::Float64, rtol::Float64,
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Vector{ComplexF64}}}
 
-    # 1. Linear-in-parameters fast path (prototype 1). Each attempt draws a
+    # 1. Linear-in-parameters fast path. Each attempt draws a
     # fresh random x₀ internally, so a `nothing` (bad draw) should retry, not
     # abandon the fast path.
     for _ in 1:3

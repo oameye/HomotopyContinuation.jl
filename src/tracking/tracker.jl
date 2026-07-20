@@ -274,8 +274,13 @@ function _check_terminated!(
                 fast_abs(state.segment.t′ - state.segment.t) <=
                 2eps(fast_abs(state.segment.t))
             state.code = TrackerCode.TERMINATED_STEP_SIZE_TOO_SMALL
-        elseif state.last_steps_failed >= 3 && state.cond_J_ẋ > opts.terminate_cond
-            state.code = TrackerCode.TERMINATED_ILL_CONDITIONED
+            # NOTE: the ill-conditioned termination below is intentionally
+            # disabled. It would kill paths passing briefly through an
+            # ill-conditioned region (e.g. monodromy loops between two nearby
+            # positive-dimensional components), which should keep tracking under
+            # step-size/accuracy control. Enabling it made `decompose` lose paths.
+            # elseif state.last_steps_failed >= 3 && state.cond_J_ẋ > opts.terminate_cond
+            #     state.code = TrackerCode.TERMINATED_ILL_CONDITIONED
         end
     end
     return nothing

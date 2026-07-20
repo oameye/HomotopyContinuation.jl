@@ -48,6 +48,13 @@ export IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy, set_subspaces!
 export AffineChartHomotopy, on_affine_chart, linear_subspace_homotopy
 export find_start_pair, monodromy_solve, verify_solution_completeness
 export MonodromyOptions, MonodromyResult, is_heuristic_stop, permutations, trace
+export independent_normal, weighted_normal
+# Witness sets / numerical irreducible decomposition
+export WitnessSet, witness_set, trace_test, membership
+export system, linear_subspace, is_irreducible, degree, points
+export WitnessPoints, regeneration
+export NumericalIrreducibleDecomposition, numerical_irreducible_decomposition, nid
+export decompose, ncomponents, n_components, witness_sets, degrees
 export newton, NewtonResult, NewtonCache, NewtonReturnCode
 export Serial, Threaded
 # Certification (certify, SolutionCertificate, …) lives in the
@@ -119,6 +126,9 @@ include("solving/polyhedral.jl")
 include("solving/result.jl")
 include("solving/solve.jl")
 include("solving/monodromy.jl")
+include("solving/witness_set.jl")
+include("solving/regeneration.jl")
+include("solving/nid.jl")
 # include("precompile.jl")
 
 end # module

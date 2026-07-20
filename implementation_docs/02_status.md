@@ -18,9 +18,12 @@ overdetermined systems, parameter homotopies, and monodromy (full v2 parity incl
 actions, linear subspaces, and the trace test) are done. Certification (Krawczyk interval
 method with arbitrary-precision Arb fallback) is at v2 parity and lives in a **separate
 `lib/HomotopyContinuationNextCertification` subpackage**, which keeps the heavy Arblib
-dependency out of core (core load dropped from about 1.6s to about 0.77s). The main remaining
-gaps are witness sets/NID, a distributed executor, and two input-layer features
-(rational expression input, system composition; see Not Done).
+dependency out of core (core load dropped from about 1.6s to about 0.77s). Witness sets and
+numerical irreducible decomposition are now implemented for affine systems (`witness_set`,
+`trace_test`, `membership`, `regeneration`, `decompose`, `nid`), validated at v2 parity. The main
+remaining gaps are the witness/NID sub-items (projective, parametric, threaded intersection and
+membership), a distributed executor, and two input-layer features (rational expression input,
+system composition; see Not Done).
 
 ## Feature Checklist
 
@@ -103,12 +106,38 @@ gaps are witness sets/NID, a distributed executor, and two input-layer features
   `distinct_certified_solutions`/`!`, `certificates`, `solutions`): certifies and deduplicates
   on the fly, thread-safe via a per-task `CertificationCache` (each carries its own cloned
   `SystemEvaluator` so refinement newton never shares interpreter tapes), OhMyThreads `@tasks`/`@local`
+- [x] **Witness sets and numerical irreducible decomposition (NID)** for affine systems, in core
+  (`src/solving/{witness_set,regeneration,nid}.jl`). Provides `witness_set` (dim/codim, explicit
+  subspace, move), `trace_test`, `membership`, `intersect(W, H)` / `intersect(W, f)`; `regeneration`
+  (u-regeneration, Duff/Leykin/Rodriguez); `decompose` plus `NumericalIrreducibleDecomposition`
+  (`nid` / `numerical_irreducible_decomposition`, `ncomponents`, `degrees`, `witness_sets`,
+  hand-rolled degree table with no PrettyTables dep).
+  Redesign: it stays in **ambient coordinates and appends the linear equations** `A x − b` (v2's
+  `SlicedSystem`) instead of slicing into intrinsic coords, so witness init reuses the ordinary
+  total-degree `solve`, moves reuse `ExtrinsicSubspaceHomotopy`, and the u-homotopy reuses
+  `StraightLineHomotopy`; fill-up/decompose reuse `MonodromySolver` (intrinsic under the hood).
+  `membership` (and regeneration's junk-removal containment test) moves witness points with a single
+  concrete `IntrinsicSubspaceHomotopy`, well-conditioned in every dim/codim regime. `decompose`
+  matches v2's control flow (one accumulating monodromy loop per iteration, `iter >= 5` singleton
+  gate) with orbit connectivity tracked by point identity + union-find (a data-representation change,
+  immune to index drift).
+  Added the `weighted_normal` monodromy sampler (v2 had it only for regen/decompose; it preserves
+  the zero-structure of the flag subspaces). Validated at v2 parity: two circles give 2 components
+  of degree (2,2); the multi-dimensional example gives 11 components (dim-2 deg-2, dim-1 deg-4 twice,
+  dim-0 deg-1 eight times), and the degree table matches v2 output. Tests:
+  `test/{witness_set,nid}_test.jl`. Remaining sub-items are listed under Not Done.
 
 ### Not Done
 
-- [ ] **Distributed executor** — extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
+- [ ] **Distributed executor**: extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
 - [ ] Direct polynomial compiler (`polynomial_compiler.jl` exists, deferred)
-- [ ] Witness sets, numerical irreducible decomposition (NID)
+- [ ] **Witness sets / NID remaining sub-items** (the affine core and `intersect` are done, see
+  above): projective/homogeneous `witness_set`/`trace_test`/`membership` (needs chart-consistent
+  subspace moves plus `on_affine_chart`; `membership` currently rejects projective input with a
+  clear error, and zero-dimensional projective `witness_set` still hits `rand_subspace(codim = 0)`),
+  parametric `target_parameters` witness sets, and threaded intersection root-tracking (the
+  u-homotopy d-th-root tracking in `_serial_intersection!` is serial; monodromy fill-up already
+  threads). Rational-input witness sets stay blocked by the polynomial-only input layer (below).
 - [ ] **Non-polynomial (rational) expression input.** v2's ModelKit builds straight-line
   programs, so systems like `u₁/x² + u₂` or triangulation objectives with `y[1:2] ./ y[3]`
   work directly; v3's DynamicPolynomials input layer is polynomial-only. Blocks porting two
@@ -130,7 +159,7 @@ gaps are witness sets/NID, a distributed executor, and two input-layer features
 
 ## Test Suite
 
-38 test files run in parallel via ParallelTestRunner (`make test`, default 10 workers):
+40 test files run in parallel via ParallelTestRunner (`make test`, default 10 workers):
 
 | Category | Files | Purpose |
 |----------|-------|---------|
@@ -143,6 +172,7 @@ gaps are witness sets/NID, a distributed executor, and two input-layer features
 | Tracking | `tracking_test.jl`, `endgame_test.jl`, `newton_test.jl`, `tracker_warmstart_test.jl` | Newton, predictor, path tracking, valuation, winding, warm start |
 | Solving | `solve_test.jl`, `binomial_system_test.jl`, `polyhedral_regression_test.jl`, `overdetermined_test.jl`, `result_clustering_test.jl`, `path_diagnostics_test.jl`, `progress_test.jl` | End-to-end solving, executor dispatch, serial/threaded consistency, binomial HNF, polyhedral regression, square-up + excess-solution filtering, clustering, diagnostics |
 | Monodromy | `monodromy_test.jl`, `voronoi_tree_test.jl`, `group_actions_test.jl` | monodromy_solve (serial + threaded), permutations, trace test, verify_solution_completeness, VoronoiTree, group actions |
+| Witness/NID | `witness_set_test.jl`, `nid_test.jl` | witness_set (init, move), trace test, membership, regeneration (u-regeneration), decompose, nid multi-dimensional v2 parity |
 | v2 parity | `compare_v2_primitives_test.jl`, `compare_v2_solve_counts_test.jl`, `compare_v2_solve_match_test.jl`, `v2_parity_test.jl` | Primitive matching, solution counts, solution values, overall parity |
 | Misc | `utils_test.jl` | SegmentStepper, stable_sort, etc. |
 
