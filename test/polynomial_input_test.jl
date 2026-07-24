@@ -224,7 +224,6 @@ end
 # Direct polynomial compiler parity
 # ─────────────────────────────────────────────────────────────────────────
 
-# Compare the direct and symbolic lowerings on eval + jacobian at deterministic points.
 function direct_symbolic_parity(F, params = _empty_vars(F); rtol = 1.0e-12)
     vars = _effective_variables(F, params)
     m, nv, np = length(F), length(vars), length(params)
@@ -280,26 +279,23 @@ end
 
     @testset "edge cases match symbolic compiler" begin
         @polyvar x y p
-        # Exponents ≥ 4 lower through OP_POW_INT with a literal exponent arg
+        # exponents ≥ 4 carry a literal exponent arg through OP_POW_INT
         @test direct_symbolic_parity([x^5 - y^7 + 3x^4 * y^4])
-        # Unit negative coefficients lower to negation
         @test direct_symbolic_parity([-x + y, x - y])
-        # Zero and constant polynomials compile to constant slots
         @test direct_symbolic_parity([x^2 - 1, 0 * x, 0 * x + 2])
-        # Duplicate outputs resolve via identity assignments
+        # repeated outputs need identity assignments
         @test direct_symbolic_parity([x * y, x * y, x^2])
-        # Bare variable / parameter outputs assign directly from the input block
+        # bare variable/parameter outputs assign from the input block
         @test direct_symbolic_parity([x + 0 * y, p + 0 * x], [p])
-        # Coefficient 2 rewrites the coefficient product to an addition
+        # coefficient 2 rewrites to an addition
         @test direct_symbolic_parity([2x^2 + 2y])
-        # Complex coefficients
         @test direct_symbolic_parity([(2.0 + 3.0im) * x^2 * y - (0.5 - 0.25im)])
     end
 
     @testset "selection policy" begin
         @polyvar a b c
         no_params = _empty_vars([a + b])
-        # At most 2 variables + parameters and at most 8 terms in total
+        # ≤ 2 variables + parameters, ≤ 8 terms
         @test _prefer_direct_polynomial_lowering(
             [sum(a^i * b^(8 - i) for i in 1:8)], [a, b], no_params,
         )
@@ -308,7 +304,7 @@ end
         )
         @test !_prefer_direct_polynomial_lowering([a + b + c], [a, b, c], no_params)
         @test _prefer_direct_polynomial_lowering([a * b], [a], [b])
-        # The term budget accumulates across polynomials
+        # the term budget accumulates across polynomials
         @test !_prefer_direct_polynomial_lowering(
             [a^4 + a^3 + a^2 + a, b^5 + b^4 + b^3 + b^2 + b], [a, b], no_params,
         )
