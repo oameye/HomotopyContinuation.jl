@@ -225,6 +225,12 @@ function regeneration(
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
     )::Vector{WitnessSet{S}} where {S <: System}
+    nparameters(F) == 0 || throw(
+        ArgumentError(
+            "regeneration does not support parametric systems; substitute the " *
+                "parameter values first (cf. `witness_set(F; target_parameters)`).",
+        ),
+    )
     seed !== nothing && Random.seed!(seed)
 
     vars = collect(variables(F))
@@ -378,13 +384,22 @@ function intersect_with_hypersurface!(
     X === nothing && return nothing
 
     # Step 2: track P_next × (d-th roots of unity) through the u-homotopy.
-    Hom, d = _set_up_u_homotopy(W, F, X, h, vars, u, state)
-    eg = EndgameTracker(
-        Tracker(HomotopyEvaluator(Hom); options = state.tracker_options),
-        state.endgame_options,
-    )
+    F₀, G₀, d = _u_homotopy_systems(W, F, X, h, vars, u)
+    γ = cis(2π * rand())
     roots = ComplexF64[cis(2π * k / d) for k in 0:(d - 1)]
-    _serial_intersection!(X, P_next, roots, eg)
+    if threading && length(P_next) * d > 1
+        _threaded_intersection!(
+            X, P_next, roots, F₀, G₀, γ,
+            state.tracker_options, state.endgame_options,
+        )
+    else
+        Hom = StraightLineHomotopy(F₀.evaluator, G₀.evaluator; γ = γ)
+        eg = EndgameTracker(
+            Tracker(HomotopyEvaluator(Hom); options = state.tracker_options),
+            state.endgame_options,
+        )
+        _serial_intersection!(X, P_next, roots, eg)
+    end
     return nothing
 end
 
@@ -394,32 +409,82 @@ function _manage_initial_points!(P, m)
     return P_next
 end
 
+# Track one (point, root-of-unity) start through the u-homotopy. Returns the
+# endpoint when it is a valid isolated intersection point, else `nothing`.
+function _track_u_root(
+        eg::EndgameTracker, q0::Vector{ComplexF64},
+    )::Union{Nothing, Vector{ComplexF64}}
+    track!(eg, FSVec{ComplexF64}(q0))
+    pr = PathResult(eg; path_number = 0, start_solution = q0)
+    if is_success(pr) && is_finite(pr) && is_nonsingular(pr)
+        q = solution(pr)
+        # sanity: q must be trackable slightly back from t = 0
+        code = track!(
+            eg.tracker, FSVec{ComplexF64}(q);
+            t₁ = complex(0.0), t₀ = complex(0.1),
+        )
+        code == TrackerCode.TRACKER_SUCCESS && return q
+    end
+    return nothing
+end
+
 function _serial_intersection!(X::WitnessPoints, P, roots, eg::EndgameTracker)
     for p in P
         for ζ in roots
             q0 = copy(p)
             q0[end] = ζ    # replace the u-placeholder with a d-th root of unity
-            track!(eg, FSVec{ComplexF64}(q0))
-            pr = PathResult(eg; path_number = 0, start_solution = Vector{ComplexF64}(q0))
-            if is_success(pr) && is_finite(pr) && is_nonsingular(pr)
-                q = solution(pr)
-                # sanity: q must be trackable slightly back from t = 0
-                code = track!(
-                    eg.tracker, FSVec{ComplexF64}(q);
-                    t₁ = complex(0.0), t₀ = complex(0.1),
-                )
-                if code == TrackerCode.TRACKER_SUCCESS
-                    push!(X, q)
-                end
-            end
+            q = _track_u_root(eg, q0)
+            q === nothing || push!(X, q)
         end
     end
     return nothing
 end
 
+# Threaded variant: one task per (point, root) pair, each with its own
+# u-homotopy built from cloned evaluators (interpreter tapes are mutable, so
+# tasks must not share them). All tasks use the same γ — they track paths of
+# the SAME homotopy. Endpoints are collected per job index and pushed in the
+# serial order.
+function _threaded_intersection!(
+        X::WitnessPoints, P::Vector{Vector{ComplexF64}}, roots::Vector{ComplexF64},
+        F₀::S1, G₀::S2, γ::ComplexF64,
+        tracker_options::TrackerOptions, endgame_options::EndgameOptions,
+    )::Nothing where {S1 <: System, S2 <: System}
+    nroots = length(roots)
+    njobs = length(P) * nroots
+    results = [ComplexF64[] for _ in 1:njobs]
+    nt = Threads.nthreads()
+    @tasks for k in 1:njobs
+        @set ntasks = nt
+        @local eg = EndgameTracker(
+            Tracker(
+                HomotopyEvaluator(
+                    StraightLineHomotopy(
+                        _clone_system_evaluator(F₀),
+                        _clone_system_evaluator(G₀);
+                        γ = γ,
+                    ),
+                );
+                options = tracker_options,
+            ),
+            endgame_options,
+        )
+        i, j = fldmod1(k, nroots)
+        q0 = copy(P[i])
+        q0[end] = roots[j]
+        q = _track_u_root(eg, q0)
+        q === nothing || (results[k] = q)
+    end
+    for r in results
+        isempty(r) || push!(X, r)
+    end
+    return nothing
+end
+
 # Deform `u^d − 1` into `h`, moving from W's type-1 subspace to X's type-2.
-function _set_up_u_homotopy(
-        W::WitnessPoints, F::System, X::WitnessPoints, h, vars, u, state,
+# Returns the two sliced ambient endpoint systems and the degree `d`.
+function _u_homotopy_systems(
+        W::WitnessPoints, F::System, X::WitnessPoints, h, vars, u,
     )
     d = MP.maxdegree(h)
     h0 = u^d - 1
@@ -430,8 +495,7 @@ function _set_up_u_homotopy(
 
     F₀ = _sliced_system([fpolys; h0], collect(vars), L)
     G₀ = _sliced_system([fpolys; h], collect(vars), K)
-    Hom = StraightLineHomotopy(F₀.evaluator, G₀.evaluator; γ = cis(2π * rand()))
-    return Hom, d
+    return F₀, G₀, d
 end
 
 # ── Membership within regeneration (structured subspace) ─────────────────────
@@ -682,7 +746,10 @@ function _remove_contained_points!(
             dim(out[j]) > dim(Wi) || continue
             for (idx, p) in enumerate(Wi.R)
                 keep[idx] || continue
-                membership(p, out[j]; atol = atol, rtol = rtol) && (keep[idx] = false)
+                membership(
+                    p, out[j];
+                    atol = atol, rtol = rtol, show_progress = false,
+                ) && (keep[idx] = false)
             end
         end
         out[i] = WitnessSet(

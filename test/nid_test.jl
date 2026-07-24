@@ -125,11 +125,9 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test isa(N4, NumericalIrreducibleDecomposition)
     end
 
-    # NOTE: rational-function systems (e.g. `x / (y - 1)`) are tracked as a
-    # SEPARATE feature. v3's `System` takes DynamicPolynomials input, which
-    # cannot represent rational functions; supporting them (denominator
-    # clearing or a rational input path) is deferred to its own change. The
-    # original v2 "rational systems" testset is preserved here, skipped.
+    # Rational-function systems (e.g. `x / (y - 1)`) need non-polynomial
+    # input, which the DynamicPolynomials input layer cannot represent
+    # (denominator clearing or a rational input path is a separate feature).
     @testset "rational systems (separate feature)" begin
         @test_skip false
     end
@@ -278,12 +276,11 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             (7 / 8) * xx_A * xx_X - (5 / 7) * xx_CXA,
         ]
 
-        # Monodromy-based decomposition is probabilistic: unseeded, ACR gives the
-        # correct Dict(4 => [7]) ~90% of the time (measured the same for v2's own
-        # `nid`), so a bare `== Dict(...)` assertion on an unseeded run is flaky.
-        # Seed it for a deterministic check, matching the other decompose testsets
-        # in this file. Reproducibility across runs relies on regeneration/decompose
-        # drawing their seeds from the (seeded) global RNG rather than RandomDevice.
+        # Monodromy-based decomposition is probabilistic: unseeded, ACR gives
+        # the correct Dict(4 => [7]) only ~90% of the time, so a bare `==`
+        # assertion on an unseeded run is flaky. Seed for a deterministic
+        # check; reproducibility relies on regeneration/decompose drawing
+        # their randomness from the (seeded) global RNG.
         N_ACR = nid(F_ACR; seed = 0x1234, show_progress = false)
         @test degrees(N_ACR) == Dict(4 => [7])
     end

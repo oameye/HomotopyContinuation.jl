@@ -96,7 +96,7 @@ end
 using HomotopyContinuationNext: monodromy_solve, MonodromyResult, permutations,
     is_heuristic_stop, nsolutions, solutions, trace
 
-@testset "monodromy_solve: v2 oracle expectations (serial)" begin
+@testset "monodromy_solve: oracle expectations (serial)" begin
     @polyvar y[1:2] p[1:2]
     F = System([y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]]; variables = y, parameters = p)
 

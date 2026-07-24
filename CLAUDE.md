@@ -137,6 +137,10 @@ For full reference, see the `julia-perf` skill (`.claude/skills/julia-perf/`) an
 - **No `using X` without explicit imports.** Use `using X: func1, func2` or `import X`. ExplicitImports.jl enforces this.
 - **Format with Runic.** Run `make format` before committing.
 
+### Comments
+
+- **Comments and docstrings describe the code as it is, never its history.** No references to v2 / HomotopyContinuation.jl, "ported from", "the analog of", prototypes, review findings, or plan/status narration in `src/` or `test/`. State the behavior and the constraint that motivates it. The v2-parity mapping and porting status live in `implementation_docs/`, not in code. Sole exception: tests that literally load v2 as a comparison oracle (`compare_v2_*`, `v2_parity_test`).
+
 ## Dependencies
 
 | Package | Purpose |

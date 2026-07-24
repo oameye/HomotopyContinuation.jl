@@ -8,7 +8,7 @@ using HomotopyContinuationNext: IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomo
     taylor!, FSVec, FSMat, TaylorVector
 using DynamicPolynomials: @polyvar, differentiate
 
-# Quadric surface in C^3, witness points on a random line (prototype 10 setup).
+# Quadric surface in C^3, witness points on a random line.
 @polyvar z[1:3]
 quadric = System([z[1]^2 + 2z[2]^2 + 3z[3]^2 + z[1] * z[2] - 1]; variables = z)
 
