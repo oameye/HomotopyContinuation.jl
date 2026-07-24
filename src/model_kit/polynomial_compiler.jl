@@ -14,11 +14,10 @@ end
 Base.isequal(a::MonomialKey, b::MonomialKey) = isequal(a.data, b.data)
 Base.hash(key::MonomialKey, h::UInt) = hash(key.data, h)
 
-# Shared monomial/power memoization over a `TapeCompiler`. Both the
-# symbol-driven polynomial frontend and the polyhedral support frontend lower
-# monomials through this cache so identical powers and monomials compile to a
-# single tape slot. `MonomialKey.data` holds alternating (variable_slot,
-# exponent) pairs with nonzero exponents; an empty key is the constant 1.
+# Monomial/power memoization shared by the polynomial and polyhedral support
+# frontends, so identical powers and monomials compile to one tape slot.
+# `MonomialKey.data` holds (variable_slot, exponent) pairs with nonzero
+# exponents, ordered by descending slot; an empty key is the constant 1.
 struct MonomialCache
     compiler::TapeCompiler
     power_slots::Dict{Tuple{Int32, Int}, Int32}
@@ -78,6 +77,8 @@ function _polynomial_instruction_compiler(
     return PolynomialInstructionCompiler(MonomialCache(compiler), slot_by_symbol)
 end
 
+# Insertion-sorted in place: keys have a handful of pairs, and avoiding the
+# generic sort keeps its specialization out of construction-time compilation.
 function _monomial_key(
         mono,
         slot_by_symbol::Dict{Symbol, Int32},
@@ -87,8 +88,24 @@ function _monomial_key(
         exp == 0 && continue
         push!(data, slot_by_symbol[Symbol(var)])
         push!(data, Int32(exp))
+        k = length(data) >> 1
+        while k > 1 && data[2k - 3] < data[2k - 1]
+            data[2k - 3], data[2k - 1] = data[2k - 1], data[2k - 3]
+            data[2k - 2], data[2k] = data[2k], data[2k - 2]
+            k -= 1
+        end
     end
     return MonomialKey(data)
+end
+
+# Multiply `slot` by a literal coefficient. Coefficients that rewrite to a
+# cheaper instruction never register a constant, leaving no dead tape slot.
+function _coeff_mul_slot!(c::TapeCompiler, coeff::ComplexF64, slot::Int32)::Int32
+    coeff == one(ComplexF64) && return slot
+    _is_one_slot(c, slot) && return _get_constant_slot!(c, coeff)
+    coeff == -one(ComplexF64) && return _tape_neg!(c, slot)
+    coeff == ComplexF64(2) && return _tape_add!(c, slot, slot)
+    return _tape_mul!(c, _get_constant_slot!(c, coeff), slot)
 end
 
 function _compile_polynomial!(
@@ -102,12 +119,11 @@ function _compile_polynomial!(
         coeff = ComplexF64(MP.coefficient(term))
         iszero(coeff) && continue
         key = _monomial_key(MP.monomial(term), state.slot_by_symbol)
-        mono_slot = _monomial_slot!(state.cache, key)
-        if coeff == one(ComplexF64)
-            push!(term_slots, mono_slot)
+        if isempty(key.data)
+            push!(term_slots, _get_constant_slot!(compiler, coeff))
         else
-            coeff_slot = _get_constant_slot!(compiler, coeff)
-            push!(term_slots, _tape_mul!(compiler, coeff_slot, mono_slot))
+            mono_slot = _monomial_slot!(state.cache, key)
+            push!(term_slots, _coeff_mul_slot!(compiler, coeff, mono_slot))
         end
     end
     isempty(term_slots) && return _get_constant_slot!(compiler, zero(ComplexF64))

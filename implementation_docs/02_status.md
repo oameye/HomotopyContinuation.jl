@@ -52,6 +52,13 @@ two input-layer features (rational expression input, system composition; see Not
   validation, v2 parity), weighted norms, custom LU with Skeel scaling
 - [x] Tape interpreter for eval, jacobian, Taylor 1–3, DF64
 - [x] CSE optimizer, Moshi ADTs for SExpr/ExecInstruction
+- [x] Direct polynomial compiler (`polynomial_compiler.jl`): lowers MultivariatePolynomials
+  input straight to tape instructions, skipping the SExpr/CSE pipeline. Selected
+  automatically at System construction for tiny systems (≤ 2 variables + parameters,
+  ≤ 8 total terms) where it materially cuts TTFX; larger systems keep the symbolic
+  compiler for its global CSE. The polyhedral support frontend shares its
+  `MonomialCache` so identical powers/monomials compile to a single tape slot.
+  Parity-tested against the symbolic compiler (test/polynomial_input_test.jl)
 - [x] RGF compiled eval+jac backend (`CompileMode.COMPILED`, 3–6x kernel speedup)
 - [x] RGF compiled Taylor backend (`CompileMode.COMPILED_ALL`, 1.3–1.7x Taylor kernel speedup, 1.2–1.4x end-to-end vs `INTERPRETED`)
 - [x] Automatic coefficient normalization (scales polynomials with O(10^8+) coefficients to O(1))
@@ -170,7 +177,6 @@ two input-layer features (rational expression input, system composition; see Not
 ### Not Done
 
 - [ ] **Distributed executor**: extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
-- [ ] Direct polynomial compiler (`polynomial_compiler.jl` exists, deferred)
 - [ ] Rational-input witness sets stay blocked by the polynomial-only input layer (below);
   everything else under witness sets / NID is done (see the Done bullet above)
 - [ ] **Solve-level subspace / many-target API** (discovered 2026-07-24 while porting v2's

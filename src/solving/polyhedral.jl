@@ -158,10 +158,7 @@ function _support_term_parts!(
         cache::MonomialCache, parameter::Int, key::MonomialKey, multiplier::Int = 1,
     )::Tuple{Int32, Int32}
     monomial_slot = _monomial_slot!(cache, key)
-    if multiplier != 1
-        multiplier_slot = _get_constant_slot!(cache.compiler, ComplexF64(multiplier))
-        monomial_slot = _tape_mul!(cache.compiler, multiplier_slot, monomial_slot)
-    end
+    monomial_slot = _coeff_mul_slot!(cache.compiler, ComplexF64(multiplier), monomial_slot)
     return cache.compiler.param_slots[parameter], monomial_slot
 end
 

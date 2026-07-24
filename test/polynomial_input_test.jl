@@ -6,7 +6,7 @@ using LinearAlgebra: norm
 using HomotopyContinuationNext: System, execute!, execute_taylor!,
     TaylorVector, TruncatedTaylorSeries, DoubleF64, ComplexDF64, OpType, instruction_op,
     Interpreter, _build_instruction_sequence_direct, _build_instruction_sequence_via_sexpr,
-    _effective_variables, _empty_vars
+    _prefer_direct_polynomial_lowering, _effective_variables, _empty_vars
 
 # Helpers: build a System through the public polynomial input path
 function test_system(F; parameters = nothing, variables = nothing)
@@ -224,6 +224,35 @@ end
 # Direct polynomial compiler parity
 # ─────────────────────────────────────────────────────────────────────────
 
+# Compare the direct and symbolic lowerings on eval + jacobian at deterministic points.
+function direct_symbolic_parity(F, params = _empty_vars(F); rtol = 1.0e-12)
+    vars = _effective_variables(F, params)
+    m, nv, np = length(F), length(vars), length(params)
+    I_direct = Interpreter(
+        Vector{ComplexF64}, _build_instruction_sequence_direct(F, vars, params, true),
+    )
+    I_symbolic = Interpreter(
+        Vector{ComplexF64}, _build_instruction_sequence_via_sexpr(F, vars, params, true),
+    )
+    u_direct = zeros(ComplexF64, m)
+    U_direct = zeros(ComplexF64, m, nv)
+    u_symbolic = zeros(ComplexF64, m)
+    U_symbolic = zeros(ComplexF64, m, nv)
+    for trial in 1:3
+        x_val = ComplexF64[
+            cospi(0.13 * trial * k) + im * sinpi(0.29 * trial * k) for k in 1:nv
+        ]
+        p_val = ComplexF64[
+            cospi(0.31 * trial * k) - im * sinpi(0.17 * trial * k) for k in 1:np
+        ]
+        execute!(u_direct, U_direct, I_direct, x_val, p_val)
+        execute!(u_symbolic, U_symbolic, I_symbolic, x_val, p_val)
+        isapprox(u_direct, u_symbolic; rtol = rtol) || return false
+        isapprox(U_direct, U_symbolic; rtol = rtol) || return false
+    end
+    return true
+end
+
 @testset "Direct polynomial compiler parity" begin
     @testset "eval and jacobian agree with symbolic compiler" begin
         @polyvar x y z a
@@ -247,6 +276,42 @@ end
 
         @test u_direct ≈ u_symbolic rtol = 1.0e-12
         @test U_direct ≈ U_symbolic rtol = 1.0e-12
+    end
+
+    @testset "edge cases match symbolic compiler" begin
+        @polyvar x y p
+        # Exponents ≥ 4 lower through OP_POW_INT with a literal exponent arg
+        @test direct_symbolic_parity([x^5 - y^7 + 3x^4 * y^4])
+        # Unit negative coefficients lower to negation
+        @test direct_symbolic_parity([-x + y, x - y])
+        # Zero and constant polynomials compile to constant slots
+        @test direct_symbolic_parity([x^2 - 1, 0 * x, 0 * x + 2])
+        # Duplicate outputs resolve via identity assignments
+        @test direct_symbolic_parity([x * y, x * y, x^2])
+        # Bare variable / parameter outputs assign directly from the input block
+        @test direct_symbolic_parity([x + 0 * y, p + 0 * x], [p])
+        # Coefficient 2 rewrites the coefficient product to an addition
+        @test direct_symbolic_parity([2x^2 + 2y])
+        # Complex coefficients
+        @test direct_symbolic_parity([(2.0 + 3.0im) * x^2 * y - (0.5 - 0.25im)])
+    end
+
+    @testset "selection policy" begin
+        @polyvar a b c
+        no_params = _empty_vars([a + b])
+        # At most 2 variables + parameters and at most 8 terms in total
+        @test _prefer_direct_polynomial_lowering(
+            [sum(a^i * b^(8 - i) for i in 1:8)], [a, b], no_params,
+        )
+        @test !_prefer_direct_polynomial_lowering(
+            [sum(a^i * b^(9 - i) for i in 1:9)], [a, b], no_params,
+        )
+        @test !_prefer_direct_polynomial_lowering([a + b + c], [a, b, c], no_params)
+        @test _prefer_direct_polynomial_lowering([a * b], [a], [b])
+        # The term budget accumulates across polynomials
+        @test !_prefer_direct_polynomial_lowering(
+            [a^4 + a^3 + a^2 + a, b^5 + b^4 + b^3 + b^2 + b], [a, b], no_params,
+        )
     end
 end
 
