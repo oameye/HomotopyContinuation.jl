@@ -11,6 +11,7 @@ using HomotopyContinuationNext:
     LinearSubspace,
     PathResult,
     PathResultCode,
+    Result,
     Tracker,
     UniquePoints,
     _cluster_solutions,
@@ -46,6 +47,13 @@ const WORKLOADS = (
     :intrinsic_subspace_track,
     :extrinsic_subspace_track,
     :affine_chart,
+    :slice_solve,
+    :slice_solve_projective,
+    :witness_set_build,
+    :parameter_sweep,
+    :subspace_sweep_intrinsic,
+    :subspace_sweep_extrinsic,
+    :result_iterator_lazy,
     :monodromy_serial,
     :monodromy_threaded,
     :monodromy_group_action,
@@ -252,6 +260,84 @@ function run(::Val{:affine_chart})
     x = randn(rng, ComplexF64, 3)
     H isa AffineChartHomotopy && on_chart!(x, H)
     return H, x
+end
+
+# ── Sliced, witness-set, sweep and lazy routes ────────────────────────────────
+
+function _conic_and_line()
+    Random.seed!(5)
+    @polyvar x y
+    F = System([x^2 + y^2 - 5]; variables = [x, y])
+    return F, rand_subspace(2; codim = 1)
+end
+
+function run(::Val{:slice_solve})
+    F, L = _conic_and_line()
+    return solve(F, L, TotalDegree(; seed = UInt32(0x1234)), Serial(); show_progress = false)
+end
+
+function run(::Val{:slice_solve_projective})
+    @polyvar x y z
+    F = System([x^2 + y^2 - z^2]; variables = [x, y, z])
+    Random.seed!(6)
+    L = rand_subspace(3; codim = 1, affine = false)
+    return solve(F, L, TotalDegree(; seed = UInt32(0x1234)), Serial(); show_progress = false)
+end
+
+function run(::Val{:witness_set_build})
+    @polyvar x y z
+    F = System([x^2 + y^2 + z^2 - 1]; variables = [x, y, z])
+    return witness_set(
+        F; dim = 2, seed = UInt32(0x1234), threading = false, show_progress = false,
+    )
+end
+
+function _parameter_sweep_problem()
+    @polyvar x y a b c
+    F = System(
+        [x^2 + y^2 - 1, a * x + b * y + c];
+        variables = [x, y], parameters = [a, b, c],
+    )
+    rng = MersenneTwister(17)
+    p₀ = randn(rng, ComplexF64, 3)
+    starts = [
+        [1.0 + 0.0im, 0.0 + 0.0im],
+        [-1.0 + 0.0im, 0.0 + 0.0im],
+    ]
+    return F, starts, p₀, [randn(rng, 3) for _ in 1:3]
+end
+
+function run(::Val{:parameter_sweep})
+    F, starts, p₀, targets = _parameter_sweep_problem()
+    return solve(
+        F, starts, targets, Serial();
+        start_parameters = p₀, seed = UInt32(0x1234), show_progress = false,
+    )
+end
+
+function _subspace_sweep_problem()
+    F, L₀ = _conic_and_line()
+    Random.seed!(23)
+    targets = [rand_subspace(2; codim = 1) for _ in 1:3]
+    starts = solutions(solve(F, L₀, Serial(); show_progress = false))
+    return F, starts, L₀, targets
+end
+
+function _subspace_sweep(intrinsic::Bool)
+    F, starts, L₀, targets = _subspace_sweep_problem()
+    return solve(
+        F, starts, L₀, targets, Serial();
+        intrinsic = intrinsic, seed = UInt32(0x1234), show_progress = false,
+    )
+end
+
+run(::Val{:subspace_sweep_intrinsic}) = _subspace_sweep(true)
+run(::Val{:subspace_sweep_extrinsic}) = _subspace_sweep(false)
+
+function run(::Val{:result_iterator_lazy})
+    F, L = _conic_and_line()
+    ri = result_iterator(F, L, TotalDegree(; seed = UInt32(0x1234)))
+    return first(ri), Result(bitmask_filter(is_real, ri))
 end
 
 function _monodromy_system()

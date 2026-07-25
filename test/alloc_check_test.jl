@@ -189,6 +189,87 @@ end
         )
     end
 
+    # ── AffineChartSystem (projective chart row) ─────────────────────────
+
+    @testset "AffineChartSystem" begin
+        @test isempty(
+            _real_allocs(
+                HC.evaluate!,
+                (
+                    FSVec{ComplexF64}, HC.AffineChartSystem,
+                    FSVec{ComplexF64}, FSVec{ComplexF64},
+                ),
+            )
+        )
+        @test isempty(
+            _real_allocs(
+                HC.evaluate_and_jacobian!,
+                (
+                    FSVec{ComplexF64}, FSMat{ComplexF64}, HC.AffineChartSystem,
+                    FSVec{ComplexF64}, FSVec{ComplexF64},
+                ),
+            )
+        )
+        for (V, N) in ((Val{1}, 2), (Val{2}, 3), (Val{3}, 4))
+            @test isempty(
+                _real_allocs(
+                    HC.taylor!,
+                    (
+                        FSVec{ComplexF64}, V, HC.AffineChartSystem,
+                        TaylorVector{N, ComplexF64}, FSVec{ComplexF64},
+                    ),
+                )
+            )
+        end
+    end
+
+    # ── SlicedSystem (`[F; A x − b]` plus an optional chart row) ─────────
+
+    @testset "SlicedSystem" begin
+        for X in (ComplexF64, HC.ComplexDF64)
+            @test isempty(
+                _real_allocs(
+                    HC.evaluate!,
+                    (
+                        FSVec{ComplexF64}, HC.SlicedSystem,
+                        FSVec{X}, FSVec{ComplexF64},
+                    ),
+                )
+            )
+        end
+        @test isempty(
+            _real_allocs(
+                HC.evaluate!,
+                (
+                    FSVec{HC.ComplexDF64}, HC.SlicedSystem,
+                    FSVec{HC.ComplexDF64}, FSVec{ComplexF64},
+                ),
+            )
+        )
+        @test isempty(
+            _real_allocs(
+                HC.evaluate_and_jacobian!,
+                (
+                    FSVec{ComplexF64}, FSMat{ComplexF64}, HC.SlicedSystem,
+                    FSVec{ComplexF64}, FSVec{ComplexF64},
+                ),
+            )
+        )
+        for (V, N) in ((Val{1}, 2), (Val{2}, 3), (Val{3}, 4))
+            for P in (FSVec{ComplexF64}, TaylorVector{N, ComplexF64})
+                @test isempty(
+                    _real_allocs(
+                        HC.taylor!,
+                        (
+                            FSVec{ComplexF64}, V, HC.SlicedSystem,
+                            TaylorVector{N, ComplexF64}, P,
+                        ),
+                    )
+                )
+            end
+        end
+    end
+
     # ── Tracker step ─────────────────────────────────────────────────────
     # This is the main hot-path entry point. FunctionWrapper dispatches are
     # expected (type-erasure boundary) but no other allocations should occur.

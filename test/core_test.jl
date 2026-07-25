@@ -343,6 +343,18 @@ end
         @test HC.is_homogeneous(sys) == true
         @test sys.is_homogeneous == true
         @test_throws ArgumentError HC.support_coefficients(sys)
+        # `a * y^2` has total degree 3, but degree 2 in `[x, y]`.
+        @test HC.degrees(sys) == [2, 2]
+    end
+
+    @testset "System: degrees ignore the parameters" begin
+        @polyvar x y a b
+        # A higher power, a product of parameters, and a parameter-only term.
+        sys = System(
+            [a^3 * x^2 + y, a * b * x * y - a^5, b^2 - x];
+            variables = [x, y], parameters = [a, b],
+        )
+        @test HC.degrees(sys) == [2, 2, 1]
     end
 
     @testset "System: eval+jac vs MP ground truth" begin

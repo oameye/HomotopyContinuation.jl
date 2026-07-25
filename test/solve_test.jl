@@ -299,6 +299,20 @@ using CommonSolve: CommonSolve
         @test nsolutions(r2) >= 1
     end
 
+    @testset "start-system routes reject a parametric system" begin
+        @polyvar x y a
+        F = System([x^2 + y^2 - a, x * y - 1]; variables = [x, y], parameters = [a])
+        for alg in (TotalDegree(), Polyhedral())
+            @test_throws ArgumentError solve(F, alg, Serial(); show_progress = false)
+            @test_throws ArgumentError CommonSolve.init(F, alg, Serial())
+        end
+        @test_throws ArgumentError solve(
+            F, rand_subspace(2; codim = 1), Serial(); show_progress = false,
+        )
+        G = System([x^2 + y^2 - 5, x * y - 1]; variables = [x, y])
+        @test nsolutions(solve(G, Serial(); show_progress = false)) == 4
+    end
+
     @testset "Executor types" begin
         @test Serial() isa HomotopyContinuationNext.AbstractExecutor
         @test Threaded() isa HomotopyContinuationNext.AbstractExecutor

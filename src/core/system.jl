@@ -135,6 +135,31 @@ end
 
 @inline _to_fsvec(xs::AbstractVector{T}) where {T} = FSVec{T}(collect(xs))
 
+# Total degree in `variables` only; `MP.maxdegree` would count parameters too.
+function _variable_degrees(
+        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+        variables::AbstractVector,
+    )::Vector{Int}
+    Base.@nospecialize polys variables
+    var_set = Set(variables)
+    degs = Vector{Int}(undef, length(polys))
+    for (i, poly) in enumerate(polys)
+        maxdeg = 0
+        for term in MP.terms(poly)
+            iszero(MP.coefficient(term)) && continue
+            mono = MP.monomial(term)
+            degree = 0
+            for (var, exp) in zip(MP.variables(mono), MP.exponents(mono))
+                var in var_set || continue
+                degree += exp
+            end
+            degree > maxdeg && (maxdeg = degree)
+        end
+        degs[i] = maxdeg
+    end
+    return degs
+end
+
 function _is_homogeneous(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         variables::AbstractVector,
@@ -253,7 +278,7 @@ end
     interp_t2 = Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval)
     interp_t3 = Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval)
 
-    degs = Int[MP.maxdegree(p) for p in polys]
+    degs = _variable_degrees(polys, variables)
     is_homogeneous = _is_homogeneous(polys, variables)
 
     evaluator = _build_mode_evaluator(

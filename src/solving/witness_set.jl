@@ -140,81 +140,7 @@ corank(F::System)::Int = nvariables(F) - LA.rank(F)
 
 # ── Internal primitives ──────────────────────────────────────────────────────
 
-# Substitute the parameter values `p` into `F`, returning a parameter-free
-# system in the same variables. The compile mode is preserved. Throws when `p`
-# does not match the parameters.
-function _fix_parameters(
-        F::System{P, V, M},
-        p::Union{Nothing, AbstractVector{<:Number}},
-    )::System where {P, V, M}
-    np = nparameters(F)
-    p === nothing && throw(
-        ArgumentError(
-            "The system has $np parameters; pass their values via " *
-                "`target_parameters` to compute a witness set.",
-        ),
-    )
-    np == 0 && throw(
-        ArgumentError(
-            "`target_parameters` was given, but the system has no parameters.",
-        ),
-    )
-    length(p) == np || throw(
-        ArgumentError(
-            "The number of parameter values ($(length(p))) does not match the " *
-                "number of parameters ($np).",
-        ),
-    )
-    params = collect(parameters(F))
-    vars = collect(variables(F))
-    pc = Vector{ComplexF64}(p)
-    fixed = [MP.polynomial(MP.subs(f, params => pc)) for f in polynomials(F)]
-    return System(fixed; variables = vars, compile = M)
-end
-
-# The full ambient space as a codim-0 subspace (`A` is `0 × n`): witness sets
-# of zero-dimensional varieties slice with the whole space, so the sliced
-# system is `F` itself (plus a chart row in the projective case).
-_full_subspace(n::Int)::LinearSubspace{ComplexF64} =
-    LinearSubspace(zeros(ComplexF64, 0, n), ComplexF64[])
-
-# Build the degree-1 polynomials `A[i,:]·vars - b[i]` describing the extrinsic
-# subspace `L = {x | A x = b}`.
-function _linear_equations(L::LinearSubspace, vars)
-    E = extrinsic(L)
-    A, b = E.A, E.b
-    n = length(vars)
-    return [
-        sum(A[i, j] * vars[j] for j in 1:n) - b[i] for i in 1:size(A, 1)
-    ]
-end
-
-# Build the chart equation `c·x − 1` fixing the projective scaling on the chart
-# `c`. Homogeneous systems are positive-dimensional in ambient coordinates; the
-# chart row makes the sliced system square.
-function _chart_equation(chart::AbstractVector, vars::AbstractVector)
-    n = length(vars)
-    return sum(chart[j] * vars[j] for j in 1:n) - 1
-end
-
-# Build the sliced system `[polys; A x − b]` in ambient coordinates, i.e. the
-# zero set `V(polys) ∩ L`. For a projective (homogeneous) problem a chart
-# equation `c·x − 1` is appended so the system is square.
-function _sliced_system(
-        polys::AbstractVector, vars::AbstractVector, L::LinearSubspace;
-        chart::Union{Nothing, AbstractVector} = nothing,
-    )::System
-    lin = _linear_equations(L, vars)
-    eqs = vcat(collect(polys), lin)
-    chart !== nothing && push!(eqs, _chart_equation(chart, vars))
-    return System(eqs; parameters = empty(vars), variables = vars)
-end
-
-@noinline function _solve_witness_system(
-        combined::S, algorithm::TotalDegree, executor::E, show_progress::Bool,
-    )::Result where {S <: System, E <: AbstractExecutor}
-    return solve(combined, algorithm, executor; show_progress = show_progress)
-end
+@noinline _solve_witness_cache(cache)::Result = CommonSolve.solve!(cache)
 
 # Initialize witness points: solve `V(F) ∩ L` by appending the linear equations
 # of `L` to `F` and running the ordinary total-degree solve. Returns the
@@ -230,20 +156,16 @@ function _witness_init(
         endgame_options::EndgameOptions = EndgameOptions(),
         seed::UInt32 = rand(UInt32),
     )::Vector{Vector{ComplexF64}}
-    vars = collect(variables(F))
-    combined = if projective
-        chart = randn(ComplexF64, length(vars))
-        _sliced_system(polynomials(F), vars, L; chart = chart)
-    else
-        _sliced_system(polynomials(F), vars, L)
-    end
+    chart = projective ? randn(ComplexF64, nvariables(F)) : ComplexF64[]
     alg = TotalDegree(;
         seed = seed,
         tracker_options = tracker_options,
         endgame_options = endgame_options,
     )
     executor = threading ? Threaded() : Serial()
-    res = _solve_witness_system(combined, alg, executor, show_progress)
+    res = _solve_witness_cache(
+        _init_sliced_total_degree(F, L, chart, alg, executor, show_progress),
+    )
     return [solution(pr) for pr in results(res; only_nonsingular = true)]
 end
 
@@ -272,18 +194,9 @@ function _move_witness_points(
         (chart === nothing ? randn(ComplexF64, nvariables(F)) : chart) :
         ComplexF64[]
     eg = if projective
-        EndgameTracker(
-            Tracker(
-                HomotopyEvaluator(AffineChartHomotopy(base, c));
-                options = tracker_options,
-            ),
-            endgame_options,
-        )
+        _endgame_tracker(AffineChartHomotopy(base, c), tracker_options, endgame_options)
     else
-        EndgameTracker(
-            Tracker(HomotopyEvaluator(base); options = tracker_options),
-            endgame_options,
-        )
+        _endgame_tracker(base, tracker_options, endgame_options)
     end
     out = Vector{Vector{ComplexF64}}()
     for s in starts
@@ -658,10 +571,7 @@ function MembershipState(
     ev = _clone_system_evaluator(F)
     hom_ev = projective ? SystemEvaluator(AffineChartSystem(ev, chart)) : ev
     homotopy = IntrinsicSubspaceHomotopy(hom_ev, L, L; gamma = gamma)
-    tracker = EndgameTracker(
-        Tracker(HomotopyEvaluator(homotopy); options = tracker_options),
-        endgame_options,
-    )
+    tracker = _endgame_tracker(homotopy, tracker_options, endgame_options)
     return MembershipState(
         ev, homotopy, tracker,
         FSVec{ComplexF64}(zeros(ComplexF64, m)),

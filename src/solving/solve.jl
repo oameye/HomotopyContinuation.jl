@@ -35,6 +35,24 @@ function _check_square_or_overdetermined(::UnderdeterminedShape, F::System)::Not
     )
 end
 
+"""
+    _check_parameter_free(F, route)
+
+Throw when `F` still has parameters. `route` names the algorithm in the message.
+"""
+function _check_parameter_free(F::System, route::String)::Nothing
+    np = nparameters(F)
+    np == 0 || throw(
+        ArgumentError(
+            "$route requires a parameter-free system, but the system has $np " *
+                "parameter(s). Substitute their values first, or track from known " *
+                "start solutions with a parameter homotopy " *
+                "(`solve(F, starts; start_parameters, target_parameters)`).",
+        ),
+    )
+    return nothing
+end
+
 # ── CommonSolve.init: System + TotalDegree ────────────────────────────────
 
 function _total_degree_solve_cache(
@@ -53,9 +71,7 @@ function _total_degree_solve_cache(
     starts = _total_degree_solutions(degrees)
 
     H = StraightLineHomotopy(start_evaluator, target_evaluator; γ = γ)
-    heval = HomotopyEvaluator(H)
-    tracker = Tracker(heval; options = tracker_options)
-    eg = EndgameTracker(tracker, endgame_options)
+    eg = _endgame_tracker(H, tracker_options, endgame_options)
 
     return SolveCache(exec, builder, eg, starts, seed, excess_checker, show_progress)
 end
@@ -67,9 +83,10 @@ function CommonSolve.init(
     )
     seed = alg.seed
     _check_square_or_overdetermined(F)
+    _check_parameter_free(F, "`TotalDegree`")
 
     rng = Random.MersenneTwister(seed)
-    γ = cis(2π * rand(rng))
+    γ = _random_gamma(rng)
     return _init_total_degree(system_shape(F), F, alg, exec, rng, γ, show_progress)
 end
 
@@ -257,9 +274,7 @@ function CommonSolve.init(
     sp = ComplexF64.(start_parameters)
     tp = ComplexF64.(target_parameters)
     H = ParameterHomotopy(F.evaluator, sp, tp)
-    heval = HomotopyEvaluator(H)
-    tracker = Tracker(heval; options = tracker_options)
-    eg = EndgameTracker(tracker, endgame_options)
+    eg = _endgame_tracker(H, tracker_options, endgame_options)
 
     builder = ParameterBuilder(F, sp, tp, tracker_options, endgame_options)
 

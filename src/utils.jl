@@ -3,6 +3,9 @@ fast_abs(x::Real) = abs(x)
 
 const DEFAULT_REAL_TOL = 1.0e-6
 
+_random_gamma(rng::Random.MersenneTwister)::ComplexF64 = cis(2π * rand(rng))
+_random_gamma(seed::UInt32)::ComplexF64 = _random_gamma(Random.MersenneTwister(seed))
+
 nanmin(a, b) = isnan(a) ? b : (isnan(b) ? a : min(a, b))
 nanmax(a, b) = isnan(a) ? b : (isnan(b) ? a : max(a, b))
 

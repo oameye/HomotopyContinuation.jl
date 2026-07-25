@@ -131,14 +131,24 @@ function evaluate_and_jacobian!(
     return nothing
 end
 
-# The chart row's order-k Taylor remainder is zero: the row is an affine
-# linear form and the J·x_k term is excluded by the call-site contract.
+# The order-K coefficient of the affine row `v'x - 1` is `v'x_K`, not zero.
+@inline function _chart_taylor_row(
+        chart::Vector{ComplexF64}, tx::TaylorVector{N, ComplexF64}, ::Val{K},
+    )::ComplexF64 where {N, K}
+    x_K = vectors(tx)[K + 1]
+    acc = zero(ComplexF64)
+    @inbounds for j in eachindex(chart)
+        acc = muladd(chart[j], x_K[j], acc)
+    end
+    return acc
+end
+
 function taylor!(
         u::FSVec{ComplexF64}, v::Val{K}, F::AffineChartSystem,
         tx::TaylorVector{N, ComplexF64}, p::FSVec{ComplexF64},
     )::Nothing where {K, N}
     taylor!(u, v, F.system, tx, p)
-    u[size(F.system)[1] + 1] = zero(ComplexF64)
+    u[size(F.system)[1] + 1] = _chart_taylor_row(F.chart, tx, v)
     return nothing
 end
 
@@ -147,7 +157,7 @@ function taylor!(
         tx::TaylorVector{N, ComplexF64}, tp::TaylorVector{M, ComplexF64},
     )::Nothing where {K, N, M}
     taylor!(u, v, F.system, tx, tp)
-    u[size(F.system)[1] + 1] = zero(ComplexF64)
+    u[size(F.system)[1] + 1] = _chart_taylor_row(F.chart, tx, v)
     return nothing
 end
 
@@ -187,8 +197,8 @@ function evaluate_and_jacobian!(
     return nothing
 end
 
-# Chart row contributes zero to every Taylor coefficient (affine linear form
-# independent of t; the J·x_k term is excluded by the call-site contract).
+# Zero here: a homotopy is the outermost wrapper and the predictor zeroes the
+# highest-order row of `tx` before each call.
 function taylor!(
         u::FSVec{ComplexF64}, ::Val{1}, H::AffineChartHomotopy,
         x::FSVec{ComplexF64}, t::ComplexF64,

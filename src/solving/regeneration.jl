@@ -394,10 +394,7 @@ function intersect_with_hypersurface!(
         )
     else
         Hom = StraightLineHomotopy(F₀.evaluator, G₀.evaluator; γ = γ)
-        eg = EndgameTracker(
-            Tracker(HomotopyEvaluator(Hom); options = state.tracker_options),
-            state.endgame_options,
-        )
+        eg = _endgame_tracker(Hom, state.tracker_options, state.endgame_options)
         _serial_intersection!(X, P_next, roots, eg)
     end
     return nothing
@@ -456,18 +453,11 @@ function _threaded_intersection!(
     nt = Threads.nthreads()
     @tasks for k in 1:njobs
         @set ntasks = nt
-        @local eg = EndgameTracker(
-            Tracker(
-                HomotopyEvaluator(
-                    StraightLineHomotopy(
-                        _clone_system_evaluator(F₀),
-                        _clone_system_evaluator(G₀);
-                        γ = γ,
-                    ),
-                );
-                options = tracker_options,
+        @local eg = _endgame_tracker(
+            StraightLineHomotopy(
+                _clone_system_evaluator(F₀), _clone_system_evaluator(G₀); γ = γ,
             ),
-            endgame_options,
+            tracker_options, endgame_options,
         )
         i, j = fldmod1(k, nroots)
         q0 = copy(P[i])
@@ -526,9 +516,7 @@ function _is_contained(
     # The intrinsic form `x = A(t) v + a(t)` is well conditioned in every
     # dim/codim regime and tracks in only `dim(LY) <= n` coordinates.
     Hom = IntrinsicSubspaceHomotopy(F.evaluator, LY, LY)
-    eg = EndgameTracker(
-        Tracker(HomotopyEvaluator(Hom); options = tracker_options), endgame_options,
-    )
+    eg = _endgame_tracker(Hom, tracker_options, endgame_options)
     u_buf = FSVec{ComplexF64}(zeros(ComplexF64, size(Hom)[2]))
     amb_buf = FSVec{ComplexF64}(zeros(ComplexF64, n))
 

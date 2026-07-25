@@ -44,6 +44,26 @@ function make_progress(n::Int, show::Bool; delay::Float64 = 0.3, desc::String = 
     return progress
 end
 
+function make_many_progress(n::Int, show::Bool; delay::Float64 = 0.3)
+    show || return nothing
+    progress = ProgressMeter.Progress(
+        n; dt = 0.2, desc = "Solving for $n targets... ", output = stdout,
+    )
+    progress.tlast += delay
+    return progress
+end
+
+update_many_progress!(::Nothing, ::Int, ::Int)::Nothing = nothing
+function update_many_progress!(
+        progress::ProgressMeter.Progress, nsolved::Int, ntracked::Int,
+    )::Nothing
+    ProgressMeter.update!(
+        progress, nsolved;
+        showvalues = (("# targets solved", nsolved), ("# paths tracked", ntracked)),
+    )
+    return nothing
+end
+
 update_progress!(::Nothing, ntracked::Int, ::ProgressStats, ::PathResult)::Nothing = nothing
 function update_progress!(
         progress::ProgressMeter.Progress, ntracked::Int, stats::ProgressStats, r::PathResult,

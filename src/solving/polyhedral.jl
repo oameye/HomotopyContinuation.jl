@@ -68,6 +68,8 @@ struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S, C}
     lifting::Vector{Vector{Int32}}
     start_solutions::Vector{Tuple{MixedSubdivisions.MixedCell, Vector{ComplexF64}}}
     seed::UInt32
+    # carries a point from the toric phase to the coefficient phase
+    x_buffer::Vector{ComplexF64}
     # GC roots for interpreters — must be kept alive for FunctionWrapper closures
     _support_system::S
     # ExcessSolutionChecker for overdetermined systems, Nothing for square ones
@@ -442,6 +444,7 @@ function CommonSolve.init(
     )::PolyhedralSolveCache
     seed = alg.seed
     _check_square_or_overdetermined(F)
+    _check_parameter_free(F, "`Polyhedral`")
     n = F.nvars
 
     # Task-local RNG seeded from user seed — deterministic without mutating global state.
@@ -537,10 +540,8 @@ function CommonSolve.init(
     flat_start = reduce(vcat, start_coeffs)
     flat_target = reduce(vcat, target_coeffs)
     coeff_H = CoefficientHomotopy(support_system.evaluator, flat_start, flat_target)
-    coeff_heval = HomotopyEvaluator(coeff_H)
-    coeff_tracker = EndgameTracker(
-        Tracker(coeff_heval; options = alg.tracker_options),
-        alg.endgame_options,
+    coeff_tracker = _endgame_tracker(
+        coeff_H, alg.tracker_options, alg.endgame_options,
     )
 
     builder = PolyhedralBuilder(
@@ -553,6 +554,7 @@ function CommonSolve.init(
         toric_tracker, coeff_tracker, toric_H,
         support, lifting,
         all_starts, seed,
+        Vector{ComplexF64}(undef, size(support[1], 1)),
         support_system,
         excess_checker,
         show_progress,
@@ -665,52 +667,55 @@ end
 @noinline _solve_polyhedral_serial_with_progress(cache::PolyhedralSolveCache{Serial}) =
     _solve_polyhedral_serial(cache, make_progress(length(cache.start_solutions), true))
 
-function _solve_polyhedral_serial(cache::PolyhedralSolveCache{Serial}, progress)::Result
-    toric_tracker = cache.toric_tracker
-    coeff_tracker = cache.coeff_tracker
-    toric_H = cache.toric_homotopy
-    support = cache.support
-    lifting = cache.lifting
+# One two-phase path: toric phase from the mixed cell, then the coefficient homotopy.
+function _track_polyhedral_path!(
+        toric_tracker::Tracker, coeff_tracker::EndgameTracker,
+        toric_H::ToricHomotopy, support::Vector{Matrix{Int32}},
+        lifting::Vector{Vector{Int32}}, x_buffer::Vector{ComplexF64},
+        cell::MixedSubdivisions.MixedCell, x₀::Vector{ComplexF64}, k::Int,
+    )::PathResult
+    min_w, max_w = update_weights!(toric_H, support, lifting, cell; min_weight = 1.0)
 
+    code = _track_toric_phase!(
+        toric_tracker, toric_H, x₀, min_w, max_w, support, lifting, cell,
+    )
+
+    if code != TrackerCode.TRACKER_SUCCESS
+        return PathResult(
+            toric_tracker; path_number = k, start_solution = Vector{ComplexF64}(x₀),
+        )
+    end
+
+    toric_accepted = toric_tracker.state.accepted_steps
+    toric_rejected = toric_tracker.state.rejected_steps
+
+    copyto!(x_buffer, toric_tracker.state.x)
+
+    init!(coeff_tracker, x_buffer; μ = toric_tracker.state.μ)
+    while coeff_tracker.state.code == EndgameCode.TRACKING
+        step!(coeff_tracker)
+    end
+
+    return _add_steps(
+        PathResult(
+            coeff_tracker; path_number = k, start_solution = Vector{ComplexF64}(x₀),
+        ),
+        toric_accepted, toric_rejected,
+    )
+end
+
+function _solve_polyhedral_serial(cache::PolyhedralSolveCache{Serial}, progress)::Result
+    support = cache.support
     n_paths = length(cache.start_solutions)
     path_results = PathResult[]
     sizehint!(path_results, n_paths)
 
-    # Pre-allocate buffer for passing solutions between phases
-    n = size(support[1], 1)
-    x_buffer = Vector{ComplexF64}(undef, n)
-
     stats = ProgressStats()
 
-    # Phase 1 + Phase 2 for each start solution
     for (k, (cell, x₀)) in enumerate(cache.start_solutions)
-        min_w, max_w = update_weights!(toric_H, support, lifting, cell; min_weight = 1.0)
-
-        code = _track_toric_phase!(
-            toric_tracker, toric_H, x₀, min_w, max_w,
-            support, lifting, cell,
-        )
-
-        if code != TrackerCode.TRACKER_SUCCESS
-            pr = PathResult(toric_tracker; path_number = k, start_solution = Vector{ComplexF64}(x₀))
-            push!(path_results, pr)
-            update_progress!(progress, k, stats, pr)
-            continue
-        end
-
-        toric_accepted = toric_tracker.state.accepted_steps
-        toric_rejected = toric_tracker.state.rejected_steps
-
-        copyto!(x_buffer, toric_tracker.state.x)
-
-        init!(coeff_tracker, x_buffer; μ = toric_tracker.state.μ)
-        while coeff_tracker.state.code == EndgameCode.TRACKING
-            step!(coeff_tracker)
-        end
-
-        pr = _add_steps(
-            PathResult(coeff_tracker; path_number = k, start_solution = Vector{ComplexF64}(x₀)),
-            toric_accepted, toric_rejected,
+        pr = _track_polyhedral_path!(
+            cache.toric_tracker, cache.coeff_tracker, cache.toric_homotopy,
+            support, cache.lifting, cache.x_buffer, cell, x₀, k,
         )
         push!(path_results, pr)
         update_progress!(progress, k, stats, pr)

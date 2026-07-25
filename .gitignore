@@ -10,6 +10,7 @@ docs/build/
 **/**/tmp_sols.txt
 **/**/tmp_cert.txt
 benchmarks_output.json
+ttfx_output.json
 .DS_Store
 .claude/*
 *.codex

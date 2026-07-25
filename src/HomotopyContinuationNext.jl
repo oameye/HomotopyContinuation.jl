@@ -50,6 +50,8 @@ export find_start_pair, monodromy_solve, verify_solution_completeness
 export MonodromyOptions, MonodromyResult, is_heuristic_stop, permutations, trace
 export independent_normal, weighted_normal
 # Witness sets / numerical irreducible decomposition
+export slice
+export ResultIterator, result_iterator, bitmask, bitmask_filter, start_solutions
 export WitnessSet, witness_set, trace_test, membership
 export system, linear_subspace, is_irreducible, degree, points
 export WitnessPoints, regeneration
@@ -103,6 +105,7 @@ include("core/straight_line_homotopy.jl")
 include("core/linear_parameter_homotopy.jl")
 include("core/subspace_homotopies.jl")
 include("core/affine_chart.jl")
+include("core/sliced_system.jl")
 include("core/toric_homotopy.jl")
 
 include("tracking/newton_corrector.jl")
@@ -125,6 +128,10 @@ include("solving/builder.jl")
 include("solving/polyhedral.jl")
 include("solving/result.jl")
 include("solving/solve.jl")
+include("solving/slice.jl")
+include("solving/subspace_solve.jl")
+include("solving/sweep.jl")
+include("solving/result_iterator.jl")
 include("solving/monodromy.jl")
 include("solving/witness_set.jl")
 include("solving/regeneration.jl")

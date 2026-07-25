@@ -235,6 +235,31 @@ function _with_multiplicity(r::PathResult, m::Int)::PathResult
     )
 end
 
+"""
+    _to_ambient(r, H::IntrinsicSubspaceHomotopy)
+
+Return a copy of `r` whose `solution` and `last_path_point` are converted from
+the intrinsic coordinates of `H` to ambient coordinates. Each point is converted
+at the `t` it was reported at, so failed paths (reported at their terminal `t`,
+not at 0) convert on the subspace they actually stopped on. The diagnostics
+(`accuracy`, `residual`, `condition_jacobian`) and `valuation` stay in intrinsic
+coordinates; `start_solution` is already ambient.
+"""
+function _to_ambient(r::PathResult, H::IntrinsicSubspaceHomotopy)::PathResult
+    n = length(H.x)
+    solution = Vector{ComplexF64}(undef, n)
+    ambient_coordinates!(solution, H, r.solution, complex(r.t))
+    last_point = Vector{ComplexF64}(undef, n)
+    ambient_coordinates!(last_point, H, r.last_path_point, complex(r.last_path_t))
+    return PathResult(
+        r.return_code, solution, r.t, r.accuracy, r.ω, r.μ, r.residual,
+        r.condition_jacobian, r.winding_number, r.singular,
+        r.accepted_steps, r.rejected_steps, r.steps_eg, r.extended_precision_used,
+        last_point, r.last_path_t, r.path_number, r.start_solution,
+        r.valuation, r.multiplicity,
+    )
+end
+
 function is_real(r::PathResult; tol::Float64 = DEFAULT_REAL_TOL)::Bool
     return is_success(r) && all(x -> abs(imag(x)) < tol * max(1.0, abs(x)), r.solution)
 end

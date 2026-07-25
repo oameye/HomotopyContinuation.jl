@@ -111,6 +111,51 @@ using LinearAlgebra: det
         end
     end
 
+    # |b| = 1 makes the magnitude system Aᵗ·log|x| = log|b| homogeneous; an
+    # off-circle rhs exercises its LU solve.
+    @testset "solve_binomial! with |b| ≠ 1" begin
+        A = Int32[0 1 1 0 -1; 0 0 0 1 -1; -1 0 -1 0 -1; 0 -1 0 -1 -1; 1 0 0 0 -1]
+        b = ComplexF64[
+            1.3 + 0.2im, -0.4 + 2.1im, 0.9 - 0.7im, -1.8 - 0.3im, 0.55 + 1.4im,
+        ]
+        d_hat = abs(round(Int, det(Float64.(A))))
+        BSS = BinomialSystemSolver(5; max_d_hat = d_hat)
+        X = zeros(ComplexF64, 5, d_hat)
+        d = solve_binomial!(X, BSS, A, b)
+        @test d == d_hat
+        for k in 1:d
+            x = X[:, k]
+            @test maximum(abs.([prod(x .^ a) for a in eachcol(A)] - b) ./ abs.(b)) <
+                1.0e-12
+        end
+    end
+
+    @testset "solve_binomial!: 6x6 dense exponents, 6910 solutions" begin
+        A = Int32[
+            3 2 3 4 2 5
+            6 -3 8 -3 8 7
+            -2 -5 7 3 6 5
+            1 2 3 4 5 6
+            1 0 2 0 5 0
+            1 2 0 -3 0 5
+        ]
+        b = ComplexF64[
+            0.8 + 0.3im, -1.7 + 0.9im, 0.35 - 1.2im,
+            2.4 + 0.6im, -0.45 - 0.8im, 1.1 - 1.6im,
+        ]
+        d_hat = abs(round(Int, det(Float64.(A))))
+        @test d_hat == 6910
+        BSS = BinomialSystemSolver(6; max_d_hat = d_hat)
+        X = zeros(ComplexF64, 6, d_hat)
+        d = solve_binomial!(X, BSS, A, b)
+        @test d == d_hat
+        worst = maximum(1:d) do k
+            x = X[:, k]
+            maximum(abs.([prod(x .^ a) for a in eachcol(A)] - b) ./ abs.(b))
+        end
+        @test worst < 1.0e-12
+    end
+
     @testset "solve_binomial! survives Int64 HNF overflow (BigInt fallback)" begin
         # det(A_overflow) == 1, so the binomial system has exactly one solution.
         # Exactly unit-modulus rhs so the exponents up to ~6e6 keep |x| = 1

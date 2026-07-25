@@ -122,6 +122,15 @@ function EndgameTracker(
     return EndgameTracker(tracker, EndgameState(n), Valuation(n), options)
 end
 
+function _endgame_tracker(
+        H::AbstractHomotopy, tracker_options::TrackerOptions,
+        endgame_options::EndgameOptions,
+    )::EndgameTracker
+    return EndgameTracker(
+        Tracker(HomotopyEvaluator(H); options = tracker_options), endgame_options,
+    )
+end
+
 # ---------------------------------------------------------------------------
 # State reset
 # ---------------------------------------------------------------------------

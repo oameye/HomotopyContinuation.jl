@@ -24,7 +24,7 @@ src/primitives/                      # DoubleF64, norms, linear algebra
 src/model_kit/                       # SExpr, CSE, tape compiler, interpreter, Taylor
 src/core/                            # AbstractSystem/Homotopy, SystemEvaluator, homotopy types
 src/tracking/                        # Predictor, Newton, Tracker
-src/solving/                         # solve(), total degree, polyhedral, result types
+src/solving/                         # solve(), total degree, polyhedral, subspaces, sweeps, result types
 src/utils.jl                         # SegmentStepper, _stable_sort!, fast_abs, etc.
 
 lib/HomotopyContinuationNextCertification/   # Certification subpackage
@@ -71,6 +71,10 @@ Tests run via ParallelTestRunner — each file is self-contained and runs in its
 - `test/aqua_test.jl` — Aqua.jl: unbound args, undefined exports, stale deps, compat, piracy
 - `test/jet_test.jl` — JET.jl: `report_package` for type error and optimization analysis
 - `test/explicit_imports_test.jl` — ExplicitImports.jl: no implicit imports, no stale imports, qualified access
+
+`test/test_systems.jl` and `test/minors_polys.jl` hold shared polynomial system data; they define no
+tests and are `include`d by the files that need them. Add new systems to `TEST_SYSTEM_COLLECTION` to
+get them covered by the evaluation sweep in `test/system_sweep_test.jl`.
 
 ### Quick debugging with Julia MCP
 

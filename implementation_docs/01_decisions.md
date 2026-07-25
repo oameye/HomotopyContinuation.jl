@@ -32,6 +32,16 @@ Canonical variable order is creation order. `_lt_variable` obtains it from the p
 
 Old code cached `_hash::UInt` at construction; Moshi `@data` SExpr recomputes hashes on every `hash()` call. Measured negligible: ~260 ns per top-level cyclic-8 equation hash, and full `System(...)` construction (CSE, hashing, tape compile, FunctionWrappers) stays under 7 ms through cyclic-8/katsura-10, far below the ~16 s first-solve TTFX. Not worth caching.
 
+### `MP.maxdegree` counts parameters as variables
+
+`MP.maxdegree(p)` is the total degree over *every* variable of `p`, including the
+ones a `System` treats as parameters. Using it for `F.degrees` reported
+`[3, 2]` for `[a*x^2 + y, x*y - a]` where the degrees in `[x, y]` are `[2, 2]`,
+which would give the total-degree route 6 paths instead of 4. `_variable_degrees`
+walks the terms and sums only exponents of declared variables, mirroring
+`_is_homogeneous`. The bug was latent because every caller of a parametric
+`degrees(F)` substitutes the parameters first, but `degrees` is public API.
+
 ### `qr!` on FSMat returns QRCompactWY, not QR
 
 LAPACK blocked factorization. Use `Matrix{ComplexF64}` with `LinearAlgebra.qrfactUnblocked!` for custom QR if needed.
@@ -144,6 +154,115 @@ each owning a `MonodromyWorkerState` (fresh evaluator + tracker via the same
 `_clone_system_evaluator` mechanism the solve executor uses). This is the one
 place with two threading coordinators in the codebase; a shared dynamic work
 queue abstraction would currently serve exactly one consumer.
+
+### Many-target sweeps thread the (target, path) product (SHIPPED)
+
+The obvious parallelization of a sweep is one task per target: each task owns a
+worker, retargets it once, and tracks every path serially. That caps the speedup
+at the number of targets, and `Threaded()` is the default executor, so a
+one-target sweep ran fully serially while paying task overhead. Measured 0.97x
+against its own serial path, i.e. 4.3x the wall time of the equivalent
+`solve(F, starts; target_parameters = q)`, which threads per path.
+
+Threading the flattened `(target, path)` index space instead fixes every regime
+with one code path, no `length(targets) < ntasks` special case. The requirement
+is target-major ordering plus contiguous chunks (OhMyThreads' default `:batch`
+chunking): a task then sees a contiguous run of the flat space and retargets only
+when it crosses a target boundary, so retargets stay at `n_targets + ntasks`
+rather than `n_targets * ntasks`. This matters because retargeting a subspace
+homotopy recomputes a Grassmannian geodesic. Measured on 12 threads with 125
+paths per target, speedup versus the serial sweep:
+
+| targets | 1 | 2 | 3 | 6 | 12 | 24 |
+|---|---|---|---|---|---|---|
+| per target | 1.36x | 1.58x | 2.26x | 3.42x | 4.52x | 5.11x |
+| per (target, path) | 4.31x | 4.20x | 3.70x | 4.69x | 4.94x | 5.38x |
+
+Because a target's paths can straddle a chunk boundary, no single task is
+guaranteed to close a target, so progress counts down a per-target atomic and
+reports the target as solved by whichever task takes its last path. Deriving
+"targets solved" from `paths_done ÷ n_paths` would have been simpler but would
+overstate completion while several tasks sit mid-target.
+
+### `transform_parameters` is applied exactly once per target (SHIPPED)
+
+The sweep entry point has to transform the first target before `_run_sweep` runs,
+because building the homotopy needs the actual parameter values. Transforming it
+again inside the loop made N targets cost N+1 calls (measured 6 for 5 targets).
+For the documented `transform_parameters = _ -> rand(3)` case that means an extra
+draw, and the homotopy is then built for a target that is never reported, so the
+first entry belongs to a different problem than its own label. Passing the
+already-transformed value in as `first_q` is what fixes it; there is no way to
+defer the first transform instead, since the homotopy cannot be built without it.
+Guarded by counting closures over both executors and 1, 3, 20 targets.
+
+The same restructure collapsed the four accumulate functions
+(serial/threaded × nested/flatten) into two `_sweep_entries` methods plus a
+flatten step. The serial method still transforms each target's `Result` before
+retargeting for the next one, so a long sweep holds only the transformed entries;
+the threaded method cannot, because it is the whole `(target, path)` product that
+gets chunked.
+
+### Start-system routes reject parametric input (SHIPPED)
+
+`TotalDegree` and `Polyhedral` build their start system from the *target's*
+coefficients, which only exist once the parameters have values. Given a
+parametric system both routes used to run to completion against an unfilled
+parameter buffer, i.e. with every parameter equal to zero, and returned confident
+wrong answers: `solve(System([x^2+y^2-a, x*y-1]; parameters=[a]))` reported four
+"solutions", all of them satisfying `x^2 + y^2 = 0`. `_check_square_or_overdetermined`
+validates the shape and says nothing about `nparameters`, and the polyhedral route's
+`support_coefficients` guard fires too late to be the front line.
+`_check_parameter_free` now runs beside the shape check in both `init` methods.
+`WitnessSet` already had the equivalent guard, which is where the wording comes
+from. The sliced and subspace routes were never affected: they call
+`_fix_parameters`, which throws when `target_parameters` is missing.
+
+### Appended linear rows: Taylor coefficient is `A x_K`, not zero (SHIPPED)
+
+A **system** wrapper that appends affine rows (`SlicedSystem`, and the chart row
+in `AffineChartSystem`) must report `A x_K` as the order-K Taylor coefficient of
+those rows, where `x_K` is the highest-order coefficient of the passed
+`TaylorVector`. Writing `0` is only correct when the caller zeroed that row.
+`StraightLineHomotopy.taylor!(Val(K))` also asks the systems for order `K-1`
+with a *prefix* of the same `TaylorVector`, whose top row is a genuine nonzero
+coefficient, so the zero shortcut silently feeds the predictor a wrong cross
+term: measured 101/102/80/54 steps versus 49/40/46/39 on the same paths, i.e.
+roughly double the work, with correct endpoints throughout. The same shortcut in
+`AffineChartSystem` cost 251 versus 172 total steps over 8 seeds on the
+projective intrinsic subspace route (`IntrinsicSubspaceHomotopy` wrapping the
+chart system), 31% more work, with the same projective endpoints.
+
+A **homotopy** wrapper is the opposite case. `AffineChartHomotopy` writes `0` and
+that is correct: a homotopy is only ever the outermost wrapper, so the predictor
+has already zeroed the highest-order row before it calls `taylor!`. Computing
+`v'x_K` there was measured to change nothing (190 steps either way). The
+distinction is *nesting depth*, not row shape, so a wrapper that ever nests a
+homotopy inside another homotopy must revisit it.
+
+Equality of `evaluate!` and `evaluate_and_jacobian!` does not catch any of this;
+compare `taylor!` against the rebuilt polynomial system with a nonzero top row.
+
+### One `_endgame_tracker` for every route (SHIPPED)
+
+`EndgameTracker(Tracker(HomotopyEvaluator(H); options = t), e)` appeared 22 times
+across `builder.jl`, `solve.jl`, `polyhedral.jl`, `witness_set.jl`,
+`regeneration.jl` and `monodromy.jl`, in three different line-breakings. It lives
+in `endgame_tracker.jl` now, next to the type. The argument is typed
+`H::AbstractHomotopy`, which does not cost a devirtualization: Julia specializes
+on concrete argument types anyway, so each caller still gets its own
+specialization and the FunctionWrapper closures still capture the exact homotopy
+a worker will later retarget.
+
+The same pass unified the three `_sliced_rows!` loops (ComplexF64 in/out, DF64 in
+with F64 out, DF64 in/out), which differed only in accumulator type and store
+conversion, into one method parametric in both. `A` and `b` are ComplexF64, so the
+accumulator follows the input and only the store rounds, which is what the
+separate DF64 loops were spelling out by hand. The unified loop uses `muladd`
+where the DF64 versions used `acc += a * b`; on `Complex{DoubleF64}` those differ
+by at most 2.7e-31 relative (200k random draws), fifteen orders below the
+ComplexF64 the value is stored into, and the linear row still matches a
+hand-accumulated DF64 reference exactly.
 
 ### Explicit kwargs replace v2 option-bag splatting in monodromy (SHIPPED)
 

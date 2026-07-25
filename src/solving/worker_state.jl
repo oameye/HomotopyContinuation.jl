@@ -12,6 +12,33 @@ struct TrackingWorkerState
 end
 
 """
+    AmbientWorkerState{H}
+
+Worker-local state for routes that track in ambient coordinates and keep the
+concrete homotopy beside the tracker, so `target_parameters!` can retarget the
+exact homotopy captured inside the tracker's `HomotopyEvaluator` closures.
+"""
+struct AmbientWorkerState{H}
+    homotopy::H
+    tracker::EndgameTracker
+end
+
+"""
+    IntrinsicWorkerState
+
+Worker-local state for tracking inside a linear subspace. Paths run in intrinsic
+coordinates; `u` holds the converted start point, and endpoints are converted
+back to ambient coordinates through `homotopy`.
+"""
+struct IntrinsicWorkerState
+    homotopy::IntrinsicSubspaceHomotopy
+    tracker::EndgameTracker
+    u::FSVec{ComplexF64}
+end
+
+const RetargetWorkerState = Union{AmbientWorkerState, IntrinsicWorkerState}
+
+"""
     PolyhedralWorkerState
 
 Worker-local state for two-phase polyhedral homotopy tracking.

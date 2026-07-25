@@ -3,7 +3,7 @@ JULIA ?= julia
 # Certification lives in a separate subpackage so Arblib stays out of core.
 CERT := lib/HomotopyContinuationNextCertification
 
-.PHONY: test test-serial test-cert benchmark format deps update help
+.PHONY: test test-serial test-cert benchmark ttfx format deps update help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}'
@@ -26,6 +26,9 @@ test-threaded: ## Run solve tests with multiple threads (exercises Threaded exec
 
 benchmark: ## Run benchmarks
 	$(JULIA) --project=benchmark benchmark/runbenchmarks.jl
+
+ttfx: ## Measure first-call latency per workload, one fresh session each
+	$(JULIA) --project=benchmark benchmark/runttfx.jl $(WORKLOADS)
 
 compare: ## Compare all categories against HomotopyContinuation v2
 	$(JULIA) --project=benchmark benchmark/compare/runcompare.jl
