@@ -269,7 +269,7 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
         end
 
         updated!(ws)
-        skeel_row_scaling!(state.row_scaling, ws, state.col_scaling)
+        skeel_row_scaling!(state.row_scaling, ws.A, state.col_scaling)
         factorize!(ws)
         state.cond = _scaled_cond(ws, state.row_scaling, state.col_scaling)
         if state.cond > opts.sing_cond || state.accuracy > opts.sing_accuracy
@@ -406,7 +406,7 @@ function _ensure_endgame_scaling!(state::EndgameState, tracker::Tracker)::Nothin
         end
         skeel_row_scaling!(
             state.row_scaling,
-            tracker.state.jacobian.workspace,
+            tracker.state.jacobian.workspace.A,
             state.col_scaling,
         )
     end

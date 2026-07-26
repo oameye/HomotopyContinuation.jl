@@ -322,8 +322,13 @@ end
         @test collect(HC.variables(sys)) == [x, y]
         @test isempty(HC.parameters(sys))
         supp, coeffs = HC.support_coefficients(sys)
-        @test supp == sys.support
-        @test coeffs == sys.coefficients
+        direct_supp, direct_coeffs = HC.support_coefficients(F, [x, y])
+        @test supp == direct_supp
+        @test coeffs == direct_coeffs
+        # Second call returns the cached objects rather than re-extracting.
+        supp2, coeffs2 = HC.support_coefficients(sys)
+        @test supp2 === supp
+        @test coeffs2 === coeffs
         @test collect(sys.polys) == F
         @test collect(sys.variables) == [x, y]
         @test isempty(sys.parameters)
@@ -344,6 +349,13 @@ end
         @test sys.is_homogeneous == true
         @test_throws ArgumentError HC.support_coefficients(sys)
         # `a * y^2` has total degree 3, but degree 2 in `[x, y]`.
+        @test HC.degrees(sys) == [2, 2]
+    end
+
+    @testset "System: homogeneity is per polynomial" begin
+        @polyvar x y
+        sys = System([x^2 + y^2, x + y^2]; variables = [x, y])
+        @test HC.is_homogeneous(sys) == false
         @test HC.degrees(sys) == [2, 2]
     end
 
@@ -417,6 +429,28 @@ end
 
             @test u_df64 ≈ u_f64 atol = 1.0e-12
         end
+    end
+
+    @testset "System: DF64 wrappers are installed on first use" begin
+        @polyvar x y
+        sys = System([x^3 - y^2 + 1, x * y^2 - x^2])
+        seval = sys.evaluator
+        @test !HC.is_installed(seval._df64)
+
+        xvals = ComplexF64[0.3 + 0.1im, 0.7 - 0.2im]
+        p = FSVec{ComplexF64}(ComplexF64[])
+        u_f64 = FSVec{ComplexF64}(zeros(ComplexF64, 2))
+        evaluate!(u_f64, seval, FSVec{ComplexF64}(xvals), p)
+        @test !HC.is_installed(seval._df64)
+
+        u_mixed = FSVec{ComplexF64}(zeros(ComplexF64, 2))
+        evaluate!(u_mixed, seval, FSVec{ComplexDF64}(ComplexDF64.(xvals)), p)
+        @test HC.is_installed(seval._df64)
+        @test u_mixed ≈ u_f64 atol = 1.0e-12
+
+        u_out = FSVec{ComplexDF64}(zeros(ComplexDF64, 2))
+        evaluate!(u_out, seval, FSVec{ComplexDF64}(ComplexDF64.(xvals)), p)
+        @test ComplexF64.(collect(u_out)) ≈ collect(u_f64) atol = 1.0e-12
     end
 
     @testset "System: Taylor vs finite differences" begin

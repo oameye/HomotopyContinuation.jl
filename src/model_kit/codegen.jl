@@ -290,8 +290,7 @@ function _build_compiled_evaluator(
 
     return SystemEvaluator(
         SysEvalFW((u, x, p) -> (eval_fn(u, x, p); nothing)),
-        SysEvalDF64FW((u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing)),
-        SysEvalDF64OutFW((u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing)),
+        _lazy_df64_interpreted(interp_df64)...,
         SysEvalJacFW((u, U, x, p) -> (jac_fn(u, U, x, p); nothing)),
         taylor_fws...,
         (neqs, nvars),

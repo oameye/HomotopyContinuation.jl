@@ -17,6 +17,8 @@ const SysEvalDF64OutFW = FunctionWrapper{
         FSVec{ComplexDF64}, FSVec{ComplexDF64}, FSVec{ComplexF64},
     },
 }
+const SysEvalDF64Pair = Tuple{SysEvalDF64FW, SysEvalDF64OutFW}
+const SysDF64InstallFW = FunctionWrapper{Nothing, Tuple{}}
 const SysEvalJacFW = FunctionWrapper{
     Nothing, Tuple{
         FSVec{ComplexF64}, FSMat{ComplexF64},
@@ -64,8 +66,8 @@ eliminating runtime dispatch on hot paths.
 """
 struct SystemEvaluator
     _evaluate!::SysEvalFW
-    _evaluate_df64!::SysEvalDF64FW
-    _evaluate_df64_out!::SysEvalDF64OutFW
+    _df64::LazyRef{SysEvalDF64Pair}
+    _install_df64!::SysDF64InstallFW
     _evaluate_and_jacobian!::SysEvalJacFW
     _taylor_1!::SysTaylor1FW
     _taylor_2!::SysTaylor2FW
@@ -75,6 +77,46 @@ struct SystemEvaluator
     _taylor_3_param!::SysTaylor3ParamFW
     _size::Tuple{Int, Int}
     _nparameters::Int
+end
+
+## Lazy extended-precision wrappers
+
+"""
+    _lazy_df64(make) -> (cache, installer)
+
+Pair a fresh empty cache with a wrapper that fills it by calling `make`, which
+must return `(evaluate_df64!, evaluate_df64_out!)`. `make` is invoked through a
+dynamic call so that compiling the installer does not compile `make`.
+"""
+function _lazy_df64(make::F)::Tuple{LazyRef{SysEvalDF64Pair}, SysDF64InstallFW} where {F}
+    cache = LazyRef{SysEvalDF64Pair}()
+    return cache, SysDF64InstallFW(_DF64Installer(cache, make))
+end
+
+struct _DF64Installer{F}
+    cache::LazyRef{SysEvalDF64Pair}
+    make::F
+end
+
+function (installer::_DF64Installer)()::Nothing
+    Base.inferencebarrier(_install_df64!)(installer.cache, installer.make)
+    return nothing
+end
+
+@noinline function _install_df64!(
+        cache::LazyRef{SysEvalDF64Pair}, make,
+    )::Nothing
+    Base.@nospecialize make
+    install!(cache, make()::SysEvalDF64Pair)
+    return nothing
+end
+
+# Two threads racing here install equivalent wrappers; the duplicate work is the
+# only cost, since `LazyRef` publishes the pair as a single atomic store.
+function _df64_evaluators(S::SystemEvaluator)::SysEvalDF64Pair
+    cache = S._df64
+    is_installed(cache) || S._install_df64!()
+    return cache[]
 end
 
 ## Dispatch methods — forward to FW closures
@@ -94,7 +136,7 @@ function evaluate!(
         u::FSVec{ComplexF64}, S::SystemEvaluator,
         x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
     )::Nothing
-    S._evaluate_df64!(u, x, p)
+    first(_df64_evaluators(S))(u, x, p)
     return nothing
 end
 
@@ -102,7 +144,7 @@ function evaluate!(
         u::FSVec{ComplexDF64}, S::SystemEvaluator,
         x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
     )::Nothing
-    S._evaluate_df64_out!(u, x, p)
+    last(_df64_evaluators(S))(u, x, p)
     return nothing
 end
 
@@ -169,8 +211,12 @@ end
 function SystemEvaluator(F::AbstractSystem)
     return SystemEvaluator(
         SysEvalFW((u, x, p) -> (evaluate!(u, F, x, p); nothing)),
-        SysEvalDF64FW((u, x, p) -> (evaluate!(u, F, x, p); nothing)),
-        SysEvalDF64OutFW((u, x, p) -> (evaluate!(u, F, x, p); nothing)),
+        _lazy_df64(
+            () -> (
+                SysEvalDF64FW((u, x, p) -> (evaluate!(u, F, x, p); nothing)),
+                SysEvalDF64OutFW((u, x, p) -> (evaluate!(u, F, x, p); nothing)),
+            ),
+        )...,
         SysEvalJacFW((u, U, x, p) -> (evaluate_and_jacobian!(u, U, F, x, p); nothing)),
         SysTaylor1FW((u, tx, p) -> (taylor!(u, Val(1), F, tx, p); nothing)),
         SysTaylor2FW((u, tx, p) -> (taylor!(u, Val(2), F, tx, p); nothing)),

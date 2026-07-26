@@ -688,6 +688,104 @@ Two limitations remain visible:
   group actions, clustering, progress, and endgames.
 - `git diff --check` passes.
 
+## Follow-up pass, 2026-07-25
+
+SnoopCompile v3.2.5 does not load on Julia 1.12 (`UndefVarError: Compiler.Params`),
+so this pass drove `SnoopCompileCore` directly. On 1.12 each `CodeInstance` carries
+`time_infer_self` and `time_compile` as `UInt16` fields holding `Float16` seconds
+(`reinterpret(Float16, ci.time_infer_self)`); `@snoop_invalidations` returns an
+`InvalidationLists` with separate `logmeths` and `logedges` vectors, and the
+`logmeths` layout is the documented `[(tree, sig)..., method, reason]` grouping.
+
+An inference barrier makes the callee a *new root* of the `@snoop_inference` tree
+rather than a child, so subtree attribution must be read per root. For
+`total_degree_interpreted_serial` the roots are:
+
+| Root | Cost | CIs |
+|---|---:|---:|
+| `_solve_total_degree_serial_without_progress` | 3010 ms | 987 |
+| `FunctionWrappers` thunks (32 roots) | 2473 ms | |
+| `Main.Workload.run` (the `System` call chain) | 1064 ms | 759 |
+| `_build_interpreted_system` | 884 ms | 1157 |
+| `_build_instruction_sequence_direct` | 852 ms | 386 |
+| `_init_total_degree_shaped` | 848 ms | 704 |
+| `Compiler.inferiterate_2arg` (3 roots) | 248 ms | 6 |
+
+The `FunctionWrappers` block is the single largest, and within it the three Taylor
+thunks for the target system dominate (682 ms, 276 ms, 190 ms for tape element types
+`TruncatedTaylorSeries{2,3,4}`). Their cost is the generated execute loop, not the
+`taylor_op_*` kernels: `execute_taylor_instructions!` alone accounts for 279 ms of
+inference on the order-1 tape because it inlines every op branch.
+
+Four changes were A/B'd over interleaved fresh-process pairs at `-t 4`
+(see `01_decisions.md` for the reasoning):
+
+| Change | Recovered | Decision |
+|---|---:|---|
+| Drop `OP_SIN`/`OP_COS`/`OP_SQRT` from the interpreter dispatch table | ~0.26 s | Rejected: retain for the planned expression frontend |
+| Install extended-precision wrappers on first use | ~0.25 s | Shipped |
+| Extract the polynomial support on demand | ~0.09 s | Shipped |
+| Pass `ws.A` to `skeel_row_scaling!` instead of the workspace | ~0.06 s | Shipped |
+
+Four hypotheses or candidate changes were rejected. The unary interpreter variants
+remain part of the execution contract for expressions such as
+`sqrt(γ) * x₁ + x₂^2`; see the implementation and validation checklist in
+`02_status.md`. Deferring the untaken QR branch with a
+bare inference barrier recovers 156 ms but fails `test/alloc_check_test.jl`; the
+follow-up pass below recovers the same time without the dynamic dispatch.
+Removing OhMyThreads (and
+with it the InitialValues invalidations, 523 of the ~3150 instances invalidated at
+load) saves 58 ms of load time and changes the first call by less than the
+run-to-run spread. Ordering `_EXEC_INSTRUCTION_SPECS` by measured op frequency
+instead of `@data` declaration order cost 83% on the cyclic-7 Jacobian tape.
+
+Steady state was measured for the rejected interpreter experiment because it
+touched the hot tape loop. The first comparison against the 2026-07-24 baseline
+showed everything ~1.5x
+slower, including `inf_norm_4` (4.02ns -> 7.29ns) and `lu_ldiv_4` in files this
+pass never touched: the machine was throttled after 45 minutes of A/B. After it
+settled the untouched primitives returned to baseline (3.96ns, 172ns) and the
+touched paths came out ahead: `track_one_path_katsura3` 151.9us -> 116.5us,
+`build_jac_katsura3` 496us -> 406us, `build_katsura3` 460us -> 407us,
+`taylor_katsura3` 107.9ns -> 103.0ns. Never compare a steady-state number against
+a baseline from another session without an untouched control in the same run.
+
+## The untaken QR branch, 2026-07-26
+
+The 156 ms that the previous pass could only recover with a hot-path dynamic
+dispatch is now recovered without one. `MatrixWorkspace` gained
+`qr_factorize::QRFactorizeFW` and `qr_solve::QRSolveFW`, chosen by shape in
+`_make_matrix_workspace`; the tall pair is constructed by calling `_tall_qr_ops`
+through `Base.inferencebarrier`, the square pair by two no-op targets.
+
+Why the wrapper is what makes the deferral legal: `FunctionWrappers` generates
+its thunk in `gen_fptr`, which is `@generated` on the target's type, so putting
+the *construction* of the tall pair behind the barrier is what keeps the QR
+kernels out of the session. The *call* is then a `ccall` through a function
+pointer, which `test/alloc_check_test.jl` already filters as a FunctionWrappers
+boundary rather than a dynamic dispatch. All 46 assertions pass.
+
+Verified by specialization count rather than by timing alone. Counting
+`Base.specializations` over `methods(f)` after `total_degree_interpreted_serial`:
+
+| method | before | after |
+|---|---:|---:|
+| `qr!` | 1 | 0 |
+| `qr_ldiv!` | 1 | 0 |
+| `reflector!` | 1 | 0 |
+| `lmul_Q_adj!` | 1 | 0 |
+| `ldiv_upper!` | 4 | 2 |
+
+`ldiv_upper!` keeps the two `FSMat` specializations the LU path needs and loses
+the two `Matrix` ones only `qr_ldiv!` reached.
+
+Timing, 5 interleaved fresh-process pairs at `-t 4`, all 5 paired differences
+favouring the wrapper: 8.427--9.062 s before, 8.312--8.426 s after, ~0.15 s
+median. The spread matters as much as the median here: removing the branch takes
+the first-call range from 0.64 s to 0.11 s. Forcing the deferred path in a
+session that has already run a square solve costs 0.345--0.363 s, and the second
+tall solve costs 54 us, so the deferral is complete rather than partial.
+
 ## Remaining root-cause priorities
 
 Continue without PrecompileTools in this order:
@@ -706,7 +804,9 @@ Continue without PrecompileTools in this order:
 4. **Taylor interpreter architecture.** The used order-2/order-3 kernels are
    honest work. Revisit them only with a representation that replaces the
    general executor across all consumers; the tested support-only executor
-   duplicated the graph and is rejected.
+   duplicated the graph and is rejected. The three execute-loop copies this
+   leaves are a settled cost, and so no longer a priority: see
+   `01_decisions.md`, "The Taylor order stays a type parameter".
 5. **Dependency invalidations upstream.** Narrow the broad DataStructures and
    MultivariatePolynomials methods responsible for most load-time impact, and
    request a public MixedSubdivisions already-normalized iterator constructor
@@ -718,3 +818,9 @@ Continue without PrecompileTools in this order:
 The current evidence does not justify using PrecompileTools yet: substantial
 latency was still removable by architecture, and the remaining hotspots have
 specific source-level owners.
+
+That verdict is unchanged by `src/precompile_signatures.jl`, which is a different
+mechanism. `precompile` is a Base builtin taking a signature, so it adds no
+dependency and executes no workload; it exists because the tape executors sit
+behind a `@cfunction` and therefore cannot be reached by any workload at all. See
+`01_decisions.md`, "Tape executors are precompiled by signature".

@@ -3,6 +3,30 @@ fast_abs(x::Real) = abs(x)
 
 const DEFAULT_REAL_TOL = 1.0e-6
 
+"""
+    LazyRef{T}
+
+Single-slot cache for a value built on first use. `is_installed` reports whether
+the slot holds a value, `install!` fills it, `Base.getindex` reads it.
+
+Mutable because the slot is written after construction; the `@atomic` field is
+what makes concurrent use safe. `T` may span several pointers, and the whole
+slot is stored and loaded as one atomic unit, so a reader observes either an
+empty slot or a complete value. `Base.RefValue{T}` cannot give that: for a
+multi-field `T` its store writes one slot at a time while `isassigned` and its
+load's null check both inspect only the first, so a reader can observe a value
+whose remaining slots are still null.
+"""
+mutable struct LazyRef{T}
+    @atomic value::T
+    LazyRef{T}() where {T} = new{T}()
+end
+
+@inline is_installed(cache::LazyRef)::Bool = isdefined(cache, :value, :acquire)
+@inline install!(cache::LazyRef{T}, value::T) where {T} =
+    (@atomic :release cache.value = value; nothing)
+@inline Base.getindex(cache::LazyRef{T}) where {T} = @atomic :acquire cache.value
+
 _random_gamma(rng::Random.MersenneTwister)::ComplexF64 = cis(2π * rand(rng))
 _random_gamma(seed::UInt32)::ComplexF64 = _random_gamma(Random.MersenneTwister(seed))
 

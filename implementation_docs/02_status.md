@@ -20,7 +20,7 @@ linear subspaces, trace test), certification (Krawczyk with Arb fallback, in the
 `trace_test`, `membership`, `regeneration`, `decompose`, `nid`, including projective,
 zero-dimensional, and parametric cases).
 
-Remaining gaps: distributed executor, rational expression input, system composition.
+Remaining gaps: distributed executor, non-polynomial expression input, system composition.
 
 ## Feature Checklist
 
@@ -179,11 +179,29 @@ Remaining gaps: distributed executor, rational expression input, system composit
 
 - [ ] **Distributed executor**: extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
 - [ ] Rational-input witness sets, blocked by the polynomial-only input layer (below)
-- [ ] **Non-polynomial (rational) expression input.** v2's ModelKit builds straight-line
-  programs, so `u₁/x² + u₂` or `y[1:2] ./ y[3]` work directly; v3's DynamicPolynomials input
-  layer is polynomial-only. Blocks two v2 monodromy testsets ("Monodromy rational functions",
-  triangulation) and v2's "certify uses approximate inverse of jacobian" (its `approx_inv!`
-  path is already covered by the Arb-fallback testset)
+- [ ] **Non-polynomial (rational) expression input.** The expression frontend must cover both
+  v2's rational straight-line programs (`u₁/x² + u₂`, `y[1:2] ./ y[3]`) and retained unary
+  operations such as `sqrt(γ) * x₁ + x₂^2`, `sin(γ) * x₁`, and `cos(x₁) - x₂`.
+  `OP_SQRT`, `OP_SIN`, and `OP_COS` remain in `ExecInstruction` even though the current
+  DynamicPolynomials frontends do not emit them. This work blocks two v2 monodromy testsets
+  ("Monodromy rational functions", triangulation) and v2's "certify uses approximate inverse
+  of jacobian" (its `approx_inv!` path is already covered by the Arb-fallback testset).
+
+  Implementation and validation checklist:
+  - add expression-IR/frontend nodes for division, integer powers, `sqrt`, `sin`, and `cos`,
+    with variable/parameter discovery and constant folding;
+  - lower them to the existing `OP_DIV`/`OP_INV`/`OP_POW_INT` and
+    `OP_SQRT`/`OP_SIN`/`OP_COS` instructions in every compile mode;
+  - implement analytic Jacobian rules and verify Taylor orders 1--3 for scalar and
+    Taylor-valued parameters;
+  - complete the extended-precision surface: `sqrt` already works for `ComplexDF64`;
+    `sin` and `cos` still need `DoubleF64`/`ComplexDF64` implementations;
+  - add RGF codegen and interval/Acb certification coverage for every new expression node;
+  - add end-to-end regression systems, including `sqrt(γ) * x₁ + x₂^2`, and validate
+    interpreted/compiled parity, Jacobians, DF64 residuals, Taylor coefficients against a
+    Cauchy-integral oracle, parameter tracking, monodromy, and certification;
+  - keep low-level interpreter tests for all retained unary variants so an operation cannot
+    disappear from an execution backend before the frontend begins emitting it.
 - [ ] **System composition** (v2 `CompositionSystem`, `L₂ ∘ f ∘ L₁`). Blocks the v2 symmetroids
   monodromy test (305 solutions; its custom-`distance` kwarg is already supported)
 - [ ] Group-action symmetry in `Result` clustering: the `GroupActions` API and group-action-aware
@@ -314,13 +332,19 @@ TaylorVector-parameter Taylor kernel (production path — CoefficientHomotopy/To
 
 #### TTFX (fresh session)
 
-Final v3 root-cause pass measured 2026-07-18; v2 numbers from 2026-04-03.
+Latest v3 pass measured 2026-07-25; v2 numbers from 2026-04-03.
+
+The v3 rows predate the tape-executor precompilation of 2026-07-26, which cut the
+common path by 1.28s in a paired comparison (`01_decisions.md`, "Tape executors are
+precompiled by signature"). They are not restated here because the machine was
+contended when the change landed and no clean absolute sweep was taken; re-run
+`make ttfx` on a quiet machine before trusting the numbers below.
 
 | Metric | Time |
 |--------|------|
 | v3 package load | 0.77s |
-| v3 construction + init + first solve! | 9.80--9.83s |
-| **v3 total (load + construction + solve)** | **10.58--10.61s** |
+| v3 construction + init + first solve! | 8.44--8.77s |
+| **v3 total (load + construction + solve)** | **9.21--9.54s** |
 | v2 package load | 1.30s |
 | v2 first solve() [:mixed] | 43.78s |
 | **v2 total [:mixed]** | **45.08s** |
@@ -329,7 +353,45 @@ Final v3 root-cause pass measured 2026-07-18; v2 numbers from 2026-04-03.
 
 The root-cause pass cut build/init/solve from 14.44s to ~9.81s by isolating mutually exclusive
 compiler branches, using adaptive direct polynomial lowering, and stabilizing constructor types.
-Full SnoopCompile/JET/Cthulhu/invalidation report: `05_ttfx_invalidations.md`.
+A later pass took it to ~9.2--9.4s by not factorizing the `MatrixWorkspace` QR field at
+construction and by putting shape dispatch behind an inference barrier. A third pass reached
+~8.4--8.8s while testing four changes: temporarily dropping three non-polynomial unary
+interpreter variants, installing the extended-precision wrappers on first use, extracting the
+support on demand, and handing `skeel_row_scaling!` a matrix instead of a `MatrixWorkspace`
+(see `01_decisions.md`). The unary-variant removal recovered about 0.26s but was rejected because
+those operations belong to the planned expression frontend. The table below therefore records a
+historical experiment, not the current absolute TTFX; remeasure with the variants retained.
+Over 3 interleaved fresh-process pairs at `-t 4`, the experimental build had 21 of 21 paired
+differences negative:
+
+| workload | before | after | |
+|---|---:|---:|---:|
+| `total_degree_interpreted_serial` | 9.339s | 8.437s | −9.7% |
+| `newton_standard` | 6.031s | 5.259s | −12.8% |
+| `singular_endgame` | 9.333s | 8.505s | −8.9% |
+| `overdetermined_total_degree` | 10.009s | 9.180s | −8.3% |
+| `total_degree_compiled_all_serial` | 10.243s | 9.532s | −6.9% |
+| `witness_set_build` | 16.046s | 14.984s | −6.6% |
+| `polyhedral_interpreted_serial` | 13.745s | 13.170s | −4.2% |
+
+Polyhedral gains least because it still extracts the support and is dominated by
+MixedSubdivisions. Full SnoopCompile/JET/Cthulhu/invalidation report: `05_ttfx_invalidations.md`.
+
+A fourth pass took the untaken `MatrixWorkspace` QR branch out of the square routes by
+erasing both its entry points behind shape-chosen `FunctionWrapper` fields, which keeps the
+tracker hot path free of runtime dispatch (`01_decisions.md`, "The QR path is erased behind a
+shape-chosen FunctionWrapper"). Over 5 interleaved fresh-process pairs at `-t 4` on
+`total_degree_interpreted_serial`, all 5 paired differences favour it: 8.427--9.062s before
+against 8.312--8.426s after, ~0.15s median. A square-only session now compiles zero
+specializations of `qr!`, `qr_ldiv!`, `reflector!` and `lmul_Q_adj!`; the first tall solve pays
+~0.35s to compile the path on demand.
+
+SnoopCompile v3.2.5 does not load on Julia 1.12 (`UndefVarError: Compiler.Params`), so that pass
+used `SnoopCompileCore`'s `@snoop_inference` tree directly: on 1.12 the per-node costs live on the
+`CodeInstance` as `time_infer_self` / `time_compile`, `UInt16` fields holding `Float16` seconds
+(`reinterpret(Float16, ci.time_infer_self)`). Codegen outweighs inference on a first solve, 9.97s
+against 6.20s for `polyhedral_interpreted_serial`, so a change that removes generated code counts
+for more than one that only removes inference.
 
 Core load stays at 0.77s because certification is a separate `lib/` subpackage. Adding Arblib to
 core raised load to ~1.6s and ~50% more invalidation descendants (one Arblib `show` method alone
@@ -364,25 +426,34 @@ accounted for ~2700), which is what motivated the split.
 - Em dashes are used as sentence pauses in comments across the older `src/` files,
   against the repo's writing rule. New and touched code is clean; a global sweep
   would be pure churn on files nothing else is changing
+- `Compiler.inferiterate_2arg` re-inference costs ~245ms of every first call. It
+  survives a build that never loads OhMyThreads, so the InitialValues invalidations are
+  not the cause and the trigger is still unattributed (`01_decisions.md`, "Dependency
+  invalidations are largely inert")
 
 ### Infrastructure
 
 - No benchmark CI: regressions go unnoticed
-- TTFX gate (construction + first solve < 5s) unmet at ~9.81s. PrecompileTools stays
-  deliberately disabled pending a final last-mile pass.
-- The routes built on top of the plain total-degree stack cost 2.6s to 8.6s more on
+- TTFX gate (construction + first solve < 5s) still unmet; last clean measurement was
+  ~8.6s, since reduced by 1.28s in a paired comparison but not re-measured absolutely.
+  PrecompileTools stays deliberately disabled; `src/precompile_signatures.jl` is a
+  separate mechanism (`01_decisions.md`, "Tape executors are precompiled by signature")
+- The routes built on top of the plain total-degree stack cost 2.6s to 8.4s more on
   first call, each measured in a fresh process at `-t 4` (`make ttfx`), against
-  9.64s for `total_degree_interpreted_serial` in the same run:
+  8.59s for `total_degree_interpreted_serial` in the same run. The table predates
+  the tape-executor precompilation, which took the common path down by 1.28s, and
+  the routes below share that path, so every absolute number here should be read as
+  an upper bound until the sweep is re-run on a quiet machine:
 
   | workload | first call (s) |
   |---|---:|
-  | `slice_solve` | 12.24 |
-  | `parameter_sweep` | 12.68 |
-  | `result_iterator_lazy` | 12.82 |
-  | `slice_solve_projective` | 15.22 |
-  | `witness_set_build` | 16.29 |
-  | `subspace_sweep_extrinsic` | 17.72 |
-  | `subspace_sweep_intrinsic` | 18.23 |
+  | `slice_solve` | 11.16 |
+  | `result_iterator_lazy` | 11.74 |
+  | `parameter_sweep` | 11.93 |
+  | `slice_solve_projective` | 14.10 |
+  | `witness_set_build` | 15.27 |
+  | `subspace_sweep_extrinsic` | 16.55 |
+  | `subspace_sweep_intrinsic` | 17.04 |
 
   Each of these compiles a wrapper stack the plain route never builds
   (`SlicedSystem`, the chart row, the subspace homotopies, the retargeting worker

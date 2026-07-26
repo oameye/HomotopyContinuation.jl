@@ -155,6 +155,9 @@ end
 
 const ExecInstructionT = typeof(ExecInstruction.Stop(Int32(0)))
 
+# One entry per `OpType`, in `@data ExecInstruction` declaration order. Any other
+# order costs the emitted switch (cyclic-7 Jacobian 387ns -> 710ns when reordered
+# by op frequency).
 const _EXEC_INSTRUCTION_SPECS = (
     (:Stop, :OP_STOP),
     (:Cb, :OP_CB),
@@ -433,7 +436,7 @@ The tape stores `TruncatedTaylorSeries` values throughout execution.
 Constants and parameters are promoted to order-0 Taylor series automatically
 via the tape's element type conversion.
 """
-Base.@propagate_inbounds function execute_taylor!(
+@noinline function execute_taylor!(
         u::AbstractVector,
         ::Val{K},
         I::Interpreter,

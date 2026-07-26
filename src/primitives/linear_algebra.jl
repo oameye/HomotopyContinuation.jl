@@ -3,6 +3,24 @@
 
 const LA = LinearAlgebra
 
+const QRFact = LA.QR{ComplexF64, Matrix{ComplexF64}, Vector{ComplexF64}}
+const QRFactorizeFW = FunctionWrapper{Nothing, Tuple{QRFact}}
+const QRSolveFW =
+    FunctionWrapper{Nothing, Tuple{FSVec{ComplexF64}, QRFact, FSVec{ComplexF64}}}
+
+# A square workspace never reaches the QR branch. Both entry points are erased
+# behind a shape-chosen `FunctionWrapper`, and the tall pair is built through a
+# dynamic call so a square-only session never compiles `qr!`.
+_unreachable_qr_factorize(::QRFact)::Nothing = nothing
+_unreachable_qr_solve(
+    ::FSVec{ComplexF64}, ::QRFact, ::FSVec{ComplexF64},
+)::Nothing = nothing
+
+_square_qr_ops()::Tuple{QRFactorizeFW, QRSolveFW} =
+    (QRFactorizeFW(_unreachable_qr_factorize), QRSolveFW(_unreachable_qr_solve))
+_tall_qr_ops()::Tuple{QRFactorizeFW, QRSolveFW} =
+    (QRFactorizeFW(qr!), QRSolveFW(qr_ldiv!))
+
 """
     MatrixWorkspace
 
@@ -17,7 +35,10 @@ mutable struct MatrixWorkspace <: AbstractMatrix{ComplexF64}
     const A::FSMat{ComplexF64}
     factorized::Bool
     lu::LA.LU{ComplexF64, FSMat{ComplexF64}, Vector{Int64}}
-    qr::LA.QR{ComplexF64, Matrix{ComplexF64}, Vector{ComplexF64}}
+    qr::QRFact
+    const qr_factorize::QRFactorizeFW
+    const qr_solve::QRSolveFW
+    const qr_x::FSVec{ComplexF64}        # QR solution buffer
     const row_scaling::FSVec{Float64}
     scaled::Bool
     const x̄::FSVec{ComplexDF64}          # extended precision workspace
@@ -42,8 +63,14 @@ function _make_matrix_workspace(A::FSMat{ComplexF64}, m::Int, n::Int)
     ipiv = zeros(Int64, m)
     lu = LA.LU{ComplexF64, FSMat{ComplexF64}, Vector{Int64}}(copy(A), ipiv, 0)
 
-    # QR: use Matrix{ComplexF64} (qr! on FSMat returns QRCompactWY, not QR)
-    qr = LA.qrfactUnblocked!(Matrix{ComplexF64}(copy(A)))
+    # A plain Matrix, since `qr!` on an FSMat returns a QRCompactWY. The factors
+    # copy `A` so `factorize!` is defined before the first `updated!`.
+    qr_factors = m == n ? Matrix{ComplexF64}(undef, 0, 0) :
+        copyto!(Matrix{ComplexF64}(undef, m, n), A)
+    qr = LA.QR(qr_factors, Vector{ComplexF64}(undef, size(qr_factors, 2)))
+    qr_x = FSVec{ComplexF64}(Vector{ComplexF64}(undef, m == n ? 0 : n))
+    qr_factorize, qr_solve = m == n ? _square_qr_ops() :
+        Base.inferencebarrier(_tall_qr_ops)()::Tuple{QRFactorizeFW, QRSolveFW}
 
     r = FSVec{ComplexF64}(zeros(ComplexF64, m))
     r̄ = FSVec{ComplexDF64}(zeros(ComplexDF64, m))
@@ -53,7 +80,7 @@ function _make_matrix_workspace(A::FSMat{ComplexF64}, m::Int, n::Int)
     inf_norm_est_rwork = FSVec{Float64}(Vector{Float64}(undef, n))
 
     return MatrixWorkspace(
-        A, false, lu, qr, row_scaling, false,
+        A, false, lu, qr, qr_factorize, qr_solve, qr_x, row_scaling, false,
         x̄, r, r̄, δx, inf_norm_est_work, inf_norm_est_rwork,
     )
 end
@@ -109,7 +136,7 @@ function factorize!(WS::MatrixWorkspace)
     if m == n
         lu!(WS.lu.factors, WS.lu.ipiv)
     else
-        qr!(WS.qr)
+        WS.qr_factorize(WS.qr)
     end
     WS.factorized = true
     return WS
@@ -347,7 +374,10 @@ function LA.ldiv!(
         end
     else
         copyto!(WS.r, b)
-        qr_ldiv!(x, WS.qr, WS.r)
+        WS.qr_solve(WS.qr_x, WS.qr, WS.r)
+        @inbounds for i in eachindex(x, WS.qr_x)
+            x[i] = WS.qr_x[i]
+        end
     end
     return x
 end

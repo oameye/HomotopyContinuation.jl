@@ -170,7 +170,7 @@ end
 Every `AbstractSystem`/`AbstractHomotopy` is wrapped via `FunctionWrapper` into concrete evaluators. The tracker is monomorphic — compiled once, reused for all systems.
 
 ```julia
-SystemEvaluator    # wraps 9 FunctionWrappers: eval, eval_df64, eval_jac,
+SystemEvaluator    # wraps eval/jac/Taylor FunctionWrappers plus a lazy DF64 pair,
                    #   taylor 1/2/3 (scalar param), taylor 1/2/3 (TaylorVector param)
                    #   + size, nparameters
 HomotopyEvaluator  # wraps 10 FunctionWrappers: eval, eval_df64, eval_jac,
@@ -183,7 +183,7 @@ All FW signatures use `FSVec{T}`/`FSMat{T}` (concrete FixedSizeArray aliases). T
 ### System
 
 ```julia
-struct System{P, V}
+struct System{P, V, M, S}
     polys::FSVec{P}                    # original MP polynomials
     parameters::FSVec{V}               # parameter variables
     variables::FSVec{V}                # decision variables
@@ -192,8 +192,7 @@ struct System{P, V}
     nvars::Int; nparams::Int
     variable_groups::Vector{Vector{Int}}
     is_homogeneous::Bool
-    support::Vector{Matrix{Int32}}
-    coefficients::Vector{Vector{ComplexF64}}
+    _support_coefficients::Base.RefValue{SupportCoefficients} # filled on first use
     # GC roots — interpreters must stay alive for FunctionWrapper closures
     _interp_f64::Interpreter{Vector{ComplexF64}}
     _interp_df64::Interpreter{Vector{ComplexDF64}}

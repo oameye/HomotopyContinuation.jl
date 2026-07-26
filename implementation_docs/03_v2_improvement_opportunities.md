@@ -36,8 +36,9 @@ All items were worked through; per-item status:
   need a `MatrixWorkspace` type parameter and a second compiled tracker body).
 - **#11 tracker presets: DONE** (`DEFAULT/FAST/CONSERVATIVE_TRACKER_OPTIONS`
   const presets with v2's β values).
-- **#12 DoubleF64 transcendentals: SKIPPED** (irrelevant for polynomial
-  systems; revisit only if non-polynomial homotopies land).
+- **#12 DoubleF64 transcendentals: DEFERRED TO EXPRESSION INPUT.** The interpreter
+  retains `SIN`, `COS`, and `SQRT`; complete extended-precision transcendental
+  support with the planned non-polynomial frontend (`02_status.md`).
 
 ## Context: the core loop is already a faithful port
 
@@ -201,8 +202,13 @@ deciding.
 
 - **v2**: `DoubleDouble.jl:612-1023` implements exp/log/sin/cos/tan/atan.
 - **v3**: `primitives/double_f64.jl` implements only algebraic ops plus `sqrt`.
-- **Gain**: extended-precision residuals for non-polynomial homotopies. Irrelevant
-  for pure polynomial systems.
+- **Gain**: extended-precision residuals for non-polynomial homotopies. This is
+  required before `sin`/`cos` expression nodes can claim parity across ordinary,
+  DF64, Taylor, and certification evaluation. `sqrt` already has the required
+  extended-precision arithmetic.
+- **Validation**: use parameter-dependent unary expressions in the common
+  expression-input matrix described in `02_status.md`; do not validate only the
+  scalar helpers in isolation.
 
 ## Recommended order
 

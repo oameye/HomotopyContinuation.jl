@@ -37,6 +37,30 @@ function make_two_output_sequence()
     )
 end
 
+# Low-level unary sequence used to keep the interpreter surface covered before
+# the non-polynomial expression frontend starts emitting these operations.
+function make_unary_sequence(op::OpType.T)
+    input = (Int32(1), Int32(1), Int32(1), Int32(1))
+    stop_input = (Int32(2), Int32(2), Int32(2), Int32(2))
+    instructions = Instruction[
+        Instruction(input, op, Int32(2)),
+        Instruction(stop_input, OpType.OP_STOP, Int32(2)),
+    ]
+    return InstructionSequence(
+        instructions,
+        ComplexF64[],
+        1:0,
+        1:0,
+        1:1,
+        1,
+        2,
+        [(1, 2)],
+        Tuple{Int, Int}[],
+        true,
+        false,
+    )
+end
+
 @testset "Interpreter" begin
     @testset "execute! with parameters" begin
         seq = make_param_sequence()
@@ -71,6 +95,47 @@ end
         u = zeros(ComplexDF64, 1)
         execute!(u, I, ComplexDF64[ComplexDF64(2.0), ComplexDF64(3.0)], ComplexDF64[])
         @test real(ComplexF64(u[1])) ≈ 8.0
+    end
+
+    @testset "retained non-polynomial unary instructions" begin
+        z = 1.3 + 0.4im
+        series = TruncatedTaylorSeries((z, 0.3 - 0.2im, -0.15 + 0.25im))
+        data = FSMat{ComplexF64}(zeros(ComplexF64, 3, 1))
+        for k in 0:2
+            data[k + 1, 1] = series[k]
+        end
+        tx = TaylorVector{3, ComplexF64}(data)
+
+        cases = (
+            (OpType.OP_SIN, sin, Next.taylor_op_sin),
+            (OpType.OP_COS, cos, Next.taylor_op_cos),
+            (OpType.OP_SQRT, sqrt, Next.taylor_op_sqrt),
+        )
+        for (op, scalar_fn, taylor_fn) in cases
+            seq = make_unary_sequence(op)
+
+            I = Interpreter(Vector{ComplexF64}, seq)
+            u = zeros(ComplexF64, 1)
+            execute!(u, I, ComplexF64[z], ComplexF64[])
+            @test u[1] ≈ scalar_fn(z)
+
+            I_taylor = Interpreter(
+                Vector{TruncatedTaylorSeries{3, ComplexF64}},
+                seq,
+            )
+            expected = taylor_fn(series)
+            for K in 0:2
+                execute_taylor!(u, Val(K), I_taylor, tx, ComplexF64[])
+                @test u[1] ≈ expected[K] atol = 1.0e-12
+            end
+        end
+
+        # ComplexDF64 already supports the algebraic square-root path. The
+        # expression-input TODO tracks DF64 sin/cos support separately.
+        I_df64 = Interpreter(Vector{ComplexDF64}, make_unary_sequence(OpType.OP_SQRT))
+        u_df64 = zeros(ComplexDF64, 1)
+        execute!(u_df64, I_df64, ComplexDF64[ComplexDF64(z)], ComplexDF64[])
+        @test ComplexF64(u_df64[1]) ≈ sqrt(z) atol = 1.0e-14
     end
 
     @testset "execute_taylor! higher order" begin

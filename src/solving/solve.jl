@@ -80,15 +80,23 @@ function CommonSolve.init(
         F::System, alg::TotalDegree,
         exec::AbstractExecutor = Threaded();
         show_progress::Bool = true,
-    )
+    )::SolveCache
     seed = alg.seed
     _check_square_or_overdetermined(F)
     _check_parameter_free(F, "`TotalDegree`")
 
     rng = Random.MersenneTwister(seed)
     γ = _random_gamma(rng)
-    return _init_total_degree(system_shape(F), F, alg, exec, rng, γ, show_progress)
+    # Dynamic call: specializes the body on the concrete `System` so that
+    # `system_shape(F)` resolves statically instead of union-splitting.
+    initializer = Base.inferencebarrier(_init_total_degree_shaped)
+    return initializer(F, alg, exec, rng, γ, show_progress)
 end
+
+_init_total_degree_shaped(
+    F::System, alg::TotalDegree, exec::AbstractExecutor,
+    rng::Random.MersenneTwister, γ::ComplexF64, show_progress::Bool,
+) = _init_total_degree(system_shape(F), F, alg, exec, rng, γ, show_progress)
 
 function _init_total_degree(
         ::SquareShape, F::System, alg::TotalDegree, exec::AbstractExecutor,

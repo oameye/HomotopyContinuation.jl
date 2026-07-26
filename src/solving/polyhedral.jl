@@ -442,9 +442,18 @@ function CommonSolve.init(
         exec::AbstractExecutor = Threaded();
         show_progress::Bool = true,
     )::PolyhedralSolveCache
-    seed = alg.seed
     _check_square_or_overdetermined(F)
     _check_parameter_free(F, "`Polyhedral`")
+    # Dynamic call: specializes the body on the concrete `System` so that
+    # `system_shape(F)` resolves statically instead of union-splitting.
+    initializer = Base.inferencebarrier(_init_polyhedral)
+    return initializer(F, alg, exec, show_progress)::PolyhedralSolveCache
+end
+
+function _init_polyhedral(
+        F::System, alg::Polyhedral, exec::AbstractExecutor, show_progress::Bool,
+    )::PolyhedralSolveCache
+    seed = alg.seed
     n = F.nvars
 
     # Task-local RNG seeded from user seed — deterministic without mutating global state.

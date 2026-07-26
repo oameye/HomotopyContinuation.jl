@@ -2,6 +2,17 @@
 #
 # The System constructor runs the full pipeline:
 #   MP polynomials → SExpr → CSE → InstructionSequence → Interpreters → FunctionWrappers
+abstract type SystemShape end
+struct UnderdeterminedShape <: SystemShape end
+struct SquareShape <: SystemShape end
+struct OverdeterminedShape <: SystemShape end
+
+const SupportCoefficients = Tuple{Vector{Matrix{Int32}}, Vector{Vector{ComplexF64}}}
+
+abstract type SystemCompileStrategy end
+struct InterpretedCompile <: SystemCompileStrategy end
+struct CompiledCompile <: SystemCompileStrategy end
+struct CompiledAllCompile <: SystemCompileStrategy end
 
 """
     System
@@ -21,16 +32,6 @@ solve(F)
 solve(F, Polyhedral())
 ```
 """
-abstract type SystemShape end
-struct UnderdeterminedShape <: SystemShape end
-struct SquareShape <: SystemShape end
-struct OverdeterminedShape <: SystemShape end
-
-abstract type SystemCompileStrategy end
-struct InterpretedCompile <: SystemCompileStrategy end
-struct CompiledCompile <: SystemCompileStrategy end
-struct CompiledAllCompile <: SystemCompileStrategy end
-
 struct System{P, V, M, S <: SystemShape}
     polys::FSVec{P}
     parameters::FSVec{V}
@@ -41,8 +42,7 @@ struct System{P, V, M, S <: SystemShape}
     nparams::Int
     variable_groups::Vector{Vector{Int}}
     is_homogeneous::Bool
-    support::Vector{Matrix{Int32}}
-    coefficients::Vector{Vector{ComplexF64}}
+    _support_coefficients::LazyRef{SupportCoefficients}
     _interp_f64::Interpreter{Vector{ComplexF64}}
     _interp_df64::Interpreter{Vector{ComplexDF64}}
     _interp_jac::Interpreter{Vector{ComplexF64}}
@@ -127,64 +127,70 @@ variables(F::System) = F.variables
 parameters(F::System) = F.parameters
 variable_groups(F::System) = F.variable_groups
 is_homogeneous(F::System)::Bool = F.is_homogeneous
-function support_coefficients(F::System)::Tuple{Vector{Matrix{Int32}}, Vector{Vector{ComplexF64}}}
+function support_coefficients(F::System)::SupportCoefficients
     nparameters(F) == 0 ||
         throw(ArgumentError("support_coefficients(::System) is only defined for parameter-free systems"))
-    return F.support, F.coefficients
+    cache = F._support_coefficients
+    if !is_installed(cache)
+        install!(cache, support_coefficients(F.polys, F.variables))
+    end
+    return cache[]
 end
 
 @inline _to_fsvec(xs::AbstractVector{T}) where {T} = FSVec{T}(collect(xs))
 
-# Total degree in `variables` only; `MP.maxdegree` would count parameters too.
+# Linear scan: a `Set` costs more to compile than the scan costs to run, as long
+# as callers keep the scan off the innermost loop.
+function _contains_variable(variables::AbstractVector, var)::Bool
+    Base.@nospecialize variables var
+    for v in variables
+        v == var && return true
+    end
+    return false
+end
+
+# Per-polynomial degree in `variables` only, and homogeneity in them, in one pass.
+# `MP.maxdegree` would count parameters and inflate the Bezout number.
 function _variable_degrees(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         variables::AbstractVector,
-    )::Vector{Int}
+    )::Tuple{Vector{Int}, Bool}
     Base.@nospecialize polys variables
-    var_set = Set(variables)
     degs = Vector{Int}(undef, length(polys))
+    homogeneous = true
+    # Every monomial of a polynomial reports the same variable list, so the
+    # membership mask is rebuilt once per polynomial rather than once per
+    # exponent. Without it the scan is quadratic in the variable count on every
+    # term: 2.1s for 40 variables over 34k terms, 250ms with the mask.
+    mask = Bool[]
+    mask_variables = nothing
     for (i, poly) in enumerate(polys)
         maxdeg = 0
+        mindeg = typemax(Int)
         for term in MP.terms(poly)
             iszero(MP.coefficient(term)) && continue
             mono = MP.monomial(term)
+            mono_variables = MP.variables(mono)
+            if mono_variables !== mask_variables
+                resize!(mask, length(mono_variables))
+                for (k, var) in enumerate(mono_variables)
+                    mask[k] = _contains_variable(variables, var)
+                end
+                mask_variables = mono_variables
+            end
             degree = 0
-            for (var, exp) in zip(MP.variables(mono), MP.exponents(mono))
-                var in var_set || continue
+            for (keep, exp) in zip(mask, MP.exponents(mono))
+                keep || continue
                 degree += exp
             end
             degree > maxdeg && (maxdeg = degree)
+            degree < mindeg && (mindeg = degree)
         end
         degs[i] = maxdeg
+        # A polynomial with no nonzero term counts as homogeneous.
+        homogeneous &= mindeg == typemax(Int) || mindeg == maxdeg
     end
-    return degs
-end
-
-function _is_homogeneous(
-        polys::AbstractVector{<:MP.AbstractPolynomialLike},
-        variables::AbstractVector,
-    )::Bool
-    Base.@nospecialize polys variables
-    var_set = Set(variables)
-    for poly in polys
-        target_degree = nothing
-        for term in MP.terms(poly)
-            coeff = MP.coefficient(term)
-            iszero(coeff) && continue
-            mono = MP.monomial(term)
-            degree = 0
-            for (var, exp) in zip(MP.variables(mono), MP.exponents(mono))
-                var in var_set || continue
-                degree += exp
-            end
-            if isnothing(target_degree)
-                target_degree = degree
-            elseif degree != target_degree
-                return false
-            end
-        end
-    end
-    return true
+    return degs, homogeneous
 end
 
 ## ── Polynomial normalization ────────────────────────────────────────────────
@@ -262,12 +268,6 @@ end
     Base.@nospecialize polys variables parameters
     polys = _normalize_polys(polys)
 
-    supp, coeffs = if nparams == 0
-        support_coefficients(polys, variables)
-    else
-        Vector{Matrix{Int32}}(), Vector{Vector{ComplexF64}}()
-    end
-
     seq_eval = _build_instruction_sequence(polys, variables, parameters, false)
     seq_jac = _build_instruction_sequence(polys, variables, parameters, true)
 
@@ -278,8 +278,7 @@ end
     interp_t2 = Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval)
     interp_t3 = Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval)
 
-    degs = _variable_degrees(polys, variables)
-    is_homogeneous = _is_homogeneous(polys, variables)
+    degs, is_homogeneous = _variable_degrees(polys, variables)
 
     evaluator = _build_mode_evaluator(
         strategy, seq_eval, seq_jac,
@@ -298,7 +297,7 @@ end
         fs_variables,
         evaluator, degs, nvars, nparams,
         Vector{Int}[], is_homogeneous,
-        supp, coeffs,
+        LazyRef{SupportCoefficients}(),
         interp_f64, interp_df64, interp_jac,
         interp_t1, interp_t2, interp_t3,
         M,
@@ -346,7 +345,7 @@ function _build_mode_evaluator(
     )
 end
 
-function _execute_eval_fw!(
+@noinline function _execute_eval_fw!(
         u::AbstractVector, interp::Interpreter, x::AbstractVector, p::AbstractVector,
     )::Nothing
     if isempty(interp.sequence.parameters_range)
@@ -358,7 +357,7 @@ function _execute_eval_fw!(
     return nothing
 end
 
-function _execute_jac_fw!(
+@noinline function _execute_jac_fw!(
         u::AbstractVector, U::AbstractMatrix, interp::Interpreter,
         x::AbstractVector, p::AbstractVector,
     )::Nothing
@@ -371,6 +370,19 @@ function _execute_jac_fw!(
     return nothing
 end
 
+function _lazy_df64_interpreted(interp_df64::Interpreter{Vector{ComplexDF64}})
+    return _lazy_df64(
+        () -> (
+            SysEvalDF64FW(
+                (u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing),
+            ),
+            SysEvalDF64OutFW(
+                (u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing),
+            ),
+        ),
+    )
+end
+
 function _build_interpreted_evaluation_fws(
         interp_f64::Interpreter{Vector{ComplexF64}},
         interp_df64::Interpreter{Vector{ComplexDF64}},
@@ -380,12 +392,7 @@ function _build_interpreted_evaluation_fws(
         SysEvalFW(
             (u, x, p) -> (_execute_eval_fw!(u, interp_f64, x, p); nothing),
         ),
-        SysEvalDF64FW(
-            (u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing),
-        ),
-        SysEvalDF64OutFW(
-            (u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing),
-        ),
+        _lazy_df64_interpreted(interp_df64)...,
         SysEvalJacFW(
             (u, U, x, p) -> (_execute_jac_fw!(u, U, interp_jac, x, p); nothing),
         ),
