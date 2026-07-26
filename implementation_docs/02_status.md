@@ -18,9 +18,9 @@ At v2 parity: threading, overdetermined systems, parameter homotopies, monodromy
 linear subspaces, trace test), certification (Krawczyk with Arb fallback, in the separate
 `lib/HomotopyContinuationNextCertification` subpackage), and witness sets / NID (`witness_set`,
 `trace_test`, `membership`, `regeneration`, `decompose`, `nid`, including projective,
-zero-dimensional, and parametric cases).
+zero-dimensional, parametric, and rational cases).
 
-Remaining gaps: distributed executor, system composition, rational-input witness sets.
+Remaining gaps: distributed executor, system composition.
 
 ## Feature Checklist
 
@@ -38,7 +38,12 @@ Remaining gaps: distributed executor, system composition, rational-input witness
 - [x] Two-stage toric reparameterization (weight renormalization when max_weight ≥ 10)
 - [x] Predictor-corrector tracker (Padé 2,1 + adaptive step + s-plane Hermite for winding > 1)
 - [x] Multi-round iterative refinement in predictor (weighted-norm orders 2–3, inf-norm order 1)
-- [x] Newton corrector (α-theory) with DoubleF64 extended precision
+- [x] Newton corrector (α-theory) with DoubleF64 extended precision, escalated both from an
+  accepted step (`update_precision!`) and from three consecutive rejected steps whose
+  correction stopped contracting after reaching the prediction. The second route is what
+  carries a path into a singular endpoint: a correction that stalls on the double-precision
+  residual is not rescued by a smaller step, so without it the step size shrinks until it
+  underflows. v2 has only the first route
 - [x] Step control: ω extrapolation, convergence-rate rejection, near-target scaling
 - [x] Endgame tracker — Puiseux valuation, winding number estimation, singular Cauchy endgame
   (geometric stepping λ=0.25), at-infinity/at-zero detection, cubic Hermite endpoint prediction,
@@ -55,7 +60,18 @@ Remaining gaps: distributed executor, system composition, rational-input witness
   its global CSE. Shares `MonomialCache` with the polyhedral support frontend
 - [x] RGF compiled eval+jac backend (`CompileMode.COMPILED`, 3–6x kernel speedup)
 - [x] RGF compiled Taylor backend (`CompileMode.COMPILED_ALL`, 1.3–1.7x Taylor kernel speedup, 1.2–1.4x end-to-end vs `INTERPRETED`)
-- [x] Automatic coefficient normalization (scales polynomials with O(10^8+) coefficients to O(1))
+- [x] Automatic equation normalization (scales an equation with O(10^8+) coefficients to O(1)).
+  Both front-ends go through it: the polynomial one takes the largest coefficient, the
+  `Expression` one evaluates the tree with every variable set to 1 and every literal replaced
+  by its absolute value (`expression_scale`), which is the ℓ1 coefficient norm of a polynomial
+  and a ratio of the two for a rational function. v2 instead leaves the target alone and scales
+  its total-degree start system per equation to match
+- [x] Condition number of the row- and column-scaled Jacobian (`_scaled_cond`), read by the
+  endgame's singularity, at-infinity and precision decisions. Higham's truncated 1-norm
+  estimator, so a lower bound on the dense `cond(D_r A D_c, Inf)` (within a factor 3 over a
+  12500-matrix sweep) and never above it, at every row scale and whether or not the LU factors
+  already carry the row scaling. That second state is what a Newton solve leaves behind, and it
+  covers four of the five call sites
 - [x] AllocCheck zero-allocation enforcement on all hot paths
 - [x] Integration tests from v2 with exact result parity
 - [x] **Non-polynomial (rational/transcendental) expression input.** `Expression` is a
@@ -104,8 +120,9 @@ Remaining gaps: distributed executor, system composition, rational-input witness
     entries of v2's `model_kit/e2e_test.jl` sweep (system, homotopy and Acb), and the
     Subs / Evaluation / Linear Algebra / Modeling / rational-functions testsets of v2's
     `model_kit/symbolic_test.jl`.
-  - Still open: `witness_set`/`regeneration`/`nid` on rational input (see Not Done), which
-    is what v2's `nid_test.jl` "rational systems" testset needs.
+  - `regeneration`/`nid`/`intersect` take rational input, through `num_den` and the front-end
+    dispatch described under witness sets/NID below. Closes v2's `nid_test.jl`
+    "rational systems" testset.
 - [x] Threading via OhMyThreads.jl — `Serial`/`Threaded` executor types, builder/worker-state
   pattern for thread-safe evaluator cloning, `@tasks`/`@local` work distribution
 - [x] Overdetermined systems: `RandomizedSystem` square-up (identity block plus random fold of
@@ -202,8 +219,9 @@ Remaining gaps: distributed executor, system composition, rational-input witness
   (u-regeneration, Duff/Leykin/Rodriguez); `decompose` plus `NumericalIrreducibleDecomposition`
   (`nid` / `numerical_irreducible_decomposition`, `ncomponents`, `degrees`, `witness_sets`,
   hand-rolled degree table with no PrettyTables dep). Covers projective witness sets,
-  zero-dimensional varieties, parametric (`target_parameters`) witness sets, and threaded
-  membership and intersection. Tests: `test/{witness_set,nid}_test.jl`.
+  zero-dimensional varieties, parametric (`target_parameters`) witness sets, rational input to
+  `regeneration`/`nid`/`intersect`, and threaded membership and intersection.
+  Tests: `test/{witness_set,nid}_test.jl`.
 
   Key design choices, all deviations from v2:
   - Stays in **ambient coordinates and appends the linear equations** `A x − b` rather than
@@ -222,17 +240,30 @@ Remaining gaps: distributed executor, system composition, rational-input witness
     global RNG in the driver, so both modes leave the global RNG in the same state. The query
     subspace direction is genuinely random per query, unlike v2's fixed axis-aligned frame.
   - Adds the `weighted_normal` monodromy sampler (v2 has it only for regen/decompose).
+  - Both input front-ends reach `regeneration` / `nid` / `intersect`, the routes that rebuild
+    equations rather than only evaluating them. `_regeneration_equations`, `_u_degree`,
+    `_u_start_equation`, `_numerator_system` and `_rename_variables` dispatch on the equation
+    type; `num_den(::Expression)` (v2's `get_num_den`) splits a rational equation `f = p/q`.
+    The witness set of the hypersurface `f = 0` is computed from `p` and the zeros of `p` that
+    also kill `q` are dropped by `_drop_poles`, instead of v2's re-track through an L→L homotopy.
+    The test is the first-order distance from the point to `V(q)`, `|q(r)| / ‖∇q(r)‖`, relative
+    to `‖r‖`. Value and gradient scale together with `q`, so unlike a residual threshold on `f`
+    the decision survives rescaling `f` or `q`; and being a distance rather than a magnitude it
+    separates a pole from a zero that merely sits near one, which is the case `(x − ε)/x` at
+    `x = ε`. `POLE_DISTANCE_TOL = 1e-10` sets the boundary: a zero closer than that to `V(q)` is
+    dropped, and a pole is kept if the point that reached it is less accurate than that.
+    The u-homotopy deforms `(u^d − 1)/q` into
+    `p/q`, so both endpoint systems are singular on the same set. Equations whose numerator or
+    denominator is not polynomial in the variables (`sqrt`/`sin`/`cos` of a variable, including
+    `1/sqrt(x)` and `x/(1 + sqrt(x))`) are rejected up front,
+    and `intersect` rejects input that mixes the two front-ends. `witness_set` on a rational
+    system keeps asking for cleared denominators (its total-degree slice would be over the
+    numerators, and `V(p₁, …, pₘ)` is larger than `V(F)`); equation-by-equation regeneration is
+    what separates the two, as it does in v2.
 
 ### Not Done
 
 - [ ] **Distributed executor**: extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
-- [ ] Rational-input witness sets: `regeneration` rebuilds its equations through
-  `MP.polynomial`/`MP.subs`/`MP.maxdegree`, so it rejects any system built from `Expression`s
-  with a targeted error. It is the last route that does: `witness_set` needs only the evaluator,
-  and parameter fixing and polyhedral support extraction now dispatch on the front-end.
-  v2 splits each equation with `get_num_den`, takes the witness set of the numerator and
-  drops the points that are poles rather than zeros; v3 has no `get_num_den`. Blocks v2's
-  `nid_test.jl` "rational systems" testset
 - [ ] **System composition** (v2 `CompositionSystem`, `L₂ ∘ f ∘ L₁`). Blocks the v2 symmetroids
   monodromy test (305 solutions; its custom-`distance` kwarg is already supported)
 - [ ] Group-action symmetry in `Result` clustering: the `GroupActions` API and group-action-aware
@@ -242,219 +273,6 @@ Remaining gaps: distributed executor, system composition, rational-input witness
   first-solve per v3 default candidate (the v3-only matrix is measured; see `04_compile_modes.md`)
 - [ ] Benchmark CI
 
-## Test Suite
-
-53 test files run in parallel via ParallelTestRunner (`make test`, default 10 workers),
-about 5635 passing assertions plus one `@test_skip` (`nid_test.jl`). The total is not
-exactly reproducible: 25 assertion loops iterate over *discovered* solutions
-(`for s in solutions(res)`), so a run that finds a different number of endpoints
-reports a different number of assertions. Observed 5039 and 5086 on one commit:
-
-| Category | Files | Notes |
-|----------|-------|-------|
-| Quality gates | `aqua_test.jl`, `jet_test.jl`, `explicit_imports_test.jl` | Static analysis, type inference, import hygiene |
-| Type safety | `concrete_structs_test.jl` | All struct fields concretely typed |
-| Allocation | `alloc_check_test.jl` | Zero-alloc norms, LA, predictor, Newton, tracker, endgame, and the three system wrappers whose appended rows run on the predictor's hot path (`RandomizedSystem`, `AffineChartSystem`, `SlicedSystem`) |
-| Primitives | `double_f64_test.jl`, `norms_test.jl`, `linear_algebra_test.jl`, `operations_test.jl` | |
-| Model kit | `interpreter_test.jl`, `codegen_test.jl`, `instruction_count_test.jl`, `taylor_test.jl`, `polynomial_input_test.jl`, `expression_test.jl` | Tape execution, RGF codegen, instruction-count regression; every `taylor_op_*` against a Cauchy-integral oracle; `expression_test.jl` covers the `Expression` ADT, `@var`, canonicalization, `differentiate`, `subs` (pairs and dicts), folding to a number, the cofactor `det`, conjugation, degrees, MP conversion, and three whole models built out of expression algebra (bottleneck, Steiner, reach of a plane curve) |
-| Non-polynomial input | `nonpolynomial_test.jl` (+ `test_systems.jl`) | Sweep of 3 systems (`small_rational`, `sqrt_parameters`, `trig`) x 3 compile modes against a plain-Julia reference: eval, Jacobian vs central differences, DF64, Taylor 1--3 with Taylor-valued parameters against a Cauchy-integral oracle. Each system also runs its tape over `Expression` values, which has to rebuild the input, and goes through a `StraightLineHomotopy` sweep (eval, Jacobian, `Val(1)` t-derivative, Taylor 2--3). Plus parameter tracking through `sqrt`, both v2 rational monodromy testsets in two compile modes, `verify_solution_completeness`, the `TotalDegree`/`Polyhedral`/`regeneration` rejection paths (plain and sliced), and the two routes that rewrite equations instead of evaluating them: polyhedral support extraction (dense, sparse where BKK beats Bezout, and squared-up overdetermined) and parameter fixing under a slice, both checked against the same system through DynamicPolynomials |
-| Evaluation sweep | `system_sweep_test.jl` (+ `test_systems.jl`) | 9 real systems (cyclic5/7, bacillus, cyclo, moments3, six_revolute, steiner, four_bar, tritangents) × 3 compile modes: eval, jacobian, DF64, Taylor 1–3 with constant and Taylor-valued parameters, plus the straight-line homotopy, all against exact symbolic ground truth |
-| Core | `core_test.jl`, `linear_subspace_test.jl`, `parameter_homotopy_test.jl`, `subspace_homotopy_test.jl`, `affine_chart_test.jl` | `affine_chart_test.jl` checks the chart row's Taylor coefficient `c·x_K` for a nonzero and a zeroed top row |
-| Tracking | `tracking_test.jl`, `endgame_test.jl`, `newton_test.jl`, `tracker_warmstart_test.jl`, `valuation_test.jl`, `tracker_regression_test.jl` | `valuation_test.jl` checks asymptotic valuations (finite, diverging, fractional); `tracker_regression_test.jl` covers the four-bar and Steiner near-singular paths |
-| Solving | `solve_test.jl`, `binomial_system_test.jl`, `polyhedral_regression_test.jl`, `overdetermined_test.jl`, `result_clustering_test.jl`, `path_diagnostics_test.jl`, `progress_test.jl` | Executor dispatch, serial/threaded consistency, excess-solution filtering |
-| Subspaces / sweeps | `sliced_solve_test.jl`, `subspace_solve_test.jl`, `many_targets_test.jl`, `result_iterator_test.jl` | `slice`, subspace→subspace, many-target sweeps, lazy iteration. `many_targets_test.jl` asserts threaded == serial for target counts on both sides of `ntasks`, since `(target, path)` threading splits one target's paths across tasks; run it under `-t N` (the parallel runner gives each worker one thread, where `Threaded()` degenerates to one task) |
-| Monodromy | `monodromy_test.jl`, `voronoi_tree_test.jl`, `group_actions_test.jl` | Serial + threaded, permutations, trace, `verify_solution_completeness` |
-| Witness/NID | `witness_set_test.jl`, `nid_test.jl` | Affine + projective, zero-dim, parametric, serial + threaded |
-| v2 parity | `compare_v2_primitives_test.jl`, `compare_v2_solve_counts_test.jl`, `compare_v2_solve_match_test.jl`, `v2_parity_test.jl`, `monodromy_v2_parity_test.jl` | Primitives, counts, values |
-| Misc | `utils_test.jl` | |
-
-The certification subpackage adds 541 assertions (`make test-cert`):
-`interval_arithmetic_test.jl` (including sampled soundness checks on random boxes for the
-`sqrt`/`sin`/`cos` enclosures), `acb_interpreter_test.jl` (the Arb tape interpreter against
-Float64 ground truth, ball containment and precision refinement, on polynomial tapes and on
-rational/`sqrt`/`sin`/`cos` ones), `certification_test.jl`
-(which certifies a `sqrt` and a `sin`/`cos` system at 53 bits, so a regression that pushed
-those to Arb would show up), `export_surface_test.jl`, `quality_test.jl`.
-
-JET test filters known false positives: MP.variables dispatch (construction-time), Moshi `@match`/`@derive` generated code.
-
-The default `JOBS=10` can drive a worker to SIGTERM under memory pressure (observed on
-`endgame_test`, which passes in 15s on its own and reports
-`Malt.TerminatedWorkerException` when killed). `make test JOBS=6` is the reliable
-setting. A `TerminatedWorkerException` is a resource symptom, not a test failure;
-re-run the file alone before believing it.
-
-### Not covered from v2's suite
-
-Every v2 test file has a v3 counterpart except `semialgebraic_sets_test.jl` (no
-SemialgebraicSets integration), plus the composition / `paths_to_track` / `mixed_volume` /
-`stop_early_cb` / start-target-`solve` testsets, whose APIs v3 does not have.
-
-`model_kit/symbolic_test.jl` is covered by `expression_test.jl` except where v2's ModelKit
-carries machinery v3 puts elsewhere or does not have:
-
-| v2 testset | why not ported |
-|------------|----------------|
-| SymEngine, Convert | `Expression` coefficients are `ComplexF64`; there is no `BigFloat`/`Rational`/`Int128` tower to round-trip and no conversion back to a Julia number type |
-| Expand | expressions are canonicalized on construction, so there is no separate expansion step (and no distributed normal form to expand *to*) |
-| Horner, to_dict, Rand / dense poly, exponents_coefficients | polynomial utilities; v3's polynomial layer is DynamicPolynomials, which provides them |
-| System (show), Homotopy | `System` has no custom `show` and there is no symbolic `Homotopy` type |
-| System variables groups + homogeneous | no multi-homogeneous variable groups |
-| rational functions (`get_num_den` half) | needs numerator/denominator splitting, which only rational witness sets would use (see Not Done) |
-
-The one v2 testset that the expression front-end does not unlock on its own is
-`nid_test.jl` "rational systems"; it needs rational-input witness sets.
-
-## Performance
-
-Measured 2026-04-03, Julia 1.12.5, single-threaded.
-
-### End-to-end solve vs v2
-
-`CompileMode.COMPILED`, fixed seed `0x4567`, endgame enabled.
-
-#### Total-degree (katsura, chain)
-
-| System | v3/v2 ratio | v3 steps/path | v2 steps/path |
-|--------|------------:|--------------:|--------------:|
-| katsura-3 | **3.07x** | 36.2 (290 acc, 0 rej) | 87.0 (696 acc, 0 rej) |
-| katsura-4 | **2.06x** | 47.3 (757 acc, 0 rej) | 78.8 (1260 acc, 0 rej) |
-| katsura-5 | **2.01x** | 56.4 (1806 acc, 0 rej) | 98.5 (3137 acc, 15 rej) |
-| chain-3 | **3.62x** | 23.0 (184 acc, 0 rej) | 46.2 (370 acc, 0 rej) |
-| chain-4 | **2.35x** | 34.4 (550 acc, 0 rej) | 64.2 (1028 acc, 0 rej) |
-| chain-5 | **1.82x** | 40.2 (1288 acc, 0 rej) | 65.0 (2081 acc, 0 rej) |
-
-#### Polyhedral (cyclic, random sparse)
-
-| System | v3/v2 ratio | v3 steps/path | v2 steps/path |
-|--------|------------:|--------------:|--------------:|
-| cyclic-4 | 0.96x | 77.1 (1188 acc, 46 rej) | 74.3 (1158 acc, 31 rej) |
-| cyclic-5 | 1.00x | 50.8 (3556 acc, 0 rej) | 50.8 (3553 acc, 0 rej) |
-| sparse-3x3 | 0.95x | 45.0 (1924 acc, 9 rej) | 45.0 (1924 acc, 9 rej) |
-| sparse-4x4 | 1.01x | 75.1 (12575 acc, 47 rej) | 75.0 (12551 acc, 47 rej) |
-| sparse-5x5 | 0.98x | 83.3 (34080 acc, 85 rej) | 83.4 (34121 acc, 90 rej) |
-
-#### Compiled vs interpreted kernels
-
-Raw `SystemEvaluator` kernels. These do not carry to end-to-end solves: through the
-`StraightLineHomotopy` they shrink to 1.7–2.0x, and Taylor plus linear algebra dominate
-the tracker step.
-
-| System | Eval speedup | Jac speedup |
-|--------|-------------:|------------:|
-| katsura-3 | 3.35x | 3.82x |
-| katsura-5 | 3.65x | 5.04x |
-| katsura-7 | 3.29x | 6.74x |
-
-#### End-to-end solve per compile mode
-
-Measured 2026-07-17, serial executor, speedup vs `INTERPRETED`
-(`benchmark/compile_modes_e2e.jl`; analysis in `04_compile_modes.md`):
-
-| System | INTERPRETED | COMPILED | COMPILED_ALL |
-|--------|------------:|---------:|-------------:|
-| katsura-3 | 0.91ms | 1.10x | 1.18x |
-| katsura-5 | 8.79ms | 1.15x | 1.25x |
-| katsura-7 | 64.98ms | 1.23x | 1.33x |
-| katsura-9 | 482.94ms | 1.27x | 1.41x |
-
-#### COMPILED_ALL (compiled Taylor) vs INTERPRETED
-
-Scalar-parameter Taylor kernel (parameter-free systems, speedup = interp/all):
-
-| System | Taylor 1 speedup | Taylor 2 speedup | Taylor 3 speedup | Solve speedup vs COMPILED | Build overhead |
-|--------|------------------:|------------------:|------------------:|--------------:|---------------:|
-| katsura-3 | 1.66x | 1.72x | 1.62x | 1.09x | 1.62x |
-| katsura-5 | 1.73x | 1.59x | 1.61x | 1.09x | 1.39x |
-| katsura-7 | 1.74x | 1.65x | 1.76x | 1.08x | 1.29x |
-
-(The solve column is `COMPILED_ALL` vs `COMPILED`, not vs `INTERPRETED`; the ratio holds at
-1.08–1.10x across katsura 3/5/7/9.)
-
-TaylorVector-parameter Taylor kernel (production path — CoefficientHomotopy/ToricHomotopy):
-
-| System | Taylor 1 speedup | Taylor 2 speedup | Taylor 3 speedup |
-|--------|------------------:|------------------:|------------------:|
-| katsura-3 | 1.48x | 1.72x | 1.48x |
-| katsura-5 | 1.51x | 1.65x | 1.25x |
-| katsura-7 | 1.30x | 1.63x | 1.20x |
-
-#### TTFX (fresh session)
-
-Latest v3 pass measured 2026-07-25; v2 numbers from 2026-04-03.
-
-The v3 rows predate the tape-executor precompilation of 2026-07-26, which cut the
-common path by 1.28s in a paired comparison (`01_decisions.md`, "Tape executors are
-precompiled by signature"). They are not restated here because the machine was
-contended when the change landed and no clean absolute sweep was taken; re-run
-`make ttfx` on a quiet machine before trusting the numbers below.
-
-| Metric | Time |
-|--------|------|
-| v3 package load | 0.77s |
-| v3 construction + init + first solve! | 8.44--8.77s |
-| **v3 total (load + construction + solve)** | **9.21--9.54s** |
-| v2 package load | 1.30s |
-| v2 first solve() [:mixed] | 43.78s |
-| **v2 total [:mixed]** | **45.08s** |
-| v2 first solve() [:none] | 10.79s |
-| v2 second solve() (different system) | 5.72s |
-
-The root-cause pass cut build/init/solve from 14.44s to ~9.81s by isolating mutually exclusive
-compiler branches, using adaptive direct polynomial lowering, and stabilizing constructor types.
-A later pass took it to ~9.2--9.4s by not factorizing the `MatrixWorkspace` QR field at
-construction and by putting shape dispatch behind an inference barrier. A third pass reached
-~8.4--8.8s while testing four changes: temporarily dropping three non-polynomial unary
-interpreter variants, installing the extended-precision wrappers on first use, extracting the
-support on demand, and handing `skeel_row_scaling!` a matrix instead of a `MatrixWorkspace`
-(see `01_decisions.md`). The unary-variant removal recovered about 0.26s but was rejected because
-those operations belong to the planned expression frontend. The table below therefore records a
-historical experiment, not the current absolute TTFX; remeasure with the variants retained.
-Over 3 interleaved fresh-process pairs at `-t 4`, the experimental build had 21 of 21 paired
-differences negative:
-
-| workload | before | after | |
-|---|---:|---:|---:|
-| `total_degree_interpreted_serial` | 9.339s | 8.437s | −9.7% |
-| `newton_standard` | 6.031s | 5.259s | −12.8% |
-| `singular_endgame` | 9.333s | 8.505s | −8.9% |
-| `overdetermined_total_degree` | 10.009s | 9.180s | −8.3% |
-| `total_degree_compiled_all_serial` | 10.243s | 9.532s | −6.9% |
-| `witness_set_build` | 16.046s | 14.984s | −6.6% |
-| `polyhedral_interpreted_serial` | 13.745s | 13.170s | −4.2% |
-
-Polyhedral gains least because it still extracts the support and is dominated by
-MixedSubdivisions. Full SnoopCompile/JET/Cthulhu/invalidation report: `05_ttfx_invalidations.md`.
-
-A fourth pass took the untaken `MatrixWorkspace` QR branch out of the square routes by
-erasing both its entry points behind shape-chosen `FunctionWrapper` fields, which keeps the
-tracker hot path free of runtime dispatch (`01_decisions.md`, "The QR path is erased behind a
-shape-chosen FunctionWrapper"). Over 5 interleaved fresh-process pairs at `-t 4` on
-`total_degree_interpreted_serial`, all 5 paired differences favour it: 8.427--9.062s before
-against 8.312--8.426s after, ~0.15s median. A square-only session now compiles zero
-specializations of `qr!`, `qr_ldiv!`, `reflector!` and `lmul_Q_adj!`; the first tall solve pays
-~0.35s to compile the path on demand.
-
-SnoopCompile v3.2.5 does not load on Julia 1.12 (`UndefVarError: Compiler.Params`), so that pass
-used `SnoopCompileCore`'s `@snoop_inference` tree directly: on 1.12 the per-node costs live on the
-`CodeInstance` as `time_infer_self` / `time_compile`, `UInt16` fields holding `Float16` seconds
-(`reinterpret(Float16, ci.time_infer_self)`). Codegen outweighs inference on a first solve, 9.97s
-against 6.20s for `polyhedral_interpreted_serial`, so a change that removes generated code counts
-for more than one that only removes inference.
-
-Core load stays at 0.77s because certification is a separate `lib/` subpackage. Adding Arblib to
-core raised load to ~1.6s and ~50% more invalidation descendants (one Arblib `show` method alone
-accounted for ~2700), which is what motivated the split.
-
-### Endgame result parity
-
-| System | v2 result | v3 result |
-|--------|-----------|-----------|
-| (x-10)^2 | nresults=1, nsingular=1 | same |
-| at-infinity | 2 success + 2 at_infinity | same |
-| winding family d=2,4,6 | d+1 success each | same |
-| Hyperbolic 6,6 | nresults=2, nsingular=2 | same |
-| singular multiplicity 3 | nresults=2, nsingular=1, nnonsingular=1 | same |
 
 ## Open Items
 

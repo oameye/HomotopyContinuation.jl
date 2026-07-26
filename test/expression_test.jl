@@ -1,7 +1,8 @@
 using Test
 import HomotopyContinuationNext as Next
 using HomotopyContinuationNext: Expression, System, @var, @unique_var, @polyvar,
-    differentiate, subs, variable, unique_variable, expression_to_sexpr, SExprT
+    differentiate, subs, num_den, variable, unique_variable, expression_to_sexpr,
+    SExprT
 using DynamicPolynomials: DynamicPolynomials
 using LinearAlgebra: det, dot
 
@@ -215,6 +216,46 @@ using LinearAlgebra: det, dot
         @var a
         @test Next.is_polynomial(f / a, [x, y, z])
         @test Next.degree(f / a, [x, y, z]) == 2
+    end
+
+    @testset "num_den" begin
+        @var x y z a
+        @test num_den(x^2 + y) == (x^2 + y, Expression(1))
+        @test num_den(Expression(3)) == (Expression(3), Expression(1))
+        @test num_den(1 / x) == (Expression(1), x)
+        @test num_den(x / (y - 1) + y + z) ==
+            (x + (y - 1) * y + (y - 1) * z, y - 1)
+        # The numeric part of a denominator moves into the numerator.
+        @test num_den(x / (2 * y)) == (0.5 * x, y)
+        # Each base enters the common denominator with its highest power.
+        p, q = num_den(1 / (x - 1) + 1 / (x - 1)^2 + 1 / y)
+        @test q == (x - 1)^2 * y
+        @test p == (x - 1) * y + y + (x - 1)^2
+        # Negative powers of a rational base invert it.
+        @test num_den((1 + 1 / x)^-2) == (x^2, (x + 1)^2)
+        # No factoring, so structurally different bases do not cancel.
+        @test num_den((x - 1)^2 / (x^2 - 2 * x + 1)) ==
+            ((x - 1)^2, x^2 - 2 * x + 1)
+        # `sqrt`, `sin` and `cos` have no rational normal form.
+        @test num_den(sqrt(x) / y + 1) == (sqrt(x) + y, y)
+        @test num_den(sqrt(1 / x)) == (sqrt(1 / x), Expression(1))
+        # f == num / den on random values.
+        for f in (x / (y - 1) + y, (1 + 1 / x)^-2 * y, a / (x * y) + 1 / (x + y))
+            p, q = num_den(f)
+            v = Dict(x => 0.3 + 0.7im, y => -1.1 + 0.2im, a => 2.0 - 0.5im)
+            @test Next.expr_number(Next.subs(f, v)) ≈
+                Next.expr_number(Next.subs(p, v)) / Next.expr_number(Next.subs(q, v))
+        end
+
+        # A rational factor in a product form. Nothing is expanded, so the
+        # numerator agrees with the factored form by value, not structurally.
+        f = x^2 + y^2 - z
+        g = x / (y - 1) + y + z - 1
+        p, q = num_den(f * g)
+        @test q == y - 1
+        v = Dict(x => 0.4 + 0.1im, y => 1.3 - 0.2im, z => -0.7 + 0.9im)
+        @test Next.expr_number(Next.subs(p, v)) ≈
+            Next.expr_number(Next.subs(f * (x + (y - 1) * (y + z - 1)), v))
     end
 
     @testset "has_real_coefficients" begin

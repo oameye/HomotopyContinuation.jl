@@ -525,6 +525,9 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
             ]
         )
         result = solve(F, TotalDegree(; seed = UInt32(1)); show_progress = false)
+        # A dead path keeps its last winding number estimate, so the count below alone
+        # does not catch one.
+        @test count(HC.is_success, result.path_results) == 12
         # All 12 paths detect winding number 3
         @test count(r -> r.winding_number == 3, result.path_results) == 12
         # 2 unique singular solutions after deduplication

@@ -419,6 +419,14 @@ function step!(tracker::Tracker)::Bool
         state.rejected_steps += 1
         state.ext_rejected_steps += Int(state.extended_prec)
         state.last_steps_failed += 1
+        # `iters > 1`: the correction reached the prediction and stopped contracting,
+        # so it is precision-limited and a smaller step will not help. Escalating
+        # refines `state.x` by about `μ`, leaving the predictor that stale until the
+        # next accepted step.
+        if state.last_steps_failed >= 3 && !state.extended_prec &&
+                result.return_code == NewtonCode.NEWT_TERMINATED && result.iters > 1
+            use_extended_precision!(tracker)
+        end
     end
 
     state.norm_Δx₀ = result.norm_Δx₀

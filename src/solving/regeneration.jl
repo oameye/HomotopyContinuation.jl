@@ -7,7 +7,8 @@
 # `decompose` for the irreducible decomposition.
 #
 # Notes:
-# * Polynomial-only: the deformation polynomial is simply `u^d - 1`.
+# * The deformation equation is `u^d - 1`, divided by the denominator of the
+#   equation it deforms into so both endpoint systems have the same poles.
 # * Every `slice(System, L)` is the ambient `_sliced_system` (`[F; A x − b]`).
 # * The intersection u-homotopy is a `StraightLineHomotopy` between two sliced
 #   ambient systems; the fill-up and membership steps reuse the existing
@@ -86,7 +87,8 @@ function initialize_witness_sets(codim::Int, n::Int)::Vector{WitnessPoints}
     return out
 end
 
-# Witness set of each hypersurface `f_i = 0` on the seed subspace `L`.
+# Witness set of each hypersurface `f_i = 0` on the seed subspace `L`. A rational
+# equation goes through its numerator, minus the zeros that are poles of it.
 function initialize_hypersurfaces(
         F::System{P, V}, vars::Vector{V}, L::LinearSubspace;
         threading::Bool, tracker_options::TrackerOptions,
@@ -97,12 +99,13 @@ function initialize_hypersurfaces(
     out = Vector{WitnessSet{HS}}(undef, length(fs))
     for i in eachindex(fs)
         h = System([fs[i]]; parameters = empty(vars), variables = vars)::HS
+        G, Q = _numerator_system(fs[i], h, vars)
         R = _witness_init(
-            h, L;
+            G, L;
             threading = threading, tracker_options = tracker_options,
             endgame_options = endgame_options,
         )
-        out[i] = WitnessSet(h, L, R)
+        out[i] = WitnessSet(h, L, Q === nothing ? R : _drop_poles(Q, R))
     end
     return out
 end
@@ -115,7 +118,7 @@ end
 # dispatch after `System(...)` chooses its runtime shape; homotopy construction
 # and all tracking then specialize on a fully concrete state.
 struct RegenerationState{P, V, S <: System}
-    fpolys::Vector{P}         # sorted equation polynomials (in vars incl. u)
+    eqs::Vector{P}            # sorted equations (in vars incl. u)
     vars::Vector{V}
     u::V
     i::Int
@@ -127,13 +130,13 @@ end
 
 @noinline function _intersect_regeneration_phase!(
         out::Vector{WitnessPoints}, H::Vector{W},
-        fpolys::Vector{P}, vars::Vector{V}, u::V,
+        eqs::Vector{P}, vars::Vector{V}, u::V,
         i::Int, codim::Int, F_prev::S,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
         threading::Bool, atol::Float64, rtol::Float64,
     )::Nothing where {W <: WitnessSet, P, V, S <: System}
     state = RegenerationState(
-        fpolys, vars, u, i, codim, F_prev, tracker_options, endgame_options,
+        eqs, vars, u, i, codim, F_prev, tracker_options, endgame_options,
     )
     intersect_all!(
         out, H, state; threading = threading, atol = atol, rtol = rtol,
@@ -143,13 +146,13 @@ end
 
 @noinline function _fill_regeneration_phase!(
         out::Vector{WitnessPoints}, monodromy_options::MonodromyOptions,
-        fpolys::Vector{P}, vars::Vector{V}, u::V,
+        eqs::Vector{P}, vars::Vector{V}, u::V,
         i::Int, codim::Int, Fᵢ::S,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
         show_monodromy_progress::Bool, threading::Bool,
     )::Nothing where {P, V, S <: System}
     state = RegenerationState(
-        fpolys, vars, u, i, codim, Fᵢ, tracker_options, endgame_options,
+        eqs, vars, u, i, codim, Fᵢ, tracker_options, endgame_options,
     )
     fill_up!(out, monodromy_options, state, show_monodromy_progress, threading)
     return nothing
@@ -164,6 +167,10 @@ Solve `F = 0` equation-by-equation and return a [`WitnessSet`](@ref) for every
 dimension without decomposing into irreducible components (a witness
 *superset*). Based on the u-regeneration algorithm of Duff, Leykin and
 Rodriguez (https://arxiv.org/abs/2206.02869).
+
+Every equation must be polynomial or rational in the variables of `F`. A rational
+equation is handled through its numerator, and the zeros of the numerator that
+are poles of the equation are dropped.
 
 # Options
 * `sorted = true`: sort the polynomials of `F` by decreasing degree.
@@ -231,7 +238,7 @@ function regeneration(
                 "parameter values first (cf. `witness_set(F; target_parameters)`).",
         ),
     )
-    _require_polynomial_input(F)
+    _check_regeneration_input(F, "`regeneration`")
     seed !== nothing && Random.seed!(seed)
 
     vars = collect(variables(F))
@@ -260,15 +267,12 @@ function regeneration(
     )
 
     # sort equations by decreasing degree
+    eqs = _regeneration_equations(F)
     if sorted
         σ = sortperm(H; by = degree, rev = true)
-        fpolys = polynomials(F)[σ]
+        eqs = eqs[σ]
         H = H[σ]
-    else
-        fpolys = polynomials(F)
     end
-    # lift the equation polynomials into the (n+1)-variable space
-    fpolys = [MP.polynomial(p) for p in fpolys]
 
     # core loop: intersect all current witness sets with each hypersurface
     progress = show_progress ?
@@ -282,15 +286,15 @@ function regeneration(
             end
         else
             F_prev = System(
-                fpolys[1:(i - 1)]; parameters = empty(vars), variables = vars,
+                eqs[1:(i - 1)]; parameters = empty(vars), variables = vars,
             )
             _intersect_regeneration_phase!(
-                out, H, fpolys, vars, u, i, codim, F_prev,
+                out, H, eqs, vars, u, i, codim, F_prev,
                 tracker_options, endgame_options, threading, atol, rtol,
             )
-            Fᵢ = System(fpolys[1:i]; parameters = empty(vars), variables = vars)
+            Fᵢ = System(eqs[1:i]; parameters = empty(vars), variables = vars)
             _fill_regeneration_phase!(
-                out, monodromy_options, fpolys, vars, u, i, codim, Fᵢ,
+                out, monodromy_options, eqs, vars, u, i, codim, Fᵢ,
                 tracker_options, endgame_options, show_monodromy_progress, threading,
             )
         end
@@ -319,14 +323,118 @@ function regeneration(
     return result
 end
 
-# Regeneration rebuilds its equations through `MultivariatePolynomials`.
-_require_polynomial_input(::System{<:MP.AbstractPolynomialLike})::Nothing = nothing
-_require_polynomial_input(::System)::Nothing = throw(
-    ArgumentError(
-        "regeneration needs systems built from polynomial input; systems built " *
-            "from `Expression`s are not supported.",
-    ),
-)
+# ── Front-end plumbing ───────────────────────────────────────────────────────
+#
+# Regeneration rebuilds its equations instead of only evaluating them, so each
+# front-end supplies the equations, the degree that sets the number of roots of
+# unity, the deformation start equation and the hypersurface to seed from.
+
+_regeneration_equations(
+    F::System{<:MP.AbstractPolynomialLike},
+)::Vector{<:MP.AbstractPolynomialLike} = [MP.polynomial(p) for p in polynomials(F)]
+
+_regeneration_equations(F::System{Expression})::Vector{Expression} =
+    collect(polynomials(F))
+
+# Every equation must be a polynomial or a ratio of polynomials in the variables.
+_check_regeneration_input(
+    ::System{<:MP.AbstractPolynomialLike}, ::String,
+)::Nothing = nothing
+
+function _check_regeneration_input(F::System{Expression}, route::String)::Nothing
+    vars = collect(variables(F))
+    for f in polynomials(F)
+        (p, q) = num_den(f)
+        (degree(p, vars) < 0 || degree(q, vars) < 0) && throw(
+            ArgumentError(
+                "$route needs equations that are polynomial or rational in the " *
+                    "variables, but `$(f)` is neither. Clear the denominators " *
+                    "first, or use a route that only evaluates the system.",
+            ),
+        )
+    end
+    return nothing
+end
+
+# `intersect` rebuilds all its input into a single system, so everything has to
+# come from the same front-end.
+_is_expression_front_end(::System{Expression})::Bool = true
+_is_expression_front_end(::System)::Bool = false
+
+_check_front_end(F::System, expression::Bool)::Nothing =
+    _is_expression_front_end(F) == expression ? nothing : throw(
+        ArgumentError(
+            "the input mixes the polynomial and `Expression` front-ends; build the " *
+            "witness sets and the hypersurface from the same kind of input.",
+        ),
+    )
+
+# Number of roots of unity the u-homotopy starts from.
+_u_degree(h::MP.AbstractPolynomialLike, ::AbstractVector)::Int = MP.maxdegree(h)
+_u_degree(h::Expression, vars::AbstractVector{Expression})::Int =
+    degree(first(num_den(h)), vars)
+
+# Start equation of the u-homotopy. Carrying the denominator of the equation it
+# deforms into makes both endpoint systems singular on the same set.
+_u_start_equation(::MP.AbstractPolynomialLike, d::Int, u) = u^d - 1
+_u_start_equation(h::Expression, d::Int, u::Expression)::Expression =
+    (u^d - 1) / last(num_den(h))
+
+# The hypersurface whose witness set gives the witness set of `f = 0`, and the
+# denominator of `f`, or `nothing` when it has none.
+_numerator_system(::MP.AbstractPolynomialLike, h::System, ::Vector) = (h, nothing)
+
+function _numerator_system(f::Expression, h::System, vars::Vector{Expression})
+    (p, q) = num_den(f)
+    degree(q, vars) <= 0 && return (h, nothing)
+    return (
+        System([p]; parameters = Expression[], variables = vars),
+        System([q]; parameters = Expression[], variables = vars),
+    )
+end
+
+# Relative distance to `V(Q)` below which a witness point counts as lying on it.
+const POLE_DISTANCE_TOL = 1.0e-10
+
+# Drop the points on the denominator variety `V(Q)`: the numerator vanishes there too,
+# so the point is a pole of the equation and not a zero of it. Tested by the
+# first-order distance `|q(r)| / ‖∇q(r)‖` relative to `‖r‖`, which is invariant under
+# rescaling the equation or its denominator and, unlike the magnitude of `q`, keeps a
+# zero that merely sits near a pole.
+function _drop_poles(
+        Q::System, R::Vector{Vector{ComplexF64}},
+    )::Vector{Vector{ComplexF64}}
+    isempty(R) && return R
+    m, n = size(Q)
+    p_empty = FSVec{ComplexF64}(ComplexF64[])
+    y = FSVec{ComplexF64}(zeros(ComplexF64, m))
+    J = FSMat{ComplexF64}(zeros(ComplexF64, m, n))
+    x = FSVec{ComplexF64}(zeros(ComplexF64, n))
+    out = Vector{Vector{ComplexF64}}()
+    for r in R
+        x .= r
+        evaluate_and_jacobian!(y, J, Q.evaluator, x, p_empty)
+        v = LA.norm(y, Inf)
+        isfinite(v) || continue
+        grad = 0.0
+        for j in 1:n
+            grad += abs2(J[1, j])
+        end
+        grad = sqrt(grad)
+        # Without a gradient there is no distance estimate, so only an exactly
+        # vanishing denominator counts.
+        d = grad > 0.0 ? v / grad : (iszero(v) ? 0.0 : Inf)
+        d > POLE_DISTANCE_TOL * max(LA.norm(r, Inf), 1.0) && push!(out, r)
+    end
+    return out
+end
+
+# Express `eqs`, given in the variables `from`, in the variables `to`.
+_rename_variables(eqs::Vector{<:MP.AbstractPolynomialLike}, from, to) =
+    [MP.polynomial(MP.subs(f, from => to)) for f in eqs]
+
+_rename_variables(eqs::Vector{Expression}, from, to)::Vector{Expression} =
+    [subs(f, from => to) for f in eqs]
 
 # Mint a fresh variable not colliding with any name in `vars`.
 function _fresh_variable_name(vars::AbstractVector)::String
@@ -375,7 +483,7 @@ function intersect_with_hypersurface!(
         threading::Bool, atol::Float64, rtol::Float64,
     )
     F = state.Fᵢ
-    h = state.fpolys[state.i]
+    h = state.eqs[state.i]
     u = state.u
     vars = state.vars
     P = points(W)
@@ -491,15 +599,15 @@ end
 function _u_homotopy_systems(
         W::WitnessPoints, F::System, X::WitnessPoints, h, vars, u,
     )
-    d = MP.maxdegree(h)
-    h0 = u^d - 1
-    fpolys = polynomials(F)
+    d = _u_degree(h, vars)
+    h0 = _u_start_equation(h, d, u)
+    eqs = polynomials(F)
 
     L = linear_subspace_u(W)      # start: u free
     K = linear_subspace(X)        # target: u = c
 
-    F₀ = _sliced_system([fpolys; h0], collect(vars), L)
-    G₀ = _sliced_system([fpolys; h], collect(vars), K)
+    F₀ = _sliced_system([eqs; h0], collect(vars), L)
+    G₀ = _sliced_system([eqs; h], collect(vars), K)
     return F₀, G₀, d
 end
 
@@ -667,23 +775,23 @@ function Base.intersect(
         rtol::Float64 = sqrt(eps()),
     )
     size(system(H))[1] == 1 ||
-        throw(ArgumentError("The second argument must be defined by a single polynomial."))
+        throw(ArgumentError("The second argument must be defined by a single equation."))
     size(system(W))[2] == size(system(H))[2] ||
         throw(ArgumentError("Witness sets must be in the same ambient space."))
-    _require_polynomial_input(system(W))
-    _require_polynomial_input(system(H))
+    _check_front_end(system(H), _is_expression_front_end(system(W)))
+    _check_regeneration_input(system(W), "`intersect`")
+    _check_regeneration_input(system(H), "`intersect`")
 
     vars = collect(variables(system(W)))
     u = _fresh_variable(vars)
     vars_u = [vars; u]
 
-    # W's and H's polynomials, both expressed in W's variables `vars`.
-    fpolys = [MP.polynomial(p) for p in polynomials(system(W))]
-    hpolys = [
-        MP.polynomial(MP.subs(p, variables(system(H)) => vars))
-            for p in polynomials(system(H))
-    ]
-    h = hpolys[1]
+    # W's and H's equations, both expressed in W's variables `vars`.
+    eqs = _regeneration_equations(system(W))
+    heqs = _rename_variables(
+        _regeneration_equations(system(H)), variables(system(H)), vars,
+    )
+    h = heqs[1]
 
     # Flags in (n+1)-space; the u-value fixes the appended coordinate.
     flagW = get_flag(1:2, linear_subspace(W))
@@ -697,13 +805,13 @@ function Base.intersect(
     W₂ = dim(W) == 0 ? nothing :
         WitnessPoints(flagW[2][1], flagW[2][2], Vector{Vector{ComplexF64}}())
     Hᵤ = WitnessSet(
-        System(hpolys; parameters = empty(vars_u), variables = vars_u), flagH[1][1],
+        System(heqs; parameters = empty(vars_u), variables = vars_u), flagH[1][1],
         [ComplexF64[x; cH] for x in solutions(H)],
     )
 
     intersect_state = RegenerationState(
-        [fpolys; h], vars_u, u, length(fpolys) + 1, 2,
-        System(fpolys; parameters = empty(vars_u), variables = vars_u),
+        [eqs; h], vars_u, u, length(eqs) + 1, 2,
+        System(eqs; parameters = empty(vars_u), variables = vars_u),
         tracker_options, endgame_options,
     )
 
@@ -712,8 +820,8 @@ function Base.intersect(
         threading = threading, atol = atol, rtol = rtol,
     )
     fill_state = RegenerationState(
-        [fpolys; h], vars_u, u, length(fpolys) + 1, 2,
-        System([fpolys; h]; parameters = empty(vars_u), variables = vars_u),
+        [eqs; h], vars_u, u, length(eqs) + 1, 2,
+        System([eqs; h]; parameters = empty(vars_u), variables = vars_u),
         tracker_options, endgame_options,
     )
     Ws = W₂ === nothing ? WitnessPoints[W₁] : WitnessPoints[W₁, W₂]
@@ -724,7 +832,7 @@ function Base.intersect(
     end
     fill_up!(Ws, monodromy_options, fill_state, show_monodromy_progress, threading)
 
-    G = System([fpolys; h]; parameters = empty(vars), variables = vars)
+    G = System([eqs; h]; parameters = empty(vars), variables = vars)
     out = WitnessSet[]
     for Wi in Ws
         P, L = u_transform(Wi)
@@ -781,8 +889,9 @@ function Base.intersect(
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
     )
-    H = witness_set(
-        System([f]);
+    _check_front_end(system(W), false)
+    H = _hypersurface_witness_set(
+        f, collect(variables(system(W)));
         show_progress = show_progress, threading = threading,
         tracker_options = tracker_options, endgame_options = endgame_options,
     )
@@ -794,6 +903,86 @@ function Base.intersect(
         monodromy_options = monodromy_options, threading = threading,
         atol = atol, rtol = rtol,
     )
+end
+
+function Base.intersect(
+        W::WitnessSet,
+        f::Expression;
+        show_progress::Bool = false,
+        show_monodromy_progress::Bool = false,
+        tracker_options::TrackerOptions = TrackerOptions(),
+        endgame_options::EndgameOptions = EndgameOptions(;
+            max_endgame_steps = 100, max_endgame_extended_steps = 100,
+            sing_cond = 1.0e12,
+        ),
+        monodromy_options::MonodromyOptions = MonodromyOptions(;
+            trace_test = true, parameter_sampler = weighted_normal,
+        ),
+        threading::Bool = Threads.nthreads() > 1,
+        atol::Float64 = 1.0e-14,
+        rtol::Float64 = sqrt(eps()),
+    )
+    _check_front_end(system(W), true)
+    H = _hypersurface_witness_set(
+        f, _as_variables(collect(variables(system(W))));
+        show_progress = show_progress, threading = threading,
+        tracker_options = tracker_options, endgame_options = endgame_options,
+    )
+    return intersect(
+        W, H;
+        show_progress = show_progress,
+        show_monodromy_progress = show_monodromy_progress,
+        tracker_options = tracker_options, endgame_options = endgame_options,
+        monodromy_options = monodromy_options, threading = threading,
+        atol = atol, rtol = rtol,
+    )
+end
+
+# Witness set of `V(f)` in the ambient space of `vars`, which may hold variables `f`
+# does not use. The slice is the affine line the flag is built from, also for a
+# homogeneous `f`, whose projective slice has one dimension too many for it.
+function _hypersurface_witness_set(
+        f::MP.AbstractPolynomialLike, vars::Vector;
+        show_progress::Bool, threading::Bool,
+        tracker_options::TrackerOptions, endgame_options::EndgameOptions,
+    )::WitnessSet
+    extra = setdiff(MP.effective_variables(f), vars)
+    isempty(extra) || throw(
+        ArgumentError(
+            "the hypersurface must be given in the variables of the witness set, " *
+                "but `$(f)` also uses $(join(extra, ", ")).",
+        ),
+    )
+    return witness_set(
+        System([f]; parameters = empty(vars), variables = vars),
+        rand_subspace(length(vars); dim = 1);
+        show_progress = show_progress, threading = threading,
+        tracker_options = tracker_options, endgame_options = endgame_options,
+    )
+end
+
+# A rational `f` is solved through its numerator, with its poles dropped.
+function _hypersurface_witness_set(
+        f::Expression, vars::Vector{Expression};
+        show_progress::Bool, threading::Bool,
+        tracker_options::TrackerOptions, endgame_options::EndgameOptions,
+    )::WitnessSet
+    (p, q) = num_den(f)
+    (degree(p, vars) < 0 || degree(q, vars) < 0) && throw(
+        ArgumentError(
+            "`intersect` needs a hypersurface that is polynomial or rational in " *
+                "the variables, but `$(f)` is neither.",
+        ),
+    )
+    h = System([f]; parameters = Expression[], variables = vars)
+    G, Q = _numerator_system(f, h, vars)
+    Wp = witness_set(
+        G, rand_subspace(length(vars); dim = 1);
+        show_progress = show_progress, threading = threading,
+        tracker_options = tracker_options, endgame_options = endgame_options,
+    )
+    R = Q === nothing ? solutions(Wp) : _drop_poles(Q, solutions(Wp))
+    return WitnessSet(h, linear_subspace(Wp), R)
 end
 
 function _regeneration_monodromy_options(M::MonodromyOptions, W)

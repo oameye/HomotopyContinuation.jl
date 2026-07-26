@@ -145,6 +145,9 @@ using CommonSolve: CommonSolve
             ]
         )
         result = solve(F, TotalDegree(; seed = UInt32(1)); show_progress = false)
+        # A dead path keeps its last winding number estimate, so the count below alone
+        # does not catch one.
+        @test count(is_success, result.path_results) == 12
         @test count(r -> r.winding_number == 3, result.path_results) == 12
         @test nresults(result) == 2
         @test nsingular(result) == 2

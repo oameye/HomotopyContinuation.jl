@@ -478,14 +478,37 @@ end
             [Next.subs(a / x + y - 2, a => 3.0)]
     end
 
-    @testset "regeneration reports that it needs polynomial input" begin
+    @testset "regeneration takes polynomial and rational expression input" begin
         @var x y z
         # Polynomial, but built through the expression front-end.
         F = System([x^2 + y^2 - z, x + y + z - 1]; variables = [x, y, z])
-        @test_throws ArgumentError Next.regeneration(F; show_progress = false)
-        @test_throws ArgumentError Next.nid(F; show_progress = false)
-        # Slicing does not go through regeneration, so it still works.
+        @test Next.degree.(Next.regeneration(F; show_progress = false)) == [2]
+        @test Next.ncomponents(Next.nid(F; show_progress = false)) == 1
         W = Next.witness_set(F; show_progress = false)
         @test Next.degree(W) == 2
+
+        # Rational: the u-homotopy carries the denominator, and the hypersurface
+        # witness sets come from the numerators.
+        G = System([x^2 + y^2 - z, x / (y - 1) + y + z - 1]; variables = [x, y, z])
+        WG = Next.regeneration(G; show_progress = false)
+        @test Next.degree.(WG) == [4]
+
+        # Rebuilding equations cannot take `sqrt` of a variable, in a denominator just
+        # as in a numerator.
+        for f in (
+                sqrt(x) + y - 1, 1 / sqrt(x) + y - 1, x / (1 + sqrt(x)) + y - 1,
+                1 / sin(x) + y - 1,
+            )
+            H = System([f, x * y - z]; variables = [x, y, z])
+            @test_throws ArgumentError Next.regeneration(H; show_progress = false)
+            @test_throws ArgumentError Next.nid(H; show_progress = false)
+        end
+
+        # `intersect` gates its hypersurface argument the same way.
+        WF = first(Next.regeneration(F; show_progress = false))
+        @test_throws ArgumentError intersect(WF, 1 / sqrt(x); show_progress = false)
+        @test_throws ArgumentError intersect(
+            WF, x / (1 + sqrt(y)); show_progress = false
+        )
     end
 end

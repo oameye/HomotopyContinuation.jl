@@ -722,6 +722,91 @@ function subs(f::AbstractArray{Expression}, pairs::AbstractDict)
     return Base.map(fi -> _subs(fi, map), f)
 end
 
+## ── Numerator and denominator ───────────────────────────────────────────────
+
+# Numeric coefficient and the powers of a canonical denominator. Denominators
+# built here are products of powers, so every factor splits into `base^k`.
+function _den_powers(d::Expression)::Tuple{ComplexF64, Dict{Expression, Int}}
+    coeff = one(ComplexF64)
+    powers = Dict{Expression, Int}()
+    storage = expr_storage(d)
+    factors = storage isa EMulStorage ? storage.args : Expression[d]
+    for f in factors
+        v = expr_number(f)
+        if v !== nothing
+            coeff *= v
+            continue
+        end
+        (base, k) = _split_power(f)
+        powers[base] = get(powers, base, 0) + k
+    end
+    return coeff, powers
+end
+
+# Put a sum over the common denominator built from each base's highest power.
+function _num_den_add(args::Vector{Expression})::Tuple{Expression, Expression}
+    nums = Vector{Expression}(undef, length(args))
+    dens = Vector{Dict{Expression, Int}}(undef, length(args))
+    max_powers = Dict{Expression, Int}()
+    for (i, a) in enumerate(args)
+        (p, q) = num_den(a)
+        (c, powers) = _den_powers(q)
+        nums[i] = isone(c) ? p : _emul(Expression[SymExpr.ENum(inv(c)), p])
+        dens[i] = powers
+        for (base, k) in powers
+            max_powers[base] = max(get(max_powers, base, 0), k)
+        end
+    end
+    isempty(max_powers) && return _eadd(nums), one(Expression)
+
+    for i in eachindex(nums)
+        factors = Expression[nums[i]]
+        for (base, k) in max_powers
+            missing_power = k - get(dens[i], base, 0)
+            missing_power > 0 && push!(factors, _epow(base, missing_power))
+        end
+        nums[i] = _emul(factors)
+    end
+    return _eadd(nums), _emul(Expression[_epow(b, k) for (b, k) in max_powers])
+end
+
+"""
+    num_den(f::Expression) -> (num, den)
+
+Numerator and denominator of `f`, such that `f` equals `num / den`.
+
+Denominator bases are compared structurally and never factored, so `(x - 1)^2`
+and `x^2 - 2x + 1` count as different bases: `num_den((x - 1)^2 / (x^2 - 2x + 1))`
+returns `x^2 - 2x + 1` as its denominator.
+
+```julia
+@var x y
+num_den(x / (y - 1) + y)   # (x + y*(-1 + y), -1 + y)
+```
+"""
+function num_den(f::Expression)::Tuple{Expression, Expression}
+    storage = expr_storage(f)
+    if storage isa EAddStorage
+        return _num_den_add(storage.args)
+    elseif storage isa EMulStorage
+        num = one(Expression)
+        den = one(Expression)
+        for a in storage.args
+            (p, q) = num_den(a)
+            num = _emul(Expression[num, p])
+            den = _emul(Expression[den, q])
+        end
+        return num, den
+    elseif storage isa EPowStorage
+        (p, q) = num_den(storage.base)
+        k = storage.exp
+        return k > 0 ? (_epow(p, k), _epow(q, k)) : (_epow(q, -k), _epow(p, -k))
+    end
+    # Literals, variables and `sqrt`/`sin`/`cos` (which have no rational normal
+    # form) are their own numerator.
+    return f, one(Expression)
+end
+
 ## ── Degrees and polynomiality ───────────────────────────────────────────────
 
 # Structural degree bound in `vars`. `nothing` marks an expression that is not
@@ -829,6 +914,42 @@ function has_real_coefficients(e::Expression)::Bool
         return has_real_coefficients(storage.base)
     else # EFnStorage
         return has_real_coefficients(storage.arg)
+    end
+end
+
+"""
+    expression_scale(f::Expression) -> Float64
+
+Magnitude of `f` with every variable set to `1` and every numeric literal replaced by
+its absolute value. This bounds the ℓ1 norm of the coefficients of a polynomial from
+above, exactly when nothing cancels: `(x - 1)^10` scales as `1024` against a largest
+coefficient of `252`. For a rational function it is the ratio of the two bounds. `sin`
+and `cos` contribute `1`, being bounded by it.
+"""
+function expression_scale(e::Expression)::Float64
+    storage = expr_storage(e)
+    if storage isa ENumStorage
+        return abs(storage.val)
+    elseif storage isa EVarStorage
+        return 1.0
+    elseif storage isa EAddStorage
+        s = 0.0
+        for a in storage.args
+            s += expression_scale(a)
+        end
+        return s
+    elseif storage isa EMulStorage
+        s = 1.0
+        for a in storage.args
+            s *= expression_scale(a)
+        end
+        return s
+    elseif storage isa EPowStorage
+        return expression_scale(storage.base)^storage.exp
+    else # EFnStorage
+        storage.kind == SUnaryKind.UNARY_SQRT &&
+            return sqrt(expression_scale(storage.arg))
+        return 1.0
     end
 end
 

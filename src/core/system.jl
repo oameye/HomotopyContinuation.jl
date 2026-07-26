@@ -283,14 +283,12 @@ end
         )
 end
 
-# No `_normalize_polys` pass: expression coefficients are already ComplexF64 and
-# rational input has no well-defined global scale.
 @noinline function _lower_input(
         exprs::AbstractVector{Expression},
         variables::AbstractVector,
         parameters::AbstractVector,
     )
-    normalized = collect(exprs)
+    normalized = _normalize_expressions(exprs)
     vars = _as_variables(variables)
     params = _as_variables(parameters)
     degs, is_homogeneous = _expression_degrees(normalized, vars)
@@ -337,8 +335,25 @@ function _normalize_polys(
     return map(polys) do p
         coeffs = MP.coefficients(p)
         nrm = maximum(c -> Float64(abs(c)), coeffs)
-        scale = nrm <= 1.0e8 ? 1.0 : nrm
-        return p / scale
+        return p / _normalization_scale(nrm)
+    end
+end
+
+# Dividing an equation by a constant leaves `V(F)` unchanged, so an equation far above
+# unit scale is brought back down. A scale of `0` (the zero equation) or a non-finite
+# one carries no information and is left alone.
+function _normalization_scale(nrm::Float64)::Float64
+    (iszero(nrm) || !isfinite(nrm)) && return 1.0
+    return nrm <= 1.0e8 ? 1.0 : nrm
+end
+
+# Scale measured by `expression_scale` rather than by the largest coefficient, which
+# an expression tree does not carry.
+function _normalize_expressions(
+        exprs::AbstractVector{Expression},
+    )::Vector{Expression}
+    return map(exprs) do e
+        return e / _normalization_scale(expression_scale(e))
     end
 end
 

@@ -923,11 +923,15 @@ function _inverse_inf_norm_est_row(
     return nanmin(γ, Inf)
 end
 
-# Higham (1988) inverse infinity-norm estimator — row and column scaling.
+# Higham (1988) inverse infinity-norm estimator (a lower bound) for `D_r A D_c`,
+# `D_r = diag(row_scaling)`, `D_c = diag(col_scaling)`. `factors_scaled` marks a
+# factorization of `diag(lu_row_scaling) A` instead of `A`.
 function _inverse_inf_norm_est(
         lu::LA.LU{ComplexF64, FSMat{ComplexF64}, Vector{Int64}},
         row_scaling::FSVec{Float64},
         col_scaling::FSVec{Float64},
+        lu_row_scaling::FSVec{Float64},
+        factors_scaled::Bool,
         work::FSVec{ComplexF64},
         rwork::FSVec{Float64},
     )::Float64
@@ -947,7 +951,7 @@ function _inverse_inf_norm_est(
     lu_ldiv_adj!(y, lu, y)
 
     @inbounds for i in 1:n
-        y[i] *= row_scaling[i]
+        y[i] *= _row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
     end
 
     γ = sum(fast_abs, y)
@@ -957,7 +961,7 @@ function _inverse_inf_norm_est(
         ξ[i] = iszero(ay) ? one(ComplexF64) : y[i] / ay
     end
     @inbounds for i in 1:n
-        ξ[i] /= row_scaling[i]
+        ξ[i] *= _row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
     end
 
     lu_ldiv!(z, lu, ξ)
@@ -989,7 +993,7 @@ function _inverse_inf_norm_est(
         lu_ldiv_adj!(y, lu, y)
 
         @inbounds for i in 1:n
-            y[i] *= row_scaling[i]
+            y[i] *= _row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
         end
 
         γ̄ = γ
@@ -1005,7 +1009,7 @@ function _inverse_inf_norm_est(
             ξ[i] = iszero(ay) ? one(ComplexF64) : y[i] / ay
         end
         @inbounds for i in 1:n
-            ξ[i] /= row_scaling[i]
+            ξ[i] *= _row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
         end
 
         lu_ldiv!(z, lu, ξ)
@@ -1021,6 +1025,16 @@ function _inverse_inf_norm_est(
     end
 
     return nanmin(γ, Inf)
+end
+
+@inline function _row_unscale(
+        row_scaling::FSVec{Float64},
+        lu_row_scaling::FSVec{Float64},
+        factors_scaled::Bool,
+        i::Int,
+    )::Float64
+    @inbounds return factors_scaled ? lu_row_scaling[i] / row_scaling[i] :
+        inv(row_scaling[i])
 end
 
 """

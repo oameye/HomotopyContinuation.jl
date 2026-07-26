@@ -25,7 +25,7 @@ RuntimeGeneratedFunctions.init(@__MODULE__)
 end
 
 export @polyvar, solve, System
-export @var, @unique_var, Expression, differentiate, subs
+export @var, @unique_var, Expression, differentiate, subs, num_den
 export CompileMode
 export solutions, real_solutions, nsolutions, nreal, nsingular, nnonsingular, nat_infinity
 export nexcess_solutions, nfailed

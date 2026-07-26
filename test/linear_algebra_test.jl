@@ -1,11 +1,12 @@
 using Test
 using LinearAlgebra: LinearAlgebra, diagm, opnorm
+using Random: Random
 using FixedSizeArrays: FixedSizeArray
 using HomotopyContinuationNext:
     MatrixWorkspace, updated!, factorize!,
     skeel_row_scaling!, apply_row_scaling!,
     mixed_precision_iterative_refinement!,
-    residual!, inverse_inf_norm_est,
+    residual!, inverse_inf_norm_est, _scaled_cond,
     Jacobian, WeightedNorm, init!
 
 const LA = LinearAlgebra
@@ -65,6 +66,38 @@ end
     skeel_row_scaling!(WS, FSVec{Float64}(ones(n)))
     @test all(WS.row_scaling .> 0.0)
     @test all(isfinite.(WS.row_scaling))
+end
+
+@testset "Scaled condition number" begin
+    # A truncated 1-norm estimate of the row- and column-scaled condition number, so a
+    # lower bound on the dense value and never below 1, independent of whether the LU
+    # factors already carry the row scaling (the state a Newton solve leaves behind).
+    Random.seed!(0x2f9c1a3b)
+    n = 3
+    A0 = rand(ComplexF64, n, n) + 2.0 * LA.I
+    col = FSVec{Float64}([0.5, 1.0, 2.0])
+    for s in (1.0e-6, 1.0e-4, 1.0e-2, 1.0, 1.0e2)
+        A = copy(A0)
+        A[1, :] .*= s
+        WS = MatrixWorkspace(n, n)
+        copyto!(WS.A, A)
+        updated!(WS)
+        d = FSVec{Float64}(zeros(n))
+        skeel_row_scaling!(d, WS.A, col)
+        factorize!(WS)
+        got = _scaled_cond(WS, d, col)
+        expected = LA.cond(diagm(collect(d)) * A * diagm(collect(col)), Inf)
+        @test 1.0 <= got <= expected * (1 + 1.0e-8)
+        @test got >= expected / 10
+
+        WS_scaled = MatrixWorkspace(n, n)
+        copyto!(WS_scaled.A, A)
+        updated!(WS_scaled)
+        skeel_row_scaling!(WS_scaled, col)
+        apply_row_scaling!(WS_scaled)
+        factorize!(WS_scaled)
+        @test _scaled_cond(WS_scaled, d, col) ≈ got rtol = 1.0e-10
+    end
 end
 
 @testset "Residual computation" begin

@@ -125,11 +125,102 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test isa(N4, NumericalIrreducibleDecomposition)
     end
 
-    # Rational-function systems (e.g. `x / (y - 1)`) need non-polynomial
-    # input, which the DynamicPolynomials input layer cannot represent
-    # (denominator clearing or a rational input path is a separate feature).
-    @testset "rational systems (separate feature)" begin
-        @test_skip false
+    @testset "rational systems" begin
+        @var x y z
+        g = System([x^2 + y^2 - z, x / (y - 1) + y + z - 1]; variables = [x, y, z])
+        N = nid(g; show_progress = false)
+        @test ncomponents(N) == 1
+        W = first(witness_sets(N)[1])
+        @test degree(W) == 4
+        @test !membership(randn(3), W)
+        @test membership(solutions(W)[1], W)
+        U = intersect(W, x / (y - 1) + y + z - 1)
+        @test degree(U) == 4
+        V = intersect(W, x * y^3 - z^4 + x^3 - 8)
+        @test degree(V) == 16
+
+        # A numerator and a denominator sharing a structural factor: the zero of
+        # the numerator at `r = 1` is a pole of the equation, not a point of its
+        # variety, so it must not enter the witness superset.
+        @var r s
+        H = System([(r^2 - 1) / (r - 1) + s, r * s - 2]; variables = [r, s])
+        R = regeneration(H; show_progress = false)
+        @test degree.(R) == [2]
+        @test all(pt -> abs(pt[1] * pt[2] - 2) < 1.0e-8, solutions(first(R)))
+        @test all(pt -> abs(pt[1] + 1 + pt[2]) < 1.0e-8, solutions(first(R)))
+
+        # A zero sitting close to a pole is still a zero: `(r - ε)/r` vanishes at
+        # `r = ε`, a full `ε` away from the denominator variety.
+        for ε in (1.0e-2, 1.0e-4, 1.0e-6, 1.0e-8)
+            Hε = System([(r - ε) / r]; variables = [r, s])
+            @test degree.(regeneration(Hε; show_progress = false)) == [1]
+        end
+        # A shared zero leaves nothing behind: only `r = -1` survives here.
+        @test degree.(
+            regeneration(
+                System([(r^2 - 1) / (r - 1)]; variables = [r, s]);
+                show_progress = false
+            )
+        ) == [1]
+
+        # Which numerator zeros are poles is a property of the variety, so
+        # rescaling an equation or its denominator may not change the answer.
+        for k in (1.0e-4, 1.0e4, 1.0e8)
+            Hk = System(
+                [k * ((r^2 - 1) / (r - 1) + s), r * s - 2]; variables = [r, s]
+            )
+            @test degree.(regeneration(Hk; show_progress = false)) == [2]
+            Hd = System(
+                [(r^2 - 1) / (k * (r - 1)) + s, r * s - 2]; variables = [r, s]
+            )
+            @test degree.(regeneration(Hd; show_progress = false)) == [2]
+        end
+
+        # Mixing the two input front-ends in one `intersect` is rejected.
+        @polyvar a b
+        Wp = witness_set(System([a^2 + b^2 - 1]); show_progress = false)
+        @test_throws ArgumentError intersect(Wp, x + y)
+    end
+
+    @testset "equation scaling" begin
+        # Multiplying an equation by a constant leaves its variety, and so the witness
+        # superset, alone in either front-end.
+        @polyvar u v
+        @var p q
+        for k in (1.0e-8, 1.0e-4, 1.0, 1.0e4, 1.0e12)
+            @test degree.(
+                regeneration(
+                    System([k * (u + 1 + v), u * v - 2]); show_progress = false,
+                )
+            ) == [2]
+            @test degree.(
+                regeneration(
+                    System([k * (p + 1 + q), p * q - 2]; variables = [p, q]);
+                    show_progress = false,
+                )
+            ) == [2]
+        end
+    end
+
+    @testset "intersect with a hypersurface" begin
+        # The hypersurface lives in the ambient space of the witness set and may leave
+        # variables out. A homogeneous one is sliced affinely like any other.
+        @polyvar x1 x2 x3 x4
+        Wp = witness_set(System([x1^2 + x2^2 + x3^2 - 4]); show_progress = false)
+        @test degree(intersect(Wp, x1^2 - x2^2 - 1; show_progress = false)) == 4
+        @test degree(intersect(Wp, x1^2 - x2^2; show_progress = false)) == 4
+        @test_throws ArgumentError intersect(Wp, x1^2 - x4^2; show_progress = false)
+
+        @var y1 y2 y3
+        We = witness_set(
+            System([y1^2 + y2^2 + y3^2 - 4]; variables = [y1, y2, y3]);
+            show_progress = false,
+        )
+        @test degree(intersect(We, y1^2 - y2^2 - 1; show_progress = false)) == 4
+        @test degree(intersect(We, y1^2 - y2^2; show_progress = false)) == 4
+        @test degree(
+            intersect(We, (y1^2 - y2^2) / (y1 - y2); show_progress = false)
+        ) == 2
     end
 
     @testset "Hypersurface of degree 5" begin
