@@ -1,6 +1,6 @@
 # DoubleF64 — extended-precision arithmetic using error-free transformations.
-# Transcendental functions (exp, log, sin, cos, tan, asin, acos, atan) are omitted
-# as they are not needed for polynomial system solving.
+# The transcendental surface is limited to what the tape can execute: `exp`,
+# `sin`, `cos`, `sincos`, `sinh` and `cosh`.
 
 # ---------------------------------------------------------------------------
 # Error-free transformations
@@ -643,6 +643,144 @@ Base.ldexp(a::DoubleF64, exp::Int) = DoubleF64(ldexp(a.hi, exp), ldexp(a.lo, exp
 `a * b` where `b` is a power of 2. Exact when `b` is a power of 2.
 """
 mul_pwr2(a::DoubleF64, b::Float64) = DoubleF64(a.hi * b, a.lo * b)
+
+# ---------------------------------------------------------------------------
+# Transcendental functions
+# ---------------------------------------------------------------------------
+
+# 1/n! for n = 1, …, 32, accurate to double-double precision.
+const _INV_FACTORIAL = ntuple(
+    n -> DoubleF64(one(BigFloat) / BigFloat(factorial(big(n)))), 32,
+)
+const double_log2 = DoubleF64(log(BigFloat(2)))
+const _LOG2_F64 = 0.6931471805599453
+# exp overflows above log(prevfloat(Inf)) and flushes to zero below log(nextfloat(0)).
+const _EXP_MAX = 709.79
+const _EXP_MIN = -745.2
+
+"""
+    exp(a::DoubleF64)
+
+`m` is chosen so that `a - m·log 2` lies in `[-log2/2, log2/2]`; that remainder is
+scaled down by 2⁹ so the Taylor series converges in a handful of terms, then the
+result is squared back up nine times.
+"""
+function Base.exp(a::DoubleF64)::DoubleF64
+    isnan(a) && return double_nan
+    a.hi >= _EXP_MAX && return double_inf
+    a.hi <= _EXP_MIN && return zero(DoubleF64)
+    iszero(a) && return one(DoubleF64)
+
+    m = round(a.hi / _LOG2_F64)
+    r = mul_pwr2(a - double_log2 * m, 1 / 512)
+
+    r2 = r * r
+    s = r + mul_pwr2(r2, 0.5)
+    p = r2 * r
+    for n in 3:11
+        s += p * _INV_FACTORIAL[n]
+        p = p * r
+    end
+    # Undo the 1/512 scaling: exp(2r) - 1 = 2(exp(r) - 1) + (exp(r) - 1)².
+    for _ in 1:9
+        s = mul_pwr2(s, 2.0) + s * s
+    end
+    return ldexp(s + 1.0, Int(m))
+end
+
+# Taylor series on |x| <= π/4. The last retained term is below 2^-106 there.
+function _sin_taylor(x::DoubleF64)::DoubleF64
+    x2 = x * x
+    s = x
+    p = x
+    for n in 3:2:31
+        p = p * x2
+        t = p * _INV_FACTORIAL[n]
+        s = isodd((n - 1) ÷ 2) ? s - t : s + t
+    end
+    return s
+end
+
+function _cos_taylor(x::DoubleF64)::DoubleF64
+    x2 = x * x
+    s = one(DoubleF64)
+    p = one(DoubleF64)
+    for n in 2:2:30
+        p = p * x2
+        t = p * _INV_FACTORIAL[n]
+        s = isodd(n ÷ 2) ? s - t : s + t
+    end
+    return s
+end
+
+function Base.sincos(a::DoubleF64)::Tuple{DoubleF64, DoubleF64}
+    isfinite(a) || return (double_nan, double_nan)
+    iszero(a) && return (zero(DoubleF64), one(DoubleF64))
+
+    # `a - 2π·round(a/2π)` carries an absolute error of about |a|·2⁻¹⁰⁶, so past
+    # |a| = 2⁵³ sum the angle from its two limbs, each of which Base reduces
+    # exactly.
+    if abs(a.hi) >= 0x1p53
+        shi, chi = sincos(a.hi)
+        slo, clo = sincos(a.lo)
+        return (
+            DoubleF64(shi * clo + chi * slo),
+            DoubleF64(chi * clo - shi * slo),
+        )
+    end
+
+    # Reduce to [-π, π], then to [-π/4, π/4] plus a quadrant index.
+    t = a - double_2pi * round(a / double_2pi)
+    q = round(t / double_pi2)
+    t = t - double_pi2 * q
+    s = _sin_taylor(t)
+    c = _cos_taylor(t)
+
+    j = mod(Int(_trunc_int64(q)), 4)
+    j == 0 && return (s, c)
+    j == 1 && return (c, -s)
+    j == 2 && return (-s, -c)
+    return (-c, s)
+end
+
+Base.sin(a::DoubleF64)::DoubleF64 = sincos(a)[1]
+Base.cos(a::DoubleF64)::DoubleF64 = sincos(a)[2]
+
+# Past this magnitude e^-|a| sits below the double-double ulp of e^|a|, so both
+# functions equal e^|a|/2 and forming `e ± 1/e` would yield NaN.
+const _SINH_LARGE = 40.0
+
+function Base.cosh(a::DoubleF64)::DoubleF64
+    isnan(a) && return double_nan
+    isinf(a) && return double_inf
+    iszero(a) && return one(DoubleF64)
+    abs(a.hi) > _SINH_LARGE && return exp(abs(a) - double_log2)
+    e = exp(a)
+    return mul_pwr2(e + inv(e), 0.5)
+end
+
+function Base.sinh(a::DoubleF64)::DoubleF64
+    isnan(a) && return double_nan
+    isinf(a) && return a.hi > 0.0 ? double_inf : -double_inf
+    iszero(a) && return zero(DoubleF64)
+    if abs(a.hi) > _SINH_LARGE
+        s = exp(abs(a) - double_log2)
+        return a.hi > 0.0 ? s : -s
+    end
+    if abs(a.hi) > 0.05
+        e = exp(a)
+        return mul_pwr2(e - inv(e), 0.5)
+    end
+    # (e - 1/e)/2 cancels catastrophically near zero, so sum the series directly.
+    x2 = a * a
+    s = a
+    p = a
+    for n in 3:2:17
+        p = p * x2
+        s += p * _INV_FACTORIAL[n]
+    end
+    return s
+end
 
 # ---------------------------------------------------------------------------
 # Display

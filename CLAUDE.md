@@ -14,6 +14,7 @@ Key design decisions:
 - **FixedSizeArrays**: all pre-allocated scratch buffers use `FSVec`/`FSMat` (size is runtime, not a type parameter). **CRITICAL:** `FixedSizeVector{T}` is NOT concrete — the `Mem` parameter is free. Use `FixedSizeArray{T,N,Memory{T}}` for struct fields (see type aliases in main module).
 - **Moshi ADTs**: `SExpr` and `ExecInstruction` use Moshi.jl `@data` for tagged unions — all variants are one concrete type, eliminating dynamic dispatch in CSE and interpreter
 - **DynamicPolynomials input**: users provide polynomials via `@polyvar`, internal pipeline uses `MP.differentiate` for Jacobian
+- **Expression input** for anything not polynomial (division, negative powers, `sqrt`, `sin`, `cos`): `@var` builds a canonicalizing `Expression <: Number` tree, lowered by `expression_to_sexpr` with Jacobians from symbolic `differentiate`. `MP.RationalPoly` converts to `Expression` automatically
 - **Immutable by default**: mutable structs require justification, use `const` fields for buffer references
 
 ## Package layout
@@ -21,7 +22,7 @@ Key design decisions:
 ```
 src/HomotopyContinuationNext.jl     # Main module (core, Arblib-free)
 src/primitives/                      # DoubleF64, norms, linear algebra
-src/model_kit/                       # SExpr, CSE, tape compiler, interpreter, Taylor
+src/model_kit/                       # SExpr, Expression, CSE, tape compiler, interpreter, Taylor
 src/core/                            # AbstractSystem/Homotopy, SystemEvaluator, homotopy types
 src/tracking/                        # Predictor, Newton, Tracker
 src/solving/                         # solve(), total degree, polyhedral, subspaces, sweeps, result types

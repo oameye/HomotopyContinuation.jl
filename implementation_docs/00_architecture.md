@@ -3,12 +3,13 @@
 ## Pipeline
 
 ```
-@polyvar x y; F = System([x^2+y, x*y-1])
-         │
-         ▼
-   poly_to_sexpr() + MP.differentiate()
-         │
-         ▼
+@polyvar x y; F = System([x^2+y, x*y-1])   @var x a; F = System([sqrt(a)*x^2-1])
+         │                                          │
+         ▼                                          ▼
+   poly_to_sexpr() + MP.differentiate()     expression_to_sexpr() + differentiate()
+         │                                          │
+         └──────────────────┬───────────────────────┘
+                            ▼
    SExpr trees (@data SExpr — single concrete type SExprT)
          │  cse() = opt_cse() + tree_cse()
          ▼
@@ -68,18 +69,20 @@ src/                                         ~17,450 lines total
 ├── HomotopyContinuationNext.jl      (120)   Main module, exports, type aliases
 ├── utils.jl                         (189)   SegmentStepper, _stable_sort!, fast_abs
 ├── primitives/
-│   ├── double_f64.jl                (653)   DoubleF64, ComplexDF64
+│   ├── double_f64.jl                (795)   DoubleF64, ComplexDF64, exp/sin/cos/sinh/cosh
 │   ├── norms.jl                     (201)   WeightedNorm (infinity norm only)
 │   └── linear_algebra.jl            (1116)  MatrixWorkspace, LU, QR, condition est.
 ├── model_kit/
 │   ├── operations.jl                (157)   OpType enum (25 ops), op_* scalar functions
-│   ├── sexpr.jl                     (380)   Moshi @data SExpr ADT, canonicalization, poly_to_sexpr
-│   ├── cse.jl                       (588)   SymEngine CSE port: opt_cse + tree_cse
-│   ├── tape_compiler.jl             (672)   SExpr → InstructionSequence, fusion, register alloc
+│   ├── sexpr.jl                     (429)   Moshi @data SExpr ADT, canonicalization, poly_to_sexpr
+│   ├── cse.jl                       (591)   SymEngine CSE port: opt_cse + tree_cse
+│   ├── tape_compiler.jl             (691)   SExpr → InstructionSequence, fusion, register alloc
 │   ├── instruction_sequence.jl      (299)   Instruction, DAG reorder, linear-scan register alloc
 │   ├── interpreter.jl               (465)   ExecInstruction variants, execute!, execute_taylor!
 │   ├── codegen.jl                   (300)   RuntimeGeneratedFunctions for COMPILED/COMPILED_ALL
 │   ├── taylor.jl                    (508)   TruncatedTaylorSeries, TaylorVector, taylor_op_*
+│   ├── expression.jl                (947)   Expression ADT, @var, arithmetic, differentiate, subs, det, conj
+│   ├── expression_compiler.jl       (51)    Expression lowering path (expr→SExpr→CSE→tape)
 │   ├── symbolic_polynomial_compiler.jl (62) Active MP lowering path (poly→SExpr→CSE→tape)
 │   ├── polynomial_compiler.jl       (140)   Experimental direct path (NOT default, gated by TODO)
 │   └── polynomial_input.jl          (72)    Variable discovery, System construction orchestrator
@@ -119,7 +122,7 @@ src/                                         ~17,450 lines total
     ├── unique_points.jl             (205)   UniquePoints, multiplicities, unique_points
     ├── group_actions.jl             (116)   GroupActions, SymmetricGroup
     ├── monodromy.jl                 (1860)  monodromy_solve, trace test, verify_solution_completeness
-    └── support.jl                   (93)    Extract support/coefficients from MP
+    └── support.jl                   (191)   Extract support/coefficients from MP or Expression
 ```
 
 ### Certification subpackage
@@ -129,7 +132,8 @@ Solution certification lives in a **separate package** under `lib/`, not in core
 ```
 lib/HomotopyContinuationNextCertification/
 ├── src/
-│   ├── interval_arithmetic.jl      Interval / IComplex / IComplexF64, inf_norm_bound, sqr
+│   ├── interval_arithmetic.jl      Interval / IComplex / IComplexF64, inf_norm_bound, sqr,
+│   │                               sqrt / sin / cos / sinh / cosh enclosures
 │   ├── interval_arblib.jl          Acb ↔ Interval bridge (Arblib)
 │   ├── acb_interpreter.jl          AcbInterpreter: arbitrary-precision in-place tape interpreter
 │   ├── certification.jl            certify(), Krawczyk operator, certificate types, accumulator
@@ -229,14 +233,53 @@ Parameterized by tape type: `Vector{ComplexF64}`, `Vector{ComplexDF64}`, or `Vec
     STmp(id::Int)
     SAdd(args::Vector{SExpr})
     SMul(args::Vector{SExpr})
-    SPow(base::SExpr, exp::Int)
+    SPow(base::SExpr, exp::Int)          # exp may be negative (division)
     SNeg(arg::SExpr)
+    SUnary(kind::SUnaryKind.T, arg::SExpr)   # sqrt, sin, cos
     SFuncSym(kind::SFuncKind.T, args::Vector{SExpr})
 end
 const SExprT = typeof(SExpr.SConst(zero(ComplexF64)))  # single concrete type
 ```
 
 All variants share one concrete type. Access via `variant_storage(expr)` for pattern dispatch on storage types (`SConstStorage`, `SVarStorage`, etc.).
+
+`SPow` with a negative exponent is how division reaches the tape: `a / b` lowers to
+`SMul([a, SPow(b, -1)])`, and the tape compiler splits products into numerator and
+denominator, emitting `OP_DIV`/`OP_INV`/`OP_INVSQR`/`OP_POW_INT`. `SUnary` lowers to
+`OP_SQRT`/`OP_SIN`/`OP_COS`.
+
+### Expression (user-facing symbolic front-end)
+
+```julia
+@data SymExpr <: Number begin
+    ENum(val::ComplexF64)
+    EVar(name::Symbol)
+    EAdd(args::Vector{SymExpr})
+    EMul(args::Vector{SymExpr})
+    EPow(base::SymExpr, exp::Int)        # exp is never 0 or 1, may be negative
+    EFn(kind::SUnaryKind.T, arg::SymExpr)
+end
+const Expression = typeof(SymExpr.ENum(zero(ComplexF64)))
+```
+
+`Expression` is the input layer for systems that are not polynomial: division, negative
+integer powers, `sqrt`, `sin` and `cos`. Because it subtypes `Number`, ordinary Julia
+arithmetic, `sum`, broadcasting and matrix products build trees without extra machinery.
+
+Every constructor canonicalizes: `EAdd`/`EMul` flatten nested nodes, fold numeric literals,
+and collect like terms (by base) and like powers (by base); `EPow` folds constant bases,
+composes nested powers, and distributes over products; `EFn` folds constant arguments. Two
+structurally equal expressions are therefore `==` and hash equal, which is what CSE relies
+on downstream.
+
+Variables come from `@var` / `@unique_var` and are keyed by `Symbol`, so `@polyvar` names
+round-trip through `Expression(::MP.AbstractPolynomialLike)` and `Expression(::MP.RationalPoly)`.
+Jacobians come from `differentiate` on the tree (product, power, quotient and chain rules),
+not `MP.differentiate`.
+
+`System` records a degree of `-1` for an equation that is not polynomial in the variables;
+`TotalDegree` and `Polyhedral` reject such systems, while parameter homotopies, `monodromy_solve`
+and `certify` accept them.
 
 ### Tracker Stack
 

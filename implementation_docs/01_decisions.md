@@ -244,3 +244,100 @@ The approximate inverse `C ≈ J⁻¹` is computed in place via `inv!(lu!(copyto
 ### Interval-arithmetic boundary fixes
 
 `0 * Interval` returns the zero *interval* (not a scalar, which broke type stability); `Interval(0)/Interval(0)` (and any `0 ∈ denominator`) returns a NaN interval instead of `[0,0]`; `x^0` returns `one(x)` for every `x`, including intervals containing zero.
+
+### Front-end lowering happens before the inference barrier
+
+`System` accepts MultivariatePolynomials input and `Expression` input, and each needs a
+different lowering to an `InstructionSequence`. Dispatching on that inside the builder chain
+looks natural, but the chain is deliberately `@nospecialize`d (see "Shape dispatch sits behind
+an inference barrier"), so `polys` is only known there to be an `AbstractVector`. Both
+`_lower_input` methods then apply, and inference walks both: a plain polynomial build was
+inferring `_differentiate`, `_eadd`, `_emul`, `_epow`, `expression_to_sexpr` and their callees,
++488 MethodInstances it never executes.
+
+Measured cost of getting this wrong, median of 3 interleaved pairs against the same commit
+without the expression front-end: `total_degree_interpreted_serial` 7.46s to 8.14s,
+`monodromy_serial` 11.87s to 12.40s, `large_symbolic_interpreted_build` 5.65s to 6.20s. A pure
+`System(...)` build regressed as much as a full solve, which is what pointed at construction
+rather than tracking.
+
+The fix is to call `_lower_input` from the typed `System` frame, where the input type is still
+known, and pass the result through the barrier as a concretely typed `LoweredInput`. Adding a
+front-end is therefore adding a `_lower_input` method, never a branch further down.
+
+### Rectangular intervals implement sqrt, sin and cos
+
+v2 has no `sqrt`/`sin`/`cos` for its rectangular interval type and certifies any system using
+them with Arb from the start. v3 implements them, so those systems take the Float64 Krawczyk
+path and only escalate when the test actually fails.
+
+The complex `sqrt` needs care. The textbook form `√z = u + i·sign(Im z)·v` with
+`u = √((|z| + Re z)/2)` and `v = √((|z| - Re z)/2)` is sound but useless near the positive real
+axis, which is exactly where a box around a real solution sits: `|z| - Re z` cancels to nothing
+and `v` comes out as the square root of the box width. A 1e-8-wide box around 4 gave an
+imaginary radius of 1e-4, far too wide for the inclusion test. Computing only the
+well-conditioned root and recovering the other from `2uv = Im z` restores a radius proportional
+to the box width (2.5e-9 for that box).
+
+`sin`/`cos` bound the endpoints with two ulps of slack and saturate to `[-1, 1]` when an
+extremum can lie inside, tested against a lattice built from an enclosure of `π`. The test
+answers "true" when unsure, which only widens the result. Soundness is checked by sampling
+random boxes in `interval_arithmetic_test.jl`.
+
+
+### `det` on expressions expands by cofactors
+
+`LinearAlgebra.det` factors the matrix: it calls `abs` to choose a pivot and divides to
+eliminate. Neither works on a symbolic entry, and dividing would build a rational expression
+where a polynomial one exists. `det(::AbstractMatrix{Expression})` therefore expands along the
+first row, skipping zero entries. It is only ever called on the small matrices that show up in
+modeling (tangency conditions, minors), never on a numeric hot path.
+
+Without it, models that go through a determinant have to inline their own cofactor expansion,
+which is what v2's tangency tests and the ported certification regression used to do.
+
+
+### Canonicalization cancels rational expressions, and that is the contract
+
+`_emul` collects repeated bases and adds their exponents, so `x/x` folds to `1`, `x^2/x` to `x`
+and `(x*y)/x` to `y`, at construction time and before any evaluator exists. `System([x/x - y, x])`
+is therefore the system `[1 - y, x]`: it evaluates at `x = 0`, and `certify` will happily
+certify `(0, 1)` even though the expression the user typed is undefined there.
+
+This is what every canonicalizing front-end does (v2's SymEngine layer folds the same three
+examples identically) and the folded system is what `show` prints, so the simplification is
+visible rather than hidden. Tracking the domain of each denominator through the tree would mean
+carrying a side condition on every expression and giving certification a second obligation to
+discharge, for a class of input that is a modeling mistake rather than a solving problem. The
+front-end's guarantee is about the canonical form it builds, not about the poles of the literal
+input.
+
+### `conj` conjugates literals, `transpose` is the identity
+
+`Expression <: Number`, so `conj` has to conjugate a numeric literal: leaving `Expression(2im)`
+alone breaks the `Number` contract outright. It recurses into the tree and conjugates the
+`ENum` leaves, which makes `adjoint((1+2im)*x)` agree with what DynamicPolynomials produces for
+the same input, so a model written against either front-end conjugates its coefficients the
+same way.
+
+Variables are left alone: the tape has no conjugation instruction, so a variable stands for a
+real symbol and `'` on a matrix of expressions is a transpose of conjugated coefficients. This
+differs from v2, which left the coefficients unconjugated too.
+
+### `sin`/`cos` on `DoubleF64` sum the limbs for large arguments
+
+Reducing `a` modulo `2π` in double-double arithmetic costs about `|a|·2⁻¹⁰⁶` radians of absolute
+accuracy, because the product `2π·round(a/2π)` is rounded at the double-double epsilon. Past
+`|a| = 2⁵³` the reduced angle is worth less than a Float64 ulp, and by `2¹⁰⁶` it has no correct
+bits at all: `sin(DoubleF64(1e32))` used to return exactly `0` against a true value of `0.585`.
+
+Above `2⁵³`, `sincos` therefore evaluates `sin(hi + lo)` through the angle-addition formula
+instead. `hi + lo` is exact by construction and `Base.sin`/`Base.cos` reduce each limb with a
+full Payne-Hanek reduction, so the result keeps Float64 accuracy at any magnitude rather than
+degrading to noise. Full double-double accuracy above `2⁵³` would need a Payne-Hanek reduction
+against a bit table of `2/π`, which no caller has asked for.
+
+`sinh`/`cosh` take a similar branch: above `|a| = 40` the term `e^-|a|` is below the
+double-double ulp of `e^|a|`, so both functions are `exp(|a| - log 2)`. Forming `e ± 1/e` there
+divides by a zero or infinite `exp` and yields NaN where the true value is finite (`sinh(710)`)
+or infinite (`sinh(1000)`).

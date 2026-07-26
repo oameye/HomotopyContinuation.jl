@@ -8,6 +8,7 @@ using HomotopyContinuationNext:
     taylor_op_muladd, taylor_op_mulsub, taylor_op_submul,
     taylor_op_add3, taylor_op_add4, taylor_op_mul3, taylor_op_mul4,
     taylor_op_mulmuladd, taylor_op_mulmulsub
+using HomotopyContinuationNext: OpType, op_call
 using FixedSizeArrays: FixedSizeArray
 const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
@@ -138,6 +139,16 @@ end
         truth = cauchy_coefficients(scalar_op, collect(args); K = K)
         for k in 0:K
             @test got[k] ≈ truth[k + 1] atol = 1.0e-9
+        end
+    end
+
+    @testset "every OpType is covered" begin
+        covered = Set(first.(cases))
+        for op in instances(OpType.T)
+            op == OpType.OP_STOP && continue
+            name = replace(String(op_call(op)), "op_" => "")
+            # `pow_int` carries its exponent in the case name.
+            @test any(c -> c == name || startswith(c, name * "("), covered)
         end
     end
 

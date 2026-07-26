@@ -380,6 +380,9 @@ function _opts_cse_visit!(
         # SNeg is our representation for SymEngine's Mul(-1, x) where neg simplifies to atom
         _opts_cse_visit!(storage.arg, adds, muls, opt_subs, seen)
 
+    elseif storage isa SUnaryStorage
+        _opts_cse_visit!(storage.arg, adds, muls, opt_subs, seen)
+
     elseif storage isa SFuncSymStorage
         # bvisit(const Basic &x) — generic case for compound expressions
         for a in storage.args

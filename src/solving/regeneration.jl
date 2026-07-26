@@ -231,6 +231,7 @@ function regeneration(
                 "parameter values first (cf. `witness_set(F; target_parameters)`).",
         ),
     )
+    _require_polynomial_input(F)
     seed !== nothing && Random.seed!(seed)
 
     vars = collect(variables(F))
@@ -318,8 +319,17 @@ function regeneration(
     return result
 end
 
+# Regeneration rebuilds its equations through `MultivariatePolynomials`.
+_require_polynomial_input(::System{<:MP.AbstractPolynomialLike})::Nothing = nothing
+_require_polynomial_input(::System)::Nothing = throw(
+    ArgumentError(
+        "regeneration needs systems built from polynomial input; systems built " *
+            "from `Expression`s are not supported.",
+    ),
+)
+
 # Mint a fresh variable not colliding with any name in `vars`.
-function _fresh_variable(vars::Vector{V}) where {V}
+function _fresh_variable_name(vars::AbstractVector)::String
     names = Set(string(v) for v in vars)
     base = "u"
     name = base
@@ -328,8 +338,13 @@ function _fresh_variable(vars::Vector{V}) where {V}
         k += 1
         name = string("##", base, "_", k)
     end
-    return V(name)
+    return name
 end
+
+_fresh_variable(vars::Vector{V}) where {V} = V(_fresh_variable_name(vars))
+# An `Expression` is a tagged union, so its constructor does not take a name.
+_fresh_variable(vars::Vector{Expression})::Expression =
+    variable(_fresh_variable_name(vars))
 
 # ── Intersection with a hypersurface ─────────────────────────────────────────
 
@@ -439,8 +454,8 @@ end
 
 # Threaded variant: one task per (point, root) pair, each with its own
 # u-homotopy built from cloned evaluators (interpreter tapes are mutable, so
-# tasks must not share them). All tasks use the same γ — they track paths of
-# the SAME homotopy. Endpoints are collected per job index and pushed in the
+# tasks must not share them). All tasks use the same γ, since they track paths
+# of the SAME homotopy. Endpoints are collected per job index and pushed in the
 # serial order.
 function _threaded_intersection!(
         X::WitnessPoints, P::Vector{Vector{ComplexF64}}, roots::Vector{ComplexF64},
@@ -655,6 +670,8 @@ function Base.intersect(
         throw(ArgumentError("The second argument must be defined by a single polynomial."))
     size(system(W))[2] == size(system(H))[2] ||
         throw(ArgumentError("Witness sets must be in the same ambient space."))
+    _require_polynomial_input(system(W))
+    _require_polynomial_input(system(H))
 
     vars = collect(variables(system(W)))
     u = _fresh_variable(vars)

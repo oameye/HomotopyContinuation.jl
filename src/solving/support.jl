@@ -45,6 +45,103 @@ function support_coefficients(
     return supports, coeffs
 end
 
+const _MonomialTerms = Dict{Vector{Int32}, ComplexF64}
+
+function _add_terms!(acc::_MonomialTerms, other::_MonomialTerms)::Nothing
+    for (m, c) in other
+        acc[m] = get(acc, m, zero(ComplexF64)) + c
+    end
+    return nothing
+end
+
+function _multiply_terms(a::_MonomialTerms, b::_MonomialTerms)::_MonomialTerms
+    out = _MonomialTerms()
+    for (ma, ca) in a, (mb, cb) in b
+        m = ma .+ mb
+        out[m] = get(out, m, zero(ComplexF64)) + ca * cb
+    end
+    return out
+end
+
+"""
+Expand a polynomial `Expression`, which stores products and powers unexpanded,
+into `exponent vector => coefficient`.
+"""
+function _monomial_terms(
+        e::Expression, var_to_idx::Dict{Symbol, Int}, n::Int,
+    )::_MonomialTerms
+    storage = expr_storage(e)
+    if storage isa ENumStorage
+        return _MonomialTerms(zeros(Int32, n) => storage.val)
+    elseif storage isa EVarStorage
+        idx = get(var_to_idx, storage.name, 0)
+        idx == 0 && throw(
+            ArgumentError(
+                "`$(storage.name)` is neither a variable nor a parameter of the system",
+            ),
+        )
+        m = zeros(Int32, n)
+        m[idx] = Int32(1)
+        return _MonomialTerms(m => one(ComplexF64))
+    elseif storage isa EAddStorage
+        acc = _MonomialTerms()
+        for a in storage.args
+            _add_terms!(acc, _monomial_terms(a, var_to_idx, n))
+        end
+        return acc
+    elseif storage isa EMulStorage
+        acc = _MonomialTerms(zeros(Int32, n) => one(ComplexF64))
+        for a in storage.args
+            acc = _multiply_terms(acc, _monomial_terms(a, var_to_idx, n))
+        end
+        return acc
+    elseif storage isa EPowStorage
+        storage.exp >= 0 || throw(
+            ArgumentError("the expression is not polynomial: it has a negative power"),
+        )
+        base = _monomial_terms(storage.base, var_to_idx, n)
+        acc = _MonomialTerms(zeros(Int32, n) => one(ComplexF64))
+        for _ in 1:(storage.exp)
+            acc = _multiply_terms(acc, base)
+        end
+        return acc
+    else # EFnStorage
+        throw(
+            ArgumentError(
+                "the expression is not polynomial: it applies `$(storage.kind)` to a variable",
+            ),
+        )
+    end
+end
+
+function support_coefficients(
+        polys::AbstractVector{Expression},
+        variables::AbstractVector{Expression},
+    )::Tuple{Vector{Matrix{Int32}}, Vector{Vector{ComplexF64}}}
+    n = length(variables)
+    var_to_idx = Dict{Symbol, Int}(Symbol(v) => i for (i, v) in enumerate(variables))
+
+    supports = Vector{Matrix{Int32}}(undef, length(polys))
+    coeffs = Vector{Vector{ComplexF64}}(undef, length(polys))
+
+    for (k, p) in enumerate(polys)
+        terms = _monomial_terms(p, var_to_idx, n)
+        # Expanding cancels terms the tree kept apart, so drop the zeros.
+        monomials = [m for (m, c) in terms if !iszero(c)]
+        S = zeros(Int32, n, length(monomials))
+        c = Vector{ComplexF64}(undef, length(monomials))
+        for (j, m) in enumerate(monomials)
+            @inbounds S[:, j] .= m
+            @inbounds c[j] = terms[m]
+        end
+        perm = _td_order_perm(S)
+        supports[k] = S[:, perm]
+        coeffs[k] = c[perm]
+    end
+
+    return supports, coeffs
+end
+
 """
     _td_order_perm(S::Matrix{Int32}) → Vector{Int}
 

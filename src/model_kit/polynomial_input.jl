@@ -37,6 +37,24 @@ end
     return empty(MP.variables(first(polys)))
 end
 
+# `MP.variables` is undefined on `MP.RationalPoly`, so gather from numerator and
+# denominator. `parameters` are matched by name: they may arrive as MP variables
+# or as `Expression`s.
+@noinline function _rational_variables(polys, parameters)
+    Base.@nospecialize polys parameters
+    all_vars = empty(MP.variables(numerator(first(polys))))
+    for p in polys
+        append!(all_vars, MP.variables(numerator(p)))
+        append!(all_vars, MP.variables(denominator(p)))
+    end
+    unique!(all_vars)
+    _stable_sort!(all_vars, _lt_variable)
+    isempty(parameters) && return all_vars
+    param_names = Set{Symbol}(Symbol(p) for p in parameters)
+    filter!(v -> !(Symbol(v) in param_names), all_vars)
+    return all_vars
+end
+
 @noinline function _effective_variables(polys, parameters)
     Base.@nospecialize polys parameters
     all_vars = _collect_variables(polys)

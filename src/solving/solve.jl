@@ -53,6 +53,25 @@ function _check_parameter_free(F::System, route::String)::Nothing
     return nothing
 end
 
+"""
+    _check_polynomial(F, route)
+
+Throw when `F` has an equation that is not polynomial in its variables. `System`
+records those with a degree of `-1`.
+"""
+function _check_polynomial(F::System, route::String)::Nothing
+    any(<(0), F.degrees) || return nothing
+    throw(
+        ArgumentError(
+            "$route requires a system that is polynomial in its variables, but at " *
+                "least one equation uses division by a variable, a negative power, " *
+                "or a unary function of a variable. Clear denominators first, or " *
+                "track from known start solutions with a parameter homotopy or " *
+                "`monodromy_solve`.",
+        ),
+    )
+end
+
 # ── CommonSolve.init: System + TotalDegree ────────────────────────────────
 
 function _total_degree_solve_cache(
@@ -84,6 +103,7 @@ function CommonSolve.init(
     seed = alg.seed
     _check_square_or_overdetermined(F)
     _check_parameter_free(F, "`TotalDegree`")
+    _check_polynomial(F, "`TotalDegree`")
 
     rng = Random.MersenneTwister(seed)
     γ = _random_gamma(rng)

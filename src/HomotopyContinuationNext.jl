@@ -25,6 +25,7 @@ RuntimeGeneratedFunctions.init(@__MODULE__)
 end
 
 export @polyvar, solve, System
+export @var, @unique_var, Expression, differentiate, subs
 export CompileMode
 export solutions, real_solutions, nsolutions, nreal, nsingular, nnonsingular, nat_infinity
 export nexcess_solutions, nfailed
@@ -82,6 +83,9 @@ include("model_kit/instruction_sequence.jl")
 # model_kit/sexpr.jl — SExpr types, hash/==, canonicalization, poly_to_sexpr
 include("model_kit/sexpr.jl")
 
+# model_kit/expression.jl — user-facing symbolic Expression frontend
+include("model_kit/expression.jl")
+
 # model_kit/cse.jl — SymEngine-style CSE algorithm (opt_cse + tree_cse)
 include("model_kit/cse.jl")
 
@@ -90,6 +94,7 @@ include("model_kit/tape_compiler.jl")
 
 include("model_kit/polynomial_compiler.jl")
 include("model_kit/symbolic_polynomial_compiler.jl")
+include("model_kit/expression_compiler.jl")
 include("model_kit/interpreter.jl")
 include("model_kit/codegen.jl")
 include("model_kit/polynomial_input.jl")

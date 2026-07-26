@@ -128,4 +128,71 @@ using HomotopyContinuationNext: DoubleF64, ComplexDF64, wide_add, wide_sub, wide
             @test x ≈ BigFloat(n) * BigFloat(2)^p / BigFloat(d)
         end
     end
+
+    @testset "transcendental functions" begin
+        args = (0.0, 1.0e-8, 0.05, 0.3, 1.0, 2.7, -3.3, 10.0, -50.25, 100.5)
+        @testset "$name" for (f, name) in (
+                (exp, "exp"), (sin, "sin"), (cos, "cos"),
+                (sinh, "sinh"), (cosh, "cosh"),
+            )
+            for x in args
+                got = BigFloat(f(DoubleF64(x)))
+                want = f(BigFloat(x))
+                err = iszero(want) ? abs(got) : abs((got - want) / want)
+                @test err < 1.0e-29
+            end
+        end
+
+        @test sincos(DoubleF64(0.7)) == (sin(DoubleF64(0.7)), cos(DoubleF64(0.7)))
+        @test exp(DoubleF64(0.0)) == DoubleF64(1.0)
+        @test iszero(sinh(DoubleF64(0.0)))
+        @test cosh(DoubleF64(0.0)) == DoubleF64(1.0)
+        @test iszero(exp(DoubleF64(-1000.0)))
+        @test isinf(exp(DoubleF64(1000.0)))
+        @test isnan(exp(DoubleF64(NaN)))
+
+        # Identities that exercise the reduction branches.
+        for x in (0.4, 3.9, -7.1)
+            d = DoubleF64(x)
+            @test abs(BigFloat(sin(d)^2 + cos(d)^2 - 1)) < 1.0e-30
+            @test abs(BigFloat(cosh(d)^2 - sinh(d)^2 - 1)) < 1.0e-28
+        end
+
+        @testset "large arguments keep at least Float64 accuracy" begin
+            for x in (0x1p53, 1.0e16, 1.0e20, 1.0e32, -1.0e32, 1.0e300)
+                d = DoubleF64(x)
+                for (f, want) in ((sin, sin(BigFloat(x))), (cos, cos(BigFloat(x))))
+                    @test abs(BigFloat(f(d)) - want) < 1.0e-15
+                end
+                @test abs(BigFloat(sin(d)^2 + cos(d)^2 - 1)) < 1.0e-15
+            end
+        end
+
+        @testset "sinh and cosh overflow to infinities" begin
+            for x in (41.0, -41.0, 300.0, 710.0)
+                d = DoubleF64(x)
+                for (f, want) in ((sinh, sinh(BigFloat(x))), (cosh, cosh(BigFloat(x))))
+                    @test abs((BigFloat(f(d)) - want) / want) < 1.0e-29
+                end
+            end
+            for x in (1000.0, Inf)
+                @test sinh(DoubleF64(x)).hi == Inf
+                @test sinh(DoubleF64(-x)).hi == -Inf
+                @test cosh(DoubleF64(x)).hi == Inf
+                @test cosh(DoubleF64(-x)).hi == Inf
+            end
+            @test isnan(sinh(DoubleF64(NaN)))
+            @test isnan(cosh(DoubleF64(NaN)))
+        end
+    end
+
+    @testset "ComplexDF64 transcendental functions" begin
+        z = ComplexDF64(DoubleF64(0.7), DoubleF64(-1.3))
+        zb = big(0.7) - big(1.3) * im
+        for f in (sin, cos, sqrt, exp)
+            got = f(z)
+            g = Complex(BigFloat(real(got)), BigFloat(imag(got)))
+            @test abs(g - f(zb)) / abs(f(zb)) < 1.0e-29
+        end
+    end
 end

@@ -157,6 +157,8 @@ end
     _compile_sum!(c, storage.args)
 @inline _compile_storage!(c::TapeCompiler, storage::SNegStorage)::Int32 =
     _tape_neg!(c, _compile!(c, storage.arg))
+@inline _compile_storage!(c::TapeCompiler, storage::SUnaryStorage)::Int32 =
+    _emit!(c, unary_op_type(storage.kind), _compile!(c, storage.arg))
 
 function _compile_storage!(c::TapeCompiler, storage::SFuncSymStorage)::Int32
     if storage.kind == SFuncKind.SFUNC_ADD

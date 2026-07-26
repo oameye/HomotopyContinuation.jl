@@ -55,7 +55,7 @@ end
 ## ── System constructor ──────────────────────────────────────────────────────
 
 function System(
-        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+        polys::AbstractVector,
         parameters::AbstractVector,
         variables::AbstractVector,
         compile::CompileMode.T = CompileMode.INTERPRETED,
@@ -82,8 +82,9 @@ function System(
     # three code-generation backends or all three shape instantiations.
     builder = Base.inferencebarrier(builder)
     shape = Base.inferencebarrier(shape)
+    normalized, lowered = _lower_input(polys, variables, parameters)
     return _dispatch_system_build(
-        builder, polys, variables, parameters, neqs, nvars, nparams, shape,
+        builder, normalized, variables, parameters, lowered, neqs, nvars, nparams, shape,
     )
 end
 
@@ -112,6 +113,69 @@ function System(
     parameters === nothing && (parameters = _empty_vars(polys))
     variables === nothing && (variables = _effective_variables(polys, parameters))
     return System(polys, parameters, variables, compile)
+end
+
+"""
+    System(exprs::AbstractVector{Expression}; parameters=[], variables=..., compile=...) -> System
+
+Build a `System` from symbolic [`Expression`](@ref)s. This is the front-end for
+input that is not a polynomial: division, negative integer powers, `sqrt`, `sin`
+and `cos`.
+
+```julia
+@var x y a b
+System([sqrt(a + b) * x^2 - y, (x * y + a - sqrt(b))^2 - 3]; parameters = [a, b])
+```
+"""
+function System(
+        exprs::AbstractVector{Expression};
+        parameters = nothing,
+        variables = nothing,
+        compile::CompileMode.T = CompileMode.INTERPRETED,
+    )::System
+    params = parameters === nothing ? Expression[] : _as_variables(parameters)
+    vars = variables === nothing ? _default_variables(exprs, params) :
+        _as_variables(variables)
+    return System(exprs, params, vars, compile)
+end
+
+# `MP.RationalPoly` has no polynomial representation, so it routes through the
+# expression front-end, keeping the MP variable order.
+function System(
+        polys::AbstractVector{<:MP.RationalPoly};
+        parameters = nothing,
+        variables = nothing,
+        compile::CompileMode.T = CompileMode.INTERPRETED,
+    )::System
+    params = parameters === nothing ? Expression[] : _as_variables(parameters)
+    vars = if variables === nothing
+        _as_variables(
+            _rational_variables(polys, parameters === nothing ? () : parameters),
+        )
+    else
+        _as_variables(variables)
+    end
+    return System(_as_expressions(polys), params, vars, compile)
+end
+
+function _as_variables(vars::AbstractVector)::Vector{Expression}
+    Base.@nospecialize vars
+    out = Vector{Expression}(undef, length(vars))
+    for (i, v) in enumerate(vars)
+        out[i] = v isa Expression ? v : variable(Symbol(v))
+    end
+    return out
+end
+
+_as_variables(vars::Vector{Expression})::Vector{Expression} = vars
+
+function _as_expressions(polys::AbstractVector)::Vector{Expression}
+    Base.@nospecialize polys
+    out = Vector{Expression}(undef, length(polys))
+    for (i, p) in enumerate(polys)
+        out[i] = convert(Expression, p)
+    end
+    return out
 end
 
 
@@ -190,6 +254,76 @@ function _variable_degrees(
     return degs, homogeneous
 end
 
+## ── Front-end lowering ──────────────────────────────────────────────────────
+
+"""
+Everything the builder needs from the input, independent of its representation.
+"""
+struct LoweredInput
+    seq_eval::InstructionSequence
+    seq_jac::InstructionSequence
+    degrees::Vector{Int}
+    is_homogeneous::Bool
+end
+
+# Called from a frame that still knows the concrete input type: dispatching behind
+# the `@nospecialize` builder chain makes inference walk both front-ends on every
+# build.
+@noinline function _lower_input(
+        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+        variables::AbstractVector,
+        parameters::AbstractVector,
+    )
+    normalized = _normalize_polys(polys)
+    degs, is_homogeneous = _variable_degrees(normalized, variables)
+    return normalized, LoweredInput(
+            _build_instruction_sequence(normalized, variables, parameters, false),
+            _build_instruction_sequence(normalized, variables, parameters, true),
+            degs, is_homogeneous,
+        )
+end
+
+# No `_normalize_polys` pass: expression coefficients are already ComplexF64 and
+# rational input has no well-defined global scale.
+@noinline function _lower_input(
+        exprs::AbstractVector{Expression},
+        variables::AbstractVector,
+        parameters::AbstractVector,
+    )
+    normalized = collect(exprs)
+    vars = _as_variables(variables)
+    params = _as_variables(parameters)
+    degs, is_homogeneous = _expression_degrees(normalized, vars)
+    return normalized, LoweredInput(
+            _build_instruction_sequence_from_expressions(normalized, vars, params, false),
+            _build_instruction_sequence_from_expressions(normalized, vars, params, true),
+            degs, is_homogeneous,
+        )
+end
+
+# Rational input reaching the positional constructor.
+@noinline function _lower_input(
+        polys::AbstractVector{<:MP.RationalPoly},
+        variables::AbstractVector,
+        parameters::AbstractVector,
+    )
+    return _lower_input(_as_expressions(polys), variables, parameters)
+end
+
+@noinline function _lower_input(
+        polys::AbstractVector,
+        variables::AbstractVector,
+        parameters::AbstractVector,
+    )
+    Base.@nospecialize polys variables parameters
+    throw(
+        ArgumentError(
+            "cannot build a `System` from input of type $(typeof(polys)): expected a " *
+                "vector of MultivariatePolynomials polynomials or of `Expression`s.",
+        ),
+    )
+end
+
 ## ── Polynomial normalization ────────────────────────────────────────────────
 
 function _normalize_polys(
@@ -213,60 +347,66 @@ end
 
 @noinline function _dispatch_system_build(
         builder::Function,
-        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+        polys::AbstractVector,
         variables::AbstractVector,
         parameters::AbstractVector,
+        lowered::LoweredInput,
         neqs::Int,
         nvars::Int,
         nparams::Int,
         shape::SystemShape,
     )::System
     Base.@nospecialize builder polys variables parameters shape
-    return builder(polys, variables, parameters, neqs, nvars, nparams, shape)
+    return builder(polys, variables, parameters, lowered, neqs, nvars, nparams, shape)
 end
 
 @noinline function _build_interpreted_system(
-        polys, variables, parameters, neqs::Int, nvars::Int, nparams::Int, shape,
+        polys, variables, parameters, lowered::LoweredInput,
+        neqs::Int, nvars::Int, nparams::Int, shape,
     )::System
     Base.@nospecialize polys variables parameters shape
     return _build_compiled_system(
-        InterpretedCompile(), polys, variables, parameters, neqs, nvars, nparams, shape,
+        InterpretedCompile(), polys, variables, parameters, lowered,
+        neqs, nvars, nparams, shape,
     )
 end
 
 @noinline function _build_codegen_system(
-        polys, variables, parameters, neqs::Int, nvars::Int, nparams::Int, shape,
+        polys, variables, parameters, lowered::LoweredInput,
+        neqs::Int, nvars::Int, nparams::Int, shape,
     )::System
     Base.@nospecialize polys variables parameters shape
     return _build_compiled_system(
-        CompiledCompile(), polys, variables, parameters, neqs, nvars, nparams, shape,
+        CompiledCompile(), polys, variables, parameters, lowered,
+        neqs, nvars, nparams, shape,
     )
 end
 
 @noinline function _build_codegen_all_system(
-        polys, variables, parameters, neqs::Int, nvars::Int, nparams::Int, shape,
+        polys, variables, parameters, lowered::LoweredInput,
+        neqs::Int, nvars::Int, nparams::Int, shape,
     )::System
     Base.@nospecialize polys variables parameters shape
     return _build_compiled_system(
-        CompiledAllCompile(), polys, variables, parameters, neqs, nvars, nparams, shape,
+        CompiledAllCompile(), polys, variables, parameters, lowered,
+        neqs, nvars, nparams, shape,
     )
 end
 
 @noinline function _build_compiled_system(
         strategy::C,
-        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+        polys::AbstractVector,
         variables::AbstractVector,
         parameters::AbstractVector,
+        lowered::LoweredInput,
         neqs::Int,
         nvars::Int,
         nparams::Int,
         ::S,
     )::System where {C <: SystemCompileStrategy, S <: SystemShape}
     Base.@nospecialize polys variables parameters
-    polys = _normalize_polys(polys)
-
-    seq_eval = _build_instruction_sequence(polys, variables, parameters, false)
-    seq_jac = _build_instruction_sequence(polys, variables, parameters, true)
+    seq_eval = lowered.seq_eval
+    seq_jac = lowered.seq_jac
 
     interp_f64 = Interpreter(Vector{ComplexF64}, seq_eval)
     interp_df64 = Interpreter(Vector{ComplexDF64}, seq_eval)
@@ -274,8 +414,6 @@ end
     interp_t1 = Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, seq_eval)
     interp_t2 = Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval)
     interp_t3 = Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval)
-
-    degs, is_homogeneous = _variable_degrees(polys, variables)
 
     evaluator = _build_mode_evaluator(
         strategy, seq_eval, seq_jac,
@@ -292,8 +430,8 @@ end
         fs_polys,
         fs_parameters,
         fs_variables,
-        evaluator, degs, nvars, nparams,
-        Vector{Int}[], is_homogeneous,
+        evaluator, lowered.degrees, nvars, nparams,
+        Vector{Int}[], lowered.is_homogeneous,
         LazyRef{SupportCoefficients}(),
         interp_f64, interp_df64, interp_jac,
         interp_t1, interp_t2, interp_t3,

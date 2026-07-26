@@ -514,6 +514,8 @@ end
 function _linear_in_params_start_pair(
         F::System,
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Vector{ComplexF64}}}
+    # The term walk below needs a polynomial representation.
+    eltype(F.polys) <: MP.AbstractPolynomialLike || return nothing
     nvars = nvariables(F)
     np = nparameters(F)
     m = length(F.polys)
@@ -1965,6 +1967,45 @@ function _zero_first_parameter_sampler(::LinearSubspace)
     throw(ArgumentError("the completeness verification sampler only supports vector parameters"))
 end
 
+# Augmented system `[F(x, p + λv); (Σᵢ aᵢxᵢ - 1)λ + t]` used by the trace test.
+# DynamicPolynomials variables are identity distinct, so the fresh variables
+# below cannot collide with user variables of the same name.
+function _build_verification_system(
+        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+        x::AbstractVector, p::AbstractVector, n::Int, m::Int,
+    )::System
+    @polyvar t v[1:m] a[1:n] λ
+    return System(
+        [
+            [MP.subs(f, p => p .+ λ .* v) for f in polys];
+            (sum(a .* x) - 1) * λ + t
+        ];
+        variables = [x; λ],
+        parameters = [t; p; v; a],
+    )
+end
+
+# `Expression` variables are keyed by name, so the fresh ones are renamed until
+# they no longer clash.
+function _build_verification_system(
+        polys::AbstractVector{Expression},
+        x::AbstractVector, p::AbstractVector, n::Int, m::Int,
+    )::System
+    taken = Expression[x; p]
+    fresh(name)::Expression = (w = unique_variable(name, taken, Expression[]); push!(taken, w); w)
+
+    t = fresh(:t)
+    λ = fresh(:λ)
+    v = Expression[fresh(Symbol("v", map_subscripts(i))) for i in 1:m]
+    a = Expression[fresh(Symbol("a", map_subscripts(i))) for i in 1:n]
+
+    exprs = Expression[subs(f, p => p .+ λ .* v) for f in polys]
+    push!(exprs, (sum(a .* x) - 1) * λ + t)
+    return System(
+        exprs; variables = Expression[x; λ], parameters = Expression[t; p; v; a],
+    )
+end
+
 """
     verify_solution_completeness(F::System, R::MonodromyResult; kwargs...)
     verify_solution_completeness(F::System, sols, p; trace_tol = 1e-14, kwargs...)
@@ -2033,20 +2074,9 @@ function verify_solution_completeness(
     )::Union{Nothing, Bool}
     n = nvariables(F)
     m = nparameters(F)
-    # DynamicPolynomials variables are identity distinct, so these fresh
-    # variables cannot collide with user variables of the same name.
-    @polyvar t v[1:m] a[1:n] λ
 
-    x = collect(F.variables)
-    p = collect(F.parameters)
-
-    verify_system = System(
-        [
-            [MP.subs(f, p => p .+ λ .* v) for f in F.polys];
-            (sum(a .* x) - 1) * λ + t
-        ];
-        variables = [x; λ],
-        parameters = [t; p; v; a],
+    verify_system = _build_verification_system(
+        F.polys, collect(F.variables), collect(F.parameters), n, m,
     )
 
     # Monodromy computation for the additional witnesses: use verify_system

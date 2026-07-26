@@ -444,6 +444,7 @@ function CommonSolve.init(
     )::PolyhedralSolveCache
     _check_square_or_overdetermined(F)
     _check_parameter_free(F, "`Polyhedral`")
+    _check_polynomial(F, "`Polyhedral`")
     # Dynamic call: specializes the body on the concrete `System` so that
     # `system_shape(F)` resolves statically instead of union-splitting.
     initializer = Base.inferencebarrier(_init_polyhedral)

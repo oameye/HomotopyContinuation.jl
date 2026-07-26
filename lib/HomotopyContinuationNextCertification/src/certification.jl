@@ -922,12 +922,23 @@ function certify_solution(
     )
 end
 
-# Whether every coefficient of every polynomial of `F` is real.
-function _is_real_system(F::System)::Bool
-    for p in polynomials(F)
+# Whether every coefficient of every equation of `F` is real.
+_is_real_system(F::System)::Bool = _has_real_coefficients(polynomials(F))
+
+function _has_real_coefficients(
+        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+    )::Bool
+    for p in polys
         for c in MP.coefficients(p)
             iszero(imag(ComplexF64(c))) || return false
         end
+    end
+    return true
+end
+
+function _has_real_coefficients(exprs::AbstractVector{Expression})::Bool
+    for e in exprs
+        has_real_coefficients(e) || return false
     end
     return true
 end

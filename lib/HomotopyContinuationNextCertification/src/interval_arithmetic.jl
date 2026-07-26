@@ -356,18 +356,112 @@ function Base.:/(a::IComplex{T}, b::IComplex{T}) where {T}
     return IComplex((are * bre + aim * bim) / denom, (aim * bre - are * bim) / denom)
 end
 
-# Transcendental functions are not defined for rectangular interval arithmetic;
-# polynomial systems never emit them. Defining them (as explicit errors) keeps
-# the tape interpreter's generated op-dispatch fully typed for `IComplex` tapes
-# rather than leaving `sin`/`cos`/`sqrt` as unresolved method calls.
-@noinline _no_transcendental(f) =
-    throw(ArgumentError("$f is not supported for interval arithmetic"))
-Base.sin(::IComplex) = _no_transcendental("sin")
-Base.cos(::IComplex) = _no_transcendental("cos")
-Base.sqrt(::IComplex) = _no_transcendental("sqrt")
-Base.sin(::Interval) = _no_transcendental("sin")
-Base.cos(::Interval) = _no_transcendental("cos")
-Base.sqrt(::Interval) = _no_transcendental("sqrt")
+# ---------------------------------------------------------------------------
+# sqrt, sin and cos
+# ---------------------------------------------------------------------------
+
+# `Float64(π)` rounds down, so `π` lies between it and its successor.
+const _PI = Interval(Float64(π), nextfloat(Float64(π)))
+const _HALF_PI = _PI / 2.0
+const _TWO_PI = 2.0 * _PI
+
+# Base's libm wrappers are accurate to well under one ulp, so two ulps on each
+# side is a rigorous enclosure.
+_enclose(x::Float64) = Interval(prevfloat(x, 2), nextfloat(x, 2))
+
+"""
+    sqrt(a::Interval{Float64})
+
+Enclosure of `√` over the nonnegative part of `a`. A wholly negative `a` is
+empty (`NaN`); a straddling `a` is restricted to its nonnegative part.
+"""
+function Base.sqrt(a::Interval{Float64})::Interval{Float64}
+    (isempty(a) || a.hi < 0.0) && return Interval(NaN)
+    lo = a.lo ≤ 0.0 ? 0.0 : max(_enclose(sqrt(a.lo)).lo, 0.0)
+    return Interval(lo, _enclose(sqrt(a.hi)).hi)
+end
+
+Base.sinh(a::Interval{Float64})::Interval{Float64} =
+    Interval(_enclose(sinh(a.lo)).lo, _enclose(sinh(a.hi)).hi)
+
+function Base.cosh(a::Interval{Float64})::Interval{Float64}
+    a.lo ≥ 0.0 && return Interval(_enclose(cosh(a.lo)).lo, _enclose(cosh(a.hi)).hi)
+    a.hi ≤ 0.0 && return Interval(_enclose(cosh(a.hi)).lo, _enclose(cosh(a.lo)).hi)
+    # `cosh ≥ 1` everywhere, with equality at 0 ∈ a.
+    return Interval(1.0, max(_enclose(cosh(a.lo)).hi, _enclose(cosh(a.hi)).hi))
+end
+
+# True when some `offset + k*period`, `k ∈ ℤ`, can meet `[lo, hi]`. `offset` and
+# `period` are enclosures, so a "maybe" answers true.
+function _meets_lattice(
+        lo::Float64, hi::Float64, offset::Interval{Float64}, period::Interval{Float64},
+    )::Bool
+    k = floor((lo - mid(offset)) / mid(period))
+    for j in (k - 1.0):(k + 2.0)
+        c = offset + j * period
+        c.hi ≥ lo && c.lo ≤ hi && return true
+    end
+    return false
+end
+
+function Base.sin(a::Interval{Float64})::Interval{Float64}
+    isempty(a) && return a
+    (!isfinite(a.lo) || !isfinite(a.hi)) && return Interval(-1.0, 1.0)
+    diam(a) ≥ _TWO_PI.lo && return Interval(-1.0, 1.0)
+    ends = hull(_enclose(sin(a.lo)), _enclose(sin(a.hi)))
+    lo = _meets_lattice(a.lo, a.hi, -_HALF_PI, _TWO_PI) ? -1.0 : max(ends.lo, -1.0)
+    hi = _meets_lattice(a.lo, a.hi, _HALF_PI, _TWO_PI) ? 1.0 : min(ends.hi, 1.0)
+    return Interval(lo, hi)
+end
+
+function Base.cos(a::Interval{Float64})::Interval{Float64}
+    isempty(a) && return a
+    (!isfinite(a.lo) || !isfinite(a.hi)) && return Interval(-1.0, 1.0)
+    diam(a) ≥ _TWO_PI.lo && return Interval(-1.0, 1.0)
+    ends = hull(_enclose(cos(a.lo)), _enclose(cos(a.hi)))
+    lo = _meets_lattice(a.lo, a.hi, _PI, _TWO_PI) ? -1.0 : max(ends.lo, -1.0)
+    hi = _meets_lattice(a.lo, a.hi, zero(Interval{Float64}), _TWO_PI) ?
+        1.0 : min(ends.hi, 1.0)
+    return Interval(lo, hi)
+end
+
+"""
+    sqrt(z::IComplex{Float64})
+
+Enclosure of the principal square root `√z = u + i·sign(Im z)·v`, where
+`u = √((|z| + Re z)/2)` and `v = √((|z| - Re z)/2)`. A box meeting the branch cut
+along the negative real axis is returned empty.
+
+Only the well-conditioned one of the two differences is evaluated; the other root
+comes from `2uv = Im z`.
+"""
+function Base.sqrt(z::IComplex{Float64})::IComplex{Float64}
+    x, y = real(z), imag(z)
+    (x.lo < 0.0 && 0.0 ∈ y) && return IComplex(Interval(NaN), Interval(NaN))
+    r = sqrt(sqr(x) + sqr(y))
+    if x.lo ≥ 0.0
+        u = sqrt((r + x) / 2.0)
+        u.lo > 0.0 && return IComplex(u, y / (2.0 * u))
+    else
+        v = sqrt((r - x) / 2.0)
+        if v.lo > 0.0
+            y.lo ≥ 0.0 && return IComplex(y / (2.0 * v), v)
+            return IComplex((-y) / (2.0 * v), -v)
+        end
+    end
+    # Neither difference stays positive: no well-conditioned root to divide by.
+    u = sqrt((r + x) / 2.0)
+    v = sqrt((r - x) / 2.0)
+    y.lo ≥ 0.0 && return IComplex(u, v)
+    y.hi ≤ 0.0 && return IComplex(u, -v)
+    return IComplex(u, Interval(-v.hi, v.hi))
+end
+
+Base.sin(z::IComplex{Float64})::IComplex{Float64} =
+    IComplex(sin(real(z)) * cosh(imag(z)), cos(real(z)) * sinh(imag(z)))
+
+Base.cos(z::IComplex{Float64})::IComplex{Float64} =
+    IComplex(cos(real(z)) * cosh(imag(z)), -(sin(real(z)) * sinh(imag(z))))
 
 mid(z::IComplex) = Complex(mid(real(z)), mid(imag(z)))
 diam(z::IComplex) = max(diam(real(z)), diam(imag(z)))

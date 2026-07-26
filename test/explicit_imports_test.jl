@@ -14,6 +14,8 @@ using HomotopyContinuationNext
         HomotopyContinuationNext.PathResultCode,
         HomotopyContinuationNext.CompileMode,  # @enumx module
         HomotopyContinuationNext.SExpr,  # Moshi @data module
+        HomotopyContinuationNext.SUnaryKind,  # @enumx module
+        HomotopyContinuationNext.SymExpr,  # Moshi @data module
         HomotopyContinuationNext.ExecInstruction,  # Moshi @data module
         HomotopyContinuationNext.EndgameCode,  # @enumx module
         HomotopyContinuationNext.MonodromyCode,  # @enumx module
@@ -39,10 +41,11 @@ using HomotopyContinuationNext
     # - Base.RefValue: used for mutable cache scalars in immutable structs
     # - Base.decompose: required for DoubleF64 <: AbstractFloat
     # - LinearAlgebra.qrfactUnblocked!: needed for custom QR (LAPACK qr! returns QRCompactWY)
+    # - Base.literal_pow: extended so `expr^2` builds an EPow instead of a product
     @test check_all_qualified_accesses_are_public(
         HomotopyContinuationNext;
         ignore = (
-            :RefValue, :decompose, :qrfactUnblocked!,
+            :RefValue, :decompose, :qrfactUnblocked!, :literal_pow, :TwicePrecision,
             # model_kit internal uses of non-public Base APIs:
             Symbol("@_inline_meta"), Symbol("@_propagate_inbounds_meta"),
             :FastMath, :div_fast, :inv_fast, :power_by_squaring,

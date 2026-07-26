@@ -30,7 +30,15 @@ end
 Base.@propagate_inbounds acb_op_neg!(t, x, m) = Arblib.neg!(t, x)
 Base.@propagate_inbounds acb_op_sin!(t, x, m) = Arblib.sin!(t, x)
 Base.@propagate_inbounds acb_op_sqr!(t, x, m) = Arblib.sqr!(t, x)
-Base.@propagate_inbounds acb_op_sqrt!(t, x, m) = Arblib.sqrt!(t, x)
+# A ball meeting the branch cut breaks the Krawczyk hypotheses, so reject it as
+# `sqrt(::IComplex{Float64})` does.
+Base.@propagate_inbounds function acb_op_sqrt!(t, x::Arblib.AcbOrRef, m)
+    if Arblib.contains_negative(Arblib.realref(x)) &&
+            Arblib.contains_zero(Arblib.imagref(x))
+        return Arblib.indeterminate!(t)
+    end
+    return Arblib.sqrt!(t, x)
+end
 Base.@propagate_inbounds acb_op_identity!(t, x, m) = Arblib.set!(t, x)
 
 # arity 2

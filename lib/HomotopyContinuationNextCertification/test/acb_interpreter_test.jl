@@ -1,5 +1,5 @@
 using Test
-using HomotopyContinuationNext: @polyvar, System
+using HomotopyContinuationNext: @polyvar, @var, System
 using HomotopyContinuationNextCertification: AcbInterpreter, acb_execute!, setprecision!
 import DynamicPolynomials as DP
 import Arblib
@@ -32,6 +32,32 @@ function acb_test_systems()
 end
 
 mp_at(f, vars, x, params, p) = isempty(params) ? f(vars => x) : f(vars => x, params => p)
+
+# Tapes carrying inv/invsqr from division and the unary sqrt/sin/cos, with value
+# and Jacobian written out by hand.
+function nonpolynomial_acb_systems()
+    @var x y a b
+    return [
+        (
+            "rational",
+            [a / x^2 + b * y, x * y - a], [x, y], [a, b],
+            (z, p) -> [p[1] / z[1]^2 + p[2] * z[2], z[1] * z[2] - p[1]],
+            (z, p) -> [
+                -2 * p[1] / z[1]^3 p[2]
+                z[2] z[1]
+            ],
+        ),
+        (
+            "transcendental",
+            [sqrt(a) * x + sin(y), cos(x * y) - b], [x, y], [a, b],
+            (z, p) -> [sqrt(p[1]) * z[1] + sin(z[2]), cos(z[1] * z[2]) - p[2]],
+            (z, p) -> [
+                sqrt(p[1]) cos(z[2])
+                -z[2] * sin(z[1] * z[2]) -z[1] * sin(z[1] * z[2])
+            ],
+        ),
+    ]
+end
 
 @testset "AcbInterpreter" begin
     @testset "$name" for (name, polys, vars, params) in acb_test_systems()
@@ -84,6 +110,37 @@ mp_at(f, vars, x, params, p) = isempty(params) ? f(vars => x) : f(vars => x, par
                 @test radius(u_high, i) <= radius(u_low, i)
                 @test Arblib.contains(u_low[i], u_high[i])
             end
+        end
+    end
+
+    @testset "non-polynomial tape: $name" for (name, exprs, vars, params, ref, jac_ref) in
+        nonpolynomial_acb_systems()
+
+        F = System(exprs; variables = vars, parameters = params)
+        m, n, r = length(exprs), length(vars), length(params)
+        prec = 256
+
+        eval_interp = AcbInterpreter(F._interp_f64.sequence; prec = prec)
+        jac_interp = AcbInterpreter(F._interp_jac.sequence; prec = prec)
+
+        # Off the branch cut of `sqrt` and away from the poles.
+        xv = ComplexF64[0.8 + 0.2im, 1.3 - 0.4im]
+        pv = ComplexF64[1.7 - 0.5im, -0.6 + 1.3im]
+
+        u = Arblib.AcbRefMatrix(m, 1; prec = prec)
+        acb_execute!(u, eval_interp, xv, pv)
+        @test ComplexF64.(u) ≈ reshape(ref(xv, pv), m, 1) rtol = 1.0e-12
+
+        U = Arblib.AcbRefMatrix(m, n; prec = prec)
+        acb_execute!(nothing, U, jac_interp, xv, pv)
+        @test ComplexF64.(U) ≈ jac_ref(xv, pv) rtol = 1.0e-12
+
+        # The ball at 32 bits must still contain the 256-bit value.
+        low = AcbInterpreter(F._interp_f64.sequence; prec = 32)
+        u_low = Arblib.AcbRefMatrix(m, 1; prec = 32)
+        acb_execute!(u_low, low, xv, pv)
+        for i in 1:m
+            @test Arblib.contains(u_low[i], u[i])
         end
     end
 end

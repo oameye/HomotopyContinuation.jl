@@ -97,7 +97,7 @@ end
         @test real(ComplexF64(u[1])) ≈ 8.0
     end
 
-    @testset "retained non-polynomial unary instructions" begin
+    @testset "non-polynomial unary instructions" begin
         z = 1.3 + 0.4im
         series = TruncatedTaylorSeries((z, 0.3 - 0.2im, -0.15 + 0.25im))
         data = FSMat{ComplexF64}(zeros(ComplexF64, 3, 1))
@@ -130,12 +130,79 @@ end
             end
         end
 
-        # ComplexDF64 already supports the algebraic square-root path. The
-        # expression-input TODO tracks DF64 sin/cos support separately.
-        I_df64 = Interpreter(Vector{ComplexDF64}, make_unary_sequence(OpType.OP_SQRT))
-        u_df64 = zeros(ComplexDF64, 1)
-        execute!(u_df64, I_df64, ComplexDF64[ComplexDF64(z)], ComplexDF64[])
-        @test ComplexF64(u_df64[1]) ≈ sqrt(z) atol = 1.0e-14
+        # Every unary operation must also run on a ComplexDF64 tape.
+        for (op, scalar_fn) in
+            ((OpType.OP_SQRT, sqrt), (OpType.OP_SIN, sin), (OpType.OP_COS, cos))
+            I_df64 = Interpreter(Vector{ComplexDF64}, make_unary_sequence(op))
+            u_df64 = zeros(ComplexDF64, 1)
+            execute!(u_df64, I_df64, ComplexDF64[ComplexDF64(z)], ComplexDF64[])
+            @test ComplexF64(u_df64[1]) ≈ scalar_fn(z) atol = 1.0e-14
+        end
+    end
+
+    @testset "division and negative power instructions" begin
+        a = 1.7 - 0.6im
+        b = -0.9 + 1.1im
+
+        # a / b, 1 / a and 1 / a^2 via the SExpr paths that emit them.
+        div_expr = SExpr.SMul(SExprT[SExpr.SVar(1), SExpr.SPow(SExpr.SVar(2), -1)])
+        inv_expr = SExpr.SPow(SExpr.SVar(1), -1)
+        invsqr_expr = SExpr.SPow(SExpr.SVar(1), -2)
+        pow_expr = SExpr.SPow(SExpr.SVar(1), -5)
+        exprs = SExprT[div_expr, inv_expr, invsqr_expr, pow_expr]
+        replacements, reduced = cse(exprs)
+        seq = compile_to_instructions(replacements, reduced, 2, 0, 4)
+
+        I = Interpreter(Vector{ComplexF64}, seq)
+        u = zeros(ComplexF64, 4)
+        execute!(u, I, ComplexF64[a, b], ComplexF64[])
+        @test u[1] ≈ a / b
+        @test u[2] ≈ inv(a)
+        @test u[3] ≈ inv(a^2)
+        @test u[4] ≈ a^-5
+
+        # CSE rewrites `base^-n` as `inv(base^n)`, so no OP_INVSQR here.
+        ops = Set(Next.instruction_op(instr) for instr in seq.instructions)
+        @test OpType.OP_DIV in ops
+        @test OpType.OP_INV in ops
+        @test OpType.OP_SQR in ops
+        @test OpType.OP_POW_INT in ops
+
+        # OP_INVSQR is what the tape compiler emits for `base^-2` directly.
+        seq_invsqr = compile_to_instructions(
+            Pair{SExprT, SExprT}[], SExprT[invsqr_expr], 1, 0, 1,
+        )
+        @test any(
+            instr -> Next.instruction_op(instr) == OpType.OP_INVSQR,
+            seq_invsqr.instructions,
+        )
+        u1 = zeros(ComplexF64, 1)
+        execute!(u1, Interpreter(Vector{ComplexF64}, seq_invsqr), ComplexF64[a], ComplexF64[])
+        @test u1[1] ≈ inv(a^2)
+
+        # Taylor recurrences for the same tape.
+        TTS3 = TruncatedTaylorSeries{3, ComplexF64}
+        I_taylor = Interpreter(Vector{TTS3}, seq)
+        sa = TruncatedTaylorSeries((a, 0.25 + 0.1im, -0.05 + 0.2im))
+        sb = TruncatedTaylorSeries((b, -0.3 + 0.15im, 0.1 - 0.05im))
+        mat = FSMat{ComplexF64}(zeros(ComplexF64, 3, 2))
+        for k in 0:2
+            mat[k + 1, 1] = sa[k]
+            mat[k + 1, 2] = sb[k]
+        end
+        tx = TaylorVector{3, ComplexF64}(mat)
+        expected = (
+            Next.taylor_op_div(sa, sb),
+            Next.taylor_op_inv(sa),
+            Next.taylor_op_invsqr(sa),
+            Next.taylor_op_pow_int(sa, -5),
+        )
+        for K in 0:2
+            execute_taylor!(u, Val(K), I_taylor, tx, ComplexF64[])
+            for i in 1:4
+                @test u[i] ≈ expected[i][K] atol = 1.0e-10
+            end
+        end
     end
 
     @testset "execute_taylor! higher order" begin

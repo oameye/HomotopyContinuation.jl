@@ -17,6 +17,28 @@ Corresponds to SymEngine's FunctionSymbol name ("add", "mul", "pow").
     SFUNC_POW
 end
 
+"""
+Unary function applied by an `SUnary` node. Each kind lowers to one arity-1
+`OpType`.
+"""
+@enumx SUnaryKind::Int8 begin
+    UNARY_SQRT
+    UNARY_SIN
+    UNARY_COS
+end
+
+@inline function unary_op_type(kind::SUnaryKind.T)::OpType.T
+    kind == SUnaryKind.UNARY_SQRT && return OpType.OP_SQRT
+    kind == SUnaryKind.UNARY_SIN && return OpType.OP_SIN
+    return OpType.OP_COS
+end
+
+@inline function apply_unary(kind::SUnaryKind.T, val::ComplexF64)::ComplexF64
+    kind == SUnaryKind.UNARY_SQRT && return sqrt(val)
+    kind == SUnaryKind.UNARY_SIN && return sin(val)
+    return cos(val)
+end
+
 ## ── SExpr ADT ─────────────────────────────────────────────────────────────
 
 @data SExpr begin
@@ -61,6 +83,12 @@ end
         arg::SExpr
     end
 
+    """Unary function application: sqrt, sin or cos."""
+    struct SUnary
+        kind::SUnaryKind.T
+        arg::SExpr
+    end
+
     """Unevaluated function symbol — placeholder created by opt_cse."""
     struct SFuncSym
         kind::SFuncKind.T
@@ -83,6 +111,7 @@ const SAddStorage = variant_storage_type(SExpr.SAdd)
 const SMulStorage = variant_storage_type(SExpr.SMul)
 const SPowStorage = variant_storage_type(SExpr.SPow)
 const SNegStorage = variant_storage_type(SExpr.SNeg)
+const SUnaryStorage = variant_storage_type(SExpr.SUnary)
 const SFuncSymStorage = variant_storage_type(SExpr.SFuncSym)
 const _EMPTY_SEXPR_VEC = SExprT[]
 
@@ -125,6 +154,8 @@ function Base.hash(e::SExprT, h::UInt)::UInt
         return hash(hash(storage.exp, hash(storage.base, hash(:SPow, zero(UInt)))), h)
     elseif storage isa SNegStorage
         return hash(storage.arg, hash(:SNeg, h))
+    elseif storage isa SUnaryStorage
+        return hash(storage.arg, hash(storage.kind, hash(:SUnary, h)))
     else # SFuncSymStorage
         return hash(_fold_hash((:SFuncSym, storage.kind), storage.args), h)
     end
@@ -143,6 +174,7 @@ end
 @inline _get_args_storage(storage::SMulStorage) = storage.args
 @inline _get_args_storage(storage::SPowStorage) = SExprT[storage.base]
 @inline _get_args_storage(storage::SNegStorage) = SExprT[storage.arg]
+@inline _get_args_storage(storage::SUnaryStorage) = SExprT[storage.arg]
 @inline _get_args_storage(storage::SFuncSymStorage) = storage.args
 @inline _get_args(e::SExprT)::Vector{SExprT} = _get_args_storage(sexpr_storage(e))
 
@@ -154,6 +186,8 @@ end
     SExpr.SPow(args[1], storage.exp)
 @inline _rebuild_expr_storage(storage::SNegStorage, args::Vector{SExprT})::SExprT =
     SExpr.SNeg(args[1])
+@inline _rebuild_expr_storage(storage::SUnaryStorage, args::Vector{SExprT})::SExprT =
+    SExpr.SUnary(storage.kind, args[1])
 @inline function _rebuild_expr_storage(
         storage::SFuncSymStorage,
         args::Vector{SExprT},
@@ -178,6 +212,7 @@ end
 @inline _complex_lt(a::ComplexF64, b::ComplexF64)::Bool =
     real(a) < real(b) || (real(a) == real(b) && imag(a) < imag(b))
 @inline _sexpr_kind_lt(a::SFuncKind.T, b::SFuncKind.T)::Bool = Int(a) < Int(b)
+@inline _sexpr_kind_lt(a::SUnaryKind.T, b::SUnaryKind.T)::Bool = Int(a) < Int(b)
 
 @inline _sexpr_tag_order(::SConstStorage)::UInt8 = 0x01
 @inline _sexpr_tag_order(::SVarStorage)::UInt8 = 0x02
@@ -187,7 +222,8 @@ end
 @inline _sexpr_tag_order(::SMulStorage)::UInt8 = 0x06
 @inline _sexpr_tag_order(::SPowStorage)::UInt8 = 0x07
 @inline _sexpr_tag_order(::SNegStorage)::UInt8 = 0x08
-@inline _sexpr_tag_order(::SFuncSymStorage)::UInt8 = 0x09
+@inline _sexpr_tag_order(::SUnaryStorage)::UInt8 = 0x09
+@inline _sexpr_tag_order(::SFuncSymStorage)::UInt8 = 0x0a
 
 function _sexpr_args_lt(a_args::Vector{SExprT}, b_args::Vector{SExprT})::Bool
     n = min(length(a_args), length(b_args))
@@ -233,6 +269,12 @@ function _sexpr_struct_lt(a::SExprT, b::SExprT)::Bool
         return _sexpr_struct_lt(a_storage.base, b_storage_typed.base)
     elseif a_storage isa SNegStorage
         b_storage_typed = b_storage::SNegStorage
+        return _sexpr_struct_lt(a_storage.arg, b_storage_typed.arg)
+    elseif a_storage isa SUnaryStorage
+        b_storage_typed = b_storage::SUnaryStorage
+        if a_storage.kind != b_storage_typed.kind
+            return _sexpr_kind_lt(a_storage.kind, b_storage_typed.kind)
+        end
         return _sexpr_struct_lt(a_storage.arg, b_storage_typed.arg)
     elseif a_storage isa SFuncSymStorage
         b_storage_typed = b_storage::SFuncSymStorage
@@ -333,6 +375,12 @@ function _canonical_mul(args::Vector{SExprT})::SExprT
     sort!(flat_args; lt = _sexpr_lt)
     coeff[] != one(ComplexF64) && pushfirst!(flat_args, SExpr.SConst(coeff[]))
     return _wrap_args(flat_args, SExpr.SConst(one(ComplexF64)), SExpr.SMul)
+end
+
+function _canonical_unary(kind::SUnaryKind.T, arg::SExprT)::SExprT
+    storage = sexpr_storage(arg)
+    storage isa SConstStorage && return SExpr.SConst(apply_unary(kind, storage.val))
+    return SExpr.SUnary(kind, arg)
 end
 
 ## ── Polynomial → SExpr conversion ──────────────────────────────────────────

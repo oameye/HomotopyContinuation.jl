@@ -33,9 +33,17 @@ function _fix_parameters(
     params = collect(parameters(F))
     vars = collect(variables(F))
     pc = Vector{ComplexF64}(p)
-    fixed = [MP.polynomial(MP.subs(f, params => pc)) for f in polynomials(F)]
-    return System(fixed; variables = vars, compile = M)
+    return System(_substitute(polynomials(F), params, pc); variables = vars, compile = M)
 end
+
+# Substitution runs through whichever front-end built the system.
+_substitute(
+    polys::FSVec{<:MP.AbstractPolynomialLike}, params::Vector, pc::Vector{ComplexF64},
+) = [MP.polynomial(MP.subs(f, params => pc)) for f in polys]
+
+_substitute(
+    polys::FSVec{Expression}, params::Vector{Expression}, pc::Vector{ComplexF64},
+)::Vector{Expression} = [subs(f, params => pc) for f in polys]
 
 # The full ambient space as a codim-0 subspace (`A` is `0 × n`): witness sets
 # of zero-dimensional varieties slice with the whole space, so the sliced
@@ -155,6 +163,9 @@ function _init_sliced_total_degree(
         G::System, L::LinearSubspace, chart::Vector{ComplexF64},
         alg::TotalDegree, exec::AbstractExecutor, show_progress::Bool,
     )
+    # The square branch below reads `G.degrees` directly, so guard first: a
+    # degree of -1 would size the start-solution array negatively.
+    _check_polynomial(G, "`TotalDegree`")
     m = size(G)[1]
     nrows = m + codim(L) + (isempty(chart) ? 0 : 1)
     nrows == nvariables(G) || return CommonSolve.init(

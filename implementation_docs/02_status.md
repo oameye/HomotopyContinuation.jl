@@ -1,12 +1,12 @@
 # Status
 
-Last updated: 2026-07-24.
+Last updated: 2026-07-26.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
 - `make compare` — v3/v2 ratios
 - `julia --project=benchmark benchmark/compare/tracking.jl` — end-to-end solve comparison
-- `make test` runs the core suite (41 files, parallel via ParallelTestRunner) then the certification subpackage; `make test-cert` runs only the latter
+- `make test` runs the core suite (53 files, parallel via ParallelTestRunner) then the certification subpackage; `make test-cert` runs only the latter
 
 ## Summary
 
@@ -20,7 +20,7 @@ linear subspaces, trace test), certification (Krawczyk with Arb fallback, in the
 `trace_test`, `membership`, `regeneration`, `decompose`, `nid`, including projective,
 zero-dimensional, and parametric cases).
 
-Remaining gaps: distributed executor, non-polynomial expression input, system composition.
+Remaining gaps: distributed executor, system composition, rational-input witness sets.
 
 ## Feature Checklist
 
@@ -58,6 +58,54 @@ Remaining gaps: distributed executor, non-polynomial expression input, system co
 - [x] Automatic coefficient normalization (scales polynomials with O(10^8+) coefficients to O(1))
 - [x] AllocCheck zero-allocation enforcement on all hot paths
 - [x] Integration tests from v2 with exact result parity
+- [x] **Non-polynomial (rational/transcendental) expression input.** `Expression` is a
+  `Number` subtype built on a Moshi `@data` ADT (`ENum`/`EVar`/`EAdd`/`EMul`/`EPow`/`EFn`),
+  declared with `@var`/`@unique_var`. It canonicalizes on construction (flattening, constant
+  folding, like-term and power collection), so `x - x`, `x*inv(x)` and `(a*b)^k` reduce
+  structurally. Covers division, negative integer powers, `sqrt`, `sin` and `cos`.
+  - `SExpr` gained an `SUnary(kind, arg)` variant; the tape compiler lowers it to
+    `OP_SQRT`/`OP_SIN`/`OP_COS`, and division/negative powers reuse the `SPow`-with-negative-
+    exponent path that already emitted `OP_DIV`/`OP_INV`/`OP_INVSQR`/`OP_POW_INT`.
+  - Jacobians come from symbolic differentiation on `Expression` (product, power, quotient,
+    chain rules for `sqrt`/`sin`/`cos`), not `MP.differentiate`.
+  - `System(exprs; variables, parameters)` accepts `Expression`s, and `MP.RationalPoly` input
+    (`u₁/x² + u₂`, `y[1:2] ./ y[3]`) converts to `Expression` automatically. All three compile
+    modes work; `degrees` reports `-1` for a non-polynomial equation and `TotalDegree`/
+    `Polyhedral` reject those systems with a targeted error, on the sliced routes as well as
+    the plain ones.
+  - The solve routes that rewrite equations rather than just evaluate them dispatch on the
+    front-end: `_fix_parameters` (used by sliced solves and witness sets) substitutes through
+    `subs` instead of `MP.subs`, and `support_coefficients` recovers the polyhedral support by
+    expanding the expression tree into `exponent vector => coefficient`, since the front-end
+    keeps products and powers unexpanded. Both agree term for term with the same system built
+    through DynamicPolynomials.
+  - `DoubleF64` gained `exp`, `sin`, `cos`, `sincos`, `sinh`, `cosh` (~32 digits); the
+    `ComplexDF64` versions follow from the generic `Base` complex methods. `sin`/`cos` switch
+    to angle addition over the two limbs past `|a| = 2⁵³`, where double-double reduction modulo
+    `2π` drops below Float64 accuracy, and `sinh`/`cosh` take a separate branch past `|a| = 40`,
+    where `e ± 1/e` would be NaN.
+  - Rectangular `Interval`/`IComplex` arithmetic gained `sqrt`, `sin`, `cos` (plus `sinh`
+    and `cosh` as building blocks), so every tape stays on the Float64 Krawczyk path and
+    escalates to Arb only when the test genuinely fails. v2 has none of these and routes
+    such systems to Arb unconditionally. The complex `sqrt` takes whichever of
+    `|z| ± Re z` does not cancel and recovers the other root from `2uv = Im z`; the naive
+    form inflates the enclosure of a box around a real solution to the square root of its
+    width. A box meeting the branch cut returns empty, which falls through to Arb.
+  - Front-end lowering (`_lower_input`) happens before the `@nospecialize` builder chain.
+    Dispatching on the input representation inside it made inference walk both front-ends
+    on every build, so a polynomial system paid ~0.6 s of TTFX to infer the expression
+    pipeline it never runs.
+  - `LinearAlgebra.det` on an `AbstractMatrix{Expression}` expands by cofactors: the generic
+    `det` factors, which needs `abs` to pick a pivot and division to eliminate.
+  - `conj` recurses and conjugates numeric literals, leaving variables alone, so `adjoint` on a
+    matrix of expressions agrees with DynamicPolynomials. v2 conjugated neither.
+  - Closes the two v2 monodromy testsets ("Monodromy rational functions", triangulation),
+    v2's "certify uses approximate inverse of jacobian", the `small_rational`/`sqrt_parameters`
+    entries of v2's `model_kit/e2e_test.jl` sweep (system, homotopy and Acb), and the
+    Subs / Evaluation / Linear Algebra / Modeling / rational-functions testsets of v2's
+    `model_kit/symbolic_test.jl`.
+  - Still open: `witness_set`/`regeneration`/`nid` on rational input (see Not Done), which
+    is what v2's `nid_test.jl` "rational systems" testset needs.
 - [x] Threading via OhMyThreads.jl — `Serial`/`Threaded` executor types, builder/worker-state
   pattern for thread-safe evaluator cloning, `@tasks`/`@local` work distribution
 - [x] Overdetermined systems: `RandomizedSystem` square-up (identity block plus random fold of
@@ -178,30 +226,13 @@ Remaining gaps: distributed executor, non-polynomial expression input, system co
 ### Not Done
 
 - [ ] **Distributed executor**: extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
-- [ ] Rational-input witness sets, blocked by the polynomial-only input layer (below)
-- [ ] **Non-polynomial (rational) expression input.** The expression frontend must cover both
-  v2's rational straight-line programs (`u₁/x² + u₂`, `y[1:2] ./ y[3]`) and retained unary
-  operations such as `sqrt(γ) * x₁ + x₂^2`, `sin(γ) * x₁`, and `cos(x₁) - x₂`.
-  `OP_SQRT`, `OP_SIN`, and `OP_COS` remain in `ExecInstruction` even though the current
-  DynamicPolynomials frontends do not emit them. This work blocks two v2 monodromy testsets
-  ("Monodromy rational functions", triangulation) and v2's "certify uses approximate inverse
-  of jacobian" (its `approx_inv!` path is already covered by the Arb-fallback testset).
-
-  Implementation and validation checklist:
-  - add expression-IR/frontend nodes for division, integer powers, `sqrt`, `sin`, and `cos`,
-    with variable/parameter discovery and constant folding;
-  - lower them to the existing `OP_DIV`/`OP_INV`/`OP_POW_INT` and
-    `OP_SQRT`/`OP_SIN`/`OP_COS` instructions in every compile mode;
-  - implement analytic Jacobian rules and verify Taylor orders 1--3 for scalar and
-    Taylor-valued parameters;
-  - complete the extended-precision surface: `sqrt` already works for `ComplexDF64`;
-    `sin` and `cos` still need `DoubleF64`/`ComplexDF64` implementations;
-  - add RGF codegen and interval/Acb certification coverage for every new expression node;
-  - add end-to-end regression systems, including `sqrt(γ) * x₁ + x₂^2`, and validate
-    interpreted/compiled parity, Jacobians, DF64 residuals, Taylor coefficients against a
-    Cauchy-integral oracle, parameter tracking, monodromy, and certification;
-  - keep low-level interpreter tests for all retained unary variants so an operation cannot
-    disappear from an execution backend before the frontend begins emitting it.
+- [ ] Rational-input witness sets: `regeneration` rebuilds its equations through
+  `MP.polynomial`/`MP.subs`/`MP.maxdegree`, so it rejects any system built from `Expression`s
+  with a targeted error. It is the last route that does: `witness_set` needs only the evaluator,
+  and parameter fixing and polyhedral support extraction now dispatch on the front-end.
+  v2 splits each equation with `get_num_den`, takes the witness set of the numerator and
+  drops the points that are poles rather than zeros; v3 has no `get_num_den`. Blocks v2's
+  `nid_test.jl` "rational systems" testset
 - [ ] **System composition** (v2 `CompositionSystem`, `L₂ ∘ f ∘ L₁`). Blocks the v2 symmetroids
   monodromy test (305 solutions; its custom-`distance` kwarg is already supported)
 - [ ] Group-action symmetry in `Result` clustering: the `GroupActions` API and group-action-aware
@@ -213,8 +244,8 @@ Remaining gaps: distributed executor, non-polynomial expression input, system co
 
 ## Test Suite
 
-51 test files run in parallel via ParallelTestRunner (`make test`, default 10 workers),
-about 5070 passing assertions plus one `@test_skip` (`nid_test.jl`). The total is not
+53 test files run in parallel via ParallelTestRunner (`make test`, default 10 workers),
+about 5635 passing assertions plus one `@test_skip` (`nid_test.jl`). The total is not
 exactly reproducible: 25 assertion loops iterate over *discovered* solutions
 (`for s in solutions(res)`), so a run that finds a different number of endpoints
 reports a different number of assertions. Observed 5039 and 5086 on one commit:
@@ -225,7 +256,8 @@ reports a different number of assertions. Observed 5039 and 5086 on one commit:
 | Type safety | `concrete_structs_test.jl` | All struct fields concretely typed |
 | Allocation | `alloc_check_test.jl` | Zero-alloc norms, LA, predictor, Newton, tracker, endgame, and the three system wrappers whose appended rows run on the predictor's hot path (`RandomizedSystem`, `AffineChartSystem`, `SlicedSystem`) |
 | Primitives | `double_f64_test.jl`, `norms_test.jl`, `linear_algebra_test.jl`, `operations_test.jl` | |
-| Model kit | `interpreter_test.jl`, `codegen_test.jl`, `instruction_count_test.jl`, `taylor_test.jl`, `polynomial_input_test.jl` | Tape execution, RGF codegen, instruction-count regression; every `taylor_op_*` against a Cauchy-integral oracle |
+| Model kit | `interpreter_test.jl`, `codegen_test.jl`, `instruction_count_test.jl`, `taylor_test.jl`, `polynomial_input_test.jl`, `expression_test.jl` | Tape execution, RGF codegen, instruction-count regression; every `taylor_op_*` against a Cauchy-integral oracle; `expression_test.jl` covers the `Expression` ADT, `@var`, canonicalization, `differentiate`, `subs` (pairs and dicts), folding to a number, the cofactor `det`, conjugation, degrees, MP conversion, and three whole models built out of expression algebra (bottleneck, Steiner, reach of a plane curve) |
+| Non-polynomial input | `nonpolynomial_test.jl` (+ `test_systems.jl`) | Sweep of 3 systems (`small_rational`, `sqrt_parameters`, `trig`) x 3 compile modes against a plain-Julia reference: eval, Jacobian vs central differences, DF64, Taylor 1--3 with Taylor-valued parameters against a Cauchy-integral oracle. Each system also runs its tape over `Expression` values, which has to rebuild the input, and goes through a `StraightLineHomotopy` sweep (eval, Jacobian, `Val(1)` t-derivative, Taylor 2--3). Plus parameter tracking through `sqrt`, both v2 rational monodromy testsets in two compile modes, `verify_solution_completeness`, the `TotalDegree`/`Polyhedral`/`regeneration` rejection paths (plain and sliced), and the two routes that rewrite equations instead of evaluating them: polyhedral support extraction (dense, sparse where BKK beats Bezout, and squared-up overdetermined) and parameter fixing under a slice, both checked against the same system through DynamicPolynomials |
 | Evaluation sweep | `system_sweep_test.jl` (+ `test_systems.jl`) | 9 real systems (cyclic5/7, bacillus, cyclo, moments3, six_revolute, steiner, four_bar, tritangents) × 3 compile modes: eval, jacobian, DF64, Taylor 1–3 with constant and Taylor-valued parameters, plus the straight-line homotopy, all against exact symbolic ground truth |
 | Core | `core_test.jl`, `linear_subspace_test.jl`, `parameter_homotopy_test.jl`, `subspace_homotopy_test.jl`, `affine_chart_test.jl` | `affine_chart_test.jl` checks the chart row's Taylor coefficient `c·x_K` for a nonzero and a zeroed top row |
 | Tracking | `tracking_test.jl`, `endgame_test.jl`, `newton_test.jl`, `tracker_warmstart_test.jl`, `valuation_test.jl`, `tracker_regression_test.jl` | `valuation_test.jl` checks asymptotic valuations (finite, diverging, fractional); `tracker_regression_test.jl` covers the four-bar and Steiner near-singular paths |
@@ -236,9 +268,13 @@ reports a different number of assertions. Observed 5039 and 5086 on one commit:
 | v2 parity | `compare_v2_primitives_test.jl`, `compare_v2_solve_counts_test.jl`, `compare_v2_solve_match_test.jl`, `v2_parity_test.jl`, `monodromy_v2_parity_test.jl` | Primitives, counts, values |
 | Misc | `utils_test.jl` | |
 
-The certification subpackage adds 486 assertions (`make test-cert`): `interval_arithmetic_test.jl`,
-`acb_interpreter_test.jl` (the Arb tape interpreter against Float64 ground truth, ball containment
-and precision refinement), `certification_test.jl`, `export_surface_test.jl`, `quality_test.jl`.
+The certification subpackage adds 541 assertions (`make test-cert`):
+`interval_arithmetic_test.jl` (including sampled soundness checks on random boxes for the
+`sqrt`/`sin`/`cos` enclosures), `acb_interpreter_test.jl` (the Arb tape interpreter against
+Float64 ground truth, ball containment and precision refinement, on polynomial tapes and on
+rational/`sqrt`/`sin`/`cos` ones), `certification_test.jl`
+(which certifies a `sqrt` and a `sin`/`cos` system at 53 bits, so a regression that pushed
+those to Arb would show up), `export_surface_test.jl`, `quality_test.jl`.
 
 JET test filters known false positives: MP.variables dispatch (construction-time), Moshi `@match`/`@derive` generated code.
 
@@ -250,11 +286,24 @@ re-run the file alone before believing it.
 
 ### Not covered from v2's suite
 
-Every v2 test file has a v3 counterpart except the ones whose feature is absent (see Not Done):
-`semialgebraic_sets_test.jl` (no SemialgebraicSets integration), `model_kit/symbolic_test.jl` (v3's
-input layer is DynamicPolynomials, not a symbolic `Expression` type), and the composition /
-rational-input / `paths_to_track` / `mixed_volume` / `stop_early_cb` / start-target-`solve`
-testsets, whose APIs v3 does not have.
+Every v2 test file has a v3 counterpart except `semialgebraic_sets_test.jl` (no
+SemialgebraicSets integration), plus the composition / `paths_to_track` / `mixed_volume` /
+`stop_early_cb` / start-target-`solve` testsets, whose APIs v3 does not have.
+
+`model_kit/symbolic_test.jl` is covered by `expression_test.jl` except where v2's ModelKit
+carries machinery v3 puts elsewhere or does not have:
+
+| v2 testset | why not ported |
+|------------|----------------|
+| SymEngine, Convert | `Expression` coefficients are `ComplexF64`; there is no `BigFloat`/`Rational`/`Int128` tower to round-trip and no conversion back to a Julia number type |
+| Expand | expressions are canonicalized on construction, so there is no separate expansion step (and no distributed normal form to expand *to*) |
+| Horner, to_dict, Rand / dense poly, exponents_coefficients | polynomial utilities; v3's polynomial layer is DynamicPolynomials, which provides them |
+| System (show), Homotopy | `System` has no custom `show` and there is no symbolic `Homotopy` type |
+| System variables groups + homogeneous | no multi-homogeneous variable groups |
+| rational functions (`get_num_den` half) | needs numerator/denominator splitting, which only rational witness sets would use (see Not Done) |
+
+The one v2 testset that the expression front-end does not unlock on its own is
+`nid_test.jl` "rational systems"; it needs rational-input witness sets.
 
 ## Performance
 

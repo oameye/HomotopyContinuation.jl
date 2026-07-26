@@ -1,6 +1,8 @@
 # Shared collection of polynomial systems used by the evaluation sweep and the
 # tracker regression cases. Each entry returns `(polys, variables, parameters)`.
-using DynamicPolynomials: @polyvar, subs, differentiate, monomials
+using DynamicPolynomials: @polyvar, subs, monomials
+using DynamicPolynomials: differentiate as mp_differentiate
+using HomotopyContinuationNext: @var
 
 # Cyclic roots: n sparse equations of degree n in n variables.
 function cyclic_system(n::Int)
@@ -181,10 +183,10 @@ function steiner_system()
 
     f = a[1] * x[1]^2 + a[2] * x[1] * x[2] + a[3] * x[2]^2 +
         a[4] * x[1] + a[5] * x[2] + 1
-    ∇f = [differentiate(f, x[1]), differentiate(f, x[2])]
+    ∇f = [mp_differentiate(f, x[1]), mp_differentiate(f, x[2])]
     g = c[1] * x[1]^2 + c[2] * x[1] * x[2] + c[3] * x[2]^2 +
         c[4] * x[1] + c[5] * x[2] + c[6]
-    ∇g = [differentiate(g, x[1]), differentiate(g, x[2])]
+    ∇g = [mp_differentiate(g, x[1]), mp_differentiate(g, x[2])]
 
     polys = mapreduce(vcat, 1:5) do i
         x₀ = y[:, i]
@@ -232,8 +234,8 @@ function tritangents_system()
     length(mons) == 20 || error("expected 20 cubic monomials, got $(length(mons))")
     C = sum(c[i] * mons[i] for i in 1:20)
     Q = x[3] - x[1] * x[2]
-    ∇Q = [differentiate(Q, xi) for xi in x]
-    ∇C = [differentiate(C, xi) for xi in x]
+    ∇Q = [mp_differentiate(Q, xi) for xi in x]
+    ∇C = [mp_differentiate(C, xi) for xi in x]
     det3(c1, c2, c3) = c1[1] * (c2[2] * c3[3] - c2[3] * c3[2]) -
         c1[2] * (c2[1] * c3[3] - c2[3] * c3[1]) +
         c1[3] * (c2[1] * c3[2] - c2[2] * c3[1])
@@ -255,4 +257,53 @@ const TEST_SYSTEM_COLLECTION = [
     ("steiner", steiner_system()...),
     ("four_bar", four_bar_system()...),
     ("tritangents", tritangents_system()...),
+]
+
+## ── Non-polynomial systems ──────────────────────────────────────────────────
+#
+# Each entry carries a plain-Julia `ref` instead of the `MP.differentiate` /
+# `MP.coefficient` ground truth the sweep over `TEST_SYSTEM_COLLECTION` uses.
+
+# One rational equation in 6 variables with 8 parameters: division by variables
+# and by differences of variables.
+function small_rational_system()
+    @var y[1:6] q[1:8]
+    expr = q[1] / y[1] - q[2] / (-y[1] + y[2]) +
+        q[5] * y[4] / (y[1] * y[4] - y[3] * y[2]) +
+        q[8] * y[6] / (y[1] * y[6] - y[2] * y[5])
+    ref = (x, p) -> [
+        p[1] / x[1] - p[2] / (-x[1] + x[2]) +
+            p[5] * x[4] / (x[1] * x[4] - x[3] * x[2]) +
+            p[8] * x[6] / (x[1] * x[6] - x[2] * x[5]),
+    ]
+    return ([expr], collect(y), collect(q), ref)
+end
+
+# Two equations whose parameters enter under a square root.
+function sqrt_parameters_system()
+    @var x y a b
+    exprs = [sqrt(a + b) * x^2 - y, (x * y + a - sqrt(b))^2 - 3]
+    ref = (z, p) -> [
+        sqrt(p[1] + p[2]) * z[1]^2 - z[2],
+        (z[1] * z[2] + p[1] - sqrt(p[2]))^2 - 3,
+    ]
+    return (exprs, [x, y], [a, b], ref)
+end
+
+# A transcendental system mixing `sin` and `cos` of variables and parameters.
+function trig_system()
+    @var x y a
+    exprs = [sin(a) * x + cos(y) - a, cos(x * y) + x^2 - 1]
+    ref = (z, p) -> [
+        sin(p[1]) * z[1] + cos(z[2]) - p[1],
+        cos(z[1] * z[2]) + z[1]^2 - 1,
+    ]
+    return (exprs, [x, y], [a], ref)
+end
+
+# (name, expressions, variables, parameters, reference implementation)
+const NONPOLYNOMIAL_SYSTEM_COLLECTION = [
+    ("small_rational", small_rational_system()...),
+    ("sqrt_parameters", sqrt_parameters_system()...),
+    ("trig", trig_system()...),
 ]
