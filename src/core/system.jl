@@ -158,10 +158,7 @@ function _variable_degrees(
     Base.@nospecialize polys variables
     degs = Vector{Int}(undef, length(polys))
     homogeneous = true
-    # Every monomial of a polynomial reports the same variable list, so the
-    # membership mask is rebuilt once per polynomial rather than once per
-    # exponent. Without it the scan is quadratic in the variable count on every
-    # term: 2.1s for 40 variables over 34k terms, 250ms with the mask.
+
     mask = Bool[]
     mask_variables = nothing
     for (i, poly) in enumerate(polys)
