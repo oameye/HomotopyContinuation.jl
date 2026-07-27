@@ -77,6 +77,11 @@ end
 
 apply_actions(cb::G, actions::F, s) where {G, F} = actions(cb, s)
 
+# `nothing`, a `GroupActions` and 2-arg-protocol callables pass through.
+_as_group_actions(actions) =
+    actions isa Function || actions isa Tuple || actions isa AbstractVector ?
+    GroupActions(actions) : actions
+
 # Implemented group actions
 
 """

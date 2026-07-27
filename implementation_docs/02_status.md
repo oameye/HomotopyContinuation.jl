@@ -49,7 +49,9 @@ Remaining gaps: distributed executor.
   (geometric stepping λ=0.25), at-infinity/at-zero detection, cubic Hermite endpoint prediction,
   jump-to-zero gating for m=1 paths
 - [x] Solution deduplication (union-find clustering, sort-and-window candidate sweep
-  scaling to thousands of paths), multiplicity tracking
+  scaling to thousands of paths), multiplicity tracking, and opt-in group-action
+  symmetry via `recluster(::Result; group_action, atol, rtol)`; `clusters(::Result)` /
+  `cluster_of(::Result, i)` expose the partition (the orbits, after a `recluster`)
 - [x] Binomial system solver (HNF with BigInt/BigFloat overflow fallback and result
   validation, v2 parity), weighted norms, custom LU with Skeel scaling
 - [x] Tape interpreter for eval, jacobian, Taylor 1–3, DF64
@@ -325,9 +327,6 @@ Remaining gaps: distributed executor.
 ### Not Done
 
 - [ ] **Distributed executor**: extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
-- [ ] Group-action symmetry in `Result` clustering: the `GroupActions` API and group-action-aware
-  `UniquePoints` exist and monodromy uses them, but `solve()`'s `Result` dedup still uses plain
-  union-find clustering (see `03_v2_improvement_opportunities.md` item 2)
 - [ ] Compile-mode benchmark, v2 side: v3 `COMPILED_ALL` vs v2 `:all`, plus fresh-session
   first-solve per v3 default candidate (the v3-only matrix is measured; see `04_compile_modes.md`)
 - [ ] Benchmark CI
@@ -338,10 +337,11 @@ Remaining gaps: distributed executor.
 ### Architecture debt
 
 - Two solution-dedup mechanisms: `Result` clustering (`_cluster_solutions`, union-find) and
-  `UniquePoints`/`VoronoiTree` from the monodromy port. Consolidating onto the VoronoiTree would
-  make `solve()` dedup group-action aware and likely speed up large results, but changes
-  solution-count semantics (transitive closure vs first-match), so it needs its own tests
-  (see `01_decisions.md`, "Two solution-dedup mechanisms exist")
+  `UniquePoints`/`VoronoiTree` from the monodromy port. The two now meet in `_orbit_merge!`,
+  which indexes proximity-cluster representatives in a `UniquePoints` tree to get group-action
+  awareness. Consolidating the proximity sweep itself onto the VoronoiTree would likely speed up
+  large results, but changes solution-count semantics (transitive closure vs first-match), so it
+  needs its own tests (see `01_decisions.md`, "Two solution-dedup mechanisms exist")
 - Two threading coordinators: OhMyThreads executor for `solve()`, Channel job queue for threaded
   monodromy. Justified by the dynamic monodromy workload; revisit only if a third dynamic
   consumer appears

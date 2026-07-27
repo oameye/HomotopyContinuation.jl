@@ -28,10 +28,7 @@ function UniquePoints(
         group_actions = group_action === nothing ? nothing : GroupActions(group_action),
         triangle_inequality::Union{Nothing, Bool} = nothing,
     )
-    if group_actions isa Function || group_actions isa Tuple ||
-            group_actions isa AbstractVector
-        group_actions = GroupActions(group_actions)
-    end
+    group_actions = _as_group_actions(group_actions)
     tree = VoronoiTree{ComplexF64}(
         d; distance = distance, triangle_inequality = triangle_inequality,
     )

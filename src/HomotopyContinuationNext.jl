@@ -35,6 +35,7 @@ export is_success, is_singular, is_nonsingular, is_at_infinity, is_real, is_exce
 export is_failed, is_finite
 export TotalDegree, Polyhedral, Result, PathResult
 export path_results, seed, ntracked, failed, at_infinity, nonsingular, singular
+export recluster, clusters, cluster_of
 export statistics, ResultStatistics
 export solution, accuracy, residual, steps, accepted_steps, rejected_steps
 export winding_number, condition_jacobian, last_path_point

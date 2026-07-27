@@ -179,8 +179,9 @@ valuation(r::PathResult)::Vector{Float64} = r.valuation
 """
     multiplicity(r::PathResult)
 
-Multiplicity of the solution (size of its deduplication cluster), filled in by
-the enclosing [`Result`](@ref). `0` for non-success paths or an unclustered result.
+Multiplicity of the solution (the number of paths that converged to the same
+point), filled in by the enclosing [`Result`](@ref). `0` for non-success paths or
+an unclustered result.
 """
 multiplicity(r::PathResult)::Int = r.multiplicity
 

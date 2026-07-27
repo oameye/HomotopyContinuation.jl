@@ -219,7 +219,7 @@ Every forwarding boundary (`monodromy_solve`, `verify_solution_completeness`, in
 
 ### Two solution-dedup mechanisms exist (known duplication)
 
-`Result` clustering (`_cluster_solutions` in `result.jl`, union-find with transitive closure) predates the monodromy port, which added `UniquePoints`/`multiplicities` backed by `VoronoiTree` (first-match dedup, O(n log n), group-action aware). Consolidating onto the VoronoiTree is tracked in `02_status.md`, but it touches solution-count semantics of every `solve()`.
+`Result` clustering (`_cluster_solutions` in `result.jl`, union-find with transitive closure) predates the monodromy port, which added `UniquePoints`/`multiplicities` backed by `VoronoiTree` (first-match dedup, O(n log n), group-action aware). The one place they meet is `_orbit_merge!`: the sweep's sort key `Re(x₁) + Im(x₁)` is not preserved by a group action, so symmetry-aware clustering indexes one representative per proximity cluster in a `UniquePoints` tree and unions on a hit, instead of duplicating the orbit walk. Consolidating the proximity sweep itself onto the VoronoiTree is tracked in `02_status.md`, but it touches solution-count semantics of every `solve()`.
 
 ### Overdetermined parameter homotopy stays rectangular
 

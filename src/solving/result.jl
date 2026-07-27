@@ -5,7 +5,7 @@
 # ---------------------------------------------------------------------------
 
 """
-    _cluster_solutions(path_results; atol, rtol) -> (clusters, multiplicity)
+    _cluster_solutions(path_results, atol, rtol, group_actions) -> (clusters, multiplicity)
 
 Group successful path results by solution proximity. Returns:
 - `clusters::Vector{Vector{Int}}` — groups of indices into `path_results`
@@ -23,12 +23,15 @@ that key, so only pairs within a `2W` key window (`W` = the largest possible
 pair tolerance) need the exact distance check. Typical cost is O(k log k);
 the worst case (all keys within one window) degrades gracefully to an
 O(k²) pairwise scan.
+
+With `group_actions`, `_orbit_merge!` additionally merges clusters sharing an orbit,
+so `clusters` holds one entry per orbit. `multiplicity` is read off the proximity
+clusters before that merge, so it reports the multiplicity of the root rather than
+the size of its orbit.
 """
 function _cluster_solutions(
-        path_results::Vector{PathResult};
-        atol::Float64 = 1.0e-6,
-        rtol::Float64 = 1.0e-3,
-    )::Tuple{Vector{Vector{Int}}, Vector{Int}}
+        path_results::Vector{PathResult}, atol::Float64, rtol::Float64, group_actions::GA,
+    )::Tuple{Vector{Vector{Int}}, Vector{Int}} where {GA}
     n = length(path_results)
     multiplicity = zeros(Int, n)
     clusters = Vector{Int}[]
@@ -99,6 +102,25 @@ function _cluster_solutions(
         end
     end
 
+    # Before any orbit merge, so the component sizes are the multiplicities.
+    prox_root = Vector{Int}(undef, k)
+    prox_size = zeros(Int, k)
+    for j in 1:k
+        root = _find(j)
+        prox_root[j] = root
+        prox_size[root] += 1
+    end
+    for j in 1:k
+        multiplicity[success_idx[j]] = prox_size[prox_root[j]]
+    end
+
+    if group_actions !== nothing
+        _orbit_merge!(
+            _union!, path_results, success_idx, prox_root, norms,
+            atol, rtol, group_actions,
+        )
+    end
+
     # Extract connected components
     comp = Dict{Int, Vector{Int}}()
     for j in 1:k
@@ -113,13 +135,38 @@ function _cluster_solutions(
 
     for cluster in values(comp)
         push!(clusters, cluster)
-        m = length(cluster)
-        for idx in cluster
-            multiplicity[idx] = m
-        end
     end
 
     return (clusters, multiplicity)
+end
+
+"""
+    _orbit_merge!(do_union!, path_results, success_idx, prox_root, norms, atol, rtol, actions)
+
+Merge proximity clusters that lie in a common orbit of `actions`, by calling
+`do_union!(a, b)` for every pair of cluster representatives found equivalent.
+Only representatives are indexed, so the tree stays at the size of the
+deduplicated solution set.
+
+Chains of merges stay transitive up to tolerance drift because the actions
+generate a group, the assumption [`search_in_radius`](@ref) already makes.
+"""
+function _orbit_merge!(
+        do_union!::F, path_results::Vector{PathResult}, success_idx::Vector{Int},
+        prox_root::Vector{Int}, norms::Vector{Float64},
+        atol::Float64, rtol::Float64, actions::GA,
+    )::Nothing where {F, GA}
+    k = length(success_idx)
+    d = length(path_results[success_idx[1]].solution)
+    d == 0 && return nothing    # no coordinates, so the sweep already collapsed them
+    UP = UniquePoints(d; distance = InfNorm(), group_actions = actions)
+    for j in 1:k
+        prox_root[j] == j || continue
+        sol = path_results[success_idx[j]].solution
+        found, is_new = add!(UP, sol, j, max(atol, rtol * norms[j]))
+        is_new || do_union!(j, found)
+    end
+    return nothing
 end
 
 # ---------------------------------------------------------------------------
@@ -130,18 +177,64 @@ struct Result
     path_results::Vector{PathResult}
     tracked_paths::Int
     seed::UInt32
-    # Deduplication: clusters[i] = indices of paths converging to same solution
+    # clusters[i] = path indices of one solution, or of one orbit after `recluster`
     clusters::Vector{Vector{Int}}
-    # Per-path multiplicity (cluster size); 0 for non-success paths
+    # Paths converging to the same point, independent of any orbit merge; 0 for non-success
     multiplicity::Vector{Int}
 end
 
 function Result(path_results::Vector{PathResult}, tracked_paths::Int, seed::UInt32)
-    clusters, multiplicity = _cluster_solutions(path_results)
+    clusters, multiplicity = _cluster_solutions(
+        path_results, DEFAULT_CLUSTER_ATOL, DEFAULT_CLUSTER_RTOL, nothing,
+    )
     # Stamp each path with its multiplicity so `multiplicity(::PathResult)`
     # reports the cluster size without a back-reference to the `Result`.
     prs = PathResult[_with_multiplicity(pr, multiplicity[i]) for (i, pr) in enumerate(path_results)]
     return Result(prs, tracked_paths, seed, clusters, multiplicity)
+end
+
+"""
+    recluster(r::Result; group_action = nothing, group_actions = nothing,
+              atol = DEFAULT_CLUSTER_ATOL, rtol = DEFAULT_CLUSTER_RTOL)
+
+Redo the solution clustering of `r` and return the reclustered [`Result`](@ref).
+
+With `group_action` (one function) or `group_actions` (a chain of them, see
+[`GroupActions`](@ref)), solutions in a common orbit are collapsed into one
+cluster, so `nsolutions`, `results` and `solutions` count and return orbits rather
+than individual points, represented by their lowest-numbered path.
+`multiplicity` is unaffected by the collapse.
+
+Two solutions are treated as one when their infinity-norm distance is at most
+`max(atol, rtol * norm(solution))`.
+
+## Example
+```julia
+julia> @polyvar x y;
+
+julia> r = solve(System([x^2 + y^2 - 5, x * y - 2]));
+
+julia> nsolutions(r)
+4
+
+julia> nsolutions(recluster(r; group_action = s -> ([s[2], s[1]],)))
+2
+```
+"""
+function recluster(
+        r::Result;
+        group_action = nothing,
+        group_actions = group_action === nothing ? nothing : GroupActions(group_action),
+        atol::Float64 = DEFAULT_CLUSTER_ATOL,
+        rtol::Float64 = DEFAULT_CLUSTER_RTOL,
+    )::Result
+    clusters, multiplicity = _cluster_solutions(
+        r.path_results, atol, rtol, _as_group_actions(group_actions),
+    )
+    prs = PathResult[
+        _with_multiplicity(pr, multiplicity[i]) for (i, pr) in enumerate(r.path_results)
+    ]
+    return Result(prs, r.tracked_paths, r.seed, clusters, multiplicity)
 end
 
 """
@@ -318,9 +411,45 @@ end
 """
     multiplicity(r, i) -> Int
 
-Multiplicity of the i-th path result (size of its cluster). Returns 0 for non-success paths.
+Multiplicity of the i-th path result: the number of paths that converged to the
+same point. Returns 0 for non-success paths. Unaffected by an orbit merge, so it
+reports the multiplicity of the solution even after [`recluster`](@ref) with a
+group action.
 """
 multiplicity(r::Result, i::Int)::Int = r.multiplicity[i]
+
+"""
+    clusters(r::Result) -> Vector{Vector{PathResult}}
+
+The deduplication partition of the successful paths: one group of
+[`PathResult`](@ref)s per unique solution, each led by its representative and in
+the order an unfiltered [`results`](@ref) returns them. After [`recluster`](@ref)
+with a group action each group is one orbit.
+
+[`results`](@ref) returns only the representatives, `results(r;
+multiple_results = true)` every member but ungrouped.
+"""
+clusters(r::Result)::Vector{Vector{PathResult}} =
+    Vector{PathResult}[PathResult[r.path_results[i] for i in cl] for cl in r.clusters]
+
+"""
+    cluster_of(r::Result, i::Int) -> Vector{PathResult}
+
+The group of [`PathResult`](@ref)s that path `i` was deduplicated into, `i`
+included, representative first. Empty when path `i` did not succeed.
+
+After [`recluster`](@ref) with a group action this is the orbit of solution `i`,
+so `cluster_of(r, path_number(pr))` gets the symmetric partners of `pr`.
+"""
+function cluster_of(r::Result, i::Int)::Vector{PathResult}
+    checkbounds(r.path_results, i)
+    for cl in r.clusters
+        if i in cl
+            return PathResult[r.path_results[j] for j in cl]
+        end
+    end
+    return PathResult[]
+end
 
 """
     results(r; only_real, only_nonsingular, only_singular, multiple_results)

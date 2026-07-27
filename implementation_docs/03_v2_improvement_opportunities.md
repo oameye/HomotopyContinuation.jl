@@ -15,8 +15,12 @@ All items were worked through; per-item status:
   unimodular 5x5 matrix (entries up to ~6e6) that overflows the Int64 HNF.
 - **#2 dedup scaling: DONE** (sort-and-window sweep, 20k paths cluster in ~15 ms;
   new `result_clustering_test.jl` cross-checks against a brute-force reference).
-  Group-action symmetry support remains OPEN: it needs a user-facing
-  `GroupActions` API design, deliberately not decided unilaterally.
+  **Group-action symmetry: DONE** via `recluster(::Result; group_action, atol, rtol)`,
+  which re-runs `_cluster_solutions` with an orbit-merge pass (`_orbit_merge!`)
+  layered on the proximity sweep. `multiplicity` stays proximity-based, so
+  collapsing an orbit never inflates it. Note there is nothing to port here: v2's
+  `compute_multiplicities` discards its `kwargs...`, so v2's `Result` dedup is not
+  symmetry-aware either.
 - **#3 dispatch reorder: REFUTED by measurement**, see the item below. Kept
   declaration order.
 - **#4 hot-path kwargs: DONE.** Positional `iterative_refinement!` cores with
@@ -98,6 +102,11 @@ So the genuine opportunities are narrow and specific, listed below by impact.
   with a fresh `Int[]` per cluster. No spatial structure, no group-action handling.
 - **Gain**: dedup/multiplicity that scales to large solution counts (thousands of
   paths), fewer allocations, and correct unique counts for symmetric systems.
+- **Resolved**: the scan became a sort-and-window sweep, and symmetry is opt-in via
+  `recluster`. The sweep's sort key `Re(x₁) + Im(x₁)` is not preserved by a group
+  action, so orbit images cannot be found by the sweep; `_orbit_merge!` indexes one
+  representative per proximity cluster in a `UniquePoints` tree instead, which
+  already walks orbits in `search_in_radius`.
 
 ## Tier 2: cheap, low-risk performance wins
 
