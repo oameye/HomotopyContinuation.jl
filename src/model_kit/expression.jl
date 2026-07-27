@@ -809,19 +809,24 @@ end
 
 ## ── Degrees and polynomiality ───────────────────────────────────────────────
 
-# Structural degree bound in `vars`. `nothing` marks an expression that is not
-# polynomial in `vars` (a negative power or a unary function of a variable).
-function _degree_bounds(e::Expression, vars::Set{Symbol})::Union{Nothing, Tuple{Int, Int}}
+# Structural degree bound under `weights`, which gives the degree of each
+# variable and leaves every unlisted symbol at 0. `nothing` marks an expression
+# that is not polynomial in those variables, or that uses one of unknown
+# (negative) weight.
+function _degree_bounds(
+        e::Expression, weights::Dict{Symbol, Int},
+    )::Union{Nothing, Tuple{Int, Int}}
     storage = expr_storage(e)
     if storage isa ENumStorage
         return (0, 0)
     elseif storage isa EVarStorage
-        return storage.name in vars ? (1, 1) : (0, 0)
+        w = get(weights, storage.name, 0)
+        return w < 0 ? nothing : (w, w)
     elseif storage isa EAddStorage
         lo = typemax(Int)
         hi = 0
         for a in storage.args
-            bounds = _degree_bounds(a, vars)
+            bounds = _degree_bounds(a, weights)
             bounds === nothing && return nothing
             lo = min(lo, bounds[1])
             hi = max(hi, bounds[2])
@@ -831,20 +836,20 @@ function _degree_bounds(e::Expression, vars::Set{Symbol})::Union{Nothing, Tuple{
         lo = 0
         hi = 0
         for a in storage.args
-            bounds = _degree_bounds(a, vars)
+            bounds = _degree_bounds(a, weights)
             bounds === nothing && return nothing
             lo += bounds[1]
             hi += bounds[2]
         end
         return (lo, hi)
     elseif storage isa EPowStorage
-        bounds = _degree_bounds(storage.base, vars)
+        bounds = _degree_bounds(storage.base, weights)
         bounds === nothing && return nothing
         bounds == (0, 0) && return (0, 0)
         storage.exp < 0 && return nothing
         return (storage.exp * bounds[1], storage.exp * bounds[2])
     else # EFnStorage
-        bounds = _degree_bounds(storage.arg, vars)
+        bounds = _degree_bounds(storage.arg, weights)
         bounds === nothing && return nothing
         return bounds == (0, 0) ? (0, 0) : nothing
     end
@@ -856,7 +861,10 @@ end
 Whether `f` is a polynomial in `vars`.
 """
 is_polynomial(f::Expression, vars::AbstractVector{Expression})::Bool =
-    _degree_bounds(f, Set{Symbol}(Symbol(v) for v in vars)) !== nothing
+    _degree_bounds(f, _unit_weights(vars)) !== nothing
+
+_unit_weights(vars::AbstractVector{Expression})::Dict{Symbol, Int} =
+    Dict{Symbol, Int}(Symbol(v) => 1 for v in vars)
 
 """
     degree(f::Expression, vars) -> Int
@@ -865,19 +873,23 @@ Upper bound on the total degree of `f` in `vars`. Returns `-1` when `f` is not
 polynomial in `vars`.
 """
 function degree(f::Expression, vars::AbstractVector{Expression})::Int
-    bounds = _degree_bounds(f, Set{Symbol}(Symbol(v) for v in vars))
+    bounds = _degree_bounds(f, _unit_weights(vars))
     bounds === nothing && return -1
     return bounds[2]
 end
 
-function _expression_degrees(
-        exprs::AbstractVector{Expression}, vars::AbstractVector{Expression},
+_expression_degrees(
+    exprs::AbstractVector{Expression}, vars::AbstractVector{Expression},
+)::Tuple{Vector{Int}, Bool} = _weighted_degrees(exprs, _unit_weights(vars))
+
+# Per-expression degree bound and homogeneity under `weights`, in one pass.
+function _weighted_degrees(
+        exprs::AbstractVector{Expression}, weights::Dict{Symbol, Int},
     )::Tuple{Vector{Int}, Bool}
-    var_set = Set{Symbol}(Symbol(v) for v in vars)
     degs = Vector{Int}(undef, length(exprs))
     homogeneous = true
     for i in eachindex(exprs)
-        bounds = _degree_bounds(exprs[i], var_set)
+        bounds = _degree_bounds(exprs[i], weights)
         if bounds === nothing
             degs[i] = -1
             homogeneous = false

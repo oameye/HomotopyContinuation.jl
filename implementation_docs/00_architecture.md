@@ -98,7 +98,9 @@ src/                                         ~17,450 lines total
 │   ├── linear_subspace.jl           (562)   LinearSubspace, intrinsic/extrinsic descriptions, geodesics
 │   ├── subspace_homotopies.jl       (747)   Intrinsic/ExtrinsicSubspaceHomotopy, Grassmannian geodesic
 │   ├── affine_chart.jl              (274)   AffineChartSystem/Homotopy, on_affine_chart
-│   └── randomized_system.jl         (201)   Square-up for overdetermined systems
+│   ├── randomized_system.jl         (201)   Square-up for overdetermined systems
+│   ├── composition_system.jl        (469)   `G ∘ F` wrapper and user-facing CompositionSystem
+│   └── start_pair_system.jl         (196)   `F(x; p)` as a system in the joint unknown `[x; p]`
 ├── tracking/
 │   ├── tracker.jl                   (620)   Path tracker, adaptive step control, warm start
 │   ├── predictor.jl                 (351)   Pade (2,1), Taylor coefficients, trust region
@@ -193,6 +195,7 @@ struct System{P, V, M, S}
     variables::FSVec{V}                # decision variables
     evaluator::SystemEvaluator
     degrees::Vector{Int}
+    equation_scales::Vector{Float64}   # factor each input equation was divided by
     nvars::Int; nparams::Int
     variable_groups::Vector{Vector{Int}}
     is_homogeneous::Bool
@@ -207,6 +210,51 @@ struct System{P, V, M, S}
     compile_mode::CompileMode.T        # needed by _clone_system_evaluator for threading
 end
 ```
+
+### CompositionSystem
+
+`compose(G, F)` (infix `G ∘ F`) builds the system `x ↦ G(F(x; p); p)` without
+rebuilding equations. The user-facing `CompositionSystem` stores one thunk per
+stage (`FunctionWrapper{SystemEvaluator, Tuple{}}` around
+`_clone_system_evaluator`), innermost first, so a chain of any depth is one
+concrete type and every worker clones the whole chain. Folding the thunks
+produces nested `_ComposedSystem <: AbstractSystem` wrappers, each erased by a
+`SystemEvaluator`: evaluation runs the stages inside out, the Jacobian is one
+`mul!` of the two stage Jacobians, and the order-K Taylor coefficient comes from
+running `G` on the series of `F` filled from order 0 up (K + 1 runs of the inner
+tape, since a `SystemEvaluator` returns one order per call).
+
+Stages are composed after `System`'s per-equation normalization, which changes
+an inner stage as a map, so the fold multiplies each inner stage's
+`equation_scales` back into its output.
+
+`SystemLike = Union{System, CompositionSystem}` marks the routes that never
+rebuild equations: parameter homotopies, `monodromy_solve`, `newton`, and total
+degree, which needs only the folded degrees, the evaluator and the clone.
+Polyhedral and witness sets need the composed monomials and reach them through
+`System(C::CompositionSystem)`, which substitutes the stages into each other
+(undoing every inner stage's scaling symbolically) and pays the differentiation
+and CSE cost the composition exists to avoid. Each stage therefore keeps a
+second thunk, `StageEquations`, that converts its equations to `Expression`s on
+demand.
+
+Degrees and homogeneity are folded from the stages rather than the composed
+equations: `deg(gⱼ ∘ F)` is the degree of `gⱼ` in the weights `deg(fᵢ)`, and
+`gⱼ ∘ F` is homogeneous when `gⱼ` is homogeneous in those weights and every
+`fᵢ` is. This matters because `MonodromySolver` picks an affine chart off
+`is_homogeneous`, and a false negative there tracks a projective problem in
+ambient coordinates with a rank-deficient Jacobian. Where every equation of `F`
+shares one degree `d` the rule collapses to `deg(gⱼ) · d` with `gⱼ` homogeneous,
+which the stage already records; that case is kept separate because it reads no
+equations, while the weighted rule calls `StageEquations`. Degrees are upper
+bounds and homogeneity is structural, as they are for a `System`.
+
+`find_start_pair` on a composition runs Newton in `(x, p)` jointly on
+`_StartPairSystem` (`core/start_pair_system.jl`), which wraps an evaluator as a
+system in `[x; p]`. The parameter block of its Jacobian is the order-1
+coefficient of `F(x; p + eⱼ t)`, exact and reusing the parameter-series Taylor
+path. A `System` keeps its symbolic strategies (linear-in-parameters solve, then
+a joint `System` in the promoted variables), which differentiate in one tape.
 
 ### Interpreter
 

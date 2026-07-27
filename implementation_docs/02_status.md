@@ -20,7 +20,7 @@ linear subspaces, trace test), certification (Krawczyk with Arb fallback, in the
 `trace_test`, `membership`, `regeneration`, `decompose`, `nid`, including projective,
 zero-dimensional, parametric, and rational cases).
 
-Remaining gaps: distributed executor, system composition.
+Remaining gaps: distributed executor.
 
 ## Feature Checklist
 
@@ -261,11 +261,70 @@ Remaining gaps: distributed executor, system composition.
     numerators, and `V(p₁, …, pₘ)` is larger than `V(F)`); equation-by-equation regeneration is
     what separates the two, as it does in v2.
 
+- [x] **System composition** (`src/core/composition_system.jl`): `compose(G, F)` and the infix
+  `G ∘ F` build `G(F(x; p); p)`, accepted by every route that only evaluates the system
+  (`solve` from start solutions, `solve` by total degree, `monodromy_solve`, `newton`,
+  `find_start_pair`, all typed on `SystemLike = Union{System, CompositionSystem}`). Routes
+  that need the composed monomials or equations (polyhedral, witness sets,
+  `verify_solution_completeness`) reach a composition through `System(C)`, matching how v2
+  reaches them through `System(F::AbstractSystem)`.
+  All three v2 composition tests are ported: the evaluate/Jacobian/Taylor sweep and the
+  parameter-list assertions (v2 `systems_test.jl`) and `solve(e ∘ f ∘ g)` by total degree and
+  by polyhedral (v2 `solve_test.jl`) live in `test/composition_test.jl`; the symmetroids
+  monodromy test (`L₂ ∘ f ∘ L₁`, 305 solutions, custom `distance`) is in
+  `test/monodromy_v2_parity_test.jl`.
+
+  Key design choices:
+  - Composition happens at the **evaluator** level, as with `RandomizedSystem` and
+    `SlicedSystem`: nested `_ComposedSystem <: AbstractSystem` wrappers, each behind a
+    `SystemEvaluator`. Substituting `F` into `G` symbolically keeps the tree unexpanded, but
+    differentiating and running CSE over the substituted tree costs 83s for the symmetroid
+    composition, against ~0.1s to wrap the evaluators; the wrapper does the same chain-rule
+    product numerically, one `mul!` per Jacobian.
+  - A composition of any depth is **one concrete type**: stages are stored innermost-first as
+    `FunctionWrapper{SystemEvaluator, Tuple{}}` clone thunks, so `_clone_system_evaluator`
+    rebuilds the whole chain per worker and threading works unchanged.
+  - Taylor: the order-K coefficient of `G ∘ F` needs the series of `F` to order K, and a
+    `SystemEvaluator` returns one order per call, so the inner tape runs K + 1 times per
+    composed order (v2 fills all orders in one run through a `TaylorVector` output). Both the
+    constant-parameter and the `TaylorVector`-parameter variants are implemented, the latter
+    being what parameter homotopies call. Lower-order views of a series share the backing
+    matrix, so no series is copied.
+  - `System` divides an equation whose coefficients are far above unit scale by that scale.
+    That leaves `V(F)` alone but changes `F` as a map, so `System` now records the factors
+    (`equation_scales`) and the fold multiplies each inner stage's factors back into its
+    output. Without it, `G ∘ F` would silently solve `G(F(x)/s)`.
+  - Parameters: both stages see the same vector (v2's rule), so stage parameter lists must
+    agree unless one is empty, and a parameter-free stage simply ignores the vector.
+  - `System(C::CompositionSystem)` rebuilds the composed equations by substitution, undoing
+    every inner stage's scaling symbolically. It agrees with `C` up to a constant factor per
+    equation, since `System` renormalizes what it is handed. Each stage keeps a second thunk
+    (`StageEquations`) that converts its equations to `Expression`s only when asked, so
+    `compose` stays cheap. This is the escape hatch v2 spells `System(F::AbstractSystem)` and
+    uses for `certify`, `witness_set` and `is_homogeneous` on a composition.
+  - Degrees and homogeneity are folded from the stages by weighting: `deg(gⱼ ∘ F)` is the
+    degree of `gⱼ` in the weights `deg(fᵢ)`, and `gⱼ ∘ F` is homogeneous when `gⱼ` is
+    homogeneous in those weights and every `fᵢ` is. `MonodromySolver` reads `is_homogeneous`
+    to decide whether to put the problem on an affine chart, so a wrong `false` there tracks
+    a projective problem in ambient coordinates; weighting is what makes a composition such
+    as `[a·u − v, w² − b·u, u + v] ∘ [x², y², z]` come out homogeneous, which the plain rule
+    `deg(gⱼ) · d` cannot see because the inner degrees `[2, 2, 1]` are not uniform. Where they
+    are uniform the two rules agree and the fold takes the cheap one, which reads no stage
+    equations. Degrees are upper bounds and homogeneity is structural, as for a `System`.
+    The folded degrees are also what lets total degree take a composition without rebuilding
+    anything: `_init_total_degree` needs the degrees, the evaluator and the clone, all of
+    which a composition has. A stage that is not polynomial in its variables gives a degree
+    of `-1` and is rejected with a message naming the composition rather than the
+    non-polynomial-equation message a `System` gets.
+  - `find_start_pair` on a composition runs Newton in `(x, p)` jointly on `_StartPairSystem`
+    (`src/core/start_pair_system.jl`), a wrapper turning an evaluator into a system in
+    `[x; p]`; its parameter Jacobian block is the order-1 Taylor coefficient along
+    `p + eⱼ t`, exact where v2 uses FiniteDiff. A `System` keeps its symbolic strategies,
+    which get the parameter derivatives from one tape.
+
 ### Not Done
 
 - [ ] **Distributed executor**: extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
-- [ ] **System composition** (v2 `CompositionSystem`, `L₂ ∘ f ∘ L₁`). Blocks the v2 symmetroids
-  monodromy test (305 solutions; its custom-`distance` kwarg is already supported)
 - [ ] Group-action symmetry in `Result` clustering: the `GroupActions` API and group-action-aware
   `UniquePoints` exist and monodromy uses them, but `solve()`'s `Result` dedup still uses plain
   union-find clustering (see `03_v2_improvement_opportunities.md` item 2)

@@ -56,7 +56,7 @@ function Base.show(io::IO, r::NewtonResult)
 end
 
 """
-    NewtonCache(F::System)
+    NewtonCache(F::SystemLike)
 
 Pre-allocate the scratch buffers and matrix workspace used by [`newton`](@ref).
 Pass the same cache to repeated `newton` calls on `F` to avoid re-allocating.
@@ -75,8 +75,12 @@ struct NewtonCache
     J_wide::FSMat{ComplexF64}
 end
 
-function NewtonCache(F::System)::NewtonCache
+function NewtonCache(F::SystemLike)::NewtonCache
     m, n = size(F)
+    return _newton_cache(m, n)
+end
+
+function _newton_cache(m::Int, n::Int)::NewtonCache
     workspace = m >= n ? MatrixWorkspace(m, n) : MatrixWorkspace(1, 1)
     J_wide = if m < n
         FSMat{ComplexF64}(zeros(ComplexF64, m, n))
@@ -105,7 +109,7 @@ function _solve_wide!(
 end
 
 """
-    newton(F::System, x₀::AbstractVector; options...) -> NewtonResult
+    newton(F::SystemLike, x₀::AbstractVector; options...) -> NewtonResult
 
 Run Newton's method on the polynomial system `F` starting from `x₀`. For an
 overdetermined `F` (m > n) the Newton step solves the linear least-squares
@@ -130,7 +134,7 @@ in double-double precision to push the achievable accuracy toward machine eps.
 - `cache::NewtonCache = NewtonCache(F)`: pre-allocated workspace for repeated calls.
 """
 function newton(
-        F::System, x₀::AbstractVector;
+        F::SystemLike, x₀::AbstractVector;
         p::AbstractVector = ComplexF64[],
         atol::Float64 = 1.0e-8,
         rtol::Float64 = atol,

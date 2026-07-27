@@ -52,10 +52,10 @@ through this single helper so the RNG draw and the square-up construction
 cannot drift apart.
 """
 function _square_up(
-        rng::Random.MersenneTwister, F::System,
+        rng::Random.MersenneTwister, F::SystemLike,
     )::Tuple{FSMat{ComplexF64}, Vector{Int}, ExcessSolutionChecker}
     m, n = size(F.evaluator)
-    perm = _randomization_permutation(F.degrees)
+    perm = _randomization_permutation(degrees(F))
     A = FSMat{ComplexF64}(randn(rng, ComplexF64, n, m - n))
     return A, perm, ExcessSolutionChecker(F.evaluator, A, perm)
 end

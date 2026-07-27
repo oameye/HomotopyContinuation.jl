@@ -35,12 +35,25 @@ function _check_square_or_overdetermined(::UnderdeterminedShape, F::System)::Not
     )
 end
 
+# A composition carries no shape parameter, so the same check reads its size.
+function _check_square_or_overdetermined(C::CompositionSystem)::Nothing
+    m, n = size(C)
+    m >= n || throw(
+        ArgumentError(
+            "The composition has $m equation(s) in $n variables. The solution set is " *
+                "positive-dimensional; only square or overdetermined systems with " *
+                "finitely many solutions are supported.",
+        ),
+    )
+    return nothing
+end
+
 """
     _check_parameter_free(F, route)
 
 Throw when `F` still has parameters. `route` names the algorithm in the message.
 """
-function _check_parameter_free(F::System, route::String)::Nothing
+function _check_parameter_free(F::SystemLike, route::String)::Nothing
     np = nparameters(F)
     np == 0 || throw(
         ArgumentError(
@@ -72,6 +85,20 @@ function _check_polynomial(F::System, route::String)::Nothing
     )
 end
 
+# A composed degree of `-1` comes from a stage, so the message names one.
+function _check_polynomial(C::CompositionSystem, route::String)::Nothing
+    any(<(0), degrees(C)) || return nothing
+    throw(
+        ArgumentError(
+            "$route requires a composition whose stages are polynomial in their " *
+                "variables, but at least one stage equation uses division by a " *
+                "variable, a negative power, or a unary function of a variable. " *
+                "Clear denominators first, or track from known start solutions " *
+                "with a parameter homotopy or `monodromy_solve`.",
+        ),
+    )
+end
+
 # ── CommonSolve.init: System + TotalDegree ────────────────────────────────
 
 function _total_degree_solve_cache(
@@ -96,7 +123,7 @@ function _total_degree_solve_cache(
 end
 
 function CommonSolve.init(
-        F::System, alg::TotalDegree,
+        F::SystemLike, alg::TotalDegree,
         exec::AbstractExecutor = Threaded();
         show_progress::Bool = true,
     )::SolveCache
@@ -114,12 +141,12 @@ function CommonSolve.init(
 end
 
 _init_total_degree_shaped(
-    F::System, alg::TotalDegree, exec::AbstractExecutor,
+    F::SystemLike, alg::TotalDegree, exec::AbstractExecutor,
     rng::Random.MersenneTwister, γ::ComplexF64, show_progress::Bool,
 ) = _init_total_degree(system_shape(F), F, alg, exec, rng, γ, show_progress)
 
 function _init_total_degree(
-        ::SquareShape, F::System, alg::TotalDegree, exec::AbstractExecutor,
+        ::SquareShape, F::SystemLike, alg::TotalDegree, exec::AbstractExecutor,
         ::Random.MersenneTwister, γ::ComplexF64, show_progress::Bool,
     )
     degrees = F.degrees
@@ -133,11 +160,11 @@ function _init_total_degree(
 end
 
 function _init_total_degree(
-        ::OverdeterminedShape, F::System, alg::TotalDegree,
+        ::OverdeterminedShape, F::SystemLike, alg::TotalDegree,
         exec::AbstractExecutor, rng::Random.MersenneTwister,
         γ::ComplexF64, show_progress::Bool,
     )
-    n = F.nvars
+    n = nvariables(F)
     A, perm, excess_checker = _square_up(rng, F)
     target_evaluator = _randomized_evaluator(F.evaluator, A, perm)
     degrees = F.degrees[perm[1:n]]
@@ -234,9 +261,13 @@ end
     solve(F::System, alg=TotalDegree(), exec=Threaded())
 
 Solve a polynomial system using homotopy continuation.
+
+A [`CompositionSystem`](@ref) is accepted too: the total-degree start system
+needs only the composed degrees, which are folded from the stages, so the
+equations are never rebuilt.
 """
 function solve(
-        F::System,
+        F::SystemLike,
         alg::TotalDegree = TotalDegree(),
         exec::AbstractExecutor = Threaded();
         show_progress::Bool = true,
@@ -244,7 +275,7 @@ function solve(
     return CommonSolve.solve!(CommonSolve.init(F, alg, exec; show_progress = show_progress))
 end
 
-function solve(F::System, exec::AbstractExecutor; show_progress::Bool = true)::Result
+function solve(F::SystemLike, exec::AbstractExecutor; show_progress::Bool = true)::Result
     return solve(F, TotalDegree(), exec; show_progress = show_progress)
 end
 
@@ -257,10 +288,27 @@ function solve(
     return CommonSolve.solve!(CommonSolve.init(F, alg, exec; show_progress = show_progress))
 end
 
+# The polyhedral start system is built from the composed monomials, which only
+# the substituted equations carry.
+function solve(
+        C::CompositionSystem,
+        alg::Polyhedral,
+        exec::AbstractExecutor = Threaded();
+        show_progress::Bool = true,
+    )::Result
+    return solve(System(C), alg, exec; show_progress = show_progress)
+end
+
+CommonSolve.init(
+    C::CompositionSystem, alg::Polyhedral,
+    exec::AbstractExecutor = Threaded();
+    show_progress::Bool = true,
+) = CommonSolve.init(System(C), alg, exec; show_progress = show_progress)
+
 # ── Parameter homotopy ─────────────────────────────────────────────────────
 
 function solve(
-        F::System,
+        F::SystemLike,
         starts::AbstractVector{<:AbstractVector{<:Number}},
         exec::AbstractExecutor = Threaded();
         start_parameters::AbstractVector{<:Number},
@@ -284,7 +332,7 @@ function solve(
 end
 
 function CommonSolve.init(
-        F::System,
+        F::SystemLike,
         starts::AbstractVector{<:AbstractVector{<:Number}},
         exec::AbstractExecutor = Threaded();
         start_parameters::AbstractVector{<:Number},

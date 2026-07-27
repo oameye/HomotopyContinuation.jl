@@ -4,7 +4,9 @@ using HomotopyContinuationNext
 using HomotopyContinuationNext: find_start_pair, monodromy_solve, permutations,
     is_heuristic_stop, verify_solution_completeness, parameters, trace,
     SymmetricGroup, multiplicities, InfNorm
-using DynamicPolynomials: @polyvar, subs, differentiate, monomials
+using DynamicPolynomials: @polyvar, subs, differentiate, monomials, coefficient
+using HomotopyContinuationNext: FSVec, FSMat, evaluate!, evaluate_and_jacobian!,
+    nparameters
 
 # The ED-discriminant system of a toric variety: 21 solutions for the twisted
 # cubic exponent matrix used below.
@@ -392,4 +394,89 @@ end
         seed = UInt32(0xd001), threading = false, show_progress = false,
     )
     @test nsolutions(r) == 1
+end
+
+# The symmetroid family of https://www.juliahomotopycontinuation.org/examples/symmetroids/:
+# `f` sends a pencil of symmetric matrices to the coefficients of its
+# determinant, `L₁` parameterizes the fiber directions and `L₂` cuts the image
+# with a hyperplane whose normal is the parameter.
+@testset "symmetroids: composition, custom distance, unique_points tolerances" begin
+    Random.seed!(0x5717)
+    n = 4
+    d = 3
+    M = binomial(d + 1, 2)
+    D = (n - 1) * M + 3
+    N = binomial(n - 1 + d, d)
+
+    @polyvar xs[0:(n - 1)] as[1:D]
+    blocks = map(0:(n - 2)) do ℓ
+        columns = map(1:d) do i
+            k = ℓ * M + sum(d - j for j in 0:(i - 1))
+            return [zeros(Int, i - 1); as[(k - (d - i)):k]]
+        end
+        B = hcat(columns...)
+        return (B + transpose(B)) ./ 2
+    end
+    A₀ = [as[D - 2] 0 0; 0 as[D - 1] 0; 0 0 as[D]]
+    μ = xs[1] .* A₀ + sum(xs[i + 1] .* blocks[i] for i in 1:(n - 1))
+    detμ = det(μ)
+    f = System([coefficient(detμ, m, xs) for m in monomials(xs, d)]; variables = as)
+    @test size(f) == (N, D)
+
+    evaluate_at(F, x, p = ComplexF64[]) = begin
+        u = FSVec{ComplexF64}(zeros(ComplexF64, size(F)[1]))
+        evaluate!(
+            u, F.evaluator, FSVec{ComplexF64}(collect(ComplexF64, x)),
+            FSVec{ComplexF64}(collect(ComplexF64, p))
+        )
+        collect(u)
+    end
+
+    u₀ = FSVec{ComplexF64}(zeros(ComplexF64, N))
+    J₀ = FSMat{ComplexF64}(zeros(ComplexF64, N, D))
+    evaluate_and_jacobian!(
+        u₀, J₀, f.evaluator, FSVec{ComplexF64}(randn(ComplexF64, D)),
+        FSVec{ComplexF64}(ComplexF64[]),
+    )
+    dimQ = rank(collect(J₀))
+    @test dimQ == 16
+
+    Q = Matrix(qr(randn(ComplexF64, D, D)).Q)
+    @var bs[1:dimQ] ks[1:(N + 1)] f₀[1:N]
+    L₁ = System(Q[:, 1:dimQ] * collect(bs) + Q[:, dimQ + 1]; variables = collect(bs))
+
+    b₁ = randn(ComplexF64, dimQ)
+    f₁ = evaluate_at(f, evaluate_at(L₁, b₁))
+    R₁ = Matrix(qr(randn(ComplexF64, N, N)).Q)
+    R = [transpose(collect(ks[1:N])); R₁[1:(dimQ - 1), :]]
+    r = [ks[N + 1]; R₁[1:(dimQ - 1), :] * f₁]
+    L₂ = System(R * collect(f₀) - r; variables = collect(f₀), parameters = collect(ks))
+
+    C = L₂ ∘ f ∘ L₁
+    @test size(C) == (dimQ, dimQ)
+    @test nparameters(C) == N + 1
+
+    p₁ = randn(ComplexF64, N)
+    params = [p₁; transpose(p₁) * f₁]
+    @test maximum(abs, evaluate_at(C, b₁, params)) < 1.0e-10
+
+    # the fibers of `f ∘ L₁` are positive-dimensional, so points sharing an
+    # image are the same solution
+    fL₁ = f ∘ L₁
+    distance(x, y) = maximum(abs, evaluate_at(fL₁, x) .- evaluate_at(fL₁, y))
+
+    points = monodromy_solve(
+        C, [b₁], params;
+        distance = distance, unique_points_rtol = 1.0e-8,
+        unique_points_atol = 1.0e-14, target_solutions_count = 305,
+        max_loops_no_progress = 20, threading = false, show_progress = false,
+        seed = UInt32(0x5717),
+    )
+    @test is_success(points)
+    @test nsolutions(points) == 305
+    @test length(
+        unique_points(
+            solutions(points); distance = distance, rtol = 1.0e-8, atol = 1.0e-14,
+        ),
+    ) == 305
 end

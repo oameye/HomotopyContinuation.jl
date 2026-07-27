@@ -38,6 +38,7 @@ struct System{P, V, M, S <: SystemShape}
     variables::FSVec{V}
     evaluator::SystemEvaluator
     degrees::Vector{Int}
+    equation_scales::Vector{Float64}
     nvars::Int
     nparams::Int
     variable_groups::Vector{Vector{Int}}
@@ -184,6 +185,9 @@ end
 Base.size(F::System)::Tuple{Int, Int} = size(F.evaluator)
 @inline system_shape(::System{P, V, M, S}) where {P, V, M, S} = S()
 degrees(F::System)::Vector{Int} = F.degrees
+# Factor each input equation was divided by. It leaves `V(F)` alone but changes
+# `F` as a map, which an inner composition stage has to undo.
+equation_scales(F::System)::Vector{Float64} = F.equation_scales
 nvariables(F::System)::Int = F.nvars
 nparameters(F::System)::Int = F.nparams
 polynomials(F::System) = F.polys
@@ -264,6 +268,8 @@ struct LoweredInput
     seq_jac::InstructionSequence
     degrees::Vector{Int}
     is_homogeneous::Bool
+    # factor each input equation was divided by
+    scales::Vector{Float64}
 end
 
 # Called from a frame that still knows the concrete input type: dispatching behind
@@ -274,12 +280,12 @@ end
         variables::AbstractVector,
         parameters::AbstractVector,
     )
-    normalized = _normalize_polys(polys)
+    normalized, scales = _normalize_polys(polys)
     degs, is_homogeneous = _variable_degrees(normalized, variables)
     return normalized, LoweredInput(
             _build_instruction_sequence(normalized, variables, parameters, false),
             _build_instruction_sequence(normalized, variables, parameters, true),
-            degs, is_homogeneous,
+            degs, is_homogeneous, scales,
         )
 end
 
@@ -288,14 +294,14 @@ end
         variables::AbstractVector,
         parameters::AbstractVector,
     )
-    normalized = _normalize_expressions(exprs)
+    normalized, scales = _normalize_expressions(exprs)
     vars = _as_variables(variables)
     params = _as_variables(parameters)
     degs, is_homogeneous = _expression_degrees(normalized, vars)
     return normalized, LoweredInput(
             _build_instruction_sequence_from_expressions(normalized, vars, params, false),
             _build_instruction_sequence_from_expressions(normalized, vars, params, true),
-            degs, is_homogeneous,
+            degs, is_homogeneous, scales,
         )
 end
 
@@ -332,11 +338,15 @@ function _normalize_polys(
     # rescaling is required. Returning either the original integer polynomial
     # or a divided floating polynomial made the rest of construction infer an
     # abstract polynomial element type.
-    return map(polys) do p
+    scales = Vector{Float64}(undef, length(polys))
+    normalized = map(enumerate(polys)) do (i, p)
         coeffs = MP.coefficients(p)
         nrm = maximum(c -> Float64(abs(c)), coeffs)
-        return p / _normalization_scale(nrm)
+        scale = _normalization_scale(nrm)
+        scales[i] = scale
+        return p / scale
     end
+    return normalized, scales
 end
 
 # Dividing an equation by a constant leaves `V(F)` unchanged, so an equation far above
@@ -351,10 +361,14 @@ end
 # an expression tree does not carry.
 function _normalize_expressions(
         exprs::AbstractVector{Expression},
-    )::Vector{Expression}
-    return map(exprs) do e
-        return e / _normalization_scale(expression_scale(e))
+    )::Tuple{Vector{Expression}, Vector{Float64}}
+    scales = Vector{Float64}(undef, length(exprs))
+    normalized = map(enumerate(exprs)) do (i, e)
+        scale = _normalization_scale(expression_scale(e))
+        scales[i] = scale
+        return e / scale
     end
+    return normalized, scales
 end
 
 ## ── FW-compatible wrapper functions ──────────────────────────────────────────
@@ -445,7 +459,7 @@ end
         fs_polys,
         fs_parameters,
         fs_variables,
-        evaluator, lowered.degrees, nvars, nparams,
+        evaluator, lowered.degrees, lowered.scales, nvars, nparams,
         Vector{Int}[], lowered.is_homogeneous,
         LazyRef{SupportCoefficients}(),
         interp_f64, interp_df64, interp_jac,

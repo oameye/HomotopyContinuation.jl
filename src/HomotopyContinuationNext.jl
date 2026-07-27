@@ -25,6 +25,7 @@ RuntimeGeneratedFunctions.init(@__MODULE__)
 end
 
 export @polyvar, solve, System
+export CompositionSystem, compose
 export @var, @unique_var, Expression, differentiate, subs, num_den
 export CompileMode
 export solutions, real_solutions, nsolutions, nreal, nsingular, nnonsingular, nat_infinity
@@ -105,6 +106,8 @@ include("solving/support.jl")
 include("core/system.jl")
 include("core/linear_subspace.jl")
 include("core/randomized_system.jl")
+include("core/composition_system.jl")
+include("core/start_pair_system.jl")
 include("core/homotopy_evaluator.jl")
 include("core/straight_line_homotopy.jl")
 include("core/linear_parameter_homotopy.jl")

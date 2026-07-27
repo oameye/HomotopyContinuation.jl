@@ -403,7 +403,7 @@ function permutations(r::MonodromyResult; reduced::Bool = true)::Matrix{Int}
 end
 
 """
-    find_start_pair(F::System; max_tries = 1_000, atol = 0.0, rtol = 1e-12)
+    find_start_pair(F::SystemLike; max_tries = 1_000, atol = 0.0, rtol = 1e-12)
 
 Try to find a pair `(x, p)` for the system `F` such that `F(x, p) = 0` by
 sampling a random `x` and solving the linear system in the parameters (when
@@ -429,16 +429,61 @@ function find_start_pair(
     )
 end
 
+# A composition keeps no equations, so the symbolic strategies do not apply and
+# Newton runs on the joint system assembled from the evaluator.
+function find_start_pair(
+        C::CompositionSystem;
+        max_tries::Int = 1_000,
+        atol::Float64 = 0.0,
+        rtol::Float64 = 1.0e-12,
+    )::Union{Nothing, Tuple{Vector{ComplexF64}, Union{Nothing, Vector{ComplexF64}}}}
+    refine_atol = atol > 0 ? atol : 1.0e-12
+    strategy = nparameters(C) == 0 ?
+        _parameter_free_start_pair : _composition_start_pair
+    strategy = Base.inferencebarrier(strategy)
+    return _dispatch_start_pair_strategy(
+        strategy, C, max_tries, refine_atol, rtol,
+    )
+end
+
 @noinline function _dispatch_start_pair_strategy(
-        strategy::Function, F::System, max_tries::Int,
+        strategy::Function, F::SystemLike, max_tries::Int,
         refine_atol::Float64, rtol::Float64,
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Union{Nothing, Vector{ComplexF64}}}}
     Base.@nospecialize strategy F
     return strategy(F, max_tries, refine_atol, rtol)
 end
 
+@noinline function _composition_start_pair(
+        C::CompositionSystem, max_tries::Int, refine_atol::Float64, rtol::Float64,
+    )::Union{Nothing, Tuple{Vector{ComplexF64}, Vector{ComplexF64}}}
+    m, n = size(C)
+    np = nparameters(C)
+    joint = SystemEvaluator(_StartPairSystem(C.evaluator))
+    joint_cache = _newton_cache(m, n + np)
+    cache = NewtonCache(C)
+    for _ in 1:max_tries
+        xp₀ = randn(ComplexF64, n + np)
+        res = _newton(
+            joint, joint_cache, xp₀, _EMPTY_PARAMS, 1.0e-8, 1.0e-8, 20, false,
+            1.0, typemax(Int), Inf, Inf,
+        )
+        if res.return_code == NewtonReturnCode.NEWTON_SUCCESS
+            x = res.x[1:n]
+            p = res.x[(n + 1):end]
+            refined = newton(
+                C, x; p = p, atol = refine_atol, rtol = rtol, cache = cache,
+            )
+            if refined.return_code == NewtonReturnCode.NEWTON_SUCCESS
+                return (refined.x, p)
+            end
+        end
+    end
+    return nothing
+end
+
 @noinline function _parameter_free_start_pair(
-        F::System, max_tries::Int, refine_atol::Float64, rtol::Float64,
+        F::SystemLike, max_tries::Int, refine_atol::Float64, rtol::Float64,
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Nothing}}
     nvars = nvariables(F)
     cache = NewtonCache(F)
@@ -862,7 +907,7 @@ function _chart_parameter_monodromy_worker(
     )
 end
 
-struct ParameterMonodromyBuilder{S <: System}
+struct ParameterMonodromyBuilder{S <: SystemLike}
     system::S
     parameters::Vector{ComplexF64}
     nvariables::Int
@@ -876,7 +921,7 @@ function (builder::ParameterMonodromyBuilder)()
     )
 end
 
-struct ChartParameterMonodromyBuilder{S <: System}
+struct ChartParameterMonodromyBuilder{S <: SystemLike}
     system::S
     parameters::Vector{ComplexF64}
     chart::Vector{ComplexF64}
@@ -892,7 +937,7 @@ function (builder::ChartParameterMonodromyBuilder)()
 end
 
 function MonodromySolver(
-        F::System, p::Vector{ComplexF64};
+        F::SystemLike, p::Vector{ComplexF64};
         options::MonodromyOptions = MonodromyOptions(),
         tracker_options::TrackerOptions = TrackerOptions(),
     )
@@ -919,8 +964,22 @@ function MonodromySolver(
     )
 end
 
+function _subspace_monodromy_worker(
+        H::AbstractHomotopy, tracker_options::TrackerOptions,
+        L::LinearSubspace{ComplexF64}, n::Int, worker_chart::Vector{ComplexF64},
+    )
+    eg = _endgame_tracker(
+        H, tracker_options, EndgameOptions(; endgame_start = 0.0),
+    )
+    n_u = size(H)[2]
+    return MonodromyWorkerState{typeof(H), LinearSubspace{ComplexF64}}(
+        H, eg, copy(L), zeros(ComplexF64, n), zeros(ComplexF64, n_u),
+        worker_chart,
+    )
+end
+
 function MonodromySolver(
-        F::System, L::LinearSubspace{ComplexF64};
+        F::SystemLike, L::LinearSubspace{ComplexF64};
         options::MonodromyOptions = MonodromyOptions(),
         tracker_options::TrackerOptions = TrackerOptions(),
         intrinsic::Union{Nothing, Bool} = nothing,
@@ -940,18 +999,13 @@ function MonodromySolver(
             He = ExtrinsicSubspaceHomotopy(sys_eval, L, L)
             projective ? AffineChartHomotopy(He, chart) : He
         end
-        eg = _endgame_tracker(
-            H, tracker_options, EndgameOptions(; endgame_start = 0.0),
-        )
-        n_u = size(H)[2]
         # For the intrinsic projective case the chart row is buried inside the
         # wrapped AffineChartSystem, so the worker keeps its own reference for
         # normalizing start points (extrinsic reaches it via the homotopy).
         worker_chart = use_intrinsic && projective ? chart : ComplexF64[]
-        return MonodromyWorkerState{typeof(H), LinearSubspace{ComplexF64}}(
-            H, eg, copy(L), zeros(ComplexF64, n), zeros(ComplexF64, n_u),
-            worker_chart,
-        )
+        # `H` is one of three homotopy types; the call specializes the state on
+        # the branch that produced it.
+        return _subspace_monodromy_worker(H, tracker_options, L, n, worker_chart)
     end
     worker = builder()
     return _monodromy_solver_from_builder(
@@ -1478,7 +1532,7 @@ the expected (co)dimension of a component of `V(F)`. See also
   deduplication.
 """
 function monodromy_solve(
-        F::System,
+        F::SystemLike,
         args...;
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
@@ -1926,13 +1980,13 @@ function threaded_monodromy_solve!(
 end
 
 """
-    solve(F::System, R::MonodromyResult; target_parameters, options...)
+    solve(F::SystemLike, R::MonodromyResult; target_parameters, options...)
 
 Track the solutions of the monodromy result `R` from its parameters to
 `target_parameters` via a parameter homotopy.
 """
 function solve(
-        F::System,
+        F::SystemLike,
         R::MonodromyResult,
         exec::AbstractExecutor = Threaded();
         target_parameters::AbstractVector{<:Number},

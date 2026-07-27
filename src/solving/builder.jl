@@ -6,7 +6,7 @@
 Builder for TotalDegree homotopy. Stores immutable reconstruction data; each call
 produces a fresh `TrackingWorkerState` with independent mutable state.
 """
-struct StraightLineBuilder{S <: System}
+struct StraightLineBuilder{S <: SystemLike}
     degrees::Vector{Int}
     target_system::S
     γ::ComplexF64
@@ -30,7 +30,7 @@ The randomization block `A` and permutation are shared read-only across workers;
 each worker gets a fresh `RandomizedSystem` (independent scratch buffers) around
 a fresh clone of the target evaluator.
 """
-struct RandomizedStraightLineBuilder{S <: System}
+struct RandomizedStraightLineBuilder{S <: SystemLike}
     degrees::Vector{Int}          # squared-up degrees (length n)
     target_system::S
     A::FSMat{ComplexF64}
@@ -56,7 +56,7 @@ Builder for parameter homotopy via ParameterHomotopy (general parameter
 dependence; CoefficientHomotopy's tangent shortcut is only valid for systems
 linear and homogeneous in the parameters).
 """
-struct ParameterBuilder{S <: System}
+struct ParameterBuilder{S <: SystemLike}
     param_system::S
     start_parameters::Vector{ComplexF64}
     target_parameters::Vector{ComplexF64}
