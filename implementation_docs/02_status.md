@@ -332,15 +332,22 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
     `p + eⱼ t`, exact where v2 uses FiniteDiff. A `System` keeps its symbolic strategies,
     which get the parameter derivatives from one tape.
 
+- [x] **Grassmannian geodesic memo** (`src/core/subspace_homotopies.jl`): each subspace homotopy
+  owns a `GeodesicCache`, a round-robin ring of up to 8 geodesics keyed on the Stiefel frame pair
+  the geodesic was built from (`intrinsic(L).X` or `extrinsic(L).A`), so a retarget that revisits
+  a `(start, target)` pair costs a linear scan instead of a Grassmannian SVD. The key is the
+  frames rather than the `LinearSubspace`es because the geodesic is independent of the offsets,
+  and it is compared by value rather than by identity because `set_subspaces!` rebuilds an
+  equal-but-distinct start subspace on every retarget whenever the γ perturbation is on. Frames
+  are stored as copies since `copy!(::LinearSubspace, ::LinearSubspace)` can overwrite a subspace
+  the caller passed in. Per-homotopy rather than v2's module-global LRU of size 128: worker
+  states hold one homotopy each, so the memo needs no lock, and the working set of a monodromy
+  loop or a subspace sweep is a handful of pairs.
+
 ### Not Done
 
 - [ ] **Distributed monodromy**: `DistributedExecutor` covers every route except monodromy,
   whose shared `UniquePoints` dedup set and trace matrix would have to become cross-process
-- [ ] **Cache the Grassmannian geodesic across retargets**: `_set_subspaces!` rebuilds
-  `GrassmannianGeodesic` on every retarget, so a subspace sweep pays one SVD per target and a
-  sweep that revisits a target pays it again. The geodesic depends only on `(start, target)`, so
-  memoizing on that key would make the repeat free. v2 keys a module-global LRU of size 128 on
-  the pair; a per-homotopy cache avoids the shared mutable global that v2 has to lock
 - [ ] Compile-mode benchmark, v2 side: v3 `COMPILED_ALL` vs v2 `:all`, plus fresh-session
   first-solve per v3 default candidate (the v3-only matrix is measured; see `04_compile_modes.md`)
 - [ ] Benchmark CI

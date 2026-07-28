@@ -5,8 +5,6 @@
 # stored at its global path index, so the output is independent of the order in
 # which batches come back.
 
-# Transport seam: every call into `Distributed` goes through this block, so a
-# second backend is a matter of swapping it.
 _transport_workers()::Vector{Int} = Distributed.workers()
 _transport_myid()::Int = Distributed.myid()
 _transport_channel(::Type{T}, n::Int) where {T} =

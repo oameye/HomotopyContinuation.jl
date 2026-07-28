@@ -163,8 +163,6 @@ end
 struct MonodromyLoop{P <: Union{LinearSubspace{ComplexF64}, Vector{ComplexF64}}}
     # p -> p₁ -> p₂ -> p (vector case, 3 segments)
     # p -> p₀₁ -> p₁ -> p₂ -> p (subspace case, 4 segments)
-    # Per-segment geodesics are recomputed on retarget (set_subspaces!), not
-    # cached here.
     p::P
     p₀₁::P # halfway
     p₁::P

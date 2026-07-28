@@ -21,7 +21,8 @@
 # * Solution conversion is not tracker business: the tracker-facing
 #   set_solution!/get_solution! are identity copies; the monodromy solver calls
 #   intrinsic_coordinates!/ambient_coordinates! on the concrete homotopy.
-# * Geodesics are recomputed on retarget (cold path), not cached.
+# * Each homotopy memoizes the geodesics it has built, so a retarget that
+#   revisits a (start, target) pair skips the Grassmannian SVD.
 
 ## Data structure for geodesics in the Grassmannian
 
@@ -33,6 +34,74 @@ struct GrassmannianGeodesic
     γ1::Matrix{ComplexF64}
     B_start::Union{Nothing, Matrix{ComplexF64}} # for base change (extrinsic only)
     B_target::Union{Nothing, Matrix{ComplexF64}}
+end
+
+## Per-homotopy geodesic memo
+
+# Round-robin ring of geodesics keyed on the Stiefel frames they were built from
+# (`X` for intrinsic, `A` for extrinsic descriptions). A homotopy only ever
+# stores frames of one kind, and it holds copies because `copy!(::LinearSubspace,
+# ::LinearSubspace)` may overwrite a subspace the caller handed in.
+const GEODESIC_CACHE_CAPACITY = 8
+
+mutable struct GeodesicCache
+    const start_frames::Vector{Matrix{ComplexF64}}
+    const target_frames::Vector{Matrix{ComplexF64}}
+    const geodesics::Vector{GrassmannianGeodesic}
+    next::Int # slot to overwrite once the ring is full
+end
+
+GeodesicCache() = GeodesicCache(
+    Matrix{ComplexF64}[], Matrix{ComplexF64}[], GrassmannianGeodesic[], 1,
+)
+
+# Index of the cached geodesic for this frame pair, 0 if there is none.
+function _find_geodesic(
+        cache::GeodesicCache, start_frame::Matrix{ComplexF64},
+        target_frame::Matrix{ComplexF64},
+    )::Int
+    for i in eachindex(cache.geodesics)
+        if cache.start_frames[i] == start_frame && cache.target_frames[i] == target_frame
+            return i
+        end
+    end
+    return 0
+end
+
+function _store_geodesic!(
+        cache::GeodesicCache, start_frame::Matrix{ComplexF64},
+        target_frame::Matrix{ComplexF64}, path::GrassmannianGeodesic,
+    )::GrassmannianGeodesic
+    if length(cache.geodesics) < GEODESIC_CACHE_CAPACITY
+        push!(cache.start_frames, copy(start_frame))
+        push!(cache.target_frames, copy(target_frame))
+        push!(cache.geodesics, path)
+    else
+        i = cache.next
+        cache.start_frames[i] = copy(start_frame)
+        cache.target_frames[i] = copy(target_frame)
+        cache.geodesics[i] = path
+        cache.next = i == GEODESIC_CACHE_CAPACITY ? 1 : i + 1
+    end
+    return path
+end
+
+function _geodesic!(
+        cache::GeodesicCache, start::IntrinsicDescription{ComplexF64},
+        target::IntrinsicDescription{ComplexF64},
+    )::GrassmannianGeodesic
+    i = _find_geodesic(cache, start.X, target.X)
+    i == 0 || return cache.geodesics[i]
+    return _store_geodesic!(cache, start.X, target.X, GrassmannianGeodesic(start, target))
+end
+
+function _geodesic!(
+        cache::GeodesicCache, start::ExtrinsicDescription{ComplexF64},
+        target::ExtrinsicDescription{ComplexF64},
+    )::GrassmannianGeodesic
+    i = _find_geodesic(cache, start.A, target.A)
+    i == 0 || return cache.geodesics[i]
+    return _store_geodesic!(cache, start.A, target.A, GrassmannianGeodesic(start, target))
 end
 
 # γ(t) = Q_cos * cos(t Θ) + Q * sin(t Θ) columnwise: t = 0 gives the target
@@ -90,6 +159,7 @@ mutable struct IntrinsicSubspaceHomotopy <: AbstractHomotopy
     start::LinearSubspace{ComplexF64}
     target::LinearSubspace{ComplexF64}
     path::GrassmannianGeodesic
+    const geodesics::GeodesicCache
 
     # For the offset part (linear interpolation)
     const a_minus_b::FSVec{ComplexF64}
@@ -137,7 +207,8 @@ function IntrinsicSubspaceHomotopy(
     start_c = _apply_gamma(g, convert(LinearSubspace{ComplexF64}, start))
     target_c = convert(LinearSubspace{ComplexF64}, target)
 
-    path = GrassmannianGeodesic(intrinsic(start_c), intrinsic(target_c))
+    geodesics = GeodesicCache()
+    path = _geodesic!(geodesics, intrinsic(start_c), intrinsic(target_c))
     Q = path.Q
     n = size(Q, 1)
 
@@ -149,6 +220,7 @@ function IntrinsicSubspaceHomotopy(
         start_c,
         target_c,
         path,
+        geodesics,
         FSVec{ComplexF64}(a - b),
         FSVec{ComplexF64}(copy(b)),
         Ref(complex(NaN, NaN)),
@@ -188,6 +260,7 @@ mutable struct ExtrinsicSubspaceHomotopy <: AbstractHomotopy
     start::LinearSubspace{ComplexF64}
     target::LinearSubspace{ComplexF64}
     path::GrassmannianGeodesic
+    const geodesics::GeodesicCache
 
     # Offsets in the Stiefel bases
     const a0::FSVec{ComplexF64}
@@ -219,7 +292,8 @@ function ExtrinsicSubspaceHomotopy(
     start_c = _apply_gamma(g, convert(LinearSubspace{ComplexF64}, start))
     target_c = convert(LinearSubspace{ComplexF64}, target)
 
-    path = GrassmannianGeodesic(extrinsic(start_c), extrinsic(target_c))
+    geodesics = GeodesicCache()
+    path = _geodesic!(geodesics, extrinsic(start_c), extrinsic(target_c))
     # Get correct coordinates for a and b in the Stiefel homotopy:
     # extrinsic(start).A is replaced by transpose(path.γ1) and
     # extrinsic(target).A by transpose(path.Q_cos).
@@ -232,6 +306,7 @@ function ExtrinsicSubspaceHomotopy(
         start_c,
         target_c,
         path,
+        geodesics,
         FSVec{ComplexF64}(a0),
         FSVec{ComplexF64}(b0),
         FSVec{ComplexF64}(a0 - b0),
@@ -278,7 +353,7 @@ function _set_subspaces!(
     )::Nothing
     H.start = start_c
     H.target = convert(LinearSubspace{ComplexF64}, target)
-    H.path = GrassmannianGeodesic(intrinsic(H.start), intrinsic(H.target))
+    H.path = _geodesic!(H.geodesics, intrinsic(H.start), intrinsic(H.target))
     H.a_minus_b .= intrinsic(H.start).b .- intrinsic(H.target).b
     H.offset .= intrinsic(H.target).b
     H.t_cache[] = complex(NaN)
@@ -293,7 +368,7 @@ function _set_subspaces!(
     )::Nothing
     H.start = start_c
     H.target = convert(LinearSubspace{ComplexF64}, target)
-    H.path = GrassmannianGeodesic(extrinsic(H.start), extrinsic(H.target))
+    H.path = _geodesic!(H.geodesics, extrinsic(H.start), extrinsic(H.target))
     LA.mul!(H.a0, something(H.path.B_start), extrinsic(H.start).b)
     LA.mul!(H.b0, something(H.path.B_target), extrinsic(H.target).b)
     H.a_minus_b .= H.a0 .- H.b0

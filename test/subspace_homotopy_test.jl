@@ -3,7 +3,7 @@ using LinearAlgebra
 using HomotopyContinuationNext
 using HomotopyContinuationNext: IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy,
     set_subspaces!, target_parameters!, intrinsic_coordinates!, ambient_coordinates!,
-    rand_subspace, extrinsic, intrinsic, LinearSubspace,
+    rand_subspace, extrinsic, intrinsic, LinearSubspace, GEODESIC_CACHE_CAPACITY,
     HomotopyEvaluator, Tracker, TrackerCode, track!, evaluate!, evaluate_and_jacobian!,
     taylor!, FSVec, FSMat, TaylorVector
 using DynamicPolynomials: @polyvar, differentiate
@@ -127,6 +127,47 @@ end
             evaluate!(ud, direct, xu, t)
             @test Vector(u) ≈ Vector(ud) atol = 1.0e-12
         end
+    end
+end
+
+@testset "geodesic memo" begin
+    Random.seed!(31)
+    V = rand_subspace(3; dim = 1)
+    W1 = rand_subspace(3; dim = 1)
+    W2 = rand_subspace(3; dim = 1)
+    g = cis(2π * 0.37)
+
+    @testset "$name" for (name, Homotopy) in (
+            ("intrinsic", IntrinsicSubspaceHomotopy),
+            ("extrinsic", ExtrinsicSubspaceHomotopy),
+        )
+        H = Homotopy(quadric.evaluator, V, W1; gamma = g)
+        path1 = H.path
+        target_parameters!(H, W2)
+        @test H.path !== path1
+        target_parameters!(H, W1)
+        @test H.path === path1
+
+        # set_subspaces! rebuilds an equal-but-distinct γ-rotated start, so the
+        # key has to hit by value, not by identity.
+        H = Homotopy(quadric.evaluator, V, W1; gamma = g)
+        path1 = H.path
+        set_subspaces!(H, V, W2)
+        set_subspaces!(H, V, W1)
+        @test H.path === path1
+
+        # The ring is bounded; the oldest entries are evicted.
+        for _ in 1:(GEODESIC_CACHE_CAPACITY + 4)
+            target_parameters!(H, rand_subspace(3; dim = 1))
+        end
+        @test length(H.geodesics.geodesics) == GEODESIC_CACHE_CAPACITY
+        target_parameters!(H, W1)
+        @test H.path !== path1
+
+        # An evicted pair still gives the same geodesic on recomputation.
+        direct = Homotopy(quadric.evaluator, V, W1; gamma = g)
+        @test H.path.Q == direct.path.Q
+        @test H.path.Θ == direct.path.Θ
     end
 end
 
