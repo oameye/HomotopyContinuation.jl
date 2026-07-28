@@ -714,6 +714,15 @@ function _track_polyhedral_path!(
     )
 end
 
+_track_polyhedral_path!(
+    ws::PolyhedralWorkerState, support::Vector{Matrix{Int32}},
+    lifting::Vector{Vector{Int32}}, cell::MixedSubdivisions.MixedCell,
+    x₀::Vector{ComplexF64}, k::Int,
+)::PathResult = _track_polyhedral_path!(
+    ws.toric_tracker, ws.coeff_tracker, ws.toric_homotopy, support, lifting,
+    ws.x_buffer, cell, x₀, k,
+)
+
 function _solve_polyhedral_serial(cache::PolyhedralSolveCache{Serial}, progress)::Result
     support = cache.support
     n_paths = length(cache.start_solutions)
@@ -766,32 +775,7 @@ function _solve_polyhedral_threaded(cache::PolyhedralSolveCache{Threaded}, progr
         @local ws = cache.builder()
 
         cell, x₀ = starts[i]
-
-        min_w, max_w = update_weights!(ws.toric_homotopy, support, lifting, cell; min_weight = 1.0)
-
-        code = _track_toric_phase!(
-            ws.toric_tracker, ws.toric_homotopy, x₀, min_w, max_w,
-            support, lifting, cell,
-        )
-
-        if code != TrackerCode.TRACKER_SUCCESS
-            results[i] = PathResult(ws.toric_tracker; path_number = i, start_solution = Vector{ComplexF64}(x₀))
-        else
-            toric_accepted = ws.toric_tracker.state.accepted_steps
-            toric_rejected = ws.toric_tracker.state.rejected_steps
-
-            copyto!(ws.x_buffer, ws.toric_tracker.state.x)
-
-            init!(ws.coeff_tracker, ws.x_buffer; μ = ws.toric_tracker.state.μ)
-            while ws.coeff_tracker.state.code == EndgameCode.TRACKING
-                step!(ws.coeff_tracker)
-            end
-
-            results[i] = _add_steps(
-                PathResult(ws.coeff_tracker; path_number = i, start_solution = Vector{ComplexF64}(x₀)),
-                toric_accepted, toric_rejected,
-            )
-        end
+        results[i] = _track_polyhedral_path!(ws, support, lifting, cell, x₀, i)
 
         if progress !== nothing
             k = Threads.atomic_add!(counter, 1) + 1
@@ -801,3 +785,8 @@ function _solve_polyhedral_threaded(cache::PolyhedralSolveCache{Threaded}, progr
 
     return _finalize_result(results, n_paths, cache.seed, cache.excess_checker)
 end
+
+# ── CommonSolve.solve!: distributed (extension) ──────────────────────────
+
+CommonSolve.solve!(cache::PolyhedralSolveCache{DistributedExecutor})::Result =
+    _distributed_solve!(cache)

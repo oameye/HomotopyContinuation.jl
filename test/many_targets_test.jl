@@ -39,10 +39,13 @@ using Random: seed!
     # right (target, path) slot for every ratio of targets to tasks, in
     # particular for fewer targets than tasks, where a target's paths are split
     # across several tasks and each task retargets its own homotopy.
+    # At a fixed seed the comparison is exact: how the work was split cannot reach
+    # the value.
     @testset "threaded matches serial for $n target(s)" for n in (1, 2, 3, 7, 20)
         tg = params[1:n]
-        rs = solve(F, S₀, tg, Serial(); start_parameters = p₀, show_progress = false)
-        rt = solve(F, S₀, tg, Threaded(); start_parameters = p₀, show_progress = false)
+        opts = (; start_parameters = p₀, seed = UInt32(0x5EED), show_progress = false)
+        rs = solve(F, S₀, tg, Serial(); opts...)
+        rt = solve(F, S₀, tg, Threaded(); opts...)
         @test length(rs) == length(rt) == n
         @test [last(t) for t in rt] == tg
         for k in 1:n
@@ -50,7 +53,7 @@ using Random: seed!
             a = sort(solutions(first(rs[k])); by = by)
             b = sort(solutions(first(rt[k])); by = by)
             @test length(a) == length(b) == 2
-            @test maximum(norm.(a .- b, Inf)) < 1.0e-8
+            @test a == b
         end
     end
 
@@ -186,16 +189,19 @@ using Random: seed!
     end
 
     # Same (target, path) threading as the parameter sweep, over both regimes.
+    # Several splits of the same work. Clamped because `Threaded` rejects more
+    # tasks than threads.
+    TASK_COUNTS = unique(min.((1, 2, 3, 8), Threads.nthreads()))
+
     @testset "target subspaces, threaded matches serial for $n target(s)" for n in
         (1, 2, 30)
-        for intrinsic in (true, false)
+        for intrinsic in (true, false), nt in TASK_COUNTS
             tg = subspaces[1:n]
-            rs = solve(
-                f, S, L₀, tg, Serial(); intrinsic = intrinsic, show_progress = false,
+            opts = (;
+                intrinsic = intrinsic, seed = UInt32(0x5EED), show_progress = false,
             )
-            rt = solve(
-                f, S, L₀, tg, Threaded(); intrinsic = intrinsic, show_progress = false,
-            )
+            rs = solve(f, S, L₀, tg, Serial(); opts...)
+            rt = solve(f, S, L₀, tg, Threaded(nt); opts...)
             @test length(rs) == length(rt) == n
             for k in 1:n
                 @test last(rt[k]) === tg[k]
@@ -203,7 +209,28 @@ using Random: seed!
                 a = sort(solutions(first(rs[k])); by = by)
                 b = sort(solutions(first(rt[k])); by = by)
                 @test length(a) == length(b) == 2
-                @test maximum(norm.(a .- b, Inf)) < 1.0e-8
+                @test a == b
+            end
+        end
+    end
+
+    # A target's solutions do not depend on how many targets came before it, so
+    # reversing the order reproduces every endpoint. The seed is fixed because it
+    # picks γ, and a different γ is a different homotopy.
+    @testset "target subspaces, order independent" begin
+        for intrinsic in (true, false)
+            tg = subspaces[1:6]
+            opts = (;
+                intrinsic = intrinsic, seed = UInt32(0x5EED), show_progress = false,
+            )
+            fwd = solve(f, S, L₀, tg, Serial(); opts...)
+            rev = reverse(solve(f, S, L₀, reverse(tg), Serial(); opts...))
+            for k in eachindex(tg)
+                by = z -> (round(real(z[1]); digits = 9), round(imag(z[1]); digits = 9))
+                a = sort(solutions(first(fwd[k])); by = by)
+                b = sort(solutions(first(rev[k])); by = by)
+                @test length(a) == length(b) == 2
+                @test a == b
             end
         end
     end

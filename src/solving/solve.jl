@@ -197,6 +197,17 @@ end
 @noinline _solve_total_degree_serial_with_progress(cache::SolveCache{Serial}) =
     _solve_total_degree_serial(cache, make_progress(length(cache.start_solutions), true))
 
+# `start_solution` is copied: the caller's `starts` vector outlives the result.
+function _track_path!(
+        eg::EndgameTracker, x₀::Vector{ComplexF64}, k::Int,
+    )::PathResult
+    track!(eg, x₀)
+    return PathResult(eg; path_number = k, start_solution = copy(x₀))
+end
+
+_track_path!(ws::TrackingWorkerState, x₀::Vector{ComplexF64}, k::Int)::PathResult =
+    _track_path!(ws.tracker, x₀, k)
+
 function _solve_total_degree_serial(cache::SolveCache{Serial}, progress)::Result
     eg = cache.tracker
     n_paths = length(cache.start_solutions)
@@ -205,8 +216,7 @@ function _solve_total_degree_serial(cache::SolveCache{Serial}, progress)::Result
 
     stats = ProgressStats()
     for (k, x₀) in enumerate(cache.start_solutions)
-        track!(eg, x₀)
-        pr = PathResult(eg; path_number = k, start_solution = Vector{ComplexF64}(x₀))
+        pr = _track_path!(eg, x₀, k)
         push!(path_results, pr)
         update_progress!(progress, k, stats, pr)
     end
@@ -244,8 +254,7 @@ function _solve_total_degree_threaded(cache::SolveCache{Threaded}, progress)::Re
     @tasks for i in eachindex(starts)
         @set ntasks = nt
         @local ws = cache.builder()
-        track!(ws.tracker, starts[i])
-        results[i] = PathResult(ws.tracker; path_number = i, start_solution = Vector{ComplexF64}(starts[i]))
+        results[i] = _track_path!(ws, starts[i], i)
         if progress !== nothing
             k = Threads.atomic_add!(counter, 1) + 1
             @lock plock update_progress!(progress, k, stats, results[i])
@@ -254,6 +263,11 @@ function _solve_total_degree_threaded(cache::SolveCache{Threaded}, progress)::Re
 
     return _finalize_result(results, n_paths, cache.seed, cache.excess_checker)
 end
+
+# ── CommonSolve.solve!: distributed (extension) ────────────────────────────
+
+CommonSolve.solve!(cache::SolveCache{DistributedExecutor})::Result =
+    _distributed_solve!(cache)
 
 # ── Convenience: solve(F, alg, exec) ─────────────────────────────────────
 

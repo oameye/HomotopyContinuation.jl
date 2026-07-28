@@ -26,10 +26,6 @@ _tall_qr_ops()::Tuple{QRFactorizeFW, QRSolveFW} =
 
 Data structure for the efficient repeated solution of a square or
 overdetermined linear system `Ax = b`.
-
-**Mutable justification:** `factorized` and `scaled` flags toggle every
-Jacobian update. `lu` and `qr` must be reassigned after factorization.
-All buffer fields are `const`.
 """
 mutable struct MatrixWorkspace <: AbstractMatrix{ComplexF64}
     const A::FSMat{ComplexF64}
@@ -1078,10 +1074,6 @@ end
 
 Wraps a `MatrixWorkspace` with factorization and solve counters.
 Used by the Newton corrector and tracker to track solver statistics.
-
-**Mutable justification:** `factorizations` and `ldivs` are counters that
-are incremented on each solve. They use `Base.RefValue{Int}` fields so that `Jacobian`
-itself remains an immutable struct.
 """
 struct Jacobian
     workspace::MatrixWorkspace

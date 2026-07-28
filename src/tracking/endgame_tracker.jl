@@ -43,9 +43,6 @@ end
     EndgameState
 
 Mutable endgame-specific state. Wraps all per-path endgame tracking data.
-
-**Mutable justification:** Nearly all fields update every endgame step (code, counters,
-accuracy, flags). Buffer fields are `const` — pre-allocated, never reassigned.
 """
 mutable struct EndgameState
     code::EndgameCode.T

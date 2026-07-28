@@ -109,9 +109,9 @@ src/                                         ~17,450 lines total
 │   ├── valuation.jl                 (224)   Puiseux series valuation for endgame detection
 │   └── endgame_tracker.jl           (960)   Endgame state machine, singular endpoint handling
 └── solving/
-    ├── executor.jl                  (44)    AbstractExecutor, Serial, Threaded
-    ├── worker_state.jl              (74)    TrackingWorkerState, PolyhedralWorkerState, _clone_system_evaluator
-    ├── builder.jl                   (117)   StraightLineBuilder, CoefficientBuilder, ParameterBuilder, PolyhedralBuilder
+    ├── executor.jl                  (133)   AbstractExecutor, Serial, Threaded, DistributedExecutor
+    ├── worker_state.jl              (117)   TrackingWorkerState, PolyhedralWorkerState, _clone_system_evaluator
+    ├── builder.jl                   (236)   StraightLineBuilder, ParameterBuilder, subspace builders, PolyhedralBuilder
     ├── solve.jl                     (206)   solve() API, CommonSolve integration, serial/threaded dispatch
     ├── total_degree.jl              (167)   Bezout start system
     ├── polyhedral.jl                (513)   Two-phase: toric + coefficient, MixedSubdivisions
@@ -397,26 +397,59 @@ struct Serial <: AbstractExecutor end
 struct Threaded <: AbstractExecutor
     ntasks::Int  # default Threads.nthreads(), validated ≤ nthreads()
 end
+struct DistributedExecutor <: AbstractExecutor
+    pids::Vector{Int}       # empty ⇒ Distributed.workers(), resolved at solve time
+    tasks_per_process::Int  # 0 ⇒ Threads.nthreads() on each process
+    batch_size::Int         # 0 ⇒ derived from path/process/task counts
+end
 ```
 
-`solve(F, alg, exec)` dispatches on executor type via `SolveCache{E,B}` / `PolyhedralSolveCache{E,B,S}`.
+`solve(F, alg, exec)` dispatches on executor type via `SolveCache{E,B,C}`,
+`PolyhedralSolveCache{E,B,S,C}` and `WorkerSolveCache{E,W,B}`.
 
-**Builder pattern** — each builder stores immutable reconstruction data and produces fresh
-worker state per task via `builder()`:
+**Builder pattern.** Each builder stores immutable reconstruction data and produces fresh
+worker state per task via `builder()`. Nine live in `solving/builder.jl`, plus two in
+`solving/monodromy.jl`:
 
 ```julia
-StraightLineBuilder  → TrackingWorkerState    (TotalDegree)
-CoefficientBuilder   → TrackingWorkerState    (parameter homotopy)
-PolyhedralBuilder    → PolyhedralWorkerState  (two-phase polyhedral)
+StraightLineBuilder             → TrackingWorkerState   (TotalDegree)
+RandomizedStraightLineBuilder   → TrackingWorkerState   (squared-up overdetermined)
+ParameterBuilder                → TrackingWorkerState   (parameter homotopy)
+SlicedStraightLineBuilder       → TrackingWorkerState   (total degree against a slice)
+ParameterRetargetBuilder        → AmbientWorkerState    (retargeted parameter homotopy)
+ExtrinsicSubspaceBuilder        → AmbientWorkerState    (subspace move, ambient)
+ChartExtrinsicSubspaceBuilder   → AmbientWorkerState    (projective subspace move)
+IntrinsicSubspaceBuilder        → IntrinsicWorkerState  (subspace move, intrinsic)
+PolyhedralBuilder               → PolyhedralWorkerState (two-phase polyhedral)
 ```
 
 Thread safety: `_clone_system_evaluator(sys)` creates a fresh `SystemEvaluator` from the
 system's `InstructionSequence`s (immutable, shared) with independent interpreter tapes
-(mutable, per-worker). Preserves `CompileMode` — INTERPRETED rebuilds interpreters,
+(mutable, per-worker). It preserves `CompileMode`: INTERPRETED rebuilds interpreters,
 COMPILED/COMPILED_ALL re-generates `@RuntimeGeneratedFunction`s.
 
-OhMyThreads `@tasks`/`@local` handles work distribution — `@local` creates one worker state
+OhMyThreads `@tasks`/`@local` handles work distribution. `@local` creates one worker state
 per task (amortized), not per path.
+
+**Distributed** (`ext/HomotopyContinuationNextDistributedExt.jl`, weakdeps `Distributed` and
+`Serialization`). The same flat index space as the threaded loops, split across processes:
+
+- Core owns the executor type and the `_distributed_solve!` / `_distributed_sweep_entries`
+  hooks. The extension fills them in. The untyped fallbacks in `executor.jl` throw an
+  actionable error, and being less specific than the extension's methods, both can be
+  precompiled (a method the extension had to overwrite could not be).
+- The driver queues index batches on a `RemoteChannel` and issues one long-lived
+  `remotecall_wait` per process, skipping any surplus process the queue is too short to
+  reach. Each process loops: take a batch, claim indices from it with an atomic counter
+  shared by its tasks, put back the batch's `PathResult`s. Only the loop task touches the
+  channels, so socket traffic stays on one thread per process. Worker states persist across
+  batches but are built only as tasks come to need them, so a small solve never pays for a
+  full pool on every process.
+- Every result is written at its global path index, so at a fixed seed a `DistributedExecutor`
+  result is bit-identical to `Serial()` on every route, sweeps included, at any batch size.
+- Builders ship as plain data: `Serialization` methods for `System`, `_SupportSystem` and
+  `CompositionSystem` write the `InstructionSequence`s and rebuild the evaluator on the far
+  side instead of shipping `FunctionWrapper` closures.
 
 ### Monodromy Stack
 

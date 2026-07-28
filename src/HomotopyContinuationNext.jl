@@ -61,7 +61,7 @@ export WitnessPoints, regeneration
 export NumericalIrreducibleDecomposition, numerical_irreducible_decomposition, nid
 export decompose, ncomponents, n_components, witness_sets, degrees
 export newton, NewtonResult, NewtonCache, NewtonReturnCode
-export Serial, Threaded
+export Serial, Threaded, DistributedExecutor
 # Certification (certify, SolutionCertificate, …) lives in the
 # HomotopyContinuationNextCertification subpackage (lib/), which depends on
 # Arblib. Keeping Arblib out of this core package is what makes core TTFX

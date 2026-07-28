@@ -125,6 +125,9 @@ end
 @noinline _solve_worker_threaded_with_progress(cache::WorkerSolveCache{Threaded}) =
     _track_all_threaded(cache, make_progress(length(cache.start_solutions), true))
 
+CommonSolve.solve!(cache::WorkerSolveCache{DistributedExecutor})::Result =
+    _distributed_solve!(cache)
+
 # ── init: subspace to subspace ─────────────────────────────────────────────
 
 # Both subspaces must live in the ambient space of `F` and have the same

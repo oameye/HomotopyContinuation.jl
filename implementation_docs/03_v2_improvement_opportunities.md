@@ -59,7 +59,13 @@ essentially no numerical gaps.
   s-plane Hermite. Identical.
 - **Endgame**: v2's Cauchy endgame is entirely commented out; both versions use
   the valuation plus s-plane cubic-Hermite singular endgame. v3 ported it
-  faithfully and added some gating improvements.
+  faithfully and added some gating improvements. One v2 field is deliberately
+  absent: `Predictor.use_hermite`, a per-path opt-out from the interpolant whose
+  only writer sits inside that commented-out Cauchy code (alongside a
+  `predictor.branch` field v2's `Predictor` no longer has). Hermite selection is
+  a function of `winding_number` alone, so a second flag would be an invariant to
+  keep in sync for no gain; anything needing to forbid the interpolant sets
+  `winding_number = 1`.
 - **WeightedNorm**: adaptive weights, Higham inverse-inf-norm condition estimate,
   Skeel row scaling, mixed/fixed-precision iterative refinement. All present.
 
@@ -105,8 +111,8 @@ So the genuine opportunities are narrow and specific, listed below by impact.
 - **Resolved**: the scan became a sort-and-window sweep, and symmetry is opt-in via
   `recluster`. The sweep's sort key `Re(x₁) + Im(x₁)` is not preserved by a group
   action, so orbit images cannot be found by the sweep; `_orbit_merge!` indexes one
-  representative per proximity cluster in a `UniquePoints` tree instead, which
-  already walks orbits in `search_in_radius`.
+  representative per proximity cluster in a `VoronoiTree` instead and unions each
+  representative with every representative its orbit images land on.
 
 ## Tier 2: cheap, low-risk performance wins
 

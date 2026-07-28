@@ -111,9 +111,8 @@ mutable struct IntrinsicSubspaceHomotopy <: AbstractHomotopy
     const tx2::TaylorVector{3, ComplexF64}
     const tx3::TaylorVector{4, ComplexF64}
 
-    # Genericity perturbation applied to the start subspace; reapplied on every
-    # set_subspaces! retarget so all monodromy loops trace consistently
-    # perturbed paths (|gamma| = 1, or exactly 1 when disabled).
+    # Genericity perturbation of a caller-supplied start subspace; |gamma| = 1,
+    # or exactly 1 when disabled.
     const gamma::ComplexF64
 end
 
@@ -205,9 +204,8 @@ mutable struct ExtrinsicSubspaceHomotopy <: AbstractHomotopy
     const taylor_t_cache::Base.RefValue{ComplexF64}
     const taylor_γ::NTuple{4, Matrix{ComplexF64}}
 
-    # Genericity perturbation applied to the start subspace; reapplied on every
-    # set_subspaces! retarget so all monodromy loops trace consistently
-    # perturbed paths (|gamma| = 1, or exactly 1 when disabled).
+    # Genericity perturbation of a caller-supplied start subspace; |gamma| = 1,
+    # or exactly 1 when disabled.
     const gamma::ComplexF64
 end
 
@@ -266,10 +264,19 @@ Update the homotopy `H` to track from the linear subspace `start` to `target`.
 All t-caches are invalidated with `complex(NaN)` (a 0.0 sentinel would serve
 a stale γ if the first query after a retarget is exactly t = 0).
 """
-function set_subspaces!(
-        H::IntrinsicSubspaceHomotopy, start::LinearSubspace, target::LinearSubspace,
+set_subspaces!(
+    H::SubspaceHomotopy, start::LinearSubspace, target::LinearSubspace,
+)::Nothing = _set_subspaces!(
+    H, _apply_gamma(H.gamma, convert(LinearSubspace{ComplexF64}, start)), target,
+)
+
+# `start_c` is already γ-rotated: γ belongs to the caller's start subspace, not to
+# each retarget.
+function _set_subspaces!(
+        H::IntrinsicSubspaceHomotopy, start_c::LinearSubspace{ComplexF64},
+        target::LinearSubspace,
     )::Nothing
-    H.start = _apply_gamma(H.gamma, convert(LinearSubspace{ComplexF64}, start))
+    H.start = start_c
     H.target = convert(LinearSubspace{ComplexF64}, target)
     H.path = GrassmannianGeodesic(intrinsic(H.start), intrinsic(H.target))
     H.a_minus_b .= intrinsic(H.start).b .- intrinsic(H.target).b
@@ -280,10 +287,11 @@ function set_subspaces!(
     return nothing
 end
 
-function set_subspaces!(
-        H::ExtrinsicSubspaceHomotopy, start::LinearSubspace, target::LinearSubspace,
+function _set_subspaces!(
+        H::ExtrinsicSubspaceHomotopy, start_c::LinearSubspace{ComplexF64},
+        target::LinearSubspace,
     )::Nothing
-    H.start = _apply_gamma(H.gamma, convert(LinearSubspace{ComplexF64}, start))
+    H.start = start_c
     H.target = convert(LinearSubspace{ComplexF64}, target)
     H.path = GrassmannianGeodesic(extrinsic(H.start), extrinsic(H.target))
     LA.mul!(H.a0, something(H.path.B_start), extrinsic(H.start).b)
@@ -299,7 +307,7 @@ end
 start_parameters!(H::SubspaceHomotopy, p::LinearSubspace)::Nothing =
     set_subspaces!(H, convert(LinearSubspace{ComplexF64}, p), H.target)
 target_parameters!(H::SubspaceHomotopy, q::LinearSubspace)::Nothing =
-    set_subspaces!(H, H.start, convert(LinearSubspace{ComplexF64}, q))
+    _set_subspaces!(H, H.start, convert(LinearSubspace{ComplexF64}, q))
 parameters!(H::SubspaceHomotopy, p::LinearSubspace, q::LinearSubspace)::Nothing =
     set_subspaces!(
     H,

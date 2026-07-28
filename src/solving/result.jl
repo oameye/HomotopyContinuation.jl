@@ -144,12 +144,12 @@ end
     _orbit_merge!(do_union!, path_results, success_idx, prox_root, norms, atol, rtol, actions)
 
 Merge proximity clusters that lie in a common orbit of `actions`, by calling
-`do_union!(a, b)` for every pair of cluster representatives found equivalent.
-Only representatives are indexed, so the tree stays at the size of the
-deduplicated solution set.
+`do_union!(a, b)` for every pair of distinct cluster representatives found
+equivalent. Only representatives are indexed.
 
-Chains of merges stay transitive up to tolerance drift because the actions
-generate a group, the assumption [`search_in_radius`](@ref) already makes.
+Every representative is indexed before any is queried, and each is unioned with
+every representative its images land on, so `actions` need only be a generating
+set of the symmetry group rather than an enumeration of whole orbits.
 """
 function _orbit_merge!(
         do_union!::F, path_results::Vector{PathResult}, success_idx::Vector{Int},
@@ -159,12 +159,21 @@ function _orbit_merge!(
     k = length(success_idx)
     d = length(path_results[success_idx[1]].solution)
     d == 0 && return nothing    # no coordinates, so the sweep already collapsed them
-    UP = UniquePoints(d; distance = InfNorm(), group_actions = actions)
-    for j in 1:k
-        prox_root[j] == j || continue
-        sol = path_results[success_idx[j]].solution
-        found, is_new = add!(UP, sol, j, max(atol, rtol * norms[j]))
-        is_new || do_union!(j, found)
+    tree = VoronoiTree{ComplexF64}(d; distance = InfNorm())
+    reps = Int[j for j in 1:k if prox_root[j] == j]
+    for j in reps
+        insert!(tree, path_results[success_idx[j]].solution, j)
+    end
+    acts = _as_group_actions(actions)
+    for j in reps
+        tol = max(atol, rtol * norms[j])
+        apply_actions(acts, path_results[success_idx[j]].solution) do w
+            l = search_in_radius(tree, w, tol)
+            if l !== nothing && l != j
+                do_union!(j, l)
+            end
+            return false
+        end
     end
     return nothing
 end
@@ -203,7 +212,9 @@ With `group_action` (one function) or `group_actions` (a chain of them, see
 [`GroupActions`](@ref)), solutions in a common orbit are collapsed into one
 cluster, so `nsolutions`, `results` and `solutions` count and return orbits rather
 than individual points, represented by their lowest-numbered path.
-`multiplicity` is unaffected by the collapse.
+`multiplicity` is unaffected by the collapse. The actions need only generate the
+symmetry group: an orbit is collapsed whole even when each action returns a single
+image, as long as the orbit's points are all present among the solutions.
 
 Two solutions are treated as one when their infinity-norm distance is at most
 `max(atol, rtol * norm(solution))`.

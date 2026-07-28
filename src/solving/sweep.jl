@@ -172,6 +172,15 @@ function _sweep_entries(
     return out
 end
 
+_sweep_entries(
+    cache::WorkerSolveCache{DistributedExecutor}, targets::AbstractVector,
+    idxs::Vector, first_q, transform_result::TR, transform_parameters::TP,
+    progress,
+) where {TR, TP} = _distributed_sweep_entries(
+    cache, targets, idxs, first_q, transform_result, transform_parameters,
+    progress,
+)
+
 # ── Flattened output: the per-target arrays concatenated ────────────────────
 
 function _flatten_first(entry::Any)

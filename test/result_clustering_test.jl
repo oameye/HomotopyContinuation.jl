@@ -39,7 +39,8 @@ function brute_force_clusters(
 end
 
 # As above, plus an edge whenever an orbit image lands within tolerance of another
-# solution. Closure is taken pairwise, stricter than a spatial index can be.
+# solution. Closure is taken pairwise, stricter than a spatial index can be. Both
+# directions are checked, since an action need not be an involution.
 function brute_force_orbit_clusters(
         prs::Vector{PathResult}, action; atol::Float64 = ATOL, rtol::Float64 = RTOL,
     )
@@ -47,12 +48,12 @@ function brute_force_orbit_clusters(
     k = length(idx)
     adj = [Int[] for _ in 1:k]
     orbits = [GroupActions(action)(prs[i].solution) for i in idx]
+    near(w, s) = HC.inf_distance(w, s) <=
+        max(atol, rtol * max(HC.inf_norm(w), HC.inf_norm(s)))
     for j in 1:k, l in (j + 1):k
-        s2 = prs[idx[l]].solution
-        equivalent = any(orbits[j]) do w
-            HC.inf_distance(w, s2) <=
-                max(atol, rtol * max(HC.inf_norm(w), HC.inf_norm(s2)))
-        end
+        s1, s2 = prs[idx[j]].solution, prs[idx[l]].solution
+        equivalent = any(w -> near(w, s2), orbits[j]) ||
+            any(w -> near(w, s1), orbits[l])
         if equivalent
             push!(adj[j], l)
             push!(adj[l], j)
@@ -234,6 +235,36 @@ end
         @test all(==(1), mult)
     end
 
+    @testset "one generator collapses the orbit it generates" begin
+        # `rot` generates the order-4 cyclic group but returns a single image, so
+        # the orbit only connects through the chain rot(s) ≈ s′, rot(s′) ≈ s″, ….
+        rot(v) = (im .* v,)
+        s = ComplexF64[1.0, 2.0]
+        orbit = [s, im .* s, -s, -im .* s]
+        for order in ([1, 2, 3, 4], [3, 1, 4, 2], [4, 3, 2, 1])
+            prs = PathResult[fake_path_result(copy(orbit[k])) for k in order]
+            clusters, mult = _cluster_solutions(prs, ATOL, RTOL, rot)
+            @test normalize_clusters(clusters) == [[1, 2, 3, 4]]
+            @test all(==(1), mult)
+        end
+
+        # Random full orbits of the same group, against the brute-force reference.
+        rng = MersenneTwister(8765)
+        for _ in 1:20
+            nvars = rand(rng, 1:4)
+            prs = PathResult[]
+            for _ in 1:rand(rng, 1:6)
+                c = randn(rng, ComplexF64, nvars)
+                for s in (c, im .* c, -c, -im .* c)
+                    jitter = 1.0e-9 * randn(rng, ComplexF64, nvars)
+                    push!(prs, fake_path_result(s .+ jitter; success = rand(rng) < 0.9))
+                end
+            end
+            clusters, _ = _cluster_solutions(prs, ATOL, RTOL, rot)
+            @test normalize_clusters(clusters) == brute_force_orbit_clusters(prs, rot)
+        end
+    end
+
     @testset "tolerances are honored" begin
         s = ComplexF64[1.0, 2.0]
         prs = [fake_path_result(copy(s)), fake_path_result(-s .+ 1.0e-5)]
@@ -279,7 +310,8 @@ end
         (a, b) -> push!(merged, (a, b)), prs, success_idx, prox_root, norms,
         ATOL, RTOL, GroupActions(sign_flip),
     )
-    @test merged == [(3, 1)]
+    # Both sides of the pair, and never a representative with itself.
+    @test merged == [(1, 3), (3, 1)]
 
     # Without an action in play nothing is merged, whatever the layout.
     empty!(merged)

@@ -2,7 +2,7 @@ using Test, Random
 using LinearAlgebra
 using HomotopyContinuationNext
 using HomotopyContinuationNext: IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy,
-    set_subspaces!, intrinsic_coordinates!, ambient_coordinates!,
+    set_subspaces!, target_parameters!, intrinsic_coordinates!, ambient_coordinates!,
     rand_subspace, extrinsic, intrinsic, LinearSubspace,
     HomotopyEvaluator, Tracker, TrackerCode, track!, evaluate!, evaluate_and_jacobian!,
     taylor!, FSVec, FSMat, TaylorVector
@@ -89,6 +89,45 @@ end
     u2 = FSVec{ComplexF64}(zeros(ComplexF64, m))
     evaluate!(u2, H2, xu, complex(0.0))
     @test Vector(u) ≈ Vector(u2) atol = 1.0e-13
+end
+
+# γ belongs to the caller's start subspace, so retargeting leaves the start alone.
+# The retarget test above uses `gamma = nothing`, where re-rotating is a no-op.
+@testset "target_parameters! leaves the start subspace fixed" begin
+    Random.seed!(29)
+    V = rand_subspace(3; dim = 1)
+    W = rand_subspace(3; dim = 1)
+    targets = [rand_subspace(3; dim = 1) for _ in 1:3]
+    g = cis(2π * 0.37)
+
+    @testset "$name" for (name, Homotopy) in (
+            ("intrinsic", IntrinsicSubspaceHomotopy),
+            ("extrinsic", ExtrinsicSubspaceHomotopy),
+        )
+        H = Homotopy(quadric.evaluator, V, W; gamma = g)
+        start0 = extrinsic(H.start)
+        for q in targets
+            target_parameters!(H, q)
+            @test extrinsic(H.start).A == start0.A
+            @test extrinsic(H.start).b == start0.b
+        end
+
+        # Retargeting is equivalent to building the homotopy for that target.
+        H = Homotopy(quadric.evaluator, V, W; gamma = g)
+        for q in targets
+            target_parameters!(H, q)
+        end
+        direct = Homotopy(quadric.evaluator, V, targets[end]; gamma = g)
+        m, n = size(H)
+        xu = FSVec{ComplexF64}(randn(ComplexF64, n))
+        for t in (complex(0.0), complex(0.4, 0.2), complex(1.0))
+            u = FSVec{ComplexF64}(zeros(ComplexF64, m))
+            ud = FSVec{ComplexF64}(zeros(ComplexF64, m))
+            evaluate!(u, H, xu, t)
+            evaluate!(ud, direct, xu, t)
+            @test Vector(u) ≈ Vector(ud) atol = 1.0e-12
+        end
+    end
 end
 
 # K-th Taylor coefficient of t ↦ H(x, t) at t0 for a constant path x, via a

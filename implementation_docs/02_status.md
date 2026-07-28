@@ -20,7 +20,8 @@ linear subspaces, trace test), certification (Krawczyk with Arb fallback, in the
 `trace_test`, `membership`, `regeneration`, `decompose`, `nid`, including projective,
 zero-dimensional, parametric, and rational cases).
 
-Remaining gaps: distributed executor.
+No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
+`DistributedExecutor` cover single-task, multi-task and multi-process tracking.
 
 ## Feature Checklist
 
@@ -125,8 +126,15 @@ Remaining gaps: distributed executor.
   - `regeneration`/`nid`/`intersect` take rational input, through `num_den` and the front-end
     dispatch described under witness sets/NID below. Closes v2's `nid_test.jl`
     "rational systems" testset.
-- [x] Threading via OhMyThreads.jl — `Serial`/`Threaded` executor types, builder/worker-state
+- [x] Threading via OhMyThreads.jl: `Serial`/`Threaded` executor types, builder/worker-state
   pattern for thread-safe evaluator cloning, `@tasks`/`@local` work distribution
+- [x] Multi-process tracking: `DistributedExecutor` in the `Distributed` package extension,
+  covering every route except monodromy (total degree, polyhedral, parameter homotopy,
+  subspace moves in both regimes, and both sweep kinds). Dynamic batching over a
+  `RemoteChannel`, each process internally threaded, results stored by global path index so
+  that at a fixed seed they are bit-identical to `Serial()` at any batch size.
+  `Serialization` methods for `System`, `_SupportSystem` and `CompositionSystem` ship builders
+  as plain data
 - [x] Overdetermined systems: `RandomizedSystem` square-up (identity block plus random fold of
   the lowest-degree equations, permutation keeps degrees exact), wired into total-degree
   (squared-up evaluator) and polyhedral (merged support/coefficients), excess-solution
@@ -326,7 +334,13 @@ Remaining gaps: distributed executor.
 
 ### Not Done
 
-- [ ] **Distributed executor**: extend `AbstractExecutor` with a `Distributed` type for multi-process path tracking (Distributed.jl / MPI)
+- [ ] **Distributed monodromy**: `DistributedExecutor` covers every route except monodromy,
+  whose shared `UniquePoints` dedup set and trace matrix would have to become cross-process
+- [ ] **Cache the Grassmannian geodesic across retargets**: `_set_subspaces!` rebuilds
+  `GrassmannianGeodesic` on every retarget, so a subspace sweep pays one SVD per target and a
+  sweep that revisits a target pays it again. The geodesic depends only on `(start, target)`, so
+  memoizing on that key would make the repeat free. v2 keys a module-global LRU of size 128 on
+  the pair; a per-homotopy cache avoids the shared mutable global that v2 has to lock
 - [ ] Compile-mode benchmark, v2 side: v3 `COMPILED_ALL` vs v2 `:all`, plus fresh-session
   first-solve per v3 default candidate (the v3-only matrix is measured; see `04_compile_modes.md`)
 - [ ] Benchmark CI
@@ -338,8 +352,8 @@ Remaining gaps: distributed executor.
 
 - Two solution-dedup mechanisms: `Result` clustering (`_cluster_solutions`, union-find) and
   `UniquePoints`/`VoronoiTree` from the monodromy port. The two now meet in `_orbit_merge!`,
-  which indexes proximity-cluster representatives in a `UniquePoints` tree to get group-action
-  awareness. Consolidating the proximity sweep itself onto the VoronoiTree would likely speed up
+  which indexes proximity-cluster representatives in a `VoronoiTree` and walks their orbit
+  images itself to get group-action awareness. Consolidating the proximity sweep itself onto the VoronoiTree would likely speed up
   large results, but changes solution-count semantics (transitive closure vs first-match), so it
   needs its own tests (see `01_decisions.md`, "Two solution-dedup mechanisms exist")
 - Two threading coordinators: OhMyThreads executor for `solve()`, Channel job queue for threaded

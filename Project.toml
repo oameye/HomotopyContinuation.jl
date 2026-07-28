@@ -20,8 +20,16 @@ ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 RuntimeGeneratedFunctions = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
 
+[weakdeps]
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
+
+[extensions]
+HomotopyContinuationNextDistributedExt = ["Distributed", "Serialization"]
+
 [compat]
 CommonSolve = "0.2.6"
+Distributed = "1"
 DynamicPolynomials = "0.6"
 EnumX = "1"
 FixedSizeArrays = "1"
@@ -36,6 +44,7 @@ Printf = "1"
 ProgressMeter = "1.7"
 Random = "1"
 RuntimeGeneratedFunctions = "0.5.17"
+Serialization = "1"
 Test = "1"
 julia = "1.11"
 

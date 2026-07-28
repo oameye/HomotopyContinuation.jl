@@ -12,15 +12,10 @@ end
 Stores Taylor coefficient data and scratch buffers for predicting the next point
 along a homotopy continuation path. Uses implicit differentiation of H(x(t),t)=0
 to compute Taylor coefficients up to order 3, then applies Pade (2,1) approximation.
-
-**Mutable justification:** `method`, `use_hermite`, `trust_region`, `local_error`,
-`cond_H_x`, `t`, `tx_norm`, `prev_t`, and `winding_number` are updated at every
-predictor step. Buffer fields (`tx3`, `tv2`, `xtemp`, `u`, `prev_tx1`) are `const`.
 """
 mutable struct Predictor
     method::PredictionMethod.T
     const order::Int
-    use_hermite::Bool
     trust_region::Float64
     local_error::Float64
     cond_H_x::Float64
@@ -39,7 +34,6 @@ function Predictor(m::Int, n::Int)
     return Predictor(
         PredictionMethod.PADE21,
         4,                                             # order
-        true,                                          # use_hermite
         Inf,                                           # trust_region
         NaN,                                           # local_error
         NaN,                                           # cond_H_x

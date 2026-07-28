@@ -96,9 +96,6 @@ end
 # s ∈ [0, abs_Δ] is the current arc-length parameter.
 # forward == true  → s increases from 0 to abs_Δ (abs(start) < abs(target))
 # forward == false → s decreases from abs_Δ to 0
-#
-# Mutable justification: s and s′ are advanced every tracker step.
-# start, target, abs_Δ, forward are reset via reinit! for each new path segment.
 mutable struct SegmentStepper
     start::ComplexF64
     target::ComplexF64

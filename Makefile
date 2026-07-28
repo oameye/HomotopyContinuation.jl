@@ -34,7 +34,7 @@ compare: ## Compare all categories against HomotopyContinuation v2
 	$(JULIA) --project=benchmark benchmark/compare/runcompare.jl
 
 format: ## Format all Julia files with Runic
-	runic --inplace src/ test/ benchmark/ $(CERT)/src/ $(CERT)/test/
+	runic --inplace src/ ext/ test/ benchmark/ $(CERT)/src/ $(CERT)/test/
 
 deps: ## Instantiate all environments
 	$(JULIA) --project -e 'using Pkg; Pkg.instantiate()'

@@ -70,11 +70,6 @@ end
     TrackerState
 
 Mutable state for the path tracker.
-
-**Mutable justification:** Nearly all fields are updated every tracker step
-(step size, accuracy, omega, counters, code, flags). Buffer fields (`x`, `x̂`,
-`x̄`, `norm`, `jacobian`) are `const` because they are pre-allocated and never
-reassigned. `segment` is reassigned in `init!` when a new path segment begins.
 """
 mutable struct TrackerState
     const x::FSVec{ComplexF64}

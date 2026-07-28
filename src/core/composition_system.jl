@@ -298,6 +298,21 @@ _composition_stages(F::System)::Vector{CompositionStage} = CompositionStage[
 ]
 _composition_stages(C::CompositionSystem)::Vector{CompositionStage} = copy(C.stages)
 
+"""
+    _stage_system(stage) -> System
+
+The `System` a stage was built from, recovered from the cloner behind its factory
+thunk. The thunk is the only place a stage holds its system, which is what keeps
+`CompositionStage` one concrete type at any composition depth.
+"""
+_stage_system(stage::CompositionStage)::System =
+    _unwrap_cloner(stage.factory.obj).system
+
+# A `FunctionWrapper` keeps its callable as whatever `Base.cconvert(Ref{objT},
+# obj)` produced, which for an immutable cloner is a `RefValue`.
+_unwrap_cloner(cloner::_SystemCloner)::_SystemCloner = cloner
+_unwrap_cloner(ref::Base.RefValue{<:_SystemCloner})::_SystemCloner = ref[]
+
 function _fold_composition(stages::Vector{CompositionStage})::SystemEvaluator
     evaluator = stages[1].factory()
     for k in 2:length(stages)

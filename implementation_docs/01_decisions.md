@@ -80,6 +80,22 @@ A 50-expression bypass threshold regressed instruction counts 30-65%. `opt_cse` 
 
 Thread safety by reconstruction, not cloning. `Builder` stores immutable data (degrees, system, γ, options) and produces a fresh `WorkerState` per call. `_clone_system_evaluator` builds new interpreter tapes from shared `InstructionSequence`s and preserves `CompileMode` (re-generating RGFs). OhMyThreads `@tasks`/`@local` creates one worker state per task, not per path. `deepcopy` was rejected: it copies immutable data wastefully and mishandles RGFs.
 
+### Distributed.jl over MPI or Dagger
+
+Path tracking is an embarrassingly parallel flat map: no inter-path communication, and one start vector in, one `PathResult` out. Interconnect bandwidth and latency, which is MPI's advantage, buys nothing here; what matters is dynamic load balancing, because per-path cost ranges from a handful of steps to `max_steps`. Distributed.jl is a stdlib, gives `RemoteChannel` for free, and is what the cluster launchers (`SlurmClusterManager.jl`, `ClusterManagers.jl`) target, so a user whose workers are already up can use it. Dagger.jl schedules heterogeneous DAGs with data dependencies, which a one-level fan-out does not need, and its scheduler would have to be fought for reproducible result ordering. DistributedArrays.jl distributes array data, which is not the shape of this problem. `DistributedNext.jl` was considered for its multithreaded-worker fixes, but it cannot interoperate with Distributed at all (its workers and Distributed's are mutually unreachable), so choosing it would lock out anyone whose workers were launched by a Distributed-based manager. The relevant thread-safety concern is avoided by design instead: only one task per process touches the sockets.
+
+### One socket task per process, batches over a channel
+
+Batches of path indices go out on a `RemoteChannel`; each process takes one, runs it across its tasks, and puts the results back. Static contiguous chunks were rejected because a process that draws a run of expensive paths would hold up the whole solve. The per-process loop is sequential with respect to the channels: it takes a batch, fans the batch out to its tasks with an atomic index counter, and only then puts results back, so no worker has several threads writing to a socket. Worker states outlive the batch that created them, since a state carries fresh interpreter tapes and, under a compiled mode, freshly generated code. They are built lazily rather than up front: a process builds a state only when a task is there to use it, and a process the batch queue is too short to reach is never called at all, so a small solve on a large or highly threaded cluster does not pay to build a full pool everywhere. Results are written at their global path index, which keeps `DistributedExecutor` output identical to `Serial()` and independent of the order batches return in.
+
+### Explicit serialization for the system types
+
+`System`, `_SupportSystem` and `CompositionSystem` get `Serialization` methods (in the extension, so core gains no `Serialization` dependency) that write the two `InstructionSequence`s plus the surrounding immutable data and rebuild the evaluator through the existing `_build_mode_evaluator`. The generic serializer does survive a round trip (`Serialization` nulls `Ptr` fields and `FunctionWrappers` re-initializes lazily, and RGFs have their own hooks), but it ships every closure and leans on gensym'd closure type names agreeing across processes. It is also about 4x larger on the wire. The tape is the source of truth, so shipping it and rebuilding is both smaller and independent of closure identity.
+
+### Extension hooks instead of extension-defined `solve!`
+
+A method defined in core and overwritten by an extension cannot be precompiled. So core defines `CommonSolve.solve!(::SolveCache{DistributedExecutor})` forwarding to `_distributed_solve!`, whose untyped fallback throws an actionable "load Distributed" error; the extension adds methods on the concrete cache types, which are strictly more specific. Note that `ProgressMeter` depends on `Distributed`, so in practice the extension is always active and that fallback is unreachable for normal use; it is kept as a guard, and the weakdep still keeps `Serialization` and the distributed code itself out of core.
+
 ### Task-local RNG for reproducibility
 
 `solve()` passes a `Random.MersenneTwister(seed)` explicitly to all `rand`/`randn` instead of mutating the global RNG. Polyhedral init passes a `_lifting_sampler` closure to `MixedSubdivisions.fine_mixed_cells`. Reproducible and safe under nested parallelism.
@@ -106,6 +122,12 @@ Threading the flattened `(target, path)` index space fixes every regime with one
 |---|---|---|---|---|---|---|
 | per target | 1.36x | 1.58x | 2.26x | 3.42x | 4.52x | 5.11x |
 | per (target, path) | 4.31x | 4.20x | 3.70x | 4.69x | 4.94x | 5.38x |
+
+### A subspace homotopy's γ is applied per start, not per retarget
+
+`set_subspaces!` rotates the start subspace by γ for genericity. `target_parameters!` used to route through it passing `H.start`, which had already been rotated, so γ was re-applied on every retarget and after `N` targets the start had been rotated `N+1` times. Monodromy never saw it (it always passes a fresh start), but a sweep did: a target's endpoint depended on how many targets its worker had reached before it, which surfaced as `Threaded` disagreeing with `Serial`. `set_subspaces!` now applies γ and delegates to `_set_subspaces!`, which takes an already-rotated start; `target_parameters!` calls the latter. Retargeting is now equivalent to constructing the homotopy for that target, pinned in `subspace_homotopy_test.jl`.
+
+This was the whole of it: at a fixed seed, a subspace sweep is bit-identical between `Serial`, `Threaded(1..8)` and `DistributedExecutor` at any batch size, in both regimes, and reversing the target order reproduces every endpoint exactly. A residual order dependence appeared to survive the fix only because two `solve` calls that are not given a `seed` each draw their own, and the seed picks γ, so the comparison was between two different homotopies. Compare sweeps at a fixed seed or the tail digits will move for that reason alone.
 
 A target's paths can straddle a chunk boundary, so no task is guaranteed to close a target: progress counts down a per-target atomic and reports the target solved by whichever task takes its last path. Deriving it from `paths_done ÷ n_paths` would overstate completion while tasks sit mid-target.
 
@@ -219,7 +241,7 @@ Every forwarding boundary (`monodromy_solve`, `verify_solution_completeness`, in
 
 ### Two solution-dedup mechanisms exist (known duplication)
 
-`Result` clustering (`_cluster_solutions` in `result.jl`, union-find with transitive closure) predates the monodromy port, which added `UniquePoints`/`multiplicities` backed by `VoronoiTree` (first-match dedup, O(n log n), group-action aware). The one place they meet is `_orbit_merge!`: the sweep's sort key `Re(x₁) + Im(x₁)` is not preserved by a group action, so symmetry-aware clustering indexes one representative per proximity cluster in a `UniquePoints` tree and unions on a hit, instead of duplicating the orbit walk. Consolidating the proximity sweep itself onto the VoronoiTree is tracked in `02_status.md`, but it touches solution-count semantics of every `solve()`.
+`Result` clustering (`_cluster_solutions` in `result.jl`, union-find with transitive closure) predates the monodromy port, which added `UniquePoints`/`multiplicities` backed by `VoronoiTree` (first-match dedup, O(n log n), group-action aware). The one place they meet is `_orbit_merge!`: the sweep's sort key `Re(x₁) + Im(x₁)` is not preserved by a group action, so symmetry-aware clustering indexes one representative per proximity cluster in a `VoronoiTree` and unions on a hit. It indexes every representative before querying any of them, and unions a representative with every representative its images land on rather than stopping at the first hit. Both are needed for transitivity: an action is only required to be a generating set, so a full orbit is connected through a chain of single applications, and a chain is only complete if every edge is discovered against the full index. Querying while building would find only the edges pointing back at already-indexed points, which splits an orbit under, for instance, a single generator of a cyclic group. Consolidating the proximity sweep itself onto the VoronoiTree is tracked in `02_status.md`, but it touches solution-count semantics of every `solve()`.
 
 ### Overdetermined parameter homotopy stays rectangular
 

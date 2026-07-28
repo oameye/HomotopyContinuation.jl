@@ -7,9 +7,6 @@
 
 Tracks per-coordinate Puiseux series valuations along a homotopy path.
 Uses two-path update: direct Taylor formula for m==1, finite differences for m>1.
-
-**Mutable justification:** `logt_1`, `logt_2`, `samples` update every endgame step.
-All FSVec buffer fields are `const` — pre-allocated, never reassigned.
 """
 mutable struct Valuation
     # Current valuations

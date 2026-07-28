@@ -595,13 +595,6 @@ end
 
 Pre-allocated data structures for [`certify`](@ref). The Float64 Krawczyk path
 uses interval interpreters built from `F`'s cached instruction sequences.
-
-**Mutable justification:** the arbitrary-precision `arb` fallback state (~KBs of
-Arb buffers) is only needed when the Float64 path fails, which is the exception,
-not the rule. It is therefore left uninitialized and built lazily on first use
-via [`_arb`](@ref); this is the one non-`const` field. Everything else is
-`const`. The stored `seq_eval`/`seq_jac`/`m` let `_arb` build the fallback
-without keeping a reference to `F`.
 """
 mutable struct CertificationCache
     # Private evaluator clone so refinement newton never touches `F`'s shared
