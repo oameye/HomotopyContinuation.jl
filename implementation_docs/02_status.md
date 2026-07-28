@@ -394,6 +394,138 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
   not the cause and the trigger is still unattributed (`01_decisions.md`, "Dependency
   invalidations are largely inert")
 
+Audited 2026-07-28 over `src/`, `ext/` and `lib/`. Findings below, most consequential first.
+
+- **Six near-identical track-all-paths loops.** `_solve_total_degree_serial` /
+  `_solve_total_degree_threaded` (`solve.jl:211,244`), `_track_all_serial` /
+  `_track_all_threaded` (`subspace_solve.jl:58,74`) and `_solve_polyhedral_serial` /
+  `_solve_polyhedral_threaded` (`polyhedral.jl:726,761`) are the same loop three times over.
+  The two threaded ones differ on exactly one line, the last argument to `_finalize_result`
+  (`cache.excess_checker` against `nothing`); everything else, including the
+  `Threads.Atomic` counter, the `ReentrantLock` and the `@tasks`/`@local` preamble, is
+  character-identical. The polyhedral pair differs only in the per-path call. The serial
+  three differ further by accident rather than by intent: they `push!` onto a `sizehint!`ed
+  `PathResult[]` where the threaded three preallocate `Vector{PathResult}(undef, n)`.
+  The distributed extension already factored exactly this shape, into `_distributed_map`
+  plus the `TrackWork`/`PolyhedralWork`/`SweepWork` callables
+  (`ext/.../distributed_map.jl`, `ext/.../solve.jl:9,17,43`), so the abstraction exists and
+  core is the side that did not adopt it. Cost: any change to progress accounting, result
+  ordering or finalization has to land in three files and be checked in six places.
+- **The progress/inference ritual is repeated six times and is undocumented.** Each
+  `CommonSolve.solve!` picks between a `_with_progress` and a `_without_progress`
+  `@noinline` trampoline, launders the choice through `Base.inferencebarrier`, and calls the
+  shared `@nospecialize`d `_dispatch_solve_policy` (`solve.jl:182,190,231`,
+  `subspace_solve.jl:99,115`, `polyhedral.jl:666,748`). That is 12 trampolines plus 6
+  five-line `solve!` bodies. The device is sound (it splits the `Union{Nothing,
+  ProgressMeter.Progress}` so each loop body specializes on one arm instead of branching on
+  a union at runtime) but `01_decisions.md` documents every other `inferencebarrier` use and
+  not this one, so a new route reproduces it by copying a neighbour rather than by reading a
+  rationale, and nothing states what breaks if it is dropped.
+- **Two spellings of parallelism.** The solve routes take a positional
+  `exec::AbstractExecutor`; `witness_set`, `membership`, `regeneration` and `nid` take a
+  `threading::Bool` kwarg and convert at the last moment with `threading ? Threaded() :
+  Serial()` (`witness_set.jl:165`, `nid.jl:185,218,235`, `regeneration.jl:708`).
+  `monodromy_solve` accepts both and lets the executor win (`monodromy.jl:1686`). 83
+  mentions of `threading` across `src/solving/`. The consequence is not cosmetic: witness
+  sets, NID and regeneration cannot reach `DistributedExecutor` at all, even though the
+  monodromy solver they call into can, and even though those are the routes whose per-loop
+  cost is highest and therefore the ones the ~5 ms channel handoff would disappear against.
+  `membership` additionally hard-codes `nt = Threads.nthreads()` (`witness_set.jl:688`)
+  rather than reading a task count off an executor, so `Threaded(2)` cannot bound it.
+- **Four progress-bar idioms.** `progress.jl` offers `make_progress`/`update_progress!` and
+  `make_many_progress`/`update_many_progress!`; monodromy has its own `ProgressUnknown`
+  pair (`monodromy.jl:1457,1269`); `membership` reuses `make_progress` but drives it with
+  bare `ProgressMeter.next!` under its own lock (`witness_set.jl:687-705`); and
+  `regeneration.jl:279` constructs a `ProgressMeter.Progress` inline. The inline one skips
+  the `progress.tlast += delay` suppression that `make_progress` applies, so a regeneration
+  that finishes inside 0.3 s prints a bar where an equally fast `solve` stays silent. Four
+  spellings of "count something and draw a bar", and the odd one out is a visible behaviour
+  difference rather than a style difference.
+- **Wrapper systems satisfy a ten-method contract that is nowhere declared.** Each of the
+  six `AbstractSystem` wrappers (`TotalDegreeStartSystem`, `RandomizedSystem`,
+  `_StartPairSystem`, `AffineChartSystem`, `SlicedSystem`, `_ComposedSystem`) implements
+  three `evaluate!` variants (F64/F64, DF64-in/F64-out, DF64/DF64), one
+  `evaluate_and_jacobian!` and six `taylor!` variants (orders 1 to 3, scalar and
+  `TaylorVector` parameters). `abstract_types.jl` declares three bare `function ... end`
+  stubs and documents one signature each, so the actual required set is discoverable only by
+  reading an existing wrapper, and a wrapper that omits the DF64 `evaluate!` fails with a
+  `MethodError` inside `extended_prec_refinement_step!` near a singular solution rather than
+  at construction. The two spellings compound it: `RandomizedSystem`,
+  `TotalDegreeStartSystem`, `_StartPairSystem` and `_ComposedSystem` write the six `taylor!`
+  methods out one per `(K, N)` pair, while `SlicedSystem` and `AffineChartSystem` collapse
+  them to two methods generic in `K`. Both are defensible (the explicit form pins the valid
+  `(K, N)` pairs as the repo's signature rule prefers, the generic form removes 16
+  declarations) but nothing records which is the house style, and the generic form silently
+  accepts `(Val{7}, TaylorVector{2})`.
+- **Two wrappers append the projective chart row.** `AffineChartSystem` is `SlicedSystem`
+  with zero linear rows: both append `v'x - 1`, both get its Jacobian row and its order-K
+  Taylor coefficient from the shared `evaluate_chart` / `_chart_taylor_row`
+  (`affine_chart.jl:81,135`), and neither wraps the other. Which one a route picks is per
+  call site and unexplained: `builder.jl:193` and `witness_set.jl:572` build an
+  `AffineChartSystem`, `slice.jl:182` builds a `SlicedSystem` carrying a chart. A new
+  projective route has to guess, and the chart-row Taylor pitfall documented in
+  `01_decisions.md` ("Appended linear rows") now has two places to get wrong.
+- **The certification subpackage depends on 32 core names, 26 of them unexported.** Its
+  `using HomotopyContinuationNext:` list
+  (`lib/HomotopyContinuationNextCertification/src/HomotopyContinuationNextCertification.jl:26`)
+  reaches into the tape compiler and interpreter internals: `_EXEC_INSTRUCTION_SPECS`,
+  `nested_ifs`, `exec_instruction_storage`, `_compile_exec_instructions`,
+  `should_use_index_not_reference`, `instruction_op`, `instruction_output`, `op_call`,
+  `arity`, `ExecInstructionT`, plus `_newton`, `_clone_system_evaluator` and
+  `make_progress`. Only `System`, `Expression`, `solution`, `Result`, `PathResult` and
+  `MonodromyResult` are public. Because the subpackage is a path dependency, no compat bound
+  can express any of this, so renaming an interpreter internal breaks it with no warning and
+  only `make test-cert` notices. Either a named internal surface (an `AcbBackend` seam the
+  Acb interpreter builds against) or an explicit note in `interpreter.jl` /
+  `instruction_sequence.jl` that these names are load-bearing outside core.
+- **The equation front-ends have no named interface.** Eight functions carry one
+  `MP.AbstractPolynomialLike` method and one `Expression` method, scattered across three
+  files: `_regeneration_equations`, `_check_regeneration_input`, `_u_degree`,
+  `_u_start_equation`, `_numerator_system`, `_rename_variables`
+  (`regeneration.jl:333-436`), `_fix_parameters` (`slice.jl:11,45`) and
+  `support_coefficients` (`support.jl:13`), guarded by the two-method predicate
+  `_is_expression_front_end`. Dispatching on the equation type is the right call and is
+  recorded as such above, but nothing lists the set, so adding a third front-end means
+  finding the members by grep and discovering an omission at runtime on whichever route
+  rewrites equations rather than only evaluating them.
+- **`solving/support.jl` is a core-layer file under the solving directory.** It is
+  `include`d between `core/system_evaluator.jl` and `core/system.jl`
+  (`HomotopyContinuationNext.jl:107`) because `System` construction needs
+  `support_coefficients`, even though `Polyhedral` is its only consumer. The include order
+  already documents the real layer; the path does not. Same shape for
+  `TotalDegreeStartSystem`, an `AbstractSystem` living in `solving/total_degree.jl` and
+  consumed by `builder.jl`.
+- **`show` conventions differ across the result types.** `Result` (`result.jl:368`),
+  `MonodromyResult`, `NumericalIrreducibleDecomposition` and `CertificationResult` define
+  multi-line two-argument `show`, which is the method Julia uses inside containers and for
+  `repr`. `PathResult` defines only a `MIME"text/plain"` method
+  (`path_result.jl:193`), so it has no two-argument method at all. Both directions misprint,
+  and both shapes are public return types: sweeps return `Vector{Result}`
+  (`sweep.jl:77`) and `path_results(r)` returns `Vector{PathResult}`. Measured:
+  `show(stdout, [r, r])` prints `Result[Result with 2 tracked paths\n • 2 non-singular
+  solutions (2 real)\n, Result with 2 ...]`, and `show(stdout, path_results(r)[1:1])` prints
+  the full 19-field struct dump. The fix is one method each: a one-line two-argument `show`
+  for both, with the multi-line body moved to `MIME"text/plain"` on `Result` and friends.
+- **`WitnessPoints` is the one `mutable struct` missing `const` on its fixed fields.**
+  `L` and `Lᵤ` are never reassigned (only `R` is, at `regeneration.jl:725,829`) and the
+  struct carries no note on why it is mutable (`regeneration.jl:26`). Two `const` keywords
+  and a sentence. Every other mutable struct in the tree either consts its fixed fields or
+  states why it cannot; `AcbCertCache` is the model, documenting that its buffers are
+  reassigned wholesale by `set_arb_precision!`.
+- **Two stale `kwargs...` docstrings and one real splat.** `multiplicities` and
+  `unique_points` document "The remaining `kwargs` are passed to `UniquePoints`"
+  (`unique_points.jl:113,170`) but their signatures enumerate every keyword explicitly, as
+  the repo requires, so the sentence promises forwarding that does not happen.
+  `DistinctSolutionCertificates(dim::Integer; kwargs...)` (`certification.jl:422`) is the
+  one surviving splat, one hop forwarding one keyword.
+
+Not found, checked: `Any`-typed struct fields (none; the five `::Any` occurrences are
+deliberate dispatch tags on parameter-Taylor builders and unsupported-route stubs),
+`FixedSizeVector`/`FixedSizeMatrix` in struct fields (none), package-global mutable state
+(only the two `const Dict` subscript tables in `expression.jl`), `deepcopy` on a
+FunctionWrapper path (none; the one mention is a comment forbidding it), and TODO/FIXME/HACK
+markers (one, `polyhedral.jl:355`, an upstream request rather than local debt).
+
 ### Infrastructure
 
 - No benchmark CI: regressions go unnoticed
