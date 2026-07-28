@@ -705,9 +705,7 @@ function _monodromy_with_options(
     cp = convert(LinearSubspace{ComplexF64}, L)
     MS = MonodromySolver(F, cp; options = opts, tracker_options = tracker_options)
     return _monodromy_solve!(
-        MS, X, cp, seed;
-        show_progress = show_progress, threading = threading,
-        catch_interrupt = true, warning = false,
+        MS, X, cp, seed, show_progress, threading ? Threaded() : Serial(),
     )
 end
 

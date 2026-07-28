@@ -3,7 +3,10 @@ using HomotopyContinuationNext
 using HomotopyContinuationNext: Serial, Threaded, DistributedExecutor, Result,
     PathResult, TotalDegree, Polyhedral, System, CompileMode
 using HomotopyContinuationNext: _SupportSystem, _stage_system, evaluate!, FSVec,
-    nparameters, _distributed_solve!, _distributed_sweep_entries
+    nparameters, _distributed_solve!, _distributed_sweep_entries,
+    _distributed_monodromy_solve!
+using HomotopyContinuationNext: monodromy_solve, permutations, trace, is_success,
+    MonodromyCode
 using DynamicPolynomials: @polyvar
 using Distributed: Distributed, addprocs, rmprocs, workers, remotecall_eval
 using Serialization: serialize, deserialize
@@ -116,6 +119,9 @@ end
         @test_throws ArgumentError _distributed_solve!(nothing)
         @test_throws ArgumentError _distributed_sweep_entries(
             nothing, [], Int[], nothing, identity, identity, nothing,
+        )
+        @test_throws ArgumentError _distributed_monodromy_solve!(
+            nothing, nothing, nothing, nothing, nothing,
         )
     end
 
@@ -258,6 +264,70 @@ end
                 @test same_sweep(
                     serial, solve(F_curve, starts_V, V, targets, exec; opts...),
                 ) == ""
+            end
+        end
+
+        # Only the tracking is distributed, so this compares solution sets rather
+        # than paths. `target_solutions_count` keeps the heuristic stop from cutting
+        # one of the runs short at a different point.
+        @testset "monodromy" begin
+            G = System(
+                [x^2 + y^2 - a^2, x * y - b^3]; variables = [x, y],
+                parameters = [a, b],
+            )
+            opts = (;
+                seed = UInt32(123), show_progress = false,
+                target_solutions_count = 4, max_loops_no_progress = 50,
+            )
+            serial = monodromy_solve(G, Serial(); opts...)
+            @test nsolutions(serial) == 4
+
+            for exec in (
+                    DistributedExecutor(),
+                    DistributedExecutor(; batch_size = 1),
+                    lockstep,
+                )
+                r = monodromy_solve(G, exec; opts...)
+                @test r.returncode == serial.returncode
+                @test nsolutions(r) == 4
+                for s in solutions(serial)
+                    @test minimum(maximum(abs.(s .- t)) for t in solutions(r)) < 1.0e-8
+                end
+            end
+
+            @testset "permutations" begin
+                r = monodromy_solve(
+                    G, DistributedExecutor(); permutations = true, opts...,
+                )
+                perm = permutations(r)
+                @test size(perm, 1) == 4
+                for k in axes(perm, 2)
+                    @test sort(perm[:, k]) == [1, 2, 3, 4]
+                end
+            end
+
+            # Trace columns are collected remotely and folded into the driver's
+            # trace matrix, which is what stops this run.
+            @testset "subspace with trace test" begin
+                Q = System([x^2 + 2y^2 + 3z^2 + x * y - 1]; variables = [x, y, z])
+                q_opts = (; dim = 2, seed = UInt32(99), show_progress = false)
+                serial_q = monodromy_solve(Q, Serial(); q_opts...)
+                @test nsolutions(serial_q) == 2 && is_success(serial_q)
+                for exec in (DistributedExecutor(), lockstep)
+                    r = monodromy_solve(Q, exec; q_opts...)
+                    @test nsolutions(r) == 2
+                    @test is_success(r)
+                    @test trace(r) !== nothing && trace(r) < 1.0e-10
+                end
+            end
+
+            @testset "timeout" begin
+                r = monodromy_solve(
+                    G, DistributedExecutor(); seed = UInt32(123),
+                    show_progress = false, timeout = 0.0,
+                    target_solutions_count = 4, max_loops_no_progress = 50,
+                )
+                @test r.returncode == MonodromyCode.TIMEOUT
             end
         end
 

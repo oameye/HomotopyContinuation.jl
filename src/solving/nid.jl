@@ -182,9 +182,7 @@ function _decompose_with_monodromy(
     MS = MonodromySolver(G, cp; options = options)
 
     res = _monodromy_solve!(
-        MS, P, cp, seed;
-        show_progress = show_monodromy_progress, threading = threading,
-        catch_interrupt = true, warning = false,
+        MS, P, cp, seed, show_monodromy_progress, threading ? Threaded() : Serial(),
     )
 
     if warning && (something(trace(res), Inf) > options.trace_test_tol)
@@ -216,9 +214,8 @@ function _decompose_with_monodromy(
             active = [master[k] for k in eachindex(master) if !done[k]]
             n_before = length(master)
             res = _monodromy_solve!(
-                MS, active, cp, seed;
-                show_progress = show_monodromy_progress, threading = threading,
-                catch_interrupt = true, warning = false,
+                MS, active, cp, seed, show_monodromy_progress,
+                threading ? Threaded() : Serial(),
             )
             _absorb_monodromy_result!(identity, res, options)
             d += length(master) - n_before      # new points grow the total degree
@@ -234,9 +231,8 @@ function _decompose_with_monodromy(
         for orbit in values(orbit_of)
             P_orbit = master[orbit]
             res_orbit = _monodromy_solve!(
-                MS, P_orbit, cp, seed;
-                show_progress = show_monodromy_progress, threading = threading,
-                catch_interrupt = true, warning = false,
+                MS, P_orbit, cp, seed, show_monodromy_progress,
+                threading ? Threaded() : Serial(),
             )
             something(trace(res_orbit), Inf) < options.trace_test_tol || continue
 

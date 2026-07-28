@@ -88,6 +88,35 @@ Path tracking is an embarrassingly parallel flat map: no inter-path communicatio
 
 Batches of path indices go out on a `RemoteChannel`; each process takes one, runs it across its tasks, and puts the results back. Static contiguous chunks were rejected because a process that draws a run of expensive paths would hold up the whole solve. The per-process loop is sequential with respect to the channels: it takes a batch, fans the batch out to its tasks with an atomic index counter, and only then puts results back, so no worker has several threads writing to a socket. Worker states outlive the batch that created them, since a state carries fresh interpreter tapes and, under a compiled mode, freshly generated code. They are built lazily rather than up front: a process builds a state only when a task is there to use it, and a process the batch queue is too short to reach is never called at all, so a small solve on a large or highly threaded cluster does not pay to build a full pool everywhere. Results are written at their global path index, which keeps `DistributedExecutor` output identical to `Serial()` and independent of the order batches return in.
 
+### Monodromy keeps its shared state on the calling process
+
+Monodromy is not a flat map: the job queue grows as solutions are found, and every result has
+to be deduplicated against every solution so far. Rather than make `UniquePoints` and the trace
+matrix cross-process, `DistributedExecutor` hands out only `track_loop!`. The driver keeps the
+queue, the dedup set, the trace matrix, the statistics and the loop list, so the shared state
+stays single-writer and the dispatch order is the serial one. The algorithm is therefore
+unchanged and `add!` needs no lock. Measured on Steiner (3264 solutions, ~6 ms per loop), the
+driver spends 0.005 ms per result on dedup, scheduling and permutations, and 99.5% of its wall
+time blocked waiting for results, so centralizing that work costs nothing.
+
+What it does cost is a channel handoff per job. Idle, a `RemoteChannel` round trip is 0.15 ms;
+with six tasks consuming, each task waits ~5 ms per handoff, the same order as tracking one
+loop, so at one job per message a task spends as long waiting as working. Hence jobs travel in
+batches (`batch_size`, default 8) and the driver holds a partial batch back while every task
+still has work, which measured 295 to 382 loops/s on Steiner against 160 to 202 serial. Those
+absolute rates move by ±30% run to run on the development machine; the ranking does not.
+
+The gap to `Threaded(6)` (1015 to 1073 loops/s on the same six cores) is that handoff latency,
+and it is neither the payload nor the driver: batching to 32, running the channels in-process
+(`pids = [myid()]`), and giving each process a spare thread for its IO task all leave it where
+it is. The queue is also short in steady state, since a result enqueues one or two follow-ups,
+so batches average 2.3 jobs however large `batch_size` is.
+
+So on one machine `Threaded()` wins by 2x to 4x on equal cores and stays the default.
+Distributed monodromy is for what threads cannot reach: several machines, or loops expensive
+enough (large systems, extended precision, big witness sets) that a fixed ~5 ms per job
+disappears against them.
+
 ### Explicit serialization for the system types
 
 `System`, `_SupportSystem` and `CompositionSystem` get `Serialization` methods (in the extension, so core gains no `Serialization` dependency) that write the two `InstructionSequence`s plus the surrounding immutable data and rebuild the evaluator through the existing `_build_mode_evaluator`. The generic serializer does survive a round trip (`Serialization` nulls `Ptr` fields and `FunctionWrappers` re-initializes lazily, and RGFs have their own hooks), but it ships every closure and leans on gensym'd closure type names agreeing across processes. It is also about 4x larger on the wire. The tape is the source of truth, so shipping it and rebuilding is both smaller and independent of closure identity.

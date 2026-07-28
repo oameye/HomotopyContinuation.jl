@@ -72,6 +72,12 @@ global path index, so the returned [`Result`](@ref) is identical to the one
   `Threads.nthreads()`, which the driver cannot know in advance.
 - `batch_size`: paths per batch. `0` picks a size from the path count, the
   process count and the task count.
+
+[`monodromy_solve`](@ref) is scheduled differently, since its work is generated as
+solutions are found: the calling process keeps the job queue, the deduplication
+and the trace test, and hands out loops. There `batch_size` is loops per message
+(`0` means 8) and two batches per task are in flight, which also bounds how many
+loops still run after a stopping criterion is met.
 """
 struct DistributedExecutor <: AbstractExecutor
     pids::Vector{Int}
@@ -114,6 +120,11 @@ end
 
 function _distributed_solve!(cache)
     Base.@nospecialize cache
+    return _distributed_ext_missing()
+end
+
+function _distributed_monodromy_solve!(executor, MS, results, seed, progress)
+    Base.@nospecialize executor MS results seed progress
     return _distributed_ext_missing()
 end
 

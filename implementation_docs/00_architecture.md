@@ -54,7 +54,8 @@
 
    Parameter families (optional):
    monodromy_solve(F; ...) → MonodromyLoop (ParameterHomotopy round trips)
-         │  serial loop or Channel-based threaded coordinator
+         │  serial loop, Channel-based threaded coordinator, or driver-held
+         │  queue over RemoteChannels (DistributedExecutor)
          ▼
    UniquePoints (VoronoiTree + GroupActions) dedup → MonodromyResult
          │
@@ -109,7 +110,7 @@ src/                                         ~17,450 lines total
 │   ├── valuation.jl                 (224)   Puiseux series valuation for endgame detection
 │   └── endgame_tracker.jl           (960)   Endgame state machine, singular endpoint handling
 └── solving/
-    ├── executor.jl                  (133)   AbstractExecutor, Serial, Threaded, DistributedExecutor
+    ├── executor.jl                  (140)   AbstractExecutor, Serial, Threaded, DistributedExecutor
     ├── worker_state.jl              (117)   TrackingWorkerState, PolyhedralWorkerState, _clone_system_evaluator
     ├── builder.jl                   (236)   StraightLineBuilder, ParameterBuilder, subspace builders, PolyhedralBuilder
     ├── solve.jl                     (206)   solve() API, CommonSolve integration, serial/threaded dispatch
@@ -123,7 +124,7 @@ src/                                         ~17,450 lines total
     ├── voronoi_tree.jl              (275)   VoronoiTree nearest-point search structure
     ├── unique_points.jl             (205)   UniquePoints, multiplicities, unique_points
     ├── group_actions.jl             (116)   GroupActions, SymmetricGroup
-    ├── monodromy.jl                 (1860)  monodromy_solve, trace test, verify_solution_completeness
+    ├── monodromy.jl                 (2335)  monodromy_solve, trace test, verify_solution_completeness
     └── support.jl                   (191)   Extract support/coefficients from MP or Expression
 ```
 
@@ -450,6 +451,12 @@ per task (amortized), not per path.
 - Builders ship as plain data: `Serialization` methods for `System`, `_SupportSystem` and
   `CompositionSystem` write the `InstructionSequence`s and rebuild the evaluator on the far
   side instead of shipping `FunctionWrapper` closures.
+- Monodromy is the one route that is not a flat index space, so it gets its own scheduler
+  (`monodromy.jl` in the extension). The driver keeps the job queue, the `UniquePoints` set and
+  the trace matrix and hands out `MonodromyJob` batches, each carrying its loop and start point;
+  a `MonodromyJobResult` brings back the `PathResult` and that loop's trace columns. Only
+  `track_loop!` runs remotely, so dedup stays single-writer and the dispatch order is the serial
+  one. `Threaded()` is faster on one machine (see `01_decisions.md`).
 
 ### Monodromy Stack
 
@@ -472,7 +479,10 @@ Serial execution runs loops in a plain while loop. Threaded execution
 (`threading = true`, default when `Threads.nthreads() > 1`) uses a
 Channel-based job queue rather than the OhMyThreads executor because the
 workload is dynamic: finished loops enqueue new loops and workers share
-statistics mid-flight (see `01_decisions.md`).
+statistics mid-flight (see `01_decisions.md`). A trailing executor argument
+(`monodromy_solve(F, sols, p, DistributedExecutor())`) overrides `threading` and
+selects the multi-process scheduler instead, which keeps every shared structure
+on the calling process.
 
 `verify_solution_completeness` implements the trace test (del Campo/Rodriguez
 2017, Leykin/Rodriguez/Sottile 2018): it builds the augmented system

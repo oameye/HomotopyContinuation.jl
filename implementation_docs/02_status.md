@@ -129,8 +129,8 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
 - [x] Threading via OhMyThreads.jl: `Serial`/`Threaded` executor types, builder/worker-state
   pattern for thread-safe evaluator cloning, `@tasks`/`@local` work distribution
 - [x] Multi-process tracking: `DistributedExecutor` in the `Distributed` package extension,
-  covering every route except monodromy (total degree, polyhedral, parameter homotopy,
-  subspace moves in both regimes, and both sweep kinds). Dynamic batching over a
+  covering every route (total degree, polyhedral, parameter homotopy,
+  subspace moves in both regimes, both sweep kinds, and monodromy). Dynamic batching over a
   `RemoteChannel`, each process internally threaded, results stored by global path index so
   that at a fixed seed they are bit-identical to `Serial()` at any batch size.
   `Serialization` methods for `System`, `_SupportSystem` and `CompositionSystem` ship builders
@@ -344,10 +344,26 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
   states hold one homotopy each, so the memo needs no lock, and the working set of a monodromy
   loop or a subspace sweep is a handful of pairs.
 
+- [x] **Distributed monodromy** (`ext/.../monodromy.jl`): `monodromy_solve(F, [sols, p],
+  DistributedExecutor())`. The shared state never leaves the calling process: it keeps the job
+  queue, the `UniquePoints` set, the trace matrix, the statistics and the loop list, and hands
+  out single loops as `MonodromyJob`s (loop, start point, its `ω`/`μ`/precision flag) that come
+  back as `MonodromyJobResult`s (the `PathResult` plus, when the trace test is on, that loop's
+  three trace columns). The queue stays on the driver rather than in the `RemoteChannel` so only
+  `batch_size` jobs per task are ever in flight, which is what lets a timeout or a reached
+  `target_solutions_count` drop the rest of a generation instead of waiting it out. Deduplication,
+  permutation recording and the trace fold then run in one thread on one process, and the
+  dispatch order is the serial one, so nothing about the algorithm changes. `track_loop!` gained
+  a trace-sink argument (the solver itself, or a `TraceColumns` for a process with no solver at
+  hand) and the subspace worker builder became a named `SubspaceMonodromyBuilder` so it ships as
+  data like the other seven builders. On one machine this is the slower option and `Threaded()`
+  remains the default: on Steiner over six cores, threads reach ~5x serial and three processes
+  1.2x to 2.2x, the gap being a ~5 ms channel handoff per job against ~6 ms of tracking (measured
+  in `01_decisions.md`). It is the multi-machine route, and it closes the gap on its own once a
+  loop costs much more than the handoff
+
 ### Not Done
 
-- [ ] **Distributed monodromy**: `DistributedExecutor` covers every route except monodromy,
-  whose shared `UniquePoints` dedup set and trace matrix would have to become cross-process
 - [ ] Compile-mode benchmark, v2 side: v3 `COMPILED_ALL` vs v2 `:all`, plus fresh-session
   first-solve per v3 default candidate (the v3-only matrix is measured; see `04_compile_modes.md`)
 - [ ] Benchmark CI

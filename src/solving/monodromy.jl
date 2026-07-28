@@ -194,6 +194,38 @@ function MonodromyLoop(base::LinearSubspace, parameter_sampler::PS) where {PS}
     return MonodromyLoop(L, L₀₁, L₁, L₂)
 end
 
+# A `LoopTrackingJob` made self-contained: everything a consumer needs beyond its
+# own `MonodromyWorkerState`. `id` and `loop_id` are echoed back in the result.
+struct MonodromyJob{P}
+    id::Int
+    loop_id::Int
+    loop::MonodromyLoop{P}
+    x::Vector{ComplexF64}
+    ω::Float64
+    μ::Float64
+    extended_precision::Bool
+    collect_trace::Bool
+end
+
+function MonodromyJob(
+        job::LoopTrackingJob, loop::MonodromyLoop{P}, res::PathResult,
+        collect_trace::Bool,
+    ) where {P}
+    return MonodromyJob{P}(
+        job.id, job.loop_id, loop, solution(res), res.ω, res.μ,
+        res.extended_precision_used, collect_trace,
+    )
+end
+
+# `result === nothing` and `trace === nothing` are independent: a loop can
+# contribute trace columns from its first two segments and fail on a later one.
+struct MonodromyJobResult
+    id::Int
+    loop_id::Int
+    result::Union{Nothing, PathResult}
+    trace::Union{Nothing, Matrix{ComplexF64}}
+end
+
 ##########################
 ## Monodromy Statistics ##
 ##########################
@@ -976,6 +1008,39 @@ function _subspace_monodromy_worker(
     )
 end
 
+struct SubspaceMonodromyBuilder{S <: SystemLike}
+    system::S
+    subspace::LinearSubspace{ComplexF64}
+    chart::Vector{ComplexF64}
+    nvariables::Int
+    tracker_options::TrackerOptions
+    use_intrinsic::Bool
+    projective::Bool
+end
+
+function (builder::SubspaceMonodromyBuilder)()
+    L = builder.subspace
+    sys_eval = _clone_system_evaluator(builder.system)
+    H = if builder.use_intrinsic
+        base_eval = builder.projective ?
+            SystemEvaluator(AffineChartSystem(sys_eval, builder.chart)) : sys_eval
+        IntrinsicSubspaceHomotopy(base_eval, L, L)
+    else
+        He = ExtrinsicSubspaceHomotopy(sys_eval, L, L)
+        builder.projective ? AffineChartHomotopy(He, builder.chart) : He
+    end
+    # For the intrinsic projective case the chart row is buried inside the
+    # wrapped AffineChartSystem, so the worker keeps its own reference for
+    # normalizing start points (extrinsic reaches it via the homotopy).
+    worker_chart = builder.use_intrinsic && builder.projective ?
+        builder.chart : ComplexF64[]
+    # `H` is one of three homotopy types; the call specializes the state on
+    # the branch that produced it.
+    return _subspace_monodromy_worker(
+        H, builder.tracker_options, L, builder.nvariables, worker_chart,
+    )
+end
+
 function MonodromySolver(
         F::SystemLike, L::LinearSubspace{ComplexF64};
         options::MonodromyOptions = MonodromyOptions(),
@@ -987,24 +1052,9 @@ function MonodromySolver(
     projective = is_linear(L) && is_homogeneous(F)
     # All workers must share the SAME chart so deduplication is consistent.
     chart = randn(ComplexF64, n)
-    builder = function ()
-        sys_eval = _clone_system_evaluator(F)
-        H = if use_intrinsic
-            base_eval = projective ?
-                SystemEvaluator(AffineChartSystem(sys_eval, chart)) : sys_eval
-            IntrinsicSubspaceHomotopy(base_eval, L, L)
-        else
-            He = ExtrinsicSubspaceHomotopy(sys_eval, L, L)
-            projective ? AffineChartHomotopy(He, chart) : He
-        end
-        # For the intrinsic projective case the chart row is buried inside the
-        # wrapped AffineChartSystem, so the worker keeps its own reference for
-        # normalizing start points (extrinsic reaches it via the homotopy).
-        worker_chart = use_intrinsic && projective ? chart : ComplexF64[]
-        # `H` is one of three homotopy types; the call specializes the state on
-        # the branch that produced it.
-        return _subspace_monodromy_worker(H, tracker_options, L, n, worker_chart)
-    end
+    builder = SubspaceMonodromyBuilder(
+        F, L, chart, n, tracker_options, use_intrinsic, projective,
+    )
     worker = builder()
     return _monodromy_solver_from_builder(
         worker, builder, n, options, chart, projective,
@@ -1054,47 +1104,92 @@ contracts to the same solution.
 uniqueness_rtol(res::PathResult)::Float64 =
     clamp(0.25 * inv(res.ω)^2, 1.0e-14, max(1.0e-14, sqrt(res.accuracy)))
 
+# Trace-test columns of one loop, for a consumer with no solver at hand.
+# `nothing` unless the loop reached its halfway subspace.
+mutable struct TraceColumns
+    columns::Union{Nothing, Matrix{ComplexF64}}
+end
+
+TraceColumns() = TraceColumns(nothing)
+
+function _accumulate_trace!(
+        MS::MonodromySolver, x₀::Vector{ComplexF64}, x₀₁::Vector{ComplexF64},
+        x₁::Vector{ComplexF64},
+    )::Nothing
+    Base.@lock MS.trace_lock begin
+        for i in eachindex(x₀)
+            MS.trace[i, 1] += x₀[i]
+            MS.trace[i, 2] += x₀₁[i]
+            MS.trace[i, 3] += x₁[i]
+        end
+    end
+    return nothing
+end
+
+function _accumulate_trace!(
+        sink::TraceColumns, x₀::Vector{ComplexF64}, x₀₁::Vector{ComplexF64},
+        x₁::Vector{ComplexF64},
+    )::Nothing
+    sink.columns = [x₀ x₀₁ x₁]
+    return nothing
+end
+
+# Fold columns collected elsewhere into the solver's trace matrix.
+function _accumulate_trace!(MS::MonodromySolver, columns::Matrix{ComplexF64})::Nothing
+    Base.@lock MS.trace_lock begin
+        for j in 1:3, i in axes(columns, 1)
+            MS.trace[i, j] += columns[i, j]
+        end
+    end
+    return nothing
+end
+
 """
     track_loop!(ws, loop::MonodromyLoop, res::PathResult, collect_trace, MS)
+    track_loop!(ws, loop, x, ω, μ, extended_precision, collect_trace, trace_sink)
 
-Track the solution of `res` around the monodromy loop `loop`. Middle segments
-run the raw inner tracker warm-started with the endpoint certificates; the
-final segment back to the base parameters runs the full endgame tracker and
-produces the returned [`PathResult`](@ref). Returns `nothing` if any segment
-fails. When `collect_trace` (subspace loops only), the segment chain goes
-through the halfway subspace `p₀₁` and the column sums for the trace test are
-accumulated into `MS.trace` under `MS.trace_lock`.
+Track the solution of `res` (or the point `x` with certificates `ω`, `μ`,
+`extended_precision`) around the monodromy loop `loop`. Middle segments run the
+raw inner tracker warm-started with those certificates; the final segment back
+to the base parameters runs the full endgame tracker and produces the returned
+[`PathResult`](@ref). Returns `nothing` if any segment fails. When
+`collect_trace` (subspace loops only), the segment chain goes through the
+halfway subspace `p₀₁` and the column sums go to `trace_sink`, either a
+[`MonodromySolver`](@ref) or a [`TraceColumns`](@ref).
 """
 function track_loop!(
         ws::MonodromyWorkerState, loop::MonodromyLoop{P}, res::PathResult,
         collect_trace::Bool, MS::MonodromySolver,
     )::Union{Nothing, PathResult} where {P}
+    return track_loop!(
+        ws, loop, solution(res), res.ω, res.μ, res.extended_precision_used,
+        collect_trace, MS,
+    )
+end
+
+function track_loop!(
+        ws::MonodromyWorkerState, loop::MonodromyLoop{P},
+        x_start::Vector{ComplexF64}, ω::Float64, μ::Float64,
+        extended_precision::Bool, collect_trace::Bool, trace_sink::TS,
+    )::Union{Nothing, PathResult} where {P, TS}
     tr = ws.tracker.tracker
     x = ws.x_buffer
-    copyto!(x, solution(res))
+    copyto!(x, x_start)
 
     if P === LinearSubspace{ComplexF64} && collect_trace
         x₀ = copy(x)
         set_loop_segment!(ws, loop, 1)   # p → p₀₁
-        _track_middle_segment!(ws, res.ω, res.μ, res.extended_precision_used) ||
-            return nothing
+        _track_middle_segment!(ws, ω, μ, extended_precision) || return nothing
         x₀₁ = copy(x)
         set_loop_segment!(ws, loop, 2)   # p₀₁ → p₁
         _track_middle_segment!(ws, tr.state.ω, tr.state.μ, tr.state.extended_prec) ||
             return nothing
         x₁ = copy(x)
-        Base.@lock MS.trace_lock begin
-            for i in 1:length(x₀)
-                MS.trace[i, 1] += x₀[i]
-                MS.trace[i, 2] += x₀₁[i]
-                MS.trace[i, 3] += x₁[i]
-            end
-        end
+        _accumulate_trace!(trace_sink, x₀, x₀₁, x₁)
     else
         # p → p₁ directly (the halfway point is skipped without trace).
         _retarget!(ws, loop.p, loop.p₁)
-        _track_middle_segment!(ws, res.ω, res.μ, res.extended_precision_used) ||
-            return nothing
+        _track_middle_segment!(ws, ω, μ, extended_precision) || return nothing
     end
 
     _retarget!(ws, loop.p₁, loop.p₂)
@@ -1326,41 +1421,36 @@ end
 ## Entrypoint ##
 ################
 
+# The last two default to what monodromy-as-a-subroutine wants; `monodromy_solve`
+# passes both, since there they are the user's to set.
 function _monodromy_solve!(
         MS::MonodromySolver{H, P},
         X::AbstractVector{<:AbstractVector},
         p::P,
-        seed::UInt32;
+        seed::UInt32,
         show_progress::Bool,
-        threading::Bool,
-        catch_interrupt::Bool,
-        warning::Bool,
+        executor::AbstractExecutor,
+        catch_interrupt::Bool = true,
+        warning::Bool = false,
     )::MonodromyResult{P, P} where {H, P}
-    runner = if threading
-        show_progress ?
-            _monodromy_threaded_with_progress! :
-            _monodromy_threaded_without_progress!
-    else
-        show_progress ?
-            _monodromy_serial_with_progress! :
-            _monodromy_serial_without_progress!
-    end
-    # Threading and progress are invocation policy. Keep all four bodies out of
-    # one inferred union so a serial, quiet solve does not compile threaded
-    # scheduling or ProgressMeter.
+    runner = show_progress ?
+        _monodromy_with_progress! : _monodromy_without_progress!
+    # Keeping the two bodies out of one inferred union means a quiet solve does
+    # not compile ProgressMeter. The executor splits the same way one level down,
+    # where `_monodromy_solve_body!` specializes on it.
     runner = Base.inferencebarrier(runner)
     return _dispatch_monodromy_policy(
-        runner, MS, X, p, seed, catch_interrupt, warning,
+        runner, MS, X, p, seed, executor, catch_interrupt, warning,
     )
 end
 
 @noinline function _dispatch_monodromy_policy(
         runner::Function, MS::MonodromySolver{H, P},
         X::AbstractVector{<:AbstractVector}, p::P, seed::UInt32,
-        catch_interrupt::Bool, warning::Bool,
+        executor::AbstractExecutor, catch_interrupt::Bool, warning::Bool,
     )::MonodromyResult{P, P} where {H, P}
-    Base.@nospecialize runner MS X p
-    return runner(MS, X, p, seed, catch_interrupt, warning)
+    Base.@nospecialize runner MS X p executor
+    return runner(MS, X, p, seed, executor, catch_interrupt, warning)
 end
 
 
@@ -1375,40 +1465,21 @@ function _make_monodromy_progress(MS::MonodromySolver)::ProgressMeter.ProgressUn
     return progress
 end
 
-@noinline function _monodromy_serial_without_progress!(
+@noinline function _monodromy_without_progress!(
         MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
-        catch_interrupt::Bool, warning::Bool,
+        executor::AbstractExecutor, catch_interrupt::Bool, warning::Bool,
     )::MonodromyResult{P, P} where {H, P}
     return _monodromy_solve_body!(
-        MS, X, p, seed, nothing, Serial(), catch_interrupt, warning,
+        MS, X, p, seed, nothing, executor, catch_interrupt, warning,
     )
 end
 
-@noinline function _monodromy_serial_with_progress!(
+@noinline function _monodromy_with_progress!(
         MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
-        catch_interrupt::Bool, warning::Bool,
+        executor::AbstractExecutor, catch_interrupt::Bool, warning::Bool,
     )::MonodromyResult{P, P} where {H, P}
     return _monodromy_solve_body!(
-        MS, X, p, seed, _make_monodromy_progress(MS), Serial(),
-        catch_interrupt, warning,
-    )
-end
-
-@noinline function _monodromy_threaded_without_progress!(
-        MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
-        catch_interrupt::Bool, warning::Bool,
-    )::MonodromyResult{P, P} where {H, P}
-    return _monodromy_solve_body!(
-        MS, X, p, seed, nothing, Threaded(), catch_interrupt, warning,
-    )
-end
-
-@noinline function _monodromy_threaded_with_progress!(
-        MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
-        catch_interrupt::Bool, warning::Bool,
-    )::MonodromyResult{P, P} where {H, P}
-    return _monodromy_solve_body!(
-        MS, X, p, seed, _make_monodromy_progress(MS), Threaded(),
+        MS, X, p, seed, _make_monodromy_progress(MS), executor,
         catch_interrupt, warning,
     )
 end
@@ -1426,6 +1497,13 @@ function _run_monodromy_loop!(
         seed::UInt32, progress,
     )::MonodromyCode.T
     return threaded_monodromy_solve!(MS, results, seed, progress)
+end
+
+function _run_monodromy_loop!(
+        executor::DistributedExecutor, MS::MonodromySolver,
+        results::Vector{PathResult}, seed::UInt32, progress,
+    )::MonodromyCode.T
+    return _distributed_monodromy_solve!(executor, MS, results, seed, progress)
 end
 
 function _monodromy_solve_body!(
@@ -1475,8 +1553,16 @@ function _monodromy_solve_body!(
     )
 end
 
+# The executor may trail the positional arguments: `monodromy_solve(F, exec)` or
+# `monodromy_solve(F, sols, p, exec)`. Without one, `threading` picks between
+# `Serial()` and `Threaded()`.
+function _split_monodromy_executor(args::Tuple)
+    (isempty(args) || !(last(args) isa AbstractExecutor)) && return nothing, args
+    return last(args), Base.front(args)
+end
+
 """
-    monodromy_solve(F, [sols, p]; options...)
+    monodromy_solve(F, [sols, p], [executor]; options...)
 
 Solve a polynomial system `F(x; p)` with specified parameters and initial
 solutions `sols` by monodromy techniques. This makes loops in the parameter
@@ -1485,12 +1571,19 @@ space of `F` to find new solutions. If the parameters occur only *linearly* in
 and `p` can be omitted and the generated parameters can be obtained with
 [`parameters`](@ref) from the [`MonodromyResult`](@ref).
 
-    monodromy_solve(F, [sols, L]; dim, codim, intrinsic = nothing, options...)
+    monodromy_solve(F, [sols, L], [executor]; dim, codim, intrinsic = nothing, options...)
 
 Solve the system `[F(x); L(x)] = 0` where `L` is a [`LinearSubspace`](@ref).
 If `sols` and `L` are not provided it is necessary to provide `dim` or `codim`,
 the expected (co)dimension of a component of `V(F)`. See also
 [`linear_subspace_homotopy`](@ref) for the `intrinsic` option.
+
+`executor` is [`Serial`](@ref), [`Threaded`](@ref) or
+[`DistributedExecutor`](@ref) and overrides the `threading` option. Only the loop
+tracking is handed out; loop generation, deduplication and the trace test always
+run in the calling process. [`Threaded`](@ref) is the default and the faster of
+the two on one machine, since a loop costs about as much to hand to another
+process as to track.
 
 ## Options
 
@@ -1521,7 +1614,8 @@ the expected (co)dimension of a component of `V(F)`. See also
   solutions: `:all`, `:random` or `:none`.
 * `seed`: Seed for the random number generator.
 * `target_solutions_count`: Stop once this number of solutions is reached.
-* `threading = Threads.nthreads() > 1`: Enable multithreaded path tracking.
+* `threading = Threads.nthreads() > 1`: Enable multithreaded path tracking. Ignored
+  when an `executor` is given.
 * `timeout`: Maximal number of seconds the computation is allowed to run.
 * `trace_test = true`: Perform a trace test to check completeness (only for
   linear-subspace monodromy).
@@ -1588,6 +1682,9 @@ function monodromy_solve(
 
     Random.seed!(seed)
 
+    exec, args = _split_monodromy_executor(args)
+    executor = exec === nothing ? (threading ? Threaded() : Serial()) : exec
+
     local S, p
     if length(args) == 0
         start_pair = find_start_pair(F)
@@ -1623,7 +1720,12 @@ function monodromy_solve(
         S = sols isa AbstractVector{<:Number} ? [sols] : sols
         p = p_arg
     else
-        throw(ArgumentError("Expected `monodromy_solve(F)` or `monodromy_solve(F, sols, p)`."))
+        throw(
+            ArgumentError(
+                "Expected `monodromy_solve(F, [executor])` or " *
+                    "`monodromy_solve(F, sols, p, [executor])`.",
+            ),
+        )
     end
 
     if p isa LinearSubspace
@@ -1644,9 +1746,7 @@ function monodromy_solve(
             )
         end
         return _monodromy_solve!(
-            MS, S, cp, seed;
-            show_progress = show_progress, threading = threading,
-            catch_interrupt = catch_interrupt, warning = warning,
+            MS, S, cp, seed, show_progress, executor, catch_interrupt, warning,
         )
     else
         cp = convert(Vector{ComplexF64}, p)
@@ -1655,9 +1755,7 @@ function monodromy_solve(
             options = options, tracker_options = tracker_options,
         )
         return _monodromy_solve!(
-            MS, S, cp, seed;
-            show_progress = show_progress, threading = threading,
-            catch_interrupt = catch_interrupt, warning = warning,
+            MS, S, cp, seed, show_progress, executor, catch_interrupt, warning,
         )
     end
 end

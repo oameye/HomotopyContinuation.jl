@@ -10,5 +10,6 @@ const HCN = HomotopyContinuationNext
 include("HomotopyContinuationNextDistributedExt/serialization.jl")
 include("HomotopyContinuationNextDistributedExt/distributed_map.jl")
 include("HomotopyContinuationNextDistributedExt/solve.jl")
+include("HomotopyContinuationNextDistributedExt/monodromy.jl")
 
 end
