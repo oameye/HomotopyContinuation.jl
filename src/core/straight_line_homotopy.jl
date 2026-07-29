@@ -29,7 +29,12 @@ function StraightLineHomotopy(
         γ::ComplexF64 = cis(2π * rand()),
     )
     m, n = size(target)
-    @assert size(start) == (m, n) "Start and target systems must have the same size"
+    size(start) == (m, n) || throw(
+        ArgumentError(
+            "the start system has size $(size(start)), but the target system has " *
+                "size $((m, n)); a homotopy needs both to agree.",
+        ),
+    )
     return StraightLineHomotopy(
         start, target, γ,
         FSVec{ComplexF64}(zeros(ComplexF64, m)),

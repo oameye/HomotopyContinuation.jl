@@ -27,12 +27,6 @@ struct WorkerSolveCache{E <: AbstractExecutor, W, B}
     show_progress::Bool
 end
 
-# Materialize start solutions as owned `Vector{ComplexF64}`s.
-_start_points(
-    starts::AbstractVector{<:AbstractVector{<:Number}},
-)::Vector{Vector{ComplexF64}} = [Vector{ComplexF64}(ComplexF64.(s)) for s in starts]
-_start_points(r::Result)::Vector{Vector{ComplexF64}} = [copy(s) for s in solutions(r)]
-
 # ── One path ───────────────────────────────────────────────────────────────
 
 # `start_solution` is copied, not aliased: the caller's `starts` vector outlives
@@ -214,13 +208,10 @@ end
 # projective representative off the chart is not a solution of it).
 function _subspace_solve_setup(
         F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace,
-        seed::UInt32, target_parameters::Union{Nothing, AbstractVector{<:Number}},
+        seed::UInt32,
     )
-    G = if nparameters(F) > 0 || target_parameters !== nothing
-        _fix_parameters(F, target_parameters)
-    else
-        F
-    end
+    _check_parameter_free(F, "`solve(F, starts, L_start, L_target)`")
+    G = F
     _check_subspace_pair(G, L_start, L_target)
     rng = Random.MersenneTwister(seed)
     gamma = _random_gamma(rng)
@@ -238,18 +229,16 @@ end
 function CommonSolve.init(
         F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace,
         exec::AbstractExecutor = Threaded();
-        intrinsic::Union{Nothing, Bool} = nothing,
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
+        intrinsic::Bool = _default_intrinsic(L_start),
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
         show_progress::Bool = true,
     )
     G, points, chart, gamma = _subspace_solve_setup(
-        F, starts, L_start, L_target, seed, target_parameters,
+        F, starts, L_start, L_target, seed,
     )
-    use_intrinsic = intrinsic === nothing ? dim(L_start) <= codim(L_start) : intrinsic
-    return if use_intrinsic
+    return if intrinsic
         _init_intrinsic_subspace(
             G, points, L_start, L_target, chart, gamma, exec, seed,
             tracker_options, endgame_options, show_progress,
@@ -264,16 +253,16 @@ end
 
 """
     solve(F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace,
-          exec = Threaded(); intrinsic = nothing, options...)
+          exec = Threaded(); intrinsic, options...)
 
 Track the solutions `starts` of `V(F) ∩ L_start` to `V(F) ∩ L_target`. The start
 points and the returned solutions are ambient, i.e. in the coordinates of `F`.
 
-`intrinsic` forces the tracking coordinates: `true` tracks inside the subspace
-(`F(A(t)v + a(t))`), `false` in ambient space (`[F(x); A(t)x - a(t)]`). The
-default picks intrinsic when `dim(L_start) <= codim(L_start)`.
+`intrinsic` chooses the tracking coordinates: `true` tracks inside the subspace
+(`F(A(t)v + a(t))`), `false` in ambient space (`[F(x); A(t)x - a(t)]`). It
+defaults to `dim(L_start) <= codim(L_start)`.
 
-For a parametric `F` pass the parameter values via `target_parameters`.
+`F` must be parameter-free; fix the values first with [`fix_parameters`](@ref).
 
 # Example
 ```julia
@@ -288,8 +277,7 @@ result = solve(F, S₁, L₁, L₂)
 function solve(
         F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace,
         exec::AbstractExecutor = Threaded();
-        intrinsic::Union{Nothing, Bool} = nothing,
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
+        intrinsic::Bool = _default_intrinsic(L_start),
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
@@ -298,7 +286,7 @@ function solve(
     return CommonSolve.solve!(
         CommonSolve.init(
             F, starts, L_start, L_target, exec;
-            intrinsic = intrinsic, target_parameters = target_parameters,
+            intrinsic = intrinsic,
             seed = seed, tracker_options = tracker_options,
             endgame_options = endgame_options, show_progress = show_progress,
         ),

@@ -273,7 +273,7 @@ target_parameters!(
 
 """
     linear_subspace_homotopy(F::System, V::LinearSubspace, W::LinearSubspace;
-                             intrinsic = nothing, gamma = cis(2π * rand()))
+                             intrinsic, gamma = cis(2π * rand()))
 
 Constructs an [`IntrinsicSubspaceHomotopy`](@ref) (if `dim(V) <= codim(V)`, or
 forced via `intrinsic = true`) or an [`ExtrinsicSubspaceHomotopy`](@ref)
@@ -286,12 +286,11 @@ function linear_subspace_homotopy(
         F::System,
         V::LinearSubspace,
         W::LinearSubspace;
-        intrinsic::Union{Nothing, Bool} = nothing,
+        intrinsic::Bool = _default_intrinsic(V),
         gamma::Union{Nothing, ComplexF64} = cis(2 * pi * rand()),
     )
-    use_intrinsic = intrinsic === nothing ? dim(V) <= codim(V) : intrinsic
     projective = is_linear(V) && is_linear(W) && is_homogeneous(F)
-    return if use_intrinsic
+    return if intrinsic
         if projective
             IntrinsicSubspaceHomotopy(
                 SystemEvaluator(on_affine_chart(F)), V, W; gamma = gamma,

@@ -100,13 +100,13 @@ The start solutions of `ri`, including the ones its mask filters out.
 """
 start_solutions(ri::ResultIterator) = ri.cache.start_solutions
 
+# A copy: the constructor pins `length(mask)`, so a `push!` on the internal
+# `BitVector` would break `length(ri)`.
 """
     bitmask(ri::ResultIterator)
 
 The mask selecting which start solutions `ri` tracks.
 """
-# A copy: the constructor pins `length(mask)`, so a `push!` on the internal
-# `BitVector` would break `length(ri)`.
 bitmask(ri::ResultIterator)::BitVector = copy(ri.mask)
 
 """
@@ -154,8 +154,8 @@ _excess_checker(::WorkerSolveCache) = nothing
 
 """
     result_iterator(F::System, alg = TotalDegree()) -> ResultIterator
-    result_iterator(F::System, L::LinearSubspace, alg = TotalDegree(); target_parameters)
-    result_iterator(F::System, starts; start_parameters, target_parameters, options...)
+    result_iterator(F::System, L::LinearSubspace, alg = TotalDegree())
+    result_iterator(F::System, starts, p_start, p_target; options...)
     result_iterator(F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace;
                     intrinsic, options...)
 
@@ -182,41 +182,37 @@ result_iterator(F::System, alg::Polyhedral)::ResultIterator =
     ResultIterator(CommonSolve.init(F, alg, Serial(); show_progress = false))
 
 function result_iterator(
-        F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree();
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
+        F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree()
     )::ResultIterator
     return ResultIterator(
         CommonSolve.init(
             F, L, alg, Serial();
-            target_parameters = target_parameters, show_progress = false,
+            show_progress = false,
         ),
     )
 end
 
 function result_iterator(
-        F::System, L::LinearSubspace, alg::Polyhedral;
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
+        F::System, L::LinearSubspace, alg::Polyhedral
     )::ResultIterator
     return ResultIterator(
         CommonSolve.init(
             F, L, alg, Serial();
-            target_parameters = target_parameters, show_progress = false,
+            show_progress = false,
         ),
     )
 end
 
 function result_iterator(
-        F::System, starts;
-        start_parameters::AbstractVector{<:Number},
-        target_parameters::AbstractVector{<:Number},
+        F::System, starts,
+        p_start::AbstractVector{<:Number}, p_target::AbstractVector{<:Number};
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
     )::ResultIterator
     return ResultIterator(
         CommonSolve.init(
-            F, _start_points(starts), Serial();
-            start_parameters = start_parameters, target_parameters = target_parameters,
+            F, starts, p_start, p_target, Serial();
             seed = seed, tracker_options = tracker_options,
             endgame_options = endgame_options, show_progress = false,
         ),
@@ -225,8 +221,7 @@ end
 
 function result_iterator(
         F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace;
-        intrinsic::Union{Nothing, Bool} = nothing,
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
+        intrinsic::Bool = _default_intrinsic(L_start),
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
@@ -234,7 +229,7 @@ function result_iterator(
     return ResultIterator(
         CommonSolve.init(
             F, starts, L_start, L_target, Serial();
-            intrinsic = intrinsic, target_parameters = target_parameters,
+            intrinsic = intrinsic,
             seed = seed, tracker_options = tracker_options,
             endgame_options = endgame_options, show_progress = false,
         ),

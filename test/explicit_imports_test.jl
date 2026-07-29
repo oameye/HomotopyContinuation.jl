@@ -59,6 +59,7 @@ const QUALIFIED_ACCESS_IGNORE = (
         HomotopyContinuationNext.EndgameCode,  # @enumx module
         HomotopyContinuationNext.MonodromyCode,  # @enumx module
         HomotopyContinuationNext.ReuseLoops,  # @enumx module
+        HomotopyContinuationNext.Irreducibility,  # @enumx module
     )
 
     @test check_no_implicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing

@@ -2,7 +2,7 @@ using Test, Random
 using LinearAlgebra
 using HomotopyContinuationNext
 using HomotopyContinuationNext: UniquePoints, GroupActions, add!, multiplicities,
-    unique_points, InfNorm
+    unique_points, InfNorm, satisfies_triangle_inequality
 
 @testset "UniquePoints" begin
     Random.seed!(0x75b1)
@@ -395,4 +395,29 @@ end
     UP = unique_points(W)
     @test length(UP) == 8
     @test unique_points(W; atol = 0.0, rtol = 0.0) == W
+end
+
+# Pruning is only sound for a metric, and probing random triples to decide that
+# would make deduplication depend on the ambient RNG.
+@testset "triangle inequality is a trait, not a probe" begin
+    non_metric = (x, y) -> 1 - abs(LinearAlgebra.dot(x, y))
+
+    @test satisfies_triangle_inequality(InfNorm())
+    @test !satisfies_triangle_inequality(non_metric)
+
+    Random.seed!(11)
+    a = UniquePoints(3; distance = non_metric)
+    Random.seed!(999)
+    b = UniquePoints(3; distance = non_metric)
+    @test a.tree.triangle_inequality == b.tree.triangle_inequality == false
+    @test UniquePoints(3).tree.triangle_inequality
+    opted_in = UniquePoints(3; distance = non_metric, triangle_inequality = true)
+    @test opted_in.tree.triangle_inequality
+
+    # Constructing one must not advance the ambient stream.
+    Random.seed!(7)
+    x = rand()
+    Random.seed!(7)
+    UniquePoints(3; distance = non_metric)
+    @test x == rand()
 end

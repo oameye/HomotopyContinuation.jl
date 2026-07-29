@@ -25,8 +25,8 @@ using Random: seed!
 
     @testset "default return shape" begin
         for exec in (Serial(), Threaded())
-            res = solve(
-                F, S₀, params, exec; start_parameters = p₀, show_progress = false,
+            res = solve_targets(
+                F, S₀, p₀, params, exec; show_progress = false,
             )
             @test res isa Vector{Tuple{Result, Vector{Float64}}}
             @test length(res) == length(params)
@@ -43,9 +43,9 @@ using Random: seed!
     # the value.
     @testset "threaded matches serial for $n target(s)" for n in (1, 2, 3, 7, 20)
         tg = params[1:n]
-        opts = (; start_parameters = p₀, seed = UInt32(0x5EED), show_progress = false)
-        rs = solve(F, S₀, tg, Serial(); opts...)
-        rt = solve(F, S₀, tg, Threaded(); opts...)
+        opts = (; seed = UInt32(0x5EED), show_progress = false)
+        rs = solve_targets(F, S₀, p₀, tg, Serial(); opts...)
+        rt = solve_targets(F, S₀, p₀, tg, Threaded(); opts...)
         @test length(rs) == length(rt) == n
         @test [last(t) for t in rt] == tg
         for k in 1:n
@@ -58,10 +58,9 @@ using Random: seed!
     end
 
     @testset "transform_result" begin
-        res = solve(
-            F, S₀, params, Threaded();
-            start_parameters = p₀, transform_result = (r, p) -> real_solutions(r),
-            show_progress = false,
+        res = solve_targets(
+            F, S₀, p₀, params, Threaded();
+            transform_result = (r, p) -> real_solutions(r), show_progress = false,
         )
         @test res isa Vector{Vector{Vector{Float64}}}
         @test length(res) == length(params)
@@ -69,31 +68,28 @@ using Random: seed!
     end
 
     @testset "flatten" begin
-        res = solve(
-            F, S₀, params, Serial();
-            start_parameters = p₀, transform_result = (r, p) -> real_solutions(r),
+        res = solve_targets(
+            F, S₀, p₀, params, Serial();
+            transform_result = (r, p) -> real_solutions(r),
             flatten = true, show_progress = false,
         )
         @test res isa Vector{Vector{Float64}}
-        nested = solve(
-            F, S₀, params, Serial();
-            start_parameters = p₀, transform_result = (r, p) -> real_solutions(r),
-            show_progress = false,
+        nested = solve_targets(
+            F, S₀, p₀, params, Serial();
+            transform_result = (r, p) -> real_solutions(r), show_progress = false,
         )
         @test length(res) == sum(length, nested)
     end
 
     @testset "flatten rejects non-array entries" begin
-        @test_throws ArgumentError solve(
-            F, S₀, params, Serial();
-            start_parameters = p₀, flatten = true, show_progress = false,
+        @test_throws ArgumentError solve_targets(
+            F, S₀, p₀, params, Serial(); flatten = true, show_progress = false,
         )
     end
 
     @testset "transform_parameters" begin
-        res = solve(
-            F, S₀, 1:20, Serial();
-            start_parameters = p₀,
+        res = solve_targets(
+            F, S₀, p₀, 1:20, Serial();
             transform_result = (r, p) -> (real_solutions(r), p),
             transform_parameters = _ -> rand(3),
             show_progress = false,
@@ -108,10 +104,9 @@ using Random: seed!
         for n in (1, 3, 20)
             calls = Ref(0)
             counted = q -> (calls[] += 1; q)
-            solve(
-                F, S₀, params[1:n], exec;
-                start_parameters = p₀, transform_parameters = counted,
-                show_progress = false,
+            solve_targets(
+                F, S₀, p₀, params[1:n], exec;
+                transform_parameters = counted, show_progress = false,
             )
             @test calls[] == n
         end
@@ -120,14 +115,11 @@ using Random: seed!
     @testset "solutions match a single-target solve" begin
         q = params[1]
         sweep = first(
-            solve(
-                F, S₀, [q], Serial(); start_parameters = p₀, show_progress = false,
+            solve_targets(
+                F, S₀, p₀, [q], Serial(); show_progress = false,
             ),
         )
-        single = solve(
-            F, S₀, Serial();
-            start_parameters = p₀, target_parameters = q, show_progress = false,
-        )
+        single = solve(F, S₀, p₀, q, Serial(); show_progress = false)
         a1 = sort(solutions(first(sweep)); by = real ∘ first)
         a2 = sort(solutions(single); by = real ∘ first)
         @test length(a1) == length(a2) == 2
@@ -152,15 +144,14 @@ using Random: seed!
         # `target_parameters!` copies into a fixed-length buffer, so a short target
         # must not silently leave stale parameter values behind.
         ragged = [params[1], [1.0, 2.0]]
-        @test_throws ArgumentError solve(
-            F, S₀, ragged, Serial(); start_parameters = p₀, show_progress = false,
+        @test_throws ArgumentError solve_targets(
+            F, S₀, p₀, ragged, Serial(); show_progress = false,
         )
     end
 
     @testset "empty targets" begin
-        @test_throws ArgumentError solve(
-            F, S₀, Vector{Float64}[], Serial();
-            start_parameters = p₀, show_progress = false,
+        @test_throws ArgumentError solve_targets(
+            F, S₀, p₀, Vector{Float64}[], Serial(); show_progress = false,
         )
     end
 
@@ -172,12 +163,15 @@ using Random: seed!
     S = solutions(solve(f, L₀; show_progress = false))
     subspaces = [rand_subspace(2; dim = 1) for _ in 1:30]
 
-    @testset "target subspaces, $label" for (label, intrinsic) in
-        (("auto", nothing), ("intrinsic", true), ("extrinsic", false))
+    # "auto" passes no keyword, so it exercises the computed default.
+    @testset "target subspaces, $label" for (label, kw) in
+        (
+            ("auto", NamedTuple()), ("intrinsic", (; intrinsic = true)),
+            ("extrinsic", (; intrinsic = false)),
+        )
         for exec in (Serial(), Threaded())
-            res = solve(
-                f, S, L₀, subspaces, exec;
-                intrinsic = intrinsic, show_progress = false,
+            res = solve_targets(
+                f, S, L₀, subspaces, exec; show_progress = false, kw...,
             )
             @test res isa Vector{Tuple{Result, LinearSubspace{ComplexF64}}}
             @test all(t -> nsolutions(first(t)) == 2, res)
@@ -200,8 +194,8 @@ using Random: seed!
             opts = (;
                 intrinsic = intrinsic, seed = UInt32(0x5EED), show_progress = false,
             )
-            rs = solve(f, S, L₀, tg, Serial(); opts...)
-            rt = solve(f, S, L₀, tg, Threaded(nt); opts...)
+            rs = solve_targets(f, S, L₀, tg, Serial(); opts...)
+            rt = solve_targets(f, S, L₀, tg, Threaded(nt); opts...)
             @test length(rs) == length(rt) == n
             for k in 1:n
                 @test last(rt[k]) === tg[k]
@@ -223,8 +217,8 @@ using Random: seed!
             opts = (;
                 intrinsic = intrinsic, seed = UInt32(0x5EED), show_progress = false,
             )
-            fwd = solve(f, S, L₀, tg, Serial(); opts...)
-            rev = reverse(solve(f, S, L₀, reverse(tg), Serial(); opts...))
+            fwd = solve_targets(f, S, L₀, tg, Serial(); opts...)
+            rev = reverse(solve_targets(f, S, L₀, reverse(tg), Serial(); opts...))
             for k in eachindex(tg)
                 by = z -> (round(real(z[1]); digits = 9), round(imag(z[1]); digits = 9))
                 a = sort(solutions(first(fwd[k])); by = by)
@@ -239,7 +233,7 @@ using Random: seed!
         for exec in (Serial(), Threaded()), n in (1, 30)
             calls = Ref(0)
             counted = L -> (calls[] += 1; L)
-            solve(
+            solve_targets(
                 f, S, L₀, subspaces[1:n], exec;
                 transform_parameters = counted, show_progress = false,
             )
@@ -250,7 +244,7 @@ using Random: seed!
     @testset "target subspaces of the wrong dimension are rejected" begin
         full = HomotopyContinuationNext._full_subspace(2)
         for intrinsic in (true, false)
-            @test_throws ArgumentError solve(
+            @test_throws ArgumentError solve_targets(
                 f, S, L₀, [subspaces[1], full], Serial();
                 intrinsic = intrinsic, show_progress = false,
             )
@@ -258,7 +252,7 @@ using Random: seed!
     end
 
     @testset "target subspaces, flatten" begin
-        res = solve(
+        res = solve_targets(
             f, S, L₀, subspaces, Serial();
             transform_result = (r, L) -> solutions(r), flatten = true,
             show_progress = false,
@@ -269,7 +263,9 @@ using Random: seed!
 
     @testset "subspace sweep agrees with single moves" begin
         pair = subspaces[1:2]
-        sweep = solve(f, S, L₀, pair, Serial(); intrinsic = false, show_progress = false)
+        sweep = solve_targets(
+            f, S, L₀, pair, Serial(); intrinsic = false, show_progress = false,
+        )
         for (k, L) in enumerate(pair)
             single = solve(
                 f, S, L₀, L, Serial(); intrinsic = false, show_progress = false,

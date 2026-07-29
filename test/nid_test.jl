@@ -26,7 +26,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test isconcretetype(eltype(W))
 
         dec = decompose(W)
-        @test all(is_irreducible, dec)
+        @test all(W -> is_irreducible(W) == Irreducibility.IRREDUCIBLE, dec)
         @test eltype(dec) === eltype(W)
 
         # sorting
@@ -47,8 +47,10 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test seed(N) == s
         @test isconcretetype(typeof(N))
 
-        N = nid(F; seed = nothing, show_progress = false)
-        @test isnothing(seed(N))
+        # Without an explicit seed a random one is drawn and recorded, so the
+        # result always carries a seed that reproduces it.
+        N = nid(F; show_progress = false)
+        @test seed(N) isa UInt32
 
         # seed roundtrip / stability
         N = nid(F; seed = 0xc770fa47, show_progress = false)
@@ -372,7 +374,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         # assertion on an unseeded run is flaky. Seed for a deterministic
         # check; reproducibility relies on regeneration/decompose drawing
         # their randomness from the (seeded) global RNG.
-        N_ACR = nid(F_ACR; seed = 0x1234, show_progress = false)
+        N_ACR = nid(F_ACR; seed = UInt32(0x1234), show_progress = false)
         @test degrees(N_ACR) == Dict(4 => [7])
     end
 
@@ -389,5 +391,61 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
 
         @test ncomponents(NID, 0) == 1
         @test degrees(NID)[0] == [1]
+    end
+
+    # The seed alone determines the result: the same seed from two different
+    # ambient RNG states must agree, and a route must not advance the ambient
+    # stream on the way.
+    @testset "seeds determine the result" begin
+        @polyvar x y z
+        F = [x * y, x * z]
+        s = UInt32(0xBEEF)
+
+        function from_two_states(f)
+            Random.seed!(1)
+            a = f()
+            Random.seed!(2)
+            b = f()
+            return a, b
+        end
+
+        function advances_ambient(f)
+            Random.seed!(7)
+            a = rand()
+            Random.seed!(7)
+            f()
+            return a != rand()
+        end
+
+        reg = () -> regeneration(
+            F; seed = s, show_progress = false, threading = false,
+        )
+        R1, R2 = from_two_states(reg)
+        @test degree.(R1) == degree.(R2)
+        @test !advances_ambient(reg)
+
+        dec = () -> nid(F; seed = s, show_progress = false, threading = false)
+        N1, N2 = from_two_states(dec)
+        @test degrees(N1) == degrees(N2)
+        @test !advances_ambient(dec)
+
+        W = witness_set(System([x^2 + y^2 - 5]); seed = s, show_progress = false)
+        cut = () -> intersect(W, x - y; seed = s)
+        I1, I2 = from_two_states(cut)
+        @test degree(I1) == degree(I2)
+        @test !advances_ambient(cut)
+
+        @polyvar a b c
+        Fp = System(
+            [x^2 + y^2 - 1, a * x + b * y + c];
+            variables = [x, y], parameters = [a, b, c],
+        )
+        mono = () -> monodromy_solve(
+            Fp; seed = s, show_progress = false, threading = false,
+        )
+        M1, M2 = from_two_states(mono)
+        by = t -> (round(real(t[1]); digits = 8), round(imag(t[1]); digits = 8))
+        @test sort(solutions(M1); by = by) ≈ sort(solutions(M2); by = by)
+        @test !advances_ambient(mono)
     end
 end

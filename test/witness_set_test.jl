@@ -4,7 +4,8 @@ using HomotopyContinuationNext
 using HomotopyContinuationNext: corank, extrinsic, TrackerOptions,
     IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy,
     EndgameTracker, Tracker, HomotopyEvaluator, PathResult,
-    intrinsic_coordinates!, ambient_coordinates!, track!, is_success, FSVec
+    intrinsic_coordinates!, ambient_coordinates!, track!, is_success, FSVec,
+    fix_parameters
 using DynamicPolynomials: @polyvar
 import MultivariatePolynomials as MP
 
@@ -40,8 +41,8 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test trace_test(W) < 1.0e-8
         @test_throws MethodError trace_test(W; shwo_progress = false)
 
-        W_seed₁ = witness_set(F; seed = 0x1234, threading = false, show_progress = false)
-        W_seed₂ = witness_set(F; seed = 0x1234, threading = false, show_progress = false)
+        W_seed₁ = witness_set(F; seed = UInt32(0x1234), threading = false, show_progress = false)
+        W_seed₂ = witness_set(F; seed = UInt32(0x1234), threading = false, show_progress = false)
         @test linear_subspace(W_seed₁) == linear_subspace(W_seed₂)
         @test points(W_seed₁) == points(W_seed₂)
     end
@@ -136,11 +137,11 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test degree(witness_set(F0; dim = 0, show_progress = false)) == 4
     end
 
-    @testset "parametric (target_parameters)" begin
+    @testset "parametric (fix_parameters)" begin
         @polyvar u v p q
         F = System([u^2 + v^2 - p * q]; variables = [u, v], parameters = [p, q])
 
-        W = witness_set(F; target_parameters = [2.0, 2.5], show_progress = false)
+        W = witness_set(fix_parameters(F, [2.0, 2.5]); show_progress = false)
         @test degree(W) == 2
         @test dim(W) == 1
         # the stored system is parameter-free (parameters substituted)
@@ -151,16 +152,16 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         W_L = witness_set(W, LinearSubspace([1 1], [-1]))
         @test degree(W_L) == 2
 
-        # explicit subspace entry point takes target_parameters too
+        # explicit subspace entry point takes a fixed-parameter system too
         L = rand_subspace(2; codim = 1)
-        W2 = witness_set(F, L; target_parameters = [2.0, 2.5], show_progress = false)
+        W2 = witness_set(fix_parameters(F, [2.0, 2.5]), L; show_progress = false)
         @test degree(W2) == 2
 
         # errors: missing, spurious, and wrong-length parameter values
         @test_throws ArgumentError witness_set(F)
-        @test_throws ArgumentError witness_set(F; target_parameters = [1.0])
+        @test_throws ArgumentError witness_set(fix_parameters(F, [1.0]))
         G = System([u^2 + v^2 - 5]; variables = [u, v])
-        @test_throws ArgumentError witness_set(G; target_parameters = [1.0])
+        @test_throws ArgumentError witness_set(fix_parameters(G, [1.0]))
         # regeneration rejects parametric systems loudly
         @test_throws ArgumentError regeneration(F)
     end
@@ -298,6 +299,79 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             [intersect(Hi, H[3]; show_progress = false, threading = true) for Hi in B]...
         )
         @test sort(degree.(C)) == [2, 8, 8]
+    end
+
+    # The seed alone determines the result: the same seed from two different
+    # ambient RNG states must agree, and a route must not advance the ambient
+    # stream on the way.
+    @testset "seeds determine the result" begin
+        @polyvar x y z
+
+        Faff = System([x^2 + y^2 - 5]; variables = [x, y])
+        Fhom = System([x^2 + y^2 - z^2]; variables = [x, y, z])
+        Laff = rand_subspace(2; codim = 1)
+        Lhom = rand_subspace(3; codim = 1, affine = false)
+
+        pts_agree(a, b) =
+            length(a) == length(b) && all(u ≈ v for (u, v) in zip(a, b))
+
+        # Two calls with one seed, from deliberately different ambient states.
+        function from_two_states(f)
+            Random.seed!(1)
+            a = f()
+            Random.seed!(2)
+            b = f()
+            return a, b
+        end
+
+        function advances_ambient(f)
+            Random.seed!(7)
+            a = rand()
+            Random.seed!(7)
+            f()
+            return a != rand()
+        end
+
+        s = UInt32(0xBEEF)
+        routes = (
+            ("witness_set(F)", () -> witness_set(Faff; seed = s, show_progress = false)),
+            (
+                "witness_set(F, L)",
+                () -> witness_set(Faff, Laff; seed = s, show_progress = false),
+            ),
+            (
+                "witness_set(F) projective",
+                () -> witness_set(Fhom; seed = s, show_progress = false),
+            ),
+            (
+                "witness_set(F, L) projective",
+                () -> witness_set(Fhom, Lhom; seed = s, show_progress = false),
+            ),
+        )
+        @testset "$name" for (name, route) in routes
+            W1, W2 = from_two_states(route)
+            @test pts_agree(solutions(W1), solutions(W2))
+            @test !advances_ambient(route)
+        end
+
+        W = witness_set(Faff; seed = UInt32(0x55), show_progress = false)
+        L2 = rand_subspace(2; codim = 1)
+
+        move = () -> witness_set(W, L2; seed = s)
+        M1, M2 = from_two_states(move)
+        @test pts_agree(solutions(M1), solutions(M2))
+        @test !advances_ambient(move)
+
+        trace = () -> trace_test(W; seed = s)
+        t1, t2 = from_two_states(trace)
+        @test t1 ≈ t2
+        @test !advances_ambient(trace)
+
+        q = solutions(W)[1]
+        mem = () -> membership(q, W; seed = s, show_progress = false)
+        m1, m2 = from_two_states(mem)
+        @test m1 == m2 == true
+        @test !advances_ambient(mem)
     end
 
 end

@@ -77,6 +77,15 @@ Tests run via ParallelTestRunner — each file is self-contained and runs in its
 tests and are `include`d by the files that need them. Add new systems to `TEST_SYSTEM_COLLECTION` to
 get them covered by the evaluation sweep in `test/system_sweep_test.jl`.
 
+**Never pipe a suite run through `tail`/`head`/`grep` as its only sink.** A full run takes ~3
+minutes. A failure whose name and stacktrace went into a lossy pipe cannot be diagnosed without
+paying for another run, and an intermittent one may not come back at all. `make test` and
+`make test-serial` already `tee` to `test-run.log` (and `test-cert.log`), so read the log with
+`grep -E "Test Failed|Error During Test" -A8 test-run.log` instead of re-running. When invoking the
+runner directly, `tee` it yourself. Iterate on a subset rather than the whole suite:
+`test/runtests.jl [TESTS...]` filters by name, `--list` shows the names, `--quickfail` stops at the
+first error.
+
 ### Quick debugging with Julia MCP
 
 Use the `julia-mcp` MCP server (tools: `julia_eval`, `julia_list_sessions`, `julia_restart`) for quick debugging and testing small snippets — e.g., checking a type, evaluating an expression, or verifying a method signature. Prefer this over spinning up a full test run when you just need a quick answer.
@@ -145,6 +154,12 @@ For full reference, see the `julia-perf` skill (`.claude/skills/julia-perf/`) an
 ### Comments
 
 - **Comments and docstrings describe the code as it is, never its history.** No references to v2 / HomotopyContinuation.jl, "ported from", "the analog of", prototypes, review findings, or plan/status narration in `src/` or `test/`. State the behavior and the constraint that motivates it. The v2-parity mapping and porting status live in `implementation_docs/`, not in code. Sole exception: tests that literally load v2 as a comparison oracle (`compare_v2_*`, `v2_parity_test`).
+
+- **A docstring is public. No internals in it.** What the thing is and how to call it, in terms a caller can reach. No private bindings (leading underscore), no unexported helper types, no internal contracts or invariants, and never `@ref` a private name. Those belong in a `#` comment at the code, or in `implementation_docs/`. Unexported does not mean private: `?name` still shows the docstring.
+
+- **Nothing between a docstring and its definition.** A comment line or a blank line silently detaches it, leaving the binding undocumented with no warning. Put such comments above the docstring, or inside the body. Applies to every definition form. Check with `Base.Docs.doc(Base.Docs.Binding(HomotopyContinuationNext, :name))`, not `@doc T` on a type object (that reports `DataType`'s docstring and looks fine either way).
+
+- **Default to no comment; be terse when you do write one.** Comment only what the code cannot say: a non-obvious constraint or invariant, a unit, a trap, why not the obvious alternative. One line where one line does. Never restate the next line, narrate what a function does, or open a multi-line block above a definition to explain the design; design rationale goes in `implementation_docs/`, not `src/`.
 
 ## Dependencies
 

@@ -14,3 +14,5 @@ ttfx_output.json
 .DS_Store
 .claude/*
 *.codex
+test-run.log
+test-cert.log

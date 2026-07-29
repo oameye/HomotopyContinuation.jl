@@ -36,9 +36,11 @@ ExplicitImports rejects it. For queued-job counts (threaded monodromy progress) 
 
 ### Closures passed as `parameter_sampler` are JET-analyzed against every method
 
-`MonodromyLoop` has methods taking `AbstractVector` and `LinearSubspace`; both call `parameter_sampler(base)`. JET analyzes a sampler closure against BOTH even if only one is reachable, so `pp -> [0; randn(length(pp) - 1)]` fails the gate with `length(::LinearSubspace)`. Use a named function with two methods whose `LinearSubspace` method throws (`_zero_first_parameter_sampler`).
+`MonodromyLoop` has methods taking `AbstractVector` and `LinearSubspace`; both call `parameter_sampler(rng, base)`. JET analyzes a sampler closure against BOTH even if only one is reachable, so `(rng, pp) -> [0; randn(rng, length(pp) - 1)]` fails the gate with `length(::LinearSubspace)`. Use a named function with two methods whose `LinearSubspace` method throws (`_zero_first_parameter_sampler`).
 
-### A comment between a docstring and a struct breaks attachment
+### Anything between a docstring and a definition breaks attachment
+
+A comment line *or* a blank line, before any definition form. The string becomes a discarded literal and the binding is left undocumented, silently.
 
 ```julia
 """
@@ -47,6 +49,8 @@ ExplicitImports rejects it. For queued-job counts (threaded monodromy progress) 
 # comment here  <- docstring silently attaches to nothing
 struct UniquePoints{T, M, GA}
 ```
+
+Confirm with `Base.Docs.doc(Base.Docs.Binding(HomotopyContinuationNext, :name))`. `@doc T` on an interpolated type object does not test this: it resolves to `DataType`'s docstring and looks fine either way.
 
 ### System{P, V} type parameters
 
@@ -127,7 +131,19 @@ A method defined in core and overwritten by an extension cannot be precompiled. 
 
 ### Task-local RNG for reproducibility
 
-`solve()` passes a `Random.MersenneTwister(seed)` explicitly to all `rand`/`randn` instead of mutating the global RNG. Polyhedral init passes a `_lifting_sampler` closure to `MixedSubdivisions.fine_mixed_cells`. Reproducible and safe under nested parallelism.
+Every route that consumes randomness takes `seed::UInt32 = rand(Random.RandomDevice(), UInt32)`, builds a local `Random.MersenneTwister` from it and passes that to every `rand`/`randn` instead of mutating the global RNG. `Random.seed!` appears nowhere in `src/`, `ext/` or `lib/`. Two properties follow, and both are tested: the same seed reproduces the same result from any global-RNG state, and no route advances the caller's stream. Reproducible and safe under nested parallelism.
+
+`seed` is `UInt32` at every boundary, field and internal positional, with no `Integer` overload. A keyword annotation asserts rather than converts, so `seed = 42` and `seed = 0x1234` are a `TypeError`: callers pass `UInt32(42)` or an eight-hex-digit literal.
+
+Consequences worth knowing before adding a route:
+
+- **Sub-computations take a seed drawn off the route's stream** (`rand(rng, UInt32)`), not the route's own seed. Reusing one seed for repeated calls rebuilds identical randomness: `decompose` and regeneration's `fill_up!` call `_monodromy_solve!` several times expecting different loops each time, and passing the same seed would make them generate the same loops and never converge.
+- **A route that must both record `seed` verbatim and seed a sub-computation with it** uses `_tagged_rng(seed, tag)`, whose seed *vector* cannot collide with `MersenneTwister(seed)`'s. `monodromy_solve` needs this: its result records the user's seed, while its setup draws (start pair, chart) must not share the stream its loop generation derives from the same seed.
+- **`MersenneTwister` is not thread-safe**, so all draws from one stream must be on one task. Where a draw sits inside a threaded region (`ReuseLoops.RANDOM` in the threaded monodromy worker) each task gets its own stream derived from the seed. Draws that only *look* threaded are fine when they precede the tasks: `membership` and the u-homotopy intersection both pre-draw in the driver, which is also what makes them bit-identical across threading modes.
+- **A homotopy constructor's `gamma` default draws from the global RNG**, so a seeded route must pass `gamma` explicitly. Every worker of one solver must also get the *same* gamma, since they track the same homotopy, so it is drawn once and stored (`SubspaceMonodromyBuilder.gamma`) rather than defaulted per worker.
+- **`rand`/`randn` with no result to reproduce takes an `rng` instead of a seed**, defaulting to `Random.default_rng()` the way `rand` itself does: `LA.rank`, `corank`, `find_start_pair`, `rand_subspace`, the `MonodromySolver` constructors, and the chart/gamma defaults of the homotopy constructors.
+
+Polyhedral init passes a `_lifting_sampler` closure to `MixedSubdivisions.fine_mixed_cells`.
 
 ### Union-find solution clustering
 
@@ -166,9 +182,46 @@ The sweep entry point must transform the first target before `_run_sweep`, since
 
 The same restructure collapsed four accumulate functions (serial/threaded × nested/flatten) into two `_sweep_entries` methods plus a flatten step. The serial method transforms each `Result` before retargeting, so a long sweep holds only transformed entries; the threaded method cannot, because the whole `(target, path)` product gets chunked.
 
-### Start-system routes reject parametric input
+### Parameter values are positional; a route that needs the equations takes a system
 
-`TotalDegree` and `Polyhedral` build their start system from the target's coefficients, which exist only once parameters have values. Given a parametric system both used to run against an unfilled parameter buffer (all parameters zero) and return confident wrong answers: `solve(System([x^2+y^2-a, x*y-1]; parameters=[a]))` reported four "solutions" satisfying `x^2 + y^2 = 0`. `_check_parameter_free` now runs beside `_check_square_or_overdetermined` in both `init` methods; the polyhedral `support_coefficients` guard fired too late to be the front line. Sliced and subspace routes were never affected: `_fix_parameters` throws when `target_parameters` is missing.
+`TotalDegree` and `Polyhedral` build their start system from the target's coefficients, which exist only once parameters have values. Given a parametric system both used to run against an unfilled parameter buffer (all parameters zero) and return confident wrong answers: `solve(System([x^2+y^2-a, x*y-1]; parameters=[a]))` reported four "solutions" satisfying `x^2 + y^2 = 0`. Every route now runs `_check_parameter_free` beside `_check_square_or_overdetermined` and names the fix in the message; the polyhedral `support_coefficients` guard fired too late to be the front line.
+
+The rule the whole surface follows: **a route that evaluates `F(x; p)` takes values, positionally. A route that needs the equations themselves takes a system, and `fix_parameters(F, p)` is the one operation that produces a parameter-free one. No parameter value is ever a keyword argument.**
+
+The evaluation-versus-construction line is what makes it exception-free. Certification, a monodromy base point and the two ends of a homotopy only evaluate `F` at a value, so they take the value: `certify(F, X, p)`, `monodromy_solve(F, S, p)`, `solve(F, starts, p_start, p_target)`, `ParameterHomotopy(F, p₁, p₀)`. Total degree and polyhedral build a start system from the target's degrees and monomial support, `slice` appends linear rows to the equations, and `witness_set`/`nid`/`regeneration` store the system and evaluate it later through `membership`, `intersect`, `decompose` and `trace_test`, so those take a system. That deleted 22 `target_parameters::Union{Nothing, AbstractVector{<:Number}}` keywords across five files, and the routes that never had the keyword (`nid`, `regeneration`) gained the capability for free.
+
+The parameter routes went positional to match the subspace routes, which already were: `solve(F, starts, L_start, L_target)` and `solve_targets(F, starts, L_start, Ltargets)`. These are the same two operations, and the spelling used to differ only because the moving thing was a `Vector` rather than a `LinearSubspace`.
+
+The one place a value is taken where a system would be expected is `certify`, and the reason is rigor: `p` is enclosed to `max_precision` bits, so what is certified is `F` at an enclosure of `p`. `certify(fix_parameters(F, p), X)` also works but answers a different question, certifying the substituted system whose coefficients are already-rounded `ComplexF64` products of `p`.
+
+### `solve` returns a `Result`, `solve_targets` returns a `Vector`
+
+The many-target route is a separate verb rather than a `solve` method, because the single-vs-many distinction cannot be carried by a positional slot's type. `solve_targets(F, S₀, p₀, 1:20; transform_parameters = i -> table[i])` passes bare numbers as targets, and `1:20` is an `AbstractVector{<:Number}`, indistinguishable from a single 20-value target. Keywords cannot dispatch, so no annotation resolves it either; v2 resolves it with a runtime `!isa(transform_parameters(first(targets)), Number)` branch, which would make the return type value-dependent. A distinct verb frees the slot, keeps metadata targets working, and removes the wart of one function returning `Result` or `Vector{Tuple}` depending on argument types. Only the public verb is new: `sweep.jl`, `_run_sweep` and `_init_parameter_sweep` keep their names.
+
+### Fixing parameters: a `System` substitutes, a composition binds (MEASURED)
+
+`fix_parameters(F::System, p)` substitutes the values into the equations and returns a `System`, so every downstream route sees ordinary parameter-free input and the tracked tapes carry no extra evaluator hop. `fix_parameters(C::CompositionSystem, p)` cannot: a composition has no equations to substitute into, and rebuilding one as a `System` costs 83 s on the symmetroid composition against ~0.1 s to wrap. It returns a `FixedParameterSystem`, which binds the values at the evaluator level and pays the hop knowingly.
+
+Substituting is also what the routes reading the equations require. Polyhedral builds its start system from the *support and coefficients* of the target, and a value can cancel a term outright and remove a support column; witness sets and regeneration rewrite equations rather than only evaluating them.
+
+Binding costs a second FunctionWrapper hop on every kernel call, measured against the substituted system on two systems (6 variables, 32 and 729 paths):
+
+| kernel | bound vs substituted |
+|---|---:|
+| `evaluate_and_jacobian!` | +11.3% |
+| `taylor!` K=1 | +19.4% |
+| `taylor!` K=2 | +16.3% |
+| `taylor!` K=3 | +11.5% |
+
+End to end that is 3.8% of a 729-path solve (237.5 ms against 228.9 ms), against a one-off CSE pass of 0.8 ms (32-path system) to 1.9 ms (729-path system). Break-even is around 40 paths, so binding wins only where a solve costs 10 ms and loses on everything larger. An earlier version resolved the values inside `init` and chose the representation there, which forked the cache type into `Union{SolveCache{…StraightLineBuilder{System}…}, SolveCache{…StraightLineBuilder{FixedParameterSystem}…}}` and compiled `solve!` and the tracking pipeline behind it twice per route. Deciding at `fix_parameters` instead leaves each route with one cache type.
+
+A `CompositionSystem` binds, because it has no equations to substitute into and rebuilding one as a `System` costs 83 s on the symmetroid composition against ~0.1 s to wrap. It pays the hop knowingly.
+
+Two consequences worth knowing. Substitution renormalizes the equations per parameter value (`System` scales an equation by its coefficient scale), so tracking is not bit-identical across parameter values. And the bound and substituted routes agree only up to floating point, not exactly: 35949 against 35940 total steps on the 729-path system, same solution count and same 41 paths escalating precision, because the parametric tape reads a parameter slot where the substituted tape folds a constant.
+
+`FixedParameterSystem` keeps the source system beside its bound evaluator, because a worker must not share the evaluator's mutable tapes: `_clone_system_evaluator` rebuilds the binding around a fresh clone of the source. It reports the degrees, shape and variable count of the system it wraps, so the shape dispatch and the square-up path treat it as any other parameter-free input. `CloneableSystem` is the union of the three things a route can clone an evaluator from and is the bound on the two straight-line builders. The `AbstractSystem` doing the actual binding is the internal `_BoundParameterSystem`.
+
+The excess-solution checker evaluates the original overdetermined system with an empty parameter vector, so it is handed `F.evaluator`, which for a `FixedParameterSystem` is already the bound one.
 
 ### Appended linear rows: Taylor coefficient is `A x_K`, not zero
 

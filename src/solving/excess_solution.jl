@@ -44,6 +44,7 @@ _randomization_permutation(degrees::Vector{Int})::Vector{Int} =
 
 """
     _square_up(rng, F) -> (A, perm, checker)
+    _square_up(rng, evaluator, degrees) -> (A, perm, checker)
 
 Randomization data for squaring up an overdetermined system: the random fold
 block `A`, the descending-degree equation permutation, and the excess-solution
@@ -51,13 +52,18 @@ checker for the post-tracking filter. Total-degree and polyhedral init both go
 through this single helper so the RNG draw and the square-up construction
 cannot drift apart.
 """
+_square_up(
+    rng::Random.MersenneTwister, F::CloneableSystem,
+)::Tuple{FSMat{ComplexF64}, Vector{Int}, ExcessSolutionChecker} =
+    _square_up(rng, F.evaluator, degrees(F))
+
 function _square_up(
-        rng::Random.MersenneTwister, F::SystemLike,
+        rng::Random.MersenneTwister, evaluator::SystemEvaluator, degs::Vector{Int},
     )::Tuple{FSMat{ComplexF64}, Vector{Int}, ExcessSolutionChecker}
-    m, n = size(F.evaluator)
-    perm = _randomization_permutation(degrees(F))
+    m, n = size(evaluator)
+    perm = _randomization_permutation(degs)
     A = FSMat{ComplexF64}(randn(rng, ComplexF64, n, m - n))
-    return A, perm, ExcessSolutionChecker(F.evaluator, A, perm)
+    return A, perm, ExcessSolutionChecker(evaluator, A, perm)
 end
 
 const EXCESS_NEWTON_MAX_ITERS = 10

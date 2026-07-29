@@ -44,14 +44,15 @@ Base.isempty(node::VTNode) = length(node) == 0
 capacity(node::VTNode) = length(node.children)
 
 """
-    VoronoiTree{T}(d::Int; distance = InfNorm(), capacity = 8, triangle_inequality = nothing)
+    VoronoiTree{T}(d::Int; distance = InfNorm(), capacity = 8, triangle_inequality)
 
 A Voronoi tree over points of element type `T` and dimension `d` with `Int`
 identifiers. Distances are measured by `distance` (the default `InfNorm` is a
 metric, so triangle-inequality pruning stays valid; relative to a Euclidean
 distance, tolerances differ by at most `sqrt(2d)`).
-`triangle_inequality = nothing` autodetects for custom distances via a
-probabilistic check on random points.
+`triangle_inequality` enables triangle-inequality pruning; it defaults to
+[`satisfies_triangle_inequality`](@ref)`(distance)`, which is `false` for a
+distance that has not declared itself a metric.
 """
 mutable struct VoronoiTree{T, M}
     # Mutable: nentries counts inserts; root is replaced by empty!.
@@ -62,29 +63,32 @@ mutable struct VoronoiTree{T, M}
     const triangle_inequality::Bool
 end
 
-function _detect_triangle_inequality(distance, d::Int)::Bool
-    distance isa InfNorm && return true
-    # Probabilistic check on random points.
-    v₁ = randn(ComplexF64, d)
-    v₂ = randn(ComplexF64, d)
-    v₃ = randn(ComplexF64, d)
-    return _vt_distance(distance, v₁, v₂) <=
-        _vt_distance(distance, v₁, v₃) + _vt_distance(distance, v₃, v₂) &&
-        _vt_distance(distance, v₁, 4 .* v₁) <=
-        _vt_distance(distance, v₁, 2 .* v₁) + _vt_distance(distance, 2 .* v₁, 4 .* v₁)
-end
+"""
+    satisfies_triangle_inequality(distance) -> Bool
+
+Whether `distance` is a metric, so that a [`VoronoiTree`](@ref) may prune with
+the triangle inequality. `false` unless declared, since pruning with a distance
+that violates it can discard genuine near-duplicates. Add a method for a custom
+metric:
+
+```julia
+HomotopyContinuationNext.satisfies_triangle_inequality(::MyMetric) = true
+```
+"""
+satisfies_triangle_inequality(_)::Bool = false
+satisfies_triangle_inequality(::InfNorm)::Bool = true
 
 function VoronoiTree{T}(
         d::Int;
         distance = InfNorm(),
         capacity::Int = 8,
-        triangle_inequality::Union{Nothing, Bool} = nothing,
+        triangle_inequality::Bool = satisfies_triangle_inequality(distance),
     ) where {T}
-    tri = triangle_inequality === nothing ?
-        _detect_triangle_inequality(distance, d) : triangle_inequality
     root = VTNode{T}(d, capacity)
     scratch = [Vector{Tuple{Float64, Int}}(undef, capacity)]
-    return VoronoiTree{T, typeof(distance)}(root, 0, distance, scratch, tri)
+    return VoronoiTree{T, typeof(distance)}(
+        root, 0, distance, scratch, triangle_inequality,
+    )
 end
 
 Base.length(tree::VoronoiTree) = tree.nentries

@@ -32,8 +32,10 @@ struct GrassmannianGeodesic
     Θ::Vector{Float64}
     U::Matrix{ComplexF64}
     γ1::Matrix{ComplexF64}
-    B_start::Union{Nothing, Matrix{ComplexF64}} # for base change (extrinsic only)
-    B_target::Union{Nothing, Matrix{ComplexF64}}
+    # Base change, extrinsic only. Empty for an intrinsic geodesic, which never
+    # reads them.
+    B_start::Matrix{ComplexF64}
+    B_target::Matrix{ComplexF64}
 end
 
 ## Per-homotopy geodesic memo
@@ -141,7 +143,8 @@ function GrassmannianGeodesic(
     Q, Θ, U = grassmannian_svd(target, start)
     Q_cos = target.X * U
     γ1 = _geodesic_start_frame(Q_cos, Q, Θ)
-    return GrassmannianGeodesic(Q, Q_cos, Θ, U, γ1, nothing, nothing)
+    empty_B = Matrix{ComplexF64}(undef, 0, 0)
+    return GrassmannianGeodesic(Q, Q_cos, Θ, U, γ1, empty_B, empty_B)
 end
 
 """
@@ -297,8 +300,8 @@ function ExtrinsicSubspaceHomotopy(
     # Get correct coordinates for a and b in the Stiefel homotopy:
     # extrinsic(start).A is replaced by transpose(path.γ1) and
     # extrinsic(target).A by transpose(path.Q_cos).
-    a0 = something(path.B_start) * extrinsic(start_c).b
-    b0 = something(path.B_target) * extrinsic(target_c).b
+    a0 = path.B_start * extrinsic(start_c).b
+    b0 = path.B_target * extrinsic(target_c).b
     k = size(path.γ1, 2)
 
     return ExtrinsicSubspaceHomotopy(
@@ -369,8 +372,8 @@ function _set_subspaces!(
     H.start = start_c
     H.target = convert(LinearSubspace{ComplexF64}, target)
     H.path = _geodesic!(H.geodesics, extrinsic(H.start), extrinsic(H.target))
-    LA.mul!(H.a0, something(H.path.B_start), extrinsic(H.start).b)
-    LA.mul!(H.b0, something(H.path.B_target), extrinsic(H.target).b)
+    LA.mul!(H.a0, H.path.B_start, extrinsic(H.start).b)
+    LA.mul!(H.b0, H.path.B_target, extrinsic(H.target).b)
     H.a_minus_b .= H.a0 .- H.b0
     H.offset .= H.b0
     H.t_cache[] = complex(NaN)

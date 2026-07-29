@@ -527,7 +527,7 @@ Optional: `set_solution!(x, y, t)`, `get_solution!(out, x, t)`, `start_parameter
 |------|---------|---------|
 | StraightLineHomotopy | H(x,t) = γ·t·G(x) + (1-t)·F(x) | TotalDegree |
 | CoefficientHomotopy | H(x,t) = F(x; t·start + (1-t)·target) | Polyhedral phase 2 |
-| ParameterHomotopy | H(x,t) = F(x; t·p₁ + (1-t)·p₀), retargetable via start/target_parameters! | Parameter solve, monodromy loops |
+| ParameterHomotopy | H(x,t) = F(x; t·p₁ + (1-t)·p₀), retargetable via start/target_parameters! | Parameter solve, `solve_targets`, monodromy loops |
 | ToricHomotopy | H(x,t) = F(x; c_j·t^{w_j}) | Polyhedral phase 1 |
 | IntrinsicSubspaceHomotopy | F restricted to a moving subspace, intrinsic coords (Grassmannian geodesic) | linear_subspace_homotopy (default) |
 | ExtrinsicSubspaceHomotopy | [F; interpolated extrinsic equations] | linear_subspace_homotopy (fallback) |

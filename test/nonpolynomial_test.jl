@@ -5,7 +5,8 @@ using HomotopyContinuationNext: Expression, System, CompileMode, @var, @polyvar,
     differentiate, solve, solutions, nsolutions, monodromy_solve,
     verify_solution_completeness, Serial, TotalDegree, Polyhedral,
     TaylorVector, ComplexDF64, HomotopyEvaluator, StraightLineHomotopy,
-    Interpreter, execute!
+    Interpreter, execute!,
+    fix_parameters
 using FixedSizeArrays: FixedSizeArray
 
 const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
@@ -329,8 +330,7 @@ end
         roots(s) = [(-1 + sign * sqrt(1 + 4s)) / (2s) for sign in (1, -1)]
         starts = [ComplexF64[xi, 1 - xi] for xi in roots(2.0)]   # sqrt(4) = 2
         res = solve(
-            F, starts, Serial();
-            start_parameters = ComplexF64[4.0], target_parameters = ComplexF64[9.0],
+            F, starts, ComplexF64[4.0], ComplexF64[9.0], Serial();
             show_progress = false,
         )
         @test nsolutions(res) == 2
@@ -469,12 +469,12 @@ end
         )
         F = System([a * x^2 + y^2 - 1]; variables = [x, y], parameters = [a])
         G = System([b * u^2 + v^2 - 1]; variables = [u, v], parameters = [b])
-        @test sols(solve(F, L; target_parameters = [2.0], show_progress = false)) ==
-            sols(solve(G, L; target_parameters = [2.0], show_progress = false))
+        @test sols(solve(fix_parameters(F, [2.0]), L; show_progress = false)) ==
+            sols(solve(fix_parameters(G, [2.0]), L; show_progress = false))
 
         # Substitution has to reach a non-polynomial equation too.
         H = System([a / x + y - 2]; variables = [x, y], parameters = [a])
-        @test Next.polynomials(Next._fix_parameters(H, ComplexF64[3.0])) ==
+        @test Next.polynomials(fix_parameters(H, ComplexF64[3.0])) ==
             [Next.subs(a / x + y - 2, a => 3.0)]
     end
 

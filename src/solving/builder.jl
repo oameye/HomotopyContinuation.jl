@@ -6,7 +6,7 @@
 Builder for TotalDegree homotopy. Stores immutable reconstruction data; each call
 produces a fresh `TrackingWorkerState` with independent mutable state.
 """
-struct StraightLineBuilder{S <: SystemLike}
+struct StraightLineBuilder{S <: CloneableSystem}
     degrees::Vector{Int}
     target_system::S
     γ::ComplexF64
@@ -30,7 +30,7 @@ The randomization block `A` and permutation are shared read-only across workers;
 each worker gets a fresh `RandomizedSystem` (independent scratch buffers) around
 a fresh clone of the target evaluator.
 """
-struct RandomizedStraightLineBuilder{S <: SystemLike}
+struct RandomizedStraightLineBuilder{S <: CloneableSystem}
     degrees::Vector{Int}          # squared-up degrees (length n)
     target_system::S
     A::FSMat{ComplexF64}

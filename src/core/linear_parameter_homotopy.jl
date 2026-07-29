@@ -41,8 +41,8 @@ coefficient case). Only under that precondition is the order-1 shortcut
 const CoefficientHomotopy = LinearParameterHomotopy{true}
 
 """
+    ParameterHomotopy(F::System, start_parameters, target_parameters)
     ParameterHomotopy(system::SystemEvaluator, start_parameters, target_parameters)
-    ParameterHomotopy(F::System; start_parameters, target_parameters)
 
 The homotopy `H(x, t) = F(x; p(t))` where `p(t) = t·p₁ + (1 - t)·p₀` moves
 linearly from the `start_parameters` `p₁` (at `t = 1`) to the
@@ -61,8 +61,18 @@ function LinearParameterHomotopy{S}(
         target_parameters::AbstractVector{<:Number},
     ) where {S}
     np = nparameters(system)
-    @assert length(start_parameters) == np "start_parameters length must match nparameters"
-    @assert length(target_parameters) == np "target_parameters length must match nparameters"
+    length(start_parameters) == np || throw(
+        ArgumentError(
+            "start parameters have length $(length(start_parameters)), but the system " *
+                "has $np parameter(s).",
+        ),
+    )
+    length(target_parameters) == np || throw(
+        ArgumentError(
+            "target parameters have length $(length(target_parameters)), but the " *
+                "system has $np parameter(s).",
+        ),
+    )
     n = size(system)[2]
 
     sp = FSVec{ComplexF64}(collect(ComplexF64, start_parameters))
@@ -82,13 +92,11 @@ function LinearParameterHomotopy{S}(
     )
 end
 
-function ParameterHomotopy(
-        F::System;
-        start_parameters::AbstractVector{<:Number},
-        target_parameters::AbstractVector{<:Number},
-    )
-    return ParameterHomotopy(F.evaluator, start_parameters, target_parameters)
-end
+ParameterHomotopy(
+    F::System,
+    start_parameters::AbstractVector{<:Number},
+    target_parameters::AbstractVector{<:Number},
+) = ParameterHomotopy(F.evaluator, start_parameters, target_parameters)
 
 Base.size(H::LinearParameterHomotopy) = size(H.system)
 

@@ -1,7 +1,16 @@
 JULIA ?= julia
 
+# `| tee` returns tee's status, which would hide a failing suite; the test
+# recipes below need bash's pipefail for `make test` to stay a real gate.
+SHELL := /bin/bash
+
 # Certification lives in a separate subpackage so Arblib stays out of core.
 CERT := lib/HomotopyContinuationNextCertification
+
+# Every suite run writes its complete output here. A run whose stdout went
+# through a lossy pipe cannot be diagnosed afterwards without running it again.
+TEST_LOG ?= test-run.log
+CERT_LOG ?= test-cert.log
 
 .PHONY: test test-serial test-cert benchmark ttfx format deps update help
 
@@ -10,16 +19,16 @@ help: ## Show this help
 
 JOBS ?= 10
 
-test: ## Run all tests in parallel (core via ParallelTestRunner) + certification subpackage
-	$(JULIA) --project=test test/runtests.jl --jobs=$(JOBS)
+test: ## Run all tests in parallel + certification subpackage (full log: test-run.log)
+	set -o pipefail; $(JULIA) --project=test test/runtests.jl --jobs=$(JOBS) 2>&1 | tee $(TEST_LOG)
 	$(MAKE) test-cert
 
-test-cert: ## Run the certification subpackage test suite (threaded)
-	$(JULIA) --project=$(CERT)/test -t 4 $(CERT)/test/runtests.jl
+test-cert: ## Run the certification subpackage test suite (threaded; log: test-cert.log)
+	set -o pipefail; $(JULIA) --project=$(CERT)/test -t 4 $(CERT)/test/runtests.jl 2>&1 | tee $(CERT_LOG)
 
-test-serial: ## Run all tests serially (for debugging)
-	$(JULIA) --project=test test/runtests.jl --jobs=1
-	$(JULIA) --project=$(CERT)/test $(CERT)/test/runtests.jl
+test-serial: ## Run all tests serially (for debugging; logs as above)
+	set -o pipefail; $(JULIA) --project=test test/runtests.jl --jobs=1 2>&1 | tee $(TEST_LOG)
+	set -o pipefail; $(JULIA) --project=$(CERT)/test $(CERT)/test/runtests.jl 2>&1 | tee $(CERT_LOG)
 
 test-threaded: ## Run solve tests with multiple threads (exercises Threaded executor)
 	$(JULIA) -t auto --project -e 'using TestEnv; TestEnv.activate(); include("test/solve_test.jl")'

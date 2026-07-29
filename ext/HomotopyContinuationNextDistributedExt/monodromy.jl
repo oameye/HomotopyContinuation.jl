@@ -97,7 +97,7 @@ function HCN._distributed_monodromy_solve!(
         try
             retcode = _drive_monodromy!(
                 MS, results, progress, jobs, out, JobT, batch_size, window,
-                total_tasks,
+                total_tasks, Random.MersenneTwister(seed),
             )
         catch e
             # `out` closed under us: a process failed and `tracking` has its error.
@@ -124,6 +124,7 @@ function _drive_monodromy!(
         MS::HCN.MonodromySolver, results::Vector{HCN.PathResult}, progress,
         jobs::Distributed.RemoteChannel, out::Distributed.RemoteChannel,
         ::Type{JobT}, batch_size::Int, window::Int, total_tasks::Int,
+        rng::Random.MersenneTwister,
     )::HCN.MonodromyCode.T where {JobT}
     queue = HCN.LoopTrackingJob[]
     stats = MS.statistics
@@ -188,7 +189,7 @@ function _drive_monodromy!(
             break
         end
 
-        HCN.add_loop!(MS)
+        HCN.add_loop!(MS, rng)
         HCN.reset_trace!(MS)
         # schedule all jobs on the fresh loop
         new_loop_id = HCN.nloops(MS)
@@ -205,7 +206,7 @@ function _drive_monodromy!(
                 # A decided retcode still collects what is in flight, since every
                 # result counts towards the permutations, but starts no new loop.
                 undecided = retcode == HCN.MonodromyCode.IN_PROGRESS
-                _handle_monodromy_result!(MS, results, queue, r, undecided)
+                _handle_monodromy_result!(MS, results, queue, r, undecided, rng)
 
                 HCN.update_progress!(
                     progress, stats;
@@ -239,7 +240,7 @@ end
 function _handle_monodromy_result!(
         MS::HCN.MonodromySolver, results::Vector{HCN.PathResult},
         queue::Vector{HCN.LoopTrackingJob}, r::HCN.MonodromyJobResult,
-        schedule_more::Bool,
+        schedule_more::Bool, rng::Random.MersenneTwister,
     )::Nothing
     opts = MS.options
     stats = MS.statistics
@@ -282,7 +283,7 @@ function _handle_monodromy_result!(
             push!(queue, HCN.LoopTrackingJob(id, k))
         end
     elseif opts.reuse_loops == HCN.ReuseLoops.RANDOM && HCN.nloops(MS) >= 2
-        k = rand(2:HCN.nloops(MS))
+        k = rand(rng, 2:HCN.nloops(MS))
         if k <= r.loop_id
             k -= 1
         end

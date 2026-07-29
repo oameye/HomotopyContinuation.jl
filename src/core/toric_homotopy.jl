@@ -30,7 +30,12 @@ function ToricHomotopy(
         system_coeffs::AbstractVector{<:AbstractVector{ComplexF64}},
     )
     nparams = sum(length, system_coeffs)
-    @assert nparams == nparameters(system)
+    nparams == nparameters(system) || throw(
+        ArgumentError(
+            "the coefficient blocks hold $nparams values, but the system has " *
+                "$(nparameters(system)) parameter(s).",
+        ),
+    )
 
     flat_coeffs = ComplexF64[]
     for c in system_coeffs

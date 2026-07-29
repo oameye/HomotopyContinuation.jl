@@ -27,26 +27,33 @@ _symbol_to_reuse_loops(r::ReuseLoops.T)::ReuseLoops.T = r
 always_false(args...) = false
 
 """
-    independent_normal(p::AbstractVector)
+    independent_normal(rng, p::AbstractVector)
 
 Sample a vector where each entry is drawn independently from the complex
-normal distribution by calling `randn(ComplexF64)`.
+normal distribution by calling `randn(rng, ComplexF64)`.
 
-    independent_normal(L::LinearSubspace)
+    independent_normal(rng, L::LinearSubspace)
 
 Creates a random linear subspace by calling [`rand_subspace`](@ref).
+
+Usable as the `parameter_sampler` of [`monodromy_solve`](@ref), whose contract
+is `sampler(rng, p)`.
 """
-independent_normal(p::AbstractVector)::Vector{ComplexF64} = randn(ComplexF64, length(p))
-independent_normal(L::LinearSubspace)::LinearSubspace{ComplexF64} =
-    convert(LinearSubspace{ComplexF64}, rand_subspace(ambient_dim(L); dim = dim(L)))
+independent_normal(rng::Random.AbstractRNG, p::AbstractVector)::Vector{ComplexF64} =
+    randn(rng, ComplexF64, length(p))
+independent_normal(
+    rng::Random.AbstractRNG, L::LinearSubspace,
+)::LinearSubspace{ComplexF64} = convert(
+    LinearSubspace{ComplexF64}, rand_subspace(rng, ambient_dim(L); dim = dim(L)),
+)
 
 """
-    weighted_normal(p::AbstractVector)
+    weighted_normal(rng, p::AbstractVector)
 
 Sample a vector `q` where each entry `q[i]` is drawn from the complex normal
 distribution with variance `|p[i]|^2`.
 
-    weighted_normal(L::LinearSubspace)
+    weighted_normal(rng, L::LinearSubspace)
 
 Sample a linear subspace `A x = a` where the entries of `A` and `a` are drawn
 from the complex normal distribution with variances `|B[i,j]|^2` and `|b[i]|^2`,
@@ -54,14 +61,19 @@ where `L = {B x = b}`. Unlike [`independent_normal`](@ref), this preserves the
 zero structure of `L` (entries where `B`/`b` vanish stay zero), which is
 essential for the structured flag subspaces used in [`regeneration`](@ref) and
 [`decompose`](@ref).
+
+Usable as the `parameter_sampler` of [`monodromy_solve`](@ref), whose contract
+is `sampler(rng, p)`.
 """
-weighted_normal(p::AbstractVector)::Vector{ComplexF64} =
-    randn(ComplexF64, length(p)) .* abs.(p)
-function weighted_normal(L::LinearSubspace)::LinearSubspace{ComplexF64}
+weighted_normal(rng::Random.AbstractRNG, p::AbstractVector)::Vector{ComplexF64} =
+    randn(rng, ComplexF64, length(p)) .* abs.(p)
+function weighted_normal(
+        rng::Random.AbstractRNG, L::LinearSubspace,
+    )::LinearSubspace{ComplexF64}
     E = extrinsic(L)
     B, b = E.A, E.b
-    A = randn(ComplexF64, size(B)...) .* abs.(B)
-    a = randn(ComplexF64, length(b)) .* abs.(b)
+    A = randn(rng, ComplexF64, size(B)...) .* abs.(B)
+    a = randn(rng, ComplexF64, length(b)) .* abs.(b)
     return convert(LinearSubspace{ComplexF64}, LinearSubspace(A, a))
 end
 
@@ -95,8 +107,10 @@ struct MonodromyOptions{D, GA <: Union{Nothing, GroupActions}, CB, PS}
     permutations::Bool
     # unique points options
     distance::D
-    triangle_inequality::Union{Nothing, Bool}
-    unique_points_atol::Union{Nothing, Float64}
+    triangle_inequality::Bool
+    unique_points_atol::Float64
+    # `nothing` is not a missing option: the default is `uniqueness_rtol(res)`,
+    # which needs the endpoint and so cannot be resolved here.
     unique_points_rtol::Union{Nothing, Float64}
     single_loop_per_start_solution::Bool
 end
@@ -117,8 +131,8 @@ function MonodromyOptions(;
         reuse_loops::Union{Symbol, ReuseLoops.T} = ReuseLoops.ALL,
         permutations::Bool = false,
         distance = InfNorm(),
-        triangle_inequality::Union{Nothing, Bool} = nothing,
-        unique_points_atol::Union{Nothing, Float64} = nothing,
+        triangle_inequality::Bool = satisfies_triangle_inequality(distance),
+        unique_points_atol::Float64 = 1.0e-14,
         unique_points_rtol::Union{Nothing, Float64} = nothing,
         single_loop_per_start_solution::Bool = false,
     )
@@ -169,27 +183,31 @@ struct MonodromyLoop{P <: Union{LinearSubspace{ComplexF64}, Vector{ComplexF64}}}
     p₂::P
 end
 
-function MonodromyLoop(base::AbstractVector, parameter_sampler::PS) where {PS}
+function MonodromyLoop(
+        base::AbstractVector, parameter_sampler::PS, rng::Random.AbstractRNG,
+    ) where {PS}
     p = convert(Vector{ComplexF64}, base)
-    p₁ = convert(Vector{ComplexF64}, parameter_sampler(p))
-    p₂ = convert(Vector{ComplexF64}, parameter_sampler(p))
+    p₁ = convert(Vector{ComplexF64}, parameter_sampler(rng, p))
+    p₂ = convert(Vector{ComplexF64}, parameter_sampler(rng, p))
 
     # The stored halfway point is 0.5(p₁ - p), not p + 0.5(p₁ - p). It is
     # unused for vector parameters (the loop is a 3-segment chain).
     return MonodromyLoop(p, 0.5 .* (p₁ .- p), p₁, p₂)
 end
 
-function MonodromyLoop(base::LinearSubspace, parameter_sampler::PS) where {PS}
+function MonodromyLoop(
+        base::LinearSubspace, parameter_sampler::PS, rng::Random.AbstractRNG,
+    ) where {PS}
     L = convert(LinearSubspace{ComplexF64}, base)
     # The second linear space is just a translation in order to perform a
     # trace test. To still find new solutions quickly we translate the linear
     # space by a larger distance.
     # EQUAL SPACING of L, L₀₁, L₁ is load-bearing for the trace test:
     # L₀₁ - L == L₁ - L₀₁ == v.
-    v = LA.rmul!(LA.normalize!(randn(ComplexF64, codim(L))), 5)
+    v = LA.rmul!(LA.normalize!(randn(rng, ComplexF64, codim(L))), 5)
     L₀₁ = translate(L, v, Extrinsic)
     L₁ = translate(L₀₁, v, Extrinsic)
-    L₂ = convert(LinearSubspace{ComplexF64}, parameter_sampler(L))
+    L₂ = convert(LinearSubspace{ComplexF64}, parameter_sampler(rng, L))
 
     return MonodromyLoop(L, L₀₁, L₁, L₂)
 end
@@ -433,12 +451,13 @@ function permutations(r::MonodromyResult; reduced::Bool = true)::Matrix{Int}
 end
 
 """
-    find_start_pair(F::SystemLike; max_tries = 1_000, atol = 0.0, rtol = 1e-12)
+    find_start_pair(F::SystemLike; max_tries = 1_000, atol = 0.0, rtol = 1e-12,
+                    rng = Random.default_rng())
 
 Try to find a pair `(x, p)` for the system `F` such that `F(x, p) = 0` by
-sampling a random `x` and solving the linear system in the parameters (when
-`F` is linear in the parameters), or by a Newton solve of the joint system in
-`(x, p)` otherwise. For a parameter-free system, returns `(x, nothing)` with
+sampling a random `x` from `rng` and solving the linear system in the parameters
+(when `F` is linear in the parameters), or by a Newton solve of the joint system
+in `(x, p)` otherwise. For a parameter-free system, returns `(x, nothing)` with
 `F(x) = 0`. Returns `nothing` if no pair could be found in `max_tries` tries.
 """
 function find_start_pair(
@@ -446,6 +465,7 @@ function find_start_pair(
         max_tries::Int = 1_000,
         atol::Float64 = 0.0,
         rtol::Float64 = 1.0e-12,
+        rng::Random.AbstractRNG = Random.default_rng(),
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Union{Nothing, Vector{ComplexF64}}}}
     refine_atol = atol > 0 ? atol : 1.0e-12
     strategy = nparameters(F) == 0 ?
@@ -455,7 +475,7 @@ function find_start_pair(
     # construction for every automatic monodromy start.
     strategy = Base.inferencebarrier(strategy)
     return _dispatch_start_pair_strategy(
-        strategy, F, max_tries, refine_atol, rtol,
+        strategy, F, rng, max_tries, refine_atol, rtol,
     )
 end
 
@@ -466,26 +486,28 @@ function find_start_pair(
         max_tries::Int = 1_000,
         atol::Float64 = 0.0,
         rtol::Float64 = 1.0e-12,
+        rng::Random.AbstractRNG = Random.default_rng(),
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Union{Nothing, Vector{ComplexF64}}}}
     refine_atol = atol > 0 ? atol : 1.0e-12
     strategy = nparameters(C) == 0 ?
         _parameter_free_start_pair : _composition_start_pair
     strategy = Base.inferencebarrier(strategy)
     return _dispatch_start_pair_strategy(
-        strategy, C, max_tries, refine_atol, rtol,
+        strategy, C, rng, max_tries, refine_atol, rtol,
     )
 end
 
 @noinline function _dispatch_start_pair_strategy(
-        strategy::Function, F::SystemLike, max_tries::Int,
+        strategy::Function, F::SystemLike, rng::Random.AbstractRNG, max_tries::Int,
         refine_atol::Float64, rtol::Float64,
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Union{Nothing, Vector{ComplexF64}}}}
     Base.@nospecialize strategy F
-    return strategy(F, max_tries, refine_atol, rtol)
+    return strategy(F, rng, max_tries, refine_atol, rtol)
 end
 
 @noinline function _composition_start_pair(
-        C::CompositionSystem, max_tries::Int, refine_atol::Float64, rtol::Float64,
+        C::CompositionSystem, rng::Random.AbstractRNG, max_tries::Int,
+        refine_atol::Float64, rtol::Float64,
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Vector{ComplexF64}}}
     m, n = size(C)
     np = nparameters(C)
@@ -493,7 +515,7 @@ end
     joint_cache = _newton_cache(m, n + np)
     cache = NewtonCache(C)
     for _ in 1:max_tries
-        xp₀ = randn(ComplexF64, n + np)
+        xp₀ = randn(rng, ComplexF64, n + np)
         res = _newton(
             joint, joint_cache, xp₀, _EMPTY_PARAMS, 1.0e-8, 1.0e-8, 20, false,
             1.0, typemax(Int), Inf, Inf,
@@ -513,12 +535,13 @@ end
 end
 
 @noinline function _parameter_free_start_pair(
-        F::SystemLike, max_tries::Int, refine_atol::Float64, rtol::Float64,
+        F::SystemLike, rng::Random.AbstractRNG, max_tries::Int,
+        refine_atol::Float64, rtol::Float64,
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Nothing}}
     nvars = nvariables(F)
     cache = NewtonCache(F)
     for _ in 1:max_tries
-        x₀ = randn(ComplexF64, nvars)
+        x₀ = randn(rng, ComplexF64, nvars)
         res = newton(F, x₀; atol = 1.0e-8, cache = cache)
         if res.return_code == NewtonReturnCode.NEWTON_SUCCESS
             refined = newton(
@@ -533,14 +556,15 @@ end
 end
 
 @noinline function _parameterized_start_pair(
-        F::System, max_tries::Int, refine_atol::Float64, rtol::Float64,
+        F::System, rng::Random.AbstractRNG, max_tries::Int,
+        refine_atol::Float64, rtol::Float64,
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Vector{ComplexF64}}}
 
     # 1. Linear-in-parameters fast path. Each attempt draws a
     # fresh random x₀ internally, so a `nothing` (bad draw) should retry, not
     # abandon the fast path.
     for _ in 1:3
-        pair = _linear_in_params_start_pair(F)
+        pair = _linear_in_params_start_pair(F, rng)
         pair === nothing && continue
         return pair
     end
@@ -550,12 +574,13 @@ end
     # it speculatively.
     fallback = Base.inferencebarrier(_joint_newton_start_pair)
     return _dispatch_start_pair_strategy(
-        fallback, F, max_tries, refine_atol, rtol,
+        fallback, F, rng, max_tries, refine_atol, rtol,
     )
 end
 
 @noinline function _joint_newton_start_pair(
-        F::System, max_tries::Int, refine_atol::Float64, rtol::Float64,
+        F::System, rng::Random.AbstractRNG, max_tries::Int,
+        refine_atol::Float64, rtol::Float64,
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Vector{ComplexF64}}}
     nvars = nvariables(F)
     np = nparameters(F)
@@ -566,7 +591,7 @@ end
     cache = NewtonCache(G)
     F_cache = NewtonCache(F)
     for _ in 1:max_tries
-        xp₀ = randn(ComplexF64, nvars + np)
+        xp₀ = randn(rng, ComplexF64, nvars + np)
         res = newton(G, xp₀; atol = 1.0e-8, cache = cache)
         if res.return_code == NewtonReturnCode.NEWTON_SUCCESS
             x = res.x[1:nvars]
@@ -587,7 +612,7 @@ end
 # with exponent at most 1, and every equation actually contains a parameter).
 # Then solve the linear system A p = b exactly.
 function _linear_in_params_start_pair(
-        F::System,
+        F::System, rng::Random.AbstractRNG,
     )::Union{Nothing, Tuple{Vector{ComplexF64}, Vector{ComplexF64}}}
     # The term walk below needs a polynomial representation.
     eltype(F.polys) <: MP.AbstractPolynomialLike || return nothing
@@ -596,7 +621,7 @@ function _linear_in_params_start_pair(
     m = length(F.polys)
     m <= np || return nothing
 
-    x₀ = randn(ComplexF64, nvars)
+    x₀ = randn(rng, ComplexF64, nvars)
     vars = collect(F.variables)
     params = collect(F.parameters)
     pidx = Dict(p => j for (j, p) in enumerate(params))
@@ -637,7 +662,7 @@ function _linear_in_params_start_pair(
         m == np && return nothing
         N = LA.nullspace(A)
         size(N, 2) == 0 && return nothing
-        Vector{ComplexF64}(N * randn(ComplexF64, size(N, 2)))
+        Vector{ComplexF64}(N * randn(rng, ComplexF64, size(N, 2)))
     else
         Vector{ComplexF64}(LA.qr(A, LA.ColumnNorm()) \ b)
     end
@@ -970,13 +995,14 @@ function MonodromySolver(
         F::SystemLike, p::Vector{ComplexF64};
         options::MonodromyOptions = MonodromyOptions(),
         tracker_options::TrackerOptions = TrackerOptions(),
+        rng::Random.AbstractRNG = Random.default_rng(),
     )
     n = nvariables(F)
     if is_homogeneous(F)
         # Homogeneous system: solutions are projective, put the problem on a
         # random affine chart. All workers must share the SAME chart so
         # deduplication is consistent.
-        chart = randn(ComplexF64, n)
+        chart = randn(rng, ComplexF64, n)
         chart_builder = ChartParameterMonodromyBuilder(
             F, p, chart, n, tracker_options,
         )
@@ -1016,6 +1042,9 @@ struct SubspaceMonodromyBuilder{S <: SystemLike}
     tracker_options::TrackerOptions
     use_intrinsic::Bool
     projective::Bool
+    # Every worker tracks the SAME homotopy, so the perturbation is drawn once
+    # here rather than per worker.
+    gamma::ComplexF64
 end
 
 function (builder::SubspaceMonodromyBuilder)()
@@ -1024,9 +1053,9 @@ function (builder::SubspaceMonodromyBuilder)()
     H = if builder.use_intrinsic
         base_eval = builder.projective ?
             SystemEvaluator(AffineChartSystem(sys_eval, builder.chart)) : sys_eval
-        IntrinsicSubspaceHomotopy(base_eval, L, L)
+        IntrinsicSubspaceHomotopy(base_eval, L, L; gamma = builder.gamma)
     else
-        He = ExtrinsicSubspaceHomotopy(sys_eval, L, L)
+        He = ExtrinsicSubspaceHomotopy(sys_eval, L, L; gamma = builder.gamma)
         builder.projective ? AffineChartHomotopy(He, builder.chart) : He
     end
     # For the intrinsic projective case the chart row is buried inside the
@@ -1045,15 +1074,16 @@ function MonodromySolver(
         F::SystemLike, L::LinearSubspace{ComplexF64};
         options::MonodromyOptions = MonodromyOptions(),
         tracker_options::TrackerOptions = TrackerOptions(),
-        intrinsic::Union{Nothing, Bool} = nothing,
+        intrinsic::Bool = _default_intrinsic(L),
+        rng::Random.AbstractRNG = Random.default_rng(),
     )
     n = nvariables(F)
-    use_intrinsic = intrinsic === nothing ? dim(L) <= codim(L) : intrinsic
     projective = is_linear(L) && is_homogeneous(F)
     # All workers must share the SAME chart so deduplication is consistent.
-    chart = randn(ComplexF64, n)
+    chart = randn(rng, ComplexF64, n)
     builder = SubspaceMonodromyBuilder(
-        F, L, chart, n, tracker_options, use_intrinsic, projective,
+        F, L, chart, n, tracker_options, intrinsic, projective,
+        _random_gamma(rng),
     )
     worker = builder()
     return _monodromy_solver_from_builder(
@@ -1061,9 +1091,9 @@ function MonodromySolver(
     )
 end
 
-function add_loop!(MS::MonodromySolver{H, P}) where {H, P}
+function add_loop!(MS::MonodromySolver{H, P}, rng::Random.AbstractRNG) where {H, P}
     base = MS.workers[1].base
-    push!(MS.loops, MonodromyLoop(base, MS.options.parameter_sampler))
+    push!(MS.loops, MonodromyLoop(base, MS.options.parameter_sampler, rng))
     Threads.atomic_add!(MS.statistics.generated_loops, 1)
     if MS.options.permutations
         push!(MS.statistics.permutations, zeros(Int, length(MS.unique_points)))
@@ -1091,6 +1121,9 @@ function trace_colinearity(MS::MonodromySolver)::Float64
     return σ[3] / σ[1]
 end
 
+# The cap `sqrt(accuracy)` can fall below the `1e-14` floor for an extremely
+# accurate endpoint; `max(..., 1e-14)` keeps the clamp bounds ordered (lo ≤ hi)
+# so the floor wins instead of the clamp silently returning a value above the cap.
 """
     uniqueness_rtol(res::PathResult)
 
@@ -1098,9 +1131,6 @@ Relative tolerance for the uniqueness check of a monodromy endpoint, derived
 from the endpoint's Newton certificates: within this radius Newton's method
 contracts to the same solution.
 """
-# The cap `sqrt(accuracy)` can fall below the `1e-14` floor for an extremely
-# accurate endpoint; `max(..., 1e-14)` keeps the clamp bounds ordered (lo ≤ hi)
-# so the floor wins instead of the clamp silently returning a value above the cap.
 uniqueness_rtol(res::PathResult)::Float64 =
     clamp(0.25 * inv(res.ω)^2, 1.0e-14, max(1.0e-14, sqrt(res.accuracy)))
 
@@ -1220,12 +1250,7 @@ function _dedup_tolerances(opts::MonodromyOptions, res::PathResult)::Tuple{Float
     else
         opts.unique_points_rtol::Float64
     end
-    atol = if opts.unique_points_atol === nothing
-        1.0e-14
-    else
-        opts.unique_points_atol::Float64
-    end
-    return atol, rtol
+    return opts.unique_points_atol, rtol
 end
 
 # Dedup-add a finished PathResult under the solver's tolerance policy.
@@ -1302,6 +1327,7 @@ function serial_monodromy_solve!(
         seed::UInt32,
         progress::Union{Nothing, ProgressMeter.ProgressUnknown},
     )::MonodromyCode.T
+    rng = Random.MersenneTwister(seed)
     queue = LoopTrackingJob[]
     ws = MS.workers[1]
     t₀ = time()
@@ -1337,7 +1363,7 @@ function serial_monodromy_solve!(
             break
         end
 
-        add_loop!(MS)
+        add_loop!(MS, rng)
         reset_trace!(MS)
         # schedule all jobs on the fresh loop
         new_loop_id = nloops(MS)
@@ -1377,7 +1403,7 @@ function serial_monodromy_solve!(
                             push!(queue, LoopTrackingJob(id, k))
                         end
                     elseif opts.reuse_loops == ReuseLoops.RANDOM && nloops(MS) >= 2
-                        k = rand(2:nloops(MS))
+                        k = rand(rng, 2:nloops(MS))
                         if k <= job.loop_id
                             k -= 1
                         end
@@ -1606,13 +1632,16 @@ process as to track.
   progress.
 * `min_solutions`: Minimal number of solutions before a stopping heuristic
   applies.
-* `parameter_sampler = independent_normal`: A function taking the parameter `p`
-  and returning a new random parameter `q`.
+* `parameter_sampler = independent_normal`: A function `sampler(rng, p)` taking
+  a random number generator and the parameter `p`, and returning a new random
+  parameter `q`. Drawing from the given `rng` is what makes `seed` determine the
+  result.
 * `permutations = false`: Whether to keep track of the permutations induced by
   the loops.
 * `reuse_loops = :all`: Strategy to reuse other loops for newly found
   solutions: `:all`, `:random` or `:none`.
-* `seed`: Seed for the random number generator.
+* `seed`: Every random choice descends from it, so the same `seed` gives the
+  same loops regardless of the state of the global random number generator.
 * `target_solutions_count`: Stop once this number of solutions is reached.
 * `threading = Threads.nthreads() > 1`: Enable multithreaded path tracking. Ignored
   when an `executor` is given.
@@ -1651,8 +1680,8 @@ function monodromy_solve(
         reuse_loops::Union{Symbol, ReuseLoops.T} = ReuseLoops.ALL,
         permutations::Bool = false,
         distance = InfNorm(),
-        triangle_inequality::Union{Nothing, Bool} = nothing,
-        unique_points_atol::Union{Nothing, Float64} = nothing,
+        triangle_inequality::Bool = satisfies_triangle_inequality(distance),
+        unique_points_atol::Float64 = 1.0e-14,
         unique_points_rtol::Union{Nothing, Float64} = nothing,
         single_loop_per_start_solution::Bool = false,
     )::MonodromyResult
@@ -1680,14 +1709,16 @@ function monodromy_solve(
         single_loop_per_start_solution = single_loop_per_start_solution,
     )
 
-    Random.seed!(seed)
+    # `_monodromy_solve!` seeds its loop generation from `seed` directly, so the
+    # setup draws below take a tagged stream to keep the two uncorrelated.
+    rng = _tagged_rng(seed, 0x0000_0001)
 
     exec, args = _split_monodromy_executor(args)
     executor = exec === nothing ? (threading ? Threaded() : Serial()) : exec
 
     local S, p
     if length(args) == 0
-        start_pair = find_start_pair(F)
+        start_pair = find_start_pair(F; rng = rng)
         if start_pair === nothing
             error(
                 "Cannot compute a start pair (x, p) using `find_start_pair(F)`." *
@@ -1711,7 +1742,9 @@ function monodromy_solve(
             codim_c = codim === nothing ? nothing : codim + Int(projective)
             # NOTE the swap: the `dim`/`codim` kwargs are COMPONENT dimensions;
             # the subspace has complementary dimensions.
-            p = rand_subspace(x; dim = codim_c, codim = dim, affine = !projective)
+            p = rand_subspace(
+                rng, x; dim = codim_c, codim = dim, affine = !projective,
+            )
         else
             p = p0
         end
@@ -1733,7 +1766,8 @@ function monodromy_solve(
         MS = MonodromySolver(
             F, cp;
             options = options, tracker_options = tracker_options,
-            intrinsic = intrinsic,
+            intrinsic = intrinsic === nothing ? _default_intrinsic(cp) : intrinsic,
+            rng = rng,
         )
         mH, nH = size(MS.workers[1].homotopy)
         if mH < nH
@@ -1752,7 +1786,7 @@ function monodromy_solve(
         cp = convert(Vector{ComplexF64}, p)
         MS = MonodromySolver(
             F, cp;
-            options = options, tracker_options = tracker_options,
+            options = options, tracker_options = tracker_options, rng = rng,
         )
         return _monodromy_solve!(
             MS, S, cp, seed, show_progress, executor, catch_interrupt, warning,
@@ -1789,8 +1823,8 @@ function monodromy_solve(
         reuse_loops::Union{Symbol, ReuseLoops.T} = ReuseLoops.ALL,
         permutations::Bool = false,
         distance = InfNorm(),
-        triangle_inequality::Union{Nothing, Bool} = nothing,
-        unique_points_atol::Union{Nothing, Float64} = nothing,
+        triangle_inequality::Bool = satisfies_triangle_inequality(distance),
+        unique_points_atol::Float64 = 1.0e-14,
         unique_points_rtol::Union{Nothing, Float64} = nothing,
         single_loop_per_start_solution::Bool = false,
     )::MonodromyResult
@@ -1841,6 +1875,9 @@ function threaded_monodromy_solve!(
         seed::UInt32,
         progress::Union{Nothing, ProgressMeter.ProgressUnknown},
     )::MonodromyCode.T
+    # `MersenneTwister` is not thread-safe, so the loop-generating coordinator and
+    # every worker task get their own stream, all derived from `seed`.
+    loop_rng = Random.MersenneTwister(seed)
     queue = Channel{LoopTrackingJob}(Inf)
 
     # Grow the worker states to one per thread via the builder (never deepcopy).
@@ -1878,7 +1915,8 @@ function threaded_monodromy_solve!(
     # inflight_count[] == 0. One is probably enough; it is safe to have both.
     try
         for tid in 1:nthr
-            let ws = MS.workers[tid], tid = tid
+            let ws = MS.workers[tid], tid = tid,
+                    job_rng = Random.MersenneTwister(seed + UInt32(tid))
                 Threads.@spawn begin
                     for job in queue
                         Threads.atomic_add!(queued_count, -1)
@@ -1943,7 +1981,7 @@ function threaded_monodromy_solve!(
                                         end
                                     elseif opts.reuse_loops == ReuseLoops.RANDOM &&
                                             nloops(MS) >= 2
-                                        k = rand(2:nloops(MS))
+                                        k = rand(job_rng, 2:nloops(MS))
                                         if k <= job.loop_id
                                             k -= 1
                                         end
@@ -2039,7 +2077,7 @@ function threaded_monodromy_solve!(
                         break
                     end
 
-                    add_loop!(MS)
+                    add_loop!(MS, loop_rng)
                     reset_trace!(MS)
                     # schedule all jobs
                     new_loop_id = nloops(MS)
@@ -2076,25 +2114,24 @@ function threaded_monodromy_solve!(
 end
 
 """
-    solve(F::SystemLike, R::MonodromyResult; target_parameters, options...)
+    solve(F::SystemLike, R::MonodromyResult, p_target, exec = Threaded(); options...)
 
-Track the solutions of the monodromy result `R` from its parameters to
-`target_parameters` via a parameter homotopy.
+Track the solutions of the monodromy result `R` from its parameters to `p_target`
+via a parameter homotopy. `R` supplies both the start solutions and the start
+parameters, so only the target end is given.
 """
 function solve(
         F::SystemLike,
         R::MonodromyResult,
+        p_target::AbstractVector{<:Number},
         exec::AbstractExecutor = Threaded();
-        target_parameters::AbstractVector{<:Number},
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
         show_progress::Bool = true,
     )::Result
     return solve(
-        F, solutions(R), exec;
-        start_parameters = parameters(R),
-        target_parameters = target_parameters,
+        F, solutions(R), parameters(R), p_target, exec;
         seed = seed,
         tracker_options = tracker_options,
         endgame_options = endgame_options,
@@ -2110,10 +2147,12 @@ end
 # parameter (the trace variable t) fixed at zero. The LinearSubspace method
 # exists only to keep the sampler total over both MonodromyLoop branches; the
 # auxiliary system always has vector parameters, so it is unreachable.
-function _zero_first_parameter_sampler(pp::AbstractVector)::Vector{ComplexF64}
-    return [0.0 + 0.0im; randn(ComplexF64, length(pp) - 1)]
+function _zero_first_parameter_sampler(
+        rng::Random.AbstractRNG, pp::AbstractVector,
+    )::Vector{ComplexF64}
+    return [0.0 + 0.0im; randn(rng, ComplexF64, length(pp) - 1)]
 end
-function _zero_first_parameter_sampler(::LinearSubspace)
+function _zero_first_parameter_sampler(::Random.AbstractRNG, ::LinearSubspace)
     throw(ArgumentError("the completeness verification sampler only supports vector parameters"))
 end
 
@@ -2236,19 +2275,17 @@ function verify_solution_completeness(
         @info "Compute additional witnesses for completeness check..."
     end
 
-    Random.seed!(seed)
+    rng = Random.MersenneTwister(seed)
     q0 = convert(Vector{ComplexF64}, q)
 
     # Start solutions: sample random parameters qq to set v = qq - q. More
     # than one start solution is good; construct up to n by a parameter
     # homotopy to qq, then compute an `a` such that those solutions lie on
     # the linear space a⋅x - 1 = 0.
-    qq = randn(ComplexF64, m)
+    qq = randn(rng, ComplexF64, m)
     qq_res = solve(
-        F, sols[1:min(n, length(sols))], Serial();
-        start_parameters = q0,
-        target_parameters = qq,
-        seed = seed,
+        F, sols[1:min(n, length(sols))], q0, qq, Serial();
+        seed = rand(rng, UInt32),
         tracker_options = tracker_options,
         endgame_options = endgame_options,
         show_progress = show_progress,
@@ -2260,7 +2297,7 @@ function verify_solution_completeness(
     additional_mres = monodromy_solve(
         verify_system, Y, [0.0; base_params];
         parameter_sampler = _zero_first_parameter_sampler,
-        seed = seed,
+        seed = rand(rng, UInt32),
         threading = threading,
         show_progress = show_progress,
         tracker_options = tracker_options,
@@ -2275,12 +2312,10 @@ function verify_solution_completeness(
 
     # Parameter homotopies for the trace: move t along a random direction γ.
     S = [map(s -> [s; 0], sols); additional_sols]
-    γ = randn(ComplexF64)
+    γ = randn(rng, ComplexF64)
     res1 = solve(
-        verify_system, S, Serial();
-        start_parameters = [0.0; base_params],
-        target_parameters = [0.5 * γ; base_params],
-        seed = seed,
+        verify_system, S, [0.0; base_params], [0.5 * γ; base_params], Serial();
+        seed = rand(rng, UInt32),
         tracker_options = tracker_options,
         endgame_options = endgame_options,
         show_progress = show_progress,
@@ -2294,10 +2329,8 @@ function verify_solution_completeness(
     end
 
     res2 = solve(
-        verify_system, S1, Serial();
-        start_parameters = [0.5 * γ; base_params],
-        target_parameters = [1.0 * γ; base_params],
-        seed = seed,
+        verify_system, S1, [0.5 * γ; base_params], [1.0 * γ; base_params], Serial();
+        seed = rand(rng, UInt32),
         tracker_options = tracker_options,
         endgame_options = endgame_options,
         show_progress = show_progress,

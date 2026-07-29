@@ -335,8 +335,7 @@ end
 
     q = ComplexF64[5.0, 2.0]
     r = solve(
-        C, starts; start_parameters = p₀, target_parameters = q,
-        show_progress = false,
+        C, starts, p₀, q; show_progress = false,
     )
     @test nsolutions(r) == 2
     for s in solutions(r)

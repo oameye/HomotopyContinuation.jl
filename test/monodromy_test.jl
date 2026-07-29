@@ -46,12 +46,12 @@ using HomotopyContinuationNext: MonodromyOptions, MonodromyLoop, MonodromyStatis
     @test opts.reuse_loops == ReuseLoops.ALL
 
     p = [1.0 + 0im, 2.0 + 0im]
-    loop = MonodromyLoop(p, independent_normal)
+    loop = MonodromyLoop(p, independent_normal, Random.MersenneTwister(0x2718))
     @test loop.p == p
     @test loop.p₀₁ ≈ 0.5 .* (loop.p₁ .- p)
 
     L = rand_subspace(3; dim = 1)
-    loopL = MonodromyLoop(L, independent_normal)
+    loopL = MonodromyLoop(L, independent_normal, Random.MersenneTwister(0x2718))
     # equal spacing: b₀₁ - b == b₁ - b₀₁
     d1 = extrinsic(loopL.p₀₁).b .- extrinsic(loopL.p).b
     d2 = extrinsic(loopL.p₁).b .- extrinsic(loopL.p₀₁).b
@@ -85,7 +85,9 @@ using HomotopyContinuationNext: MonodromySolver, MonodromyWorkerState, track_loo
     res0 = track_start!(ws, ComplexF64.(x0))
     @test res0 !== nothing && is_success(res0)
 
-    loop = MonodromyLoop(ComplexF64.(p0), MS.options.parameter_sampler)
+    loop = MonodromyLoop(
+        ComplexF64.(p0), MS.options.parameter_sampler, Random.MersenneTwister(0x2718),
+    )
     res1 = track_loop!(ws, loop, res0, false, MS)
     @test res1 !== nothing && is_success(res1)
     # endpoint is back on the fiber over p0
@@ -120,15 +122,17 @@ using HomotopyContinuationNext: monodromy_solve, MonodromyResult, permutations,
     # group action: x^2 - p has a 2-orbit collapsing to 1 class
     @polyvar u q
     G = System([u^2 - q]; variables = [u], parameters = [q])
+    # A loop swaps the two roots only when it winds around the branch point
+    # q = 0, which is a property of the loop the seed draws; this seed's does.
     rg = monodromy_solve(
         G, [[2.0 + 0im]], [4.0 + 0im];
-        group_action = s -> ([-s[1]],), seed = UInt32(11),
+        group_action = s -> ([-s[1]],), seed = UInt32(100),
         threading = false, show_progress = false,
     )
     @test nsolutions(rg) == 1
     rng = monodromy_solve(
         G, [[2.0 + 0im]], [4.0 + 0im];
-        seed = UInt32(11), threading = false, show_progress = false,
+        seed = UInt32(100), threading = false, show_progress = false,
     )
     @test nsolutions(rng) == 2
 
@@ -222,7 +226,7 @@ end
     # seed chosen so that both solutions appear before the no-progress window
     # of 2 loops elapses (some seeds stop with only 1 found)
     rml = monodromy_solve(
-        F; max_loops_no_progress = 2, seed = UInt32(306),
+        F; max_loops_no_progress = 2, seed = UInt32(300),
         threading = false, show_progress = false,
     )
     @test nsolutions(rml) == 2 && is_heuristic_stop(rml)

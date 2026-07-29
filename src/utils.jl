@@ -29,8 +29,13 @@ end
     (@atomic :release cache.value = value; nothing)
 @inline Base.getindex(cache::LazyRef{T}) where {T} = @atomic :acquire cache.value
 
-_random_gamma(rng::Random.MersenneTwister)::ComplexF64 = cis(2π * rand(rng))
+_random_gamma(rng::Random.AbstractRNG)::ComplexF64 = cis(2π * rand(rng))
 _random_gamma(seed::UInt32)::ComplexF64 = _random_gamma(Random.MersenneTwister(seed))
+
+# A second stream from the same seed: the seed vector differs from the one
+# `MersenneTwister(seed)` builds, so the two never share draws.
+_tagged_rng(seed::UInt32, tag::UInt32)::Random.MersenneTwister =
+    Random.MersenneTwister(UInt32[seed, tag])
 
 nanmin(a, b) = isnan(a) ? b : (isnan(b) ? a : min(a, b))
 nanmax(a, b) = isnan(a) ? b : (isnan(b) ? a : max(a, b))

@@ -5,7 +5,8 @@ using HomotopyContinuationNext: CompileMode, TotalDegree, Polyhedral, Result,
     variables, parameters, _sliced_solve_system, _sliced_solve_setup,
     _init_sliced_total_degree, _rebuild_sliced, _sliced_evaluator, SlicedSystem,
     LinearSubspace, FSVec, FSMat, TaylorVector, vectors,
-    evaluate!, evaluate_and_jacobian!, taylor!, path_results, steps
+    evaluate!, evaluate_and_jacobian!, taylor!, path_results, steps,
+    fix_parameters
 using DynamicPolynomials: @polyvar
 using CommonSolve: CommonSolve
 using LinearAlgebra: norm
@@ -96,7 +97,7 @@ end
         @polyvar x y a
         F = System([x^2 + y^2 - a]; variables = [x, y], parameters = [a])
         L = rand_subspace(2; codim = 1)
-        res = solve(F, L; target_parameters = [5.0], show_progress = false)
+        res = solve(fix_parameters(F, [5.0]), L; show_progress = false)
         @test nsolutions(res) == 2
         for s in solutions(res)
             @test abs(s[1]^2 + s[2]^2 - 5) < 1.0e-10
@@ -104,13 +105,10 @@ end
         @test_throws ArgumentError solve(F, L; show_progress = false)
     end
 
-    @testset "solve(F, L): target_parameters on a parameter-free system" begin
+    @testset "solve(F, L): fixing parameters of a parameter-free system" begin
         @polyvar x y
         F = System([x^2 + y^2 - 5]; variables = [x, y])
-        @test_throws ArgumentError solve(
-            F, rand_subspace(2; codim = 1); target_parameters = [1.0],
-            show_progress = false,
-        )
+        @test_throws ArgumentError fix_parameters(F, [1.0])
     end
 
     @testset "solve(F, L): overdetermined slice keeps the excess checker" begin
@@ -151,8 +149,8 @@ end
         F = System([x^2 + y^2 - z^2]; variables = [x, y, z])
         L = rand_subspace(3; codim = 1, affine = false)
         seed32 = UInt32(0x2024)
-        G1 = _sliced_solve_system(F, L, seed32, nothing)
-        G2 = _sliced_solve_system(F, L, seed32, nothing)
+        G1 = _sliced_solve_system(F, L, seed32)
+        G2 = _sliced_solve_system(F, L, seed32)
         @test collect(polynomials(G1)) == collect(polynomials(G2))
     end
 
@@ -161,7 +159,7 @@ end
         F = System([x^3 + y^2 * z - 2 * z^3, x * y - z^2]; variables = [x, y, z])
         L = rand_subspace(3; codim = 1)
         alg = TotalDegree(; seed = UInt32(11))
-        G, chart = _sliced_solve_setup(F, L, alg.seed, nothing)
+        G, chart = _sliced_solve_setup(F, L, alg.seed)
         wrapped = _sliced_evaluator(
             G.evaluator, convert(LinearSubspace{ComplexF64}, L), chart,
         )
@@ -205,7 +203,7 @@ end
         F = System([x^3 + y^2 * z - 2 * z^3, x * y - z^2]; variables = [x, y, z])
         L = rand_subspace(3; codim = 1)
         alg = TotalDegree(; seed = UInt32(11))
-        G, chart = _sliced_solve_setup(F, L, alg.seed, nothing)
+        G, chart = _sliced_solve_setup(F, L, alg.seed)
         wrapped = CommonSolve.solve!(
             _init_sliced_total_degree(G, L, chart, alg, Serial(), false),
         )

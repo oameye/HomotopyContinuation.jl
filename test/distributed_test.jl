@@ -202,13 +202,11 @@ end
 
         @testset "parameter homotopy" begin
             @test length(starts) == 4
-            opts = (;
-                start_parameters = p₀, target_parameters = ComplexF64[2.3, 0.9],
-                seed = UInt32(55), show_progress = false,
-            )
-            serial = solve(F_param, starts, Serial(); opts...)
+            q = ComplexF64[2.3, 0.9]
+            opts = (; seed = UInt32(55), show_progress = false)
+            serial = solve(F_param, starts, p₀, q, Serial(); opts...)
             for exec in (DistributedExecutor(), DistributedExecutor(; batch_size = 1))
-                @test same_paths(serial, solve(F_param, starts, exec; opts...)) == ""
+                @test same_paths(serial, solve(F_param, starts, p₀, q, exec; opts...)) == ""
             end
         end
 
@@ -233,8 +231,8 @@ end
 
         @testset "parameter sweep" begin
             targets = [ComplexF64[2.0 + 0.1k, 0.4 + 0.05k] for k in 1:7]
-            opts = (; start_parameters = p₀, seed = UInt32(55), show_progress = false)
-            serial = solve(F_param, starts, targets, Serial(); opts...)
+            opts = (; seed = UInt32(55), show_progress = false)
+            serial = solve_targets(F_param, starts, p₀, targets, Serial(); opts...)
             @test length(serial) == length(targets)
             # `batch_size = 3` puts a batch boundary inside a target, which is
             # what exercises the retarget bookkeeping.
@@ -245,7 +243,7 @@ end
                     lockstep,
                 )
                 @test same_sweep(
-                    serial, solve(F_param, starts, targets, exec; opts...),
+                    serial, solve_targets(F_param, starts, p₀, targets, exec; opts...),
                 ) == ""
             end
         end
@@ -253,7 +251,7 @@ end
         @testset "subspace sweep" begin
             targets = [rand_subspace(3; codim = 1) for _ in 1:5]
             opts = (; seed = UInt32(8), show_progress = false)
-            serial = solve(F_curve, starts_V, V, targets, Serial(); opts...)
+            serial = solve_targets(F_curve, starts_V, V, targets, Serial(); opts...)
             @test length(serial) == length(targets)
             for exec in (
                     DistributedExecutor(),
@@ -262,7 +260,7 @@ end
                     lockstep,
                 )
                 @test same_sweep(
-                    serial, solve(F_curve, starts_V, V, targets, exec; opts...),
+                    serial, solve_targets(F_curve, starts_V, V, targets, exec; opts...),
                 ) == ""
             end
         end
@@ -356,9 +354,9 @@ end
             # An error thrown while tracking arrives as the error the system
             # raised, not as a `RemoteException` wrapping it.
             err = try
-                solve(
-                    F_param, starts, [ComplexF64[1.0]], DistributedExecutor();
-                    start_parameters = p₀, seed = UInt32(1), show_progress = false,
+                solve_targets(
+                    F_param, starts, p₀, [ComplexF64[1.0]], DistributedExecutor();
+                    seed = UInt32(1), show_progress = false,
                 )
                 nothing
             catch e

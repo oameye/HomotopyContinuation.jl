@@ -119,9 +119,9 @@ function run(::Val{:parameter_interpreted_serial})
     return solve(
         F,
         [[1.0 + 0.0im]],
+        [1.0 + 0.0im],
+        [9.0 + 0.0im],
         Serial();
-        start_parameters = [1.0 + 0.0im],
-        target_parameters = [9.0 + 0.0im],
         seed = UInt32(1),
         show_progress = false,
     )
@@ -138,9 +138,9 @@ function run(::Val{:parameter_compiled_all_threaded})
     return solve(
         F,
         [[1.0 + 0.0im]],
+        [1.0 + 0.0im],
+        [9.0 + 0.0im],
         Threaded(1);
-        start_parameters = [1.0 + 0.0im],
-        target_parameters = [9.0 + 0.0im],
         seed = UInt32(1),
         show_progress = false,
     )
@@ -309,9 +309,9 @@ end
 
 function run(::Val{:parameter_sweep})
     F, starts, p₀, targets = _parameter_sweep_problem()
-    return solve(
-        F, starts, targets, Serial();
-        start_parameters = p₀, seed = UInt32(0x1234), show_progress = false,
+    return solve_targets(
+        F, starts, p₀, targets, Serial();
+        seed = UInt32(0x1234), show_progress = false,
     )
 end
 
@@ -325,7 +325,7 @@ end
 
 function _subspace_sweep(intrinsic::Bool)
     F, starts, L₀, targets = _subspace_sweep_problem()
-    return solve(
+    return solve_targets(
         F, starts, L₀, targets, Serial();
         intrinsic = intrinsic, seed = UInt32(0x1234), show_progress = false,
     )

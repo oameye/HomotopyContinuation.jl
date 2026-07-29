@@ -34,7 +34,7 @@ using HomotopyContinuation.ModelKit: @var
         F3 = Next.System([nx^2 - na, ny^2 - na]; parameters = [na])
         F3_fixed = Next.System([nx^2 - 1, ny^2 - 1])
         starts3 = Next.solutions(Next.solve(F3_fixed; show_progress = false))
-        r3 = Next.solve(F3, starts3; start_parameters = [1.0], target_parameters = [4.0], show_progress = false)
+        r3 = Next.solve(F3, starts3, [1.0], [4.0]; show_progress = false)
 
         @var hx hy ha
         F2 = HC.ModelKit.System([hx^2 - ha, hy^2 - ha]; parameters = [ha])

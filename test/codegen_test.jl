@@ -422,8 +422,8 @@ _rgf(expr) = RuntimeGeneratedFunctions.RuntimeGeneratedFunction(HC, HC, expr)
         F_start = System([x^2 - 1, y^2 - 1]; compile = CompileMode.INTERPRETED)
         starts = HC.solutions(HC.solve(F_start; show_progress = false))
 
-        r_i = HC.solve(F_i, starts; start_parameters = [1.0], target_parameters = [4.0], show_progress = false)
-        r_c = HC.solve(F_c, starts; start_parameters = [1.0], target_parameters = [4.0], show_progress = false)
+        r_i = HC.solve(F_i, starts, [1.0], [4.0]; show_progress = false)
+        r_c = HC.solve(F_c, starts, [1.0], [4.0]; show_progress = false)
         @test HC.nresults(r_i) == HC.nresults(r_c)
 
         sols_i = sort(HC.real_solutions(r_i); by = s -> (s[1], s[2]))

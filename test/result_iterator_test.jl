@@ -61,7 +61,7 @@ using LinearAlgebra: norm
         @test maximum(pr -> maximum(abs, E.A * solution(pr) - E.b), w₂) < 1.0e-10
         # also usable as start solutions for an eager solve and a sweep
         @test nsolutions(solve(F, r₁, l₁, l₂; show_progress = false)) == 2
-        sweep = solve(F, r₁, l₁, [l₂], Serial(); show_progress = false)
+        sweep = solve_targets(F, r₁, l₁, [l₂], Serial(); show_progress = false)
         @test nsolutions(first(only(sweep))) == 2
     end
 
@@ -70,7 +70,7 @@ using LinearAlgebra: norm
         F = System([x^2 + y^2 - p, x - y]; variables = [x, y], parameters = [p])
         G = System([x^2 + y^2 - 2.0, x - y]; variables = [x, y])
         S = solutions(solve(G, Serial(); show_progress = false))
-        ri = result_iterator(F, S; start_parameters = [2.0], target_parameters = [8.0])
+        ri = result_iterator(F, S, [2.0], [8.0])
         @test length(collect(ri)) == length(S)
         for s in solutions(Result(ri))
             @test abs(s[1]^2 + s[2]^2 - 8) < 1.0e-10

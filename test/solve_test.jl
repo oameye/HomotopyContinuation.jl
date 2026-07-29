@@ -250,9 +250,7 @@ using CommonSolve: CommonSolve
         @test nsolutions(r1) >= 2
         # Track to new parameters a=2, b=1
         r2 = solve(
-            F, solutions(r1);
-            start_parameters = [1.0, 0.5],
-            target_parameters = [2.0, 1.0], show_progress = false,
+            F, solutions(r1), [1.0, 0.5], [2.0, 1.0]; show_progress = false,
         )
         @test nsolutions(r2) >= 2
         # Verify solutions satisfy the target system
@@ -270,11 +268,7 @@ using CommonSolve: CommonSolve
         r1 = solve(F_fixed; show_progress = false)
         @test nsolutions(r1) == 4
         # Track to a=4
-        r2 = solve(
-            F, solutions(r1);
-            start_parameters = [1.0],
-            target_parameters = [4.0], show_progress = false,
-        )
+        r2 = solve(F, solutions(r1), [1.0], [4.0]; show_progress = false)
         @test nsolutions(r2) == 4
         rsols = real_solutions(r2)
         @test length(rsols) == 4
@@ -289,17 +283,15 @@ using CommonSolve: CommonSolve
         F = System([x^2 - a, y - 1]; parameters = [a])
         F_fixed = System([x^2 - 1, y - 1])
         r1 = solve(F_fixed; show_progress = false)
-        cache = CommonSolve.init(
-            F, solutions(r1);
-            start_parameters = [1.0],
-            target_parameters = [4.0],
-        )
+        cache = CommonSolve.init(F, solutions(r1), [1.0], [4.0])
         @test cache isa SolveCache
         r2 = CommonSolve.solve!(cache)
         @test nsolutions(r2) >= 1
     end
 
-    @testset "start-system routes reject a parametric system" begin
+    # Without values there is no target system to build a start system for; the
+    # routes with values fixed are covered in `fixed_parameter_test.jl`.
+    @testset "start-system routes reject a parametric system without values" begin
         @polyvar x y a
         F = System([x^2 + y^2 - a, x * y - 1]; variables = [x, y], parameters = [a])
         for alg in (TotalDegree(), Polyhedral())
@@ -535,11 +527,7 @@ using CommonSolve: CommonSolve
         F = System([x^2 - a, y^2 - a]; parameters = [a])
         F_fixed = System([x^2 - 1, y^2 - 1])
         r1 = solve(F_fixed; show_progress = false)
-        r2 = solve(
-            F, solutions(r1), Serial();
-            start_parameters = [1.0],
-            target_parameters = [4.0], show_progress = false,
-        )
+        r2 = solve(F, solutions(r1), [1.0], [4.0], Serial(); show_progress = false)
         @test nsolutions(r2) == 4
         for sol in real_solutions(r2)
             @test abs(sol[1]^2 - 4) < 1.0e-6
@@ -552,11 +540,7 @@ using CommonSolve: CommonSolve
         F = System([x^2 - a, y^2 - a]; parameters = [a])
         F_fixed = System([x^2 - 1, y^2 - 1])
         r1 = solve(F_fixed; show_progress = false)
-        r2 = solve(
-            F, solutions(r1), Threaded();
-            start_parameters = [1.0],
-            target_parameters = [4.0], show_progress = false,
-        )
+        r2 = solve(F, solutions(r1), [1.0], [4.0], Threaded(); show_progress = false)
         @test nsolutions(r2) == 4
         for sol in real_solutions(r2)
             @test abs(sol[1]^2 - 4) < 1.0e-6

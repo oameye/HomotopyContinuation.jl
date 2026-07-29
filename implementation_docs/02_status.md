@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-07-26.
+Last updated: 2026-07-29.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
@@ -22,6 +22,10 @@ zero-dimensional, parametric, and rational cases).
 
 No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
 `DistributedExecutor` cover single-task, multi-task and multi-process tracking.
+
+A testset-by-testset comparison against v2's suite on 2026-07-29 found 11 v2 test files
+that are not fully ported, all because the feature behind them does not exist yet. They are
+listed under "v2 parity gaps" below and are the remaining work toward full parity.
 
 ## Feature Checklist
 
@@ -93,7 +97,7 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
     `Polyhedral` reject those systems with a targeted error, on the sliced routes as well as
     the plain ones.
   - The solve routes that rewrite equations rather than just evaluate them dispatch on the
-    front-end: `_fix_parameters` (used by sliced solves and witness sets) substitutes through
+    front-end: `fix_parameters` (used by sliced solves and witness sets) substitutes through
     `subs` instead of `MP.subs`, and `support_coefficients` recovers the polyhedral support by
     expanding the expression tree into `exponent vector => coefficient`, since the front-end
     keeps products and powers unexpanded. Both agree term for term with the same system built
@@ -152,7 +156,7 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
 - [x] Progress bars via ProgressMeter.jl (`show_progress` kwarg on `solve`/`init`, threaded, with v2's
   live `showvalues` counts and `delay=0.3` suppression)
 - [x] `ParameterHomotopy` (linear parameter interpolation, retargetable via
-  `start_parameters!`/`target_parameters!`) and `solve(F, starts; start_parameters, target_parameters)`
+  `start_parameters!`/`target_parameters!`) and `solve(F, starts, p_start, p_target)`
 - [x] Tracker warm start (`track!` reusing ω/μ from a previous path; `ω`/`μ` accessors on `PathResult`)
 - [x] `GroupActions`/`SymmetricGroup` (orbit generation, composed actions)
 - [x] `VoronoiTree` and `UniquePoints` (group-action-aware nearest-point dedup),
@@ -168,6 +172,8 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
   (Channel job queue) execution, `MonodromyOptions` (~27 explicit kwargs, no splatting),
   `reuse_loops` (`:all`/`:random`/`:none`), heuristic stop, `target_solutions_count`,
   equivalence classes via group actions, `LinearSubspace` parameters, permutations, trace
+  test. One deliberate signature deviation: `parameter_sampler` is called `sampler(rng, p)`
+  rather than v2's `sampler(p)`.
 - [x] `verify_solution_completeness` (trace test with augmented system, auxiliary monodromy,
   singular-value trace check)
 - [x] **Certification** (`certify`) at full v2 parity, in the separate
@@ -177,7 +183,7 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
   + `setprecision!`, escalates 128→256 bits), `SolutionCertificate`/`ExtendedSolutionCertificate`,
   all accessors and counts, duplicate grouping via interval tree, `save`,
   `show_straight_line_program`, and every input form
-  (`Result`/`PathResult`/`Vector`/single/`MonodromyResult`, positional and `target_parameters`).
+  (`Result`/`PathResult`/`Vector`/single/`MonodromyResult`, with the parameter values positional).
   Includes the 3264-conics regression. Load with
   `using HomotopyContinuationNext, HomotopyContinuationNextCertification`
 - [x] **`DistinctCertifiedSolutions`** streaming accumulator (`add_solution!`,
@@ -192,9 +198,9 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
     variables, parameters and compile mode; `chart = c` appends `c·x − 1`.
   - `solve(F, L, alg, exec)` / `init`: `V(F) ∩ L` through the ordinary total-degree or polyhedral
     route, so `Result`, clustering and the excess checker apply unchanged. A homogeneous `F` with
-    a linear `L` gets a seed-reproducible chart row; parametric `F` takes `target_parameters`,
-    substituted before slicing. Solutions are ambient (v2's too, though it reaches them through
-    an intrinsic sliced system).
+    a linear `L` gets a seed-reproducible chart row; a parametric `F` is rejected, and
+    `fix_parameters(F, p)` is what the route accepts. Solutions are ambient (v2's too, though it
+    reaches them through an intrinsic sliced system).
   - `SlicedSystem` appends the linear rows by wrapping `F`'s **evaluator**, so the square
     total-degree route (and `_witness_init`, hence witness sets, NID and regeneration) never
     re-runs CSE or rebuilds tapes: `init` 0.02 ms versus 9.64 ms on a dense degree-4 system in 5
@@ -207,16 +213,18 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
     at `t = 1` and back out through `_to_ambient` at the `t` each path reported. Consequences:
     clustering compares ambient points (v2 clusters intrinsic ones), and per-path diagnostics
     (accuracy, residual, condition number, valuation) stay in tracking coordinates, as in v2.
-  - `solve(F, starts, targets, exec; start_parameters, ...)` and
-    `solve(F, starts, L_start, targets, exec; ...)`: one homotopy built and retargeted per target
+  - `solve_targets(F, starts, p_start, targets, exec; ...)` and
+    `solve_targets(F, starts, L_start, targets, exec; ...)`: one homotopy built and retargeted per target
     (`target_parameters!` through the concrete handle in the worker state), `transform_result`,
     `transform_parameters` and `flatten` matching v2's four return shapes. Threading runs over the
     (target, path) product, each task owning its worker state and retargeting it when it crosses a
     target boundary, so the speedup no longer caps at the number of targets: measured 4.31x versus
     1.36x on 12 threads for a one-target sweep of 125 paths, and unchanged at 24+ targets. Chunks
     are contiguous in target-major order, so this costs at most `n_targets + ntasks` retargets. The
-    v2 kwarg spelling (`target_parameters = [p1, ...]`) is deliberately not accepted: it would make
-    an existing route's return type value-dependent.
+    many-target route is its own verb because the single-vs-many distinction cannot be carried by a
+    positional slot's type: numeric metadata targets (`1:20` plus `transform_parameters`) are
+    indistinguishable from one multi-value target, and v2's runtime `isa(…, Number)` branch would
+    make the return type value-dependent.
   - `result_iterator(...)` → `ResultIterator`, the typed replacement for v2's `iterator_only`
     kwarg: lazy per-path tracking for the total-degree, polyhedral, sliced, parameter and
     subspace routes (serial), `bitmask` / `bitmask_filter`, and `Result(ri)` for clustering and
@@ -229,7 +237,7 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
   (u-regeneration, Duff/Leykin/Rodriguez); `decompose` plus `NumericalIrreducibleDecomposition`
   (`nid` / `numerical_irreducible_decomposition`, `ncomponents`, `degrees`, `witness_sets`,
   hand-rolled degree table with no PrettyTables dep). Covers projective witness sets,
-  zero-dimensional varieties, parametric (`target_parameters`) witness sets, rational input to
+  zero-dimensional varieties, witness sets of a `fix_parameters` system, rational input to
   `regeneration`/`nid`/`intersect`, and threaded membership and intersection.
   Tests: `test/{witness_set,nid}_test.jl`.
 
@@ -246,10 +254,12 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
     parameter-free system, so no parameter plumbing reaches moves/trace/membership/decompose.
   - Threaded intersection clones evaluators instead of `deepcopy`ing trackers (unsafe with
     FunctionWrappers) and pushes endpoints in serial order.
-  - `membership` is bit-identical across threading modes: all randomness is drawn from the
-    global RNG in the driver, so both modes leave the global RNG in the same state. The query
-    subspace direction is genuinely random per query, unlike v2's fixed axis-aligned frame.
+  - `membership` is bit-identical across threading modes: all randomness is drawn in the
+    driver, off the stream its `seed` builds, before any task starts. The query subspace
+    direction is genuinely random per query, unlike v2's fixed axis-aligned frame.
   - Adds the `weighted_normal` monodromy sampler (v2 has it only for regen/decompose).
+    Both samplers take the random number generator as their first argument, `sampler(rng, p)`,
+    where v2's take only `p`; that is what lets a route's `seed` determine its loops.
   - Both input front-ends reach `regeneration` / `nid` / `intersect`, the routes that rebuild
     equations rather than only evaluating them. `_regeneration_equations`, `_u_degree`,
     `_u_start_equation`, `_numerator_system` and `_rename_variables` dispatch on the equation
@@ -368,6 +378,94 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
   first-solve per v3 default candidate (the v3-only matrix is measured; see `04_compile_modes.md`)
 - [ ] Benchmark CI
 
+### v2 parity gaps
+
+Found by comparing every v2 `@testset` against the v3 suite on 2026-07-29. Each entry names
+the v2 test that stays unported until the feature lands. Ordered by consequence.
+
+- [ ] **Multi-homogeneous (variable-group) total degree.** `System` accepts and stores
+  `variable_groups` but nothing reads it: no `multi_degrees`, no multi-homogeneous Bezout
+  count, no product start system. Unports `solve_test.jl` "total degree (variable groups)"
+  (affine and projective, square and overdetermined) and `symbolic_test.jl`
+  "System variables groups + homogeneous".
+- [ ] **Projective total degree and polyhedral.** `_init_total_degree` dispatches on
+  `SquareShape`/`OverdeterminedShape` only, so a homogeneous system with `m = n - 1` is
+  underdetermined and throws. v3 draws a chart on the sliced, subspace and witness routes
+  (`slice.jl:136`, `subspace_solve.jl:228`, `witness_set.jl:40`) but not on the plain ones.
+  Unports the `proj_square`, `proj_ov` and `proj_ov_reordering` cases of `solve_test.jl`
+  "total degree (simple)".
+- [x] **`fix_parameters(F, p)`**, and **`FixedParameterSystem`**. One public operation fixes a
+  parametric system at one parameter value, and its result is what every route accepts:
+  `solve(fix_parameters(F, p), TotalDegree())`, `solve(fix_parameters(F, p), L, Polyhedral())`,
+  `witness_set(fix_parameters(F, p))`. No solve route takes parameter values any more, which
+  removed 22 `target_parameters::Union{Nothing, …}` keywords across five files and gave `nid`
+  and `regeneration` the capability for free; `start_parameters`/`target_parameters` survive
+  only on the parameter-homotopy and sweep routes, where they name two different ends. A
+  `System` has the values substituted into its equations; a `CompositionSystem` has no
+  equations to substitute into and gets a `FixedParameterSystem`, which binds them at the
+  evaluator level and pays a second FunctionWrapper hop of 11% to 19% per kernel call
+  (measurements in `01_decisions.md`, "Fixing parameters"). Tests:
+  `test/fixed_parameter_test.jl` (which representation each input gets, the bound evaluator
+  against the substituted system on every interface method, per-worker cloning, both
+  algorithms, square and overdetermined, all three compile modes, both executors, composition)
+  plus the bound wrapper's hot-path entry in `test/alloc_check_test.jl`. Closes
+  `systems_test.jl` "FixedParameterSystem".
+- [ ] **`solve(G, F, starts)`** between two parameter-fixed systems, which
+  `FixedParameterSystem` now makes expressible. Unports the second half of `solve_test.jl`
+  "solve (start target)".
+- [ ] **`solve(H::AbstractHomotopy, starts)`**: tracking an explicit homotopy object.
+  Unports `solve_test.jl` "solve (Homotopy)".
+- [ ] **`stop_early_cb`**, serial and threaded. Unports `solve_test.jl` "stop early callback".
+- [ ] **SemialgebraicSets.jl integration**: `SemialgebraicSetsHCSolver` with
+  `excess_residual_tol`, `real_atol`, `real_rtol`, `compile`, and its `show`. Unports all of
+  `semialgebraic_sets_test.jl`.
+- [ ] **Solution and parameter file I/O**: `write_solutions`, `read_solutions`,
+  `write_parameters`, `read_parameters`. Unports `utils_test.jl` "writing and reading".
+- [ ] **`path_info`**: the per-step tracking table and its `show`. Unports `tracker_test.jl`
+  "path info".
+- [ ] **Tracker path iterator** `iterator(tracker, x, t₁, t₀)` yielding `(x, t)` per accepted
+  step. `ResultIterator` is a different thing (lazy per-path at solve level). Unports
+  `tracker_test.jl` "iterator".
+- [ ] **`paths_to_track`, `mixed_volume`**, and the polyhedral `only_torus` / `only_non_zero`
+  options. `total_degree_count` covers the total-degree half and is unexported. Unports
+  `solve_test.jl` "paths to track" and `polyhedral_test.jl` "only torus".
+- [ ] **Symbolic `Homotopy` type** (`Homotopy(h, vars, t; parameters)`) for user-defined
+  homotopies, with `nvariables`/`variables`/`parameters`/`show`. v3 has only the built-in
+  concrete homotopies. Unports `symbolic_test.jl` "Homotopy".
+- [ ] **Symbolic utilities on `Expression`**: `expand`, `to_dict`, `horner`, `monomials`,
+  `dense_poly`, `rand_poly`, `coefficients(f, vars)`, `coeffs_as_dense_poly`,
+  `exponents_coefficients` and `poly_from_exponents_coefficients` (the per-equation form of
+  the internal `support_coefficients`), `multi_degrees`, `to_number` /
+  `convert(Int, ::Expression)`, `evaluate(exprs, ::Dict)`, and calling a system as a function
+  (`F(x)`, `F(x, p)`). Unports `symbolic_test.jl` "Expand", "to_dict", "Horner",
+  "Rand / dense poly", "Polynomial to exponents_coefficients and back", "Convert",
+  "evaluate - Issue #500" and "evaluate - Issue #511".
+- [ ] **`is_real` on a system** (real-coefficient check). `has_real_coefficients` covers a
+  single `Expression` only. Unports `systems_test.jl` "is_real".
+- [ ] **Public interface surface.** 22 of v2's 53 exports resolve to existing v3 internals
+  that are not exported: `variables`, `parameters`, `nvariables`, `nparameters`,
+  `variable_groups`, `is_homogeneous`, `is_polynomial`, `degree`, `polynomials` (v2's
+  `expressions`), `support_coefficients`, `evaluate!`, `evaluate_and_jacobian!`, `taylor!`,
+  `AbstractSystem`, `AbstractHomotopy`, `TaylorVector`, `TruncatedTaylorSeries`,
+  `Interpreter`. Implementing a custom `AbstractSystem` currently needs qualified access to
+  the interface functions.
+- [ ] **Ported features whose v2 test is missing:** cyclic-7 (924 solutions) on total degree
+  and polyhedral, in the benchmarks but not the suite (`endgame_test.jl` "Cyclic 7",
+  `polyhedral_test.jl` "cyclic"); `result_test.jl` "Compression", which needs
+  `total_degree_start_solutions` exposed (the `bitmask` half exists);
+  `extensive/extensive_test.jl` "Lines on a quintic surface" (2875 solutions plus certify).
+- [ ] **Sweep collection.** `TEST_SYSTEM_COLLECTION` holds 9 of v2's 14 systems.
+  `fano_quintic` and `RigidMultiView` do not exist in v3 at all; `minors` exists
+  (`test/minors_polys.jl`) but is not in the sweep. v2's `small_rational` and
+  `sqrt_parameters` are covered by `NONPOLYNOMIAL_SYSTEM_COLLECTION`.
+
+Deliberately not ported, since they are v2 architecture rather than features: `MixedSystem`
+and `MixedHomotopy`, `CompiledSystem`/`InterpretedSystem` as user-facing types,
+`set_default_compile` (v3 takes `compile` per `System` and keeps no global mutable state),
+`optimize` (CSE runs at construction), the `ModelKit` submodule, the TreeViews and Juno
+`show` methods, and `rand_unitary_matrix` (`RandomizedSystem` uses an identity block plus a
+random fold). v2's `get_num_den` is v3's exported `num_den`.
+
 
 ## Open Items
 
@@ -382,6 +480,34 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
 - Two threading coordinators: OhMyThreads executor for `solve()`, Channel job queue for threaded
   monodromy. Justified by the dynamic monodromy workload; revisit only if a third dynamic
   consumer appears
+- **Surviving `Union{Nothing, T}` struct fields, audited.** Eight remain, all of them a genuinely
+  absent value rather than a flag state, so they are deliberate and an audit should not churn on
+  them:
+  - `MonodromyOptions.target_solutions_count`, `.timeout`, `.min_solutions`: the stopping
+    heuristic was not requested, so there is no count, deadline or minimum to compare against.
+  - `MonodromyOptions.unique_points_rtol`: the default is `uniqueness_rtol(res)`, which needs the
+    endpoint, so it cannot be resolved at construction. Its sibling `unique_points_atol` could
+    (the default was the constant `1.0e-14`) and is now a plain `Float64`.
+  - `MonodromyJobResult.result`, `.trace`: a path that failed has no `PathResult`, and a loop that
+    failed on a later segment contributed no trace columns. The two are independent.
+  - `MonodromyResult.trace`: no trace test was run.
+  - `TraceColumns.columns`: the loop never reached its halfway subspace.
+
+  What was removed rather than kept, and the spelling that replaced it: a tri-state flag became a
+  `Bool` with a computed keyword default (`intrinsic::Bool = _default_intrinsic(L_start)`,
+  `triangle_inequality::Bool = satisfies_triangle_inequality(distance)`); an unknown-until-computed
+  state became an enum (`WitnessSet.irreducibility::Irreducibility.T`, replacing a
+  `Union{Nothing, Bool}` field whose accessor returned `Union{Symbol, Bool}`); a field absent only
+  in one construction mode became an empty sentinel of the concrete type
+  (`GrassmannianGeodesic.B_start::Matrix{ComplexF64}`, empty for an intrinsic geodesic); and a
+  "use the default constant" sentinel became the constant. Where the absent case is fixed at
+  construction, a type parameter keeps each instance concrete instead:
+  `MonodromyOptions{D, GA <: Union{Nothing, GroupActions}, …}` with `group_actions::GA`.
+  A nullable *seed* was the remaining case and was not in the legitimate class:
+  `NumericalIrreducibleDecomposition.seed === nothing` meant "no seed was recorded", which is what
+  made an NID result unreproducible. It is now a plain `UInt32`, and every route that consumes
+  randomness now derives all of it from its `seed` (see `01_decisions.md`, "Task-local RNG for
+  reproducibility").
 - The eight builder structs each repeat `tracker_options` / `endgame_options`. A shared
   `BuilderOptions` field would remove sixteen declarations and add an indirection at
   every use, so it was left alone; the construction *tail* they all shared is now
@@ -389,6 +515,17 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
 - Em dashes are used as sentence pauses in comments across the older `src/` files,
   against the repo's writing rule. New and touched code is clean; a global sweep
   would be pure churn on files nothing else is changing
+- The API surface is declared only by `export`, so there is no way to tell a documented
+  entry point from an implementation detail that happens to be reachable. Names that are
+  public but should not be dumped into the caller's namespace (option structs, result
+  accessors, the `AbstractSystem`/`AbstractHomotopy` interface methods a user overloads)
+  currently have to choose between being exported or looking private. Adopt SciMLPublic
+  and mark every intended entry point with `@public`, keeping `export` for the small set
+  users want unqualified (`solve`, `System`, `@polyvar`, `@var`, ...). That gives three
+  explicit tiers, exported, public-not-exported, and private, lets Aqua and
+  ExplicitImports check the boundary, and makes `Base.ispublic` the single source of
+  truth for what downstream code may depend on. 39 `export` lines across the main module
+  today, plus the certification subpackage.
 - `Compiler.inferiterate_2arg` re-inference costs ~245ms of every first call. It
   survives a build that never loads OhMyThreads, so the InitialValues invalidations are
   not the cause and the trigger is still unattributed (`01_decisions.md`, "Dependency

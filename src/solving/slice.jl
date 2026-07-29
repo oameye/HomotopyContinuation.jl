@@ -5,46 +5,6 @@
 # `F(A v + b)`. Solutions are therefore ambient points and the ordinary
 # total-degree / polyhedral machinery applies unchanged.
 
-# Substitute the parameter values `p` into `F`, returning a parameter-free
-# system in the same variables. The compile mode is preserved. Throws when `p`
-# does not match the parameters.
-function _fix_parameters(
-        F::System{P, V, M},
-        p::Union{Nothing, AbstractVector{<:Number}},
-    )::System where {P, V, M}
-    np = nparameters(F)
-    p === nothing && throw(
-        ArgumentError(
-            "The system has $np parameters; pass their values via " *
-                "`target_parameters`.",
-        ),
-    )
-    np == 0 && throw(
-        ArgumentError(
-            "`target_parameters` was given, but the system has no parameters.",
-        ),
-    )
-    length(p) == np || throw(
-        ArgumentError(
-            "The number of parameter values ($(length(p))) does not match the " *
-                "number of parameters ($np).",
-        ),
-    )
-    params = collect(parameters(F))
-    vars = collect(variables(F))
-    pc = Vector{ComplexF64}(p)
-    return System(_substitute(polynomials(F), params, pc); variables = vars, compile = M)
-end
-
-# Substitution runs through whichever front-end built the system.
-_substitute(
-    polys::FSVec{<:MP.AbstractPolynomialLike}, params::Vector, pc::Vector{ComplexF64},
-) = [MP.polynomial(MP.subs(f, params => pc)) for f in polys]
-
-_substitute(
-    polys::FSVec{Expression}, params::Vector{Expression}, pc::Vector{ComplexF64},
-)::Vector{Expression} = [subs(f, params => pc) for f in polys]
-
 # The full ambient space as a codim-0 subspace (`A` is `0 × n`): witness sets
 # of zero-dimensional varieties slice with the whole space, so the sliced
 # system is `F` itself (plus a chart row in the projective case).
@@ -122,35 +82,24 @@ end
 
 # ── solve(F, L) ──────────────────────────────────────────────────────────────
 
-# Fix the parameters (if any) and draw the affine chart for a projective
-# problem. `seed` makes the chart reproducible.
-function _sliced_solve_setup(
-        F::System, L::LinearSubspace, seed::UInt32,
-        target_parameters::Union{Nothing, AbstractVector{<:Number}},
-    )
-    G = if nparameters(F) > 0 || target_parameters !== nothing
-        _fix_parameters(F, target_parameters)
-    else
-        F
-    end
-    chart = if is_linear(L) && is_homogeneous(G)
-        randn(Random.MersenneTwister(seed), ComplexF64, nvariables(G))
+# Draw the affine chart for a projective problem. `seed` makes it reproducible.
+function _sliced_solve_setup(F::System, L::LinearSubspace, seed::UInt32)
+    _check_parameter_free(F, "`solve(F, L)`")
+    chart = if is_linear(L) && is_homogeneous(F)
+        randn(Random.MersenneTwister(seed), ComplexF64, nvariables(F))
     else
         ComplexF64[]
     end
-    return G, chart
+    return F, chart
 end
 
 _rebuild_sliced(G::System, L::LinearSubspace, chart::Vector{ComplexF64})::System =
     isempty(chart) ? slice(G, L) : slice(G, L; chart = chart)
 
-# The polynomial sliced system a solve route would track, parameters fixed and
-# the projective chart row appended.
-function _sliced_solve_system(
-        F::System, L::LinearSubspace, seed::UInt32,
-        target_parameters::Union{Nothing, AbstractVector{<:Number}},
-    )::System
-    G, chart = _sliced_solve_setup(F, L, seed, target_parameters)
+# The polynomial sliced system a solve route would track, with the projective
+# chart row appended.
+function _sliced_solve_system(F::System, L::LinearSubspace, seed::UInt32)::System
+    G, chart = _sliced_solve_setup(F, L, seed)
     return _rebuild_sliced(G, L, chart)
 end
 
@@ -187,21 +136,19 @@ end
 function CommonSolve.init(
         F::System, L::LinearSubspace, alg::TotalDegree,
         exec::AbstractExecutor = Threaded();
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
         show_progress::Bool = true,
     )
-    G, chart = _sliced_solve_setup(F, L, alg.seed, target_parameters)
+    G, chart = _sliced_solve_setup(F, L, alg.seed)
     return _init_sliced_total_degree(G, L, chart, alg, exec, show_progress)
 end
 
 function CommonSolve.init(
         F::System, L::LinearSubspace, alg::Polyhedral,
         exec::AbstractExecutor = Threaded();
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
         show_progress::Bool = true,
     )::PolyhedralSolveCache
     return CommonSolve.init(
-        _sliced_solve_system(F, L, alg.seed, target_parameters), alg, exec;
+        _sliced_solve_system(F, L, alg.seed), alg, exec;
         show_progress = show_progress,
     )
 end
@@ -212,8 +159,8 @@ end
 Solve `V(F) ∩ L` for the (affine) linear subspace `L`. The returned solutions
 are ambient points, i.e. in the coordinates of `F`.
 
-For a parametric `F` pass the parameter values via `target_parameters`; they are
-substituted into `F` before slicing.
+`F` must be parameter-free; for a parametric system fix the values first with
+[`fix_parameters`](@ref).
 
 # Example
 ```julia
@@ -227,13 +174,12 @@ function solve(
         F::System, L::LinearSubspace,
         alg::TotalDegree = TotalDegree(),
         exec::AbstractExecutor = Threaded();
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
         show_progress::Bool = true,
     )::Result
     return CommonSolve.solve!(
         CommonSolve.init(
             F, L, alg, exec;
-            target_parameters = target_parameters, show_progress = show_progress,
+            show_progress = show_progress,
         ),
     )
 end
@@ -241,24 +187,22 @@ end
 function solve(
         F::System, L::LinearSubspace, alg::Polyhedral,
         exec::AbstractExecutor = Threaded();
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
         show_progress::Bool = true,
     )::Result
     return CommonSolve.solve!(
         CommonSolve.init(
             F, L, alg, exec;
-            target_parameters = target_parameters, show_progress = show_progress,
+            show_progress = show_progress,
         ),
     )
 end
 
 function solve(
         F::System, L::LinearSubspace, exec::AbstractExecutor;
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
         show_progress::Bool = true,
     )::Result
     return solve(
         F, L, TotalDegree(), exec;
-        target_parameters = target_parameters, show_progress = show_progress,
+        show_progress = show_progress,
     )
 end

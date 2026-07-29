@@ -6,7 +6,7 @@
 
 """
     UniquePoints(d::Int; distance = InfNorm(), group_actions = nothing,
-                 triangle_inequality = nothing)
+                 triangle_inequality)
 
 A data structure to quickly check whether a point of dimension `d` is close to
 an already indexed point, up to the given `distance` function and modulo the
@@ -26,7 +26,7 @@ function UniquePoints(
         distance = InfNorm(),
         group_action = nothing,
         group_actions = group_action === nothing ? nothing : GroupActions(group_action),
-        triangle_inequality::Union{Nothing, Bool} = nothing,
+        triangle_inequality::Bool = satisfies_triangle_inequality(distance),
     )
     group_actions = _as_group_actions(group_actions)
     tree = VoronoiTree{ComplexF64}(
@@ -124,7 +124,7 @@ function multiplicities(
         rtol::Float64 = 1.0e-8,
         group_action = nothing,
         group_actions = group_action === nothing ? nothing : GroupActions(group_action),
-        triangle_inequality::Union{Nothing, Bool} = nothing,
+        triangle_inequality::Bool = satisfies_triangle_inequality(distance),
     )
     return multiplicities(
         identity, v;
@@ -140,7 +140,7 @@ function multiplicities(
         rtol::Float64 = 1.0e-8,
         group_action = nothing,
         group_actions = group_action === nothing ? nothing : GroupActions(group_action),
-        triangle_inequality::Union{Nothing, Bool} = nothing,
+        triangle_inequality::Bool = satisfies_triangle_inequality(distance),
     ) where {F <: Function}
     isempty(v) && return Vector{Vector{Int}}()
     UP = UniquePoints(
@@ -180,7 +180,7 @@ function unique_points(
         rtol::Float64 = 1.0e-8,
         group_action = nothing,
         group_actions = group_action === nothing ? nothing : GroupActions(group_action),
-        triangle_inequality::Union{Nothing, Bool} = nothing,
+        triangle_inequality::Bool = satisfies_triangle_inequality(distance),
     )
     UP = UniquePoints(
         length(first(V));

@@ -352,7 +352,7 @@ end
         threading = false, seed = UInt32(0xf001), show_progress = false,
     )
     Random.seed!(0xf002)
-    r = solve(F, mres; target_parameters = randn(ComplexF64, 4), show_progress = false)
+    r = solve(F, mres, randn(ComplexF64, 4); show_progress = false)
     @test nsolutions(r) == 21
 end
 
@@ -362,9 +362,8 @@ end
     l = a * x + b * y + c
     sys = System([f, l]; variables = [x, y], parameters = [a, b, c])
     res = solve(
-        sys, [[-0.6 - 0.8im, -1.2 + 0.4im]];
-        start_parameters = [1.0 + 0im, 2.0 + 0im, 3.0 + 0im],
-        target_parameters = [1.0 + 0im, 2.0 + 0im, 3.0 + 0im],
+        sys, [[-0.6 - 0.8im, -1.2 + 0.4im]],
+        [1.0 + 0im, 2.0 + 0im, 3.0 + 0im], [1.0 + 0im, 2.0 + 0im, 3.0 + 0im];
         seed = UInt32(0xce01), show_progress = false,
     )
     @test nsolutions(res) == 1

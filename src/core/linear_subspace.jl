@@ -291,6 +291,8 @@ Codimension of the (affine) linear subspace `A`.
 """
 codim(A::LinearSubspace) = codim(A.intrinsic)
 
+_default_intrinsic(A::LinearSubspace)::Bool = dim(A) <= codim(A)
+
 """
     ambient_dim(A::LinearSubspace)
 
@@ -355,7 +357,7 @@ function (A::LinearSubspace)(x::AbstractVector, ::Coordinates{:Extrinsic} = Extr
 end
 
 """
-    rand_subspace(n::Integer; dim | codim, affine = true, real = false)
+    rand_subspace([rng], n::Integer; dim | codim, affine = true, real = false)
 
 Generate a random [`LinearSubspace`](@ref) with given dimension `dim` or
 codimension `codim` (one of them has to be provided) in ambient space of
@@ -364,14 +366,17 @@ If `affine`, then an affine linear subspace is generated. The matrix `A` of the
 extrinsic description is drawn independently from a normal distribution using
 `randn`.
 
-    rand_subspace(x::AbstractVector; dim | codim, affine = true)
+    rand_subspace([rng], x::AbstractVector; dim | codim, affine = true)
 
 Generate a random [`LinearSubspace`](@ref) with given dimension `dim` or
 codimension `codim` in ambient space of dimension `length(x)` going through the
 given point `x`.
+
+As with `rand` and `randn`, pass a random number generator `rng` as the first
+argument to draw from it instead of the global one.
 """
 function rand_subspace(
-        n::Integer;
+        rng::Random.AbstractRNG, n::Integer;
         dim::Union{Nothing, Integer} = nothing,
         codim::Union{Nothing, Integer} = nothing,
         real::Bool = false,
@@ -389,13 +394,22 @@ function rand_subspace(
         k = n - codim
     end
     T = real ? Float64 : ComplexF64
-    A = randn(T, n - k, n)
+    A = randn(rng, T, n - k, n)
     return if affine
-        LinearSubspace(A, randn(T, n - k))
+        LinearSubspace(A, randn(rng, T, n - k))
     else
         LinearSubspace(A)
     end
 end
+rand_subspace(
+    n::Integer;
+    dim::Union{Nothing, Integer} = nothing,
+    codim::Union{Nothing, Integer} = nothing,
+    real::Bool = false,
+    affine::Bool = true,
+) = rand_subspace(
+    Random.default_rng(), n; dim = dim, codim = codim, real = real, affine = affine,
+)
 rand_subspace(
     x::AbstractVector{<:MP.AbstractVariable};
     dim::Union{Nothing, Integer} = nothing,
@@ -405,8 +419,18 @@ rand_subspace(
 ) = rand_subspace(
     length(x); dim = dim, codim = codim, real = real, affine = affine,
 )
+rand_subspace(
+    rng::Random.AbstractRNG,
+    x::AbstractVector{<:MP.AbstractVariable};
+    dim::Union{Nothing, Integer} = nothing,
+    codim::Union{Nothing, Integer} = nothing,
+    real::Bool = false,
+    affine::Bool = true,
+) = rand_subspace(
+    rng, length(x); dim = dim, codim = codim, real = real, affine = affine,
+)
 function rand_subspace(
-        x::AbstractVector;
+        rng::Random.AbstractRNG, x::AbstractVector;
         dim::Union{Nothing, Integer} = nothing,
         codim::Union{Nothing, Integer} = nothing,
         affine::Bool = true,
@@ -425,15 +449,23 @@ function rand_subspace(
     end
 
     return if affine
-        A = randn(eltype(x), n - k, n)
+        A = randn(rng, eltype(x), n - k, n)
         b = A * x
         LinearSubspace(A, b)
     else
         N = LA.nullspace(Matrix(x'))'
-        A = randn(eltype(N), n - k, size(N, 1)) * N
+        A = randn(rng, eltype(N), n - k, size(N, 1)) * N
         LinearSubspace(A)
     end
 end
+rand_subspace(
+    x::AbstractVector;
+    dim::Union{Nothing, Integer} = nothing,
+    codim::Union{Nothing, Integer} = nothing,
+    affine::Bool = true,
+) = rand_subspace(
+    Random.default_rng(), x; dim = dim, codim = codim, affine = affine,
+)
 
 # Coordinate changes
 """

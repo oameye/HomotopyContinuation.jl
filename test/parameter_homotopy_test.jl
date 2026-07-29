@@ -104,8 +104,7 @@ using DynamicPolynomials: @polyvar, subs, differentiate
         @polyvar y q
         G = System([y^2 - q]; variables = [y], parameters = [q])
         res = solve(
-            G, [[1.0 + 0.0im]], Serial();
-            start_parameters = [1.0 + 0im], target_parameters = [9.0 + 0im],
+            G, [[1.0 + 0.0im]], [1.0 + 0im], [9.0 + 0im], Serial();
             seed = UInt32(1), show_progress = false,
         )
         @test nsolutions(res) == 1
@@ -114,5 +113,42 @@ using DynamicPolynomials: @polyvar, subs, differentiate
         # With CoefficientHomotopy's invalid Val(1) shortcut this took 204 accepted
         # steps; the exact tangent needs a handful.
         @test accepted_steps(r) < 20
+    end
+
+    # Every route that takes start solutions accepts the same three forms, so a
+    # `Result` or `ResultIterator` from one solve feeds the next unchanged.
+    @testset "start solutions: vector, Result and ResultIterator agree" begin
+        @polyvar w z c
+        K = System([w^2 - c, z^2 - c]; variables = [w, z], parameters = [c])
+        base = solve(fix_parameters(K, [1.0]), Serial(); show_progress = false)
+
+        key(R) = sort(
+            [
+                sort([(round(real(v); digits = 8), round(imag(v); digits = 8)) for v in s])
+                    for s in solutions(R)
+            ]
+        )
+        ref = key(solve(K, solutions(base), [1.0], [4.0], Serial(); show_progress = false))
+        @test length(ref) == 4
+
+        @test key(
+            solve(K, base, [1.0], [4.0], Serial(); show_progress = false),
+        ) == ref
+        @test key(
+            solve(
+                K, result_iterator(fix_parameters(K, [1.0])), [1.0], [4.0], Serial();
+                show_progress = false,
+            ),
+        ) == ref
+
+        # The same three forms on the other routes that take start solutions.
+        @test length(
+            solve_targets(K, base, [1.0], [[4.0], [9.0]], Serial(); show_progress = false),
+        ) == 2
+        @test key(Result(result_iterator(K, base, [1.0], [4.0]))) == ref
+
+        @test_throws ArgumentError solve(
+            K, "not start solutions", [1.0], [4.0], Serial(); show_progress = false,
+        )
     end
 end

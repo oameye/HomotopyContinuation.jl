@@ -24,8 +24,9 @@ RuntimeGeneratedFunctions.init(@__MODULE__)
     COMPILED_ALL
 end
 
-export @polyvar, solve, System
+export @polyvar, solve, solve_targets, System
 export CompositionSystem, compose
+export FixedParameterSystem, fix_parameters
 export @var, @unique_var, Expression, differentiate, subs, num_den
 export CompileMode
 export solutions, real_solutions, nsolutions, nreal, nsingular, nnonsingular, nat_infinity
@@ -44,6 +45,7 @@ export EndgameOptions, EndgameTracker
 export ParameterHomotopy
 export GroupActions, SymmetricGroup
 export UniquePoints, search_in_radius, add!, multiplicities, unique_points
+export satisfies_triangle_inequality
 export LinearSubspace, ExtrinsicDescription, IntrinsicDescription, Intrinsic, Extrinsic
 export intrinsic, extrinsic, is_linear, dim, codim, ambient_dim
 export rand_subspace, translate, geodesic, geodesic_distance, coord_change
@@ -56,7 +58,7 @@ export independent_normal, weighted_normal
 export slice
 export ResultIterator, result_iterator, bitmask, bitmask_filter, start_solutions
 export WitnessSet, witness_set, trace_test, membership
-export system, linear_subspace, is_irreducible, degree, points
+export system, linear_subspace, is_irreducible, Irreducibility, degree, points
 export WitnessPoints, regeneration
 export NumericalIrreducibleDecomposition, numerical_irreducible_decomposition, nid
 export decompose, ncomponents, n_components, witness_sets, degrees
@@ -115,6 +117,7 @@ include("core/linear_parameter_homotopy.jl")
 include("core/subspace_homotopies.jl")
 include("core/affine_chart.jl")
 include("core/sliced_system.jl")
+include("core/fixed_parameter_system.jl")
 include("core/toric_homotopy.jl")
 
 include("tracking/newton_corrector.jl")

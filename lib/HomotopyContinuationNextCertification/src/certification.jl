@@ -1049,6 +1049,11 @@ Attempt to certify that the approximate `solutions` correspond to true solutions
 of the square polynomial system `F(x; p)` using interval arithmetic and the
 Krawczyk method. Returns a [`CertificationResult`](@ref).
 
+`p` is enclosed to `max_precision` bits, so what is certified is `F` at an
+enclosure of `p`. This is a stronger statement than
+`certify(fix_parameters(F, p), solutions)`, which certifies the substituted
+system, whose coefficients are already-rounded `ComplexF64` products of `p`.
+
 ## Options
 - `show_progress = true`: show a progress bar.
 - `max_precision = 256`: maximum bit precision used in the Arb fallback.
@@ -1062,17 +1067,17 @@ function certify end
 function certify(
         F::System,
         X::AbstractVector{<:AbstractVector{<:Number}},
+        # Not `fix_parameters(F, p)`: substituting would round the coefficients,
+        # and the enclosure has to be of `p` itself.
         p::Union{Nothing, AbstractArray} = nothing,
         cache::CertificationCache = CertificationCache(F);
-        target_parameters::Union{Nothing, AbstractArray} = nothing,
         show_progress::Bool = true,
         threading::Bool = true,
         max_precision::Int = 256,
         refine_solution::Bool = true,
         extended_certificate::Bool = false,
     )
-    params = isnothing(p) ? target_parameters : p
-    cert_params = certification_parameters(params; prec = max_precision)
+    cert_params = certification_parameters(p; prec = max_precision)
     return _certify(
         F, X, cert_params, cache;
         show_progress, threading, max_precision, refine_solution, extended_certificate,
@@ -1084,7 +1089,6 @@ function certify(
         x::AbstractVector{<:Number},
         p::Union{Nothing, AbstractArray} = nothing,
         cache::CertificationCache = CertificationCache(F);
-        target_parameters::Union{Nothing, AbstractArray} = nothing,
         show_progress::Bool = true,
         threading::Bool = true,
         max_precision::Int = 256,
@@ -1093,8 +1097,7 @@ function certify(
     )
     return certify(
         F, [convert(Vector{ComplexF64}, x)], p, cache;
-        target_parameters, show_progress, threading,
-        max_precision, refine_solution, extended_certificate,
+        show_progress, threading, max_precision, refine_solution, extended_certificate,
     )
 end
 
@@ -1103,7 +1106,6 @@ function certify(
         X::Result,
         p::Union{Nothing, AbstractArray} = nothing,
         cache::CertificationCache = CertificationCache(F);
-        target_parameters::Union{Nothing, AbstractArray} = nothing,
         show_progress::Bool = true,
         threading::Bool = true,
         max_precision::Int = 256,
@@ -1112,8 +1114,7 @@ function certify(
     )
     return certify(
         F, solutions(X), p, cache;
-        target_parameters, show_progress, threading,
-        max_precision, refine_solution, extended_certificate,
+        show_progress, threading, max_precision, refine_solution, extended_certificate,
     )
 end
 
@@ -1122,7 +1123,6 @@ function certify(
         r::PathResult,
         p::Union{Nothing, AbstractArray} = nothing,
         cache::CertificationCache = CertificationCache(F);
-        target_parameters::Union{Nothing, AbstractArray} = nothing,
         show_progress::Bool = true,
         threading::Bool = true,
         max_precision::Int = 256,
@@ -1131,8 +1131,7 @@ function certify(
     )
     return certify(
         F, [solution(r)], p, cache;
-        target_parameters, show_progress, threading,
-        max_precision, refine_solution, extended_certificate,
+        show_progress, threading, max_precision, refine_solution, extended_certificate,
     )
 end
 
@@ -1141,7 +1140,6 @@ function certify(
         r::AbstractVector{<:PathResult},
         p::Union{Nothing, AbstractArray} = nothing,
         cache::CertificationCache = CertificationCache(F);
-        target_parameters::Union{Nothing, AbstractArray} = nothing,
         show_progress::Bool = true,
         threading::Bool = true,
         max_precision::Int = 256,
@@ -1150,8 +1148,7 @@ function certify(
     )
     return certify(
         F, solution.(r), p, cache;
-        target_parameters, show_progress, threading,
-        max_precision, refine_solution, extended_certificate,
+        show_progress, threading, max_precision, refine_solution, extended_certificate,
     )
 end
 

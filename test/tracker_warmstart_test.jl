@@ -38,8 +38,7 @@ end
     @polyvar y q
     G = System([y^2 - q]; variables = [y], parameters = [q])
     res = solve(
-        G, [[1.0 + 0.0im]], Serial();
-        start_parameters = [1.0 + 0im], target_parameters = [9.0 + 0im],
+        G, [[1.0 + 0.0im]], [1.0 + 0im], [9.0 + 0im], Serial();
         seed = UInt32(1), show_progress = false,
     )
     r = first(path_results(res))

@@ -66,9 +66,7 @@ using CommonSolve: CommonSolve
         @test nsolutions(r1) >= 1
         # Track to target parameters
         r2 = solve(
-            F, solutions(r1);
-            start_parameters = [1.0, 0.0],
-            target_parameters = [2.0, 4.0], show_progress = false,
+            F, solutions(r1), [1.0, 0.0], [2.0, 4.0]; show_progress = false,
         )
         @test nsolutions(r2) >= 1
         for sol in solutions(r2)

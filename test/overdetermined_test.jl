@@ -257,14 +257,12 @@ include("minors_polys.jl")
         @polyvar x y z a b
         F = System([x^2 - a]; variables = [x, y], parameters = [a, b])
         @test_throws ArgumentError solve(
-            F, [[1.0, 1.0]], Serial();
-            start_parameters = [1, 0], target_parameters = [2, 4], show_progress = false,
+            F, [[1.0, 1.0]], [1, 0], [2, 4], Serial(); show_progress = false,
         )
 
         F_proj = System([x * y + (b - a) * z^2]; variables = [x, y, z], parameters = [a, b])
         @test_throws ArgumentError solve(
-            F_proj, [[1.0, 1.0, 1.0]], Serial();
-            start_parameters = [1, 0], target_parameters = [2, 4], show_progress = false,
+            F_proj, [[1.0, 1.0, 1.0]], [1, 0], [2, 4], Serial(); show_progress = false,
         )
     end
 

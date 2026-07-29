@@ -2,6 +2,7 @@ module HomotopyContinuationNextDistributedExt
 
 import Distributed
 import Serialization
+using Random: Random
 using MixedSubdivisions: MixedSubdivisions
 
 using HomotopyContinuationNext: HomotopyContinuationNext

@@ -151,16 +151,12 @@ end
         cands = solutions(res)
         @test length(cands) == 36
 
-        # certify against the parametric system, positional parameters
+        # certify against the parametric system at those parameter values
         cert = certify(C, cands, u₀; show_progress = false)
         @test ncertified(cert) == 36
         @test ndistinct_certified(cert) == 36
         @test nreal_certified(cert) == 8
         @test ndistinct_real_certified(cert) == 8
-
-        # and via the target_parameters keyword
-        cert_kw = certify(C, cands; target_parameters = u₀, show_progress = false)
-        @test ncertified(cert_kw) == 36
 
         # invalid solutions: random points certify (almost) none
         invalid = [100 .* randn(ComplexF64, 3) for _ in 1:10]

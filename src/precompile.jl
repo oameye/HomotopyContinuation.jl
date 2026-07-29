@@ -39,9 +39,7 @@ using PrecompileTools: @compile_workload, @setup_workload
         )
         find_start_pair(parameter_system)
         solve(
-            parameter_system, [ComplexF64[1]], Serial();
-            start_parameters = ComplexF64[1],
-            target_parameters = ComplexF64[2],
+            parameter_system, [ComplexF64[1]], ComplexF64[1], ComplexF64[2], Serial();
             seed = UInt32(1),
             show_progress = false,
         )

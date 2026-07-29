@@ -219,21 +219,28 @@ end
 
 function _init_parameter_sweep(
         F::System, starts, first_target::AbstractVector{<:Number}, exec::E,
-        start_parameters::AbstractVector{<:Number}, seed::UInt32,
+        p_start::AbstractVector{<:Number}, seed::UInt32,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
         show_progress::Bool,
     ) where {E <: AbstractExecutor}
     _check_square_or_overdetermined(F)
-    nparameters(F) > 0 ||
-        throw(ArgumentError("System must have parameters for a parameter sweep."))
-    length(start_parameters) == nparameters(F) || throw(
-        ArgumentError("start_parameters length must match nparameters"),
+    np = nparameters(F)
+    np > 0 || throw(
+        ArgumentError(
+            "`solve_targets` over parameters requires a parametric system, but the " *
+                "system has no parameters.",
+        ),
     )
-    length(first_target) == nparameters(F) || throw(
-        ArgumentError("each target must have length nparameters($(nparameters(F)))"),
+    length(p_start) == np || throw(
+        ArgumentError(
+            "p_start has length $(length(p_start)), but the system has $np parameter(s).",
+        ),
+    )
+    length(first_target) == np || throw(
+        ArgumentError("each target must have length $np, the number of parameters."),
     )
     builder = ParameterRetargetBuilder(
-        F, Vector{ComplexF64}(start_parameters), Vector{ComplexF64}(first_target),
+        F, Vector{ComplexF64}(p_start), Vector{ComplexF64}(first_target),
         tracker_options, endgame_options,
     )
     return WorkerSolveCache(
@@ -242,35 +249,39 @@ function _init_parameter_sweep(
 end
 
 """
-    solve(F::System, starts, targets::AbstractVector, exec = Threaded();
-          start_parameters, transform_result = tuple, transform_parameters = identity,
-          flatten = false, options...)
+    solve_targets(F::System, starts, p_start, targets::AbstractVector, exec = Threaded();
+                  transform_result = tuple, transform_parameters = identity,
+                  flatten = false, options...)
+    solve_targets(F::System, starts, L_start::LinearSubspace,
+                  targets::AbstractVector{<:LinearSubspace}, exec = Threaded();
+                  intrinsic, options...)
 
-Solve `F` for many target parameters, tracking `starts` from `start_parameters`
-to each target in turn. One homotopy is built and retargeted per target.
+Track `starts` from one start end to every target in `targets`, retargeting a
+single homotopy per target. Unlike [`solve`](@ref), which returns one
+[`Result`](@ref), this returns a `Vector` with one entry per target.
 
-By default the return value is a `Vector` of `(result, target)` tuples.
-`transform_result(result, target)` replaces each entry, and `flatten = true`
-concatenates the (array-valued) entries into a single vector.
-`transform_parameters(target)` maps each element of `targets` to the actual
-parameter values, so `targets` may hold indices or other metadata; the
-untransformed element is what `transform_result` receives.
+By default each entry is a `(result, target)` tuple. `transform_result(result,
+target)` replaces it, and `flatten = true` concatenates the (array-valued)
+entries into a single vector. `transform_parameters(target)` maps each element of
+`targets` to the actual target, so `targets` may hold indices or other metadata;
+the untransformed element is what `transform_result` receives.
+
+For subspace targets, start points and solutions are ambient; see [`solve`](@ref)
+with a single target subspace for the meaning of `intrinsic`.
 
 # Example
 ```julia
 @polyvar x y a b c
 F = System([x^2 + y^2 - 1, a * x + b * y + c]; variables = [x, y], parameters = [a, b, c])
 p₀ = randn(ComplexF64, 3)
-G = System([x^2 + y^2 - 1, p₀[1] * x + p₀[2] * y + p₀[3]]; variables = [x, y])
-S₀ = solutions(solve(G))
+S₀ = solutions(solve(fix_parameters(F, p₀)))
 targets = [rand(3) for _ in 1:100]
-solve(F, S₀, targets; start_parameters = p₀, transform_result = (r, p) -> real_solutions(r))
+solve_targets(F, S₀, p₀, targets; transform_result = (r, p) -> real_solutions(r))
 ```
 """
-function solve(
-        F::System, starts, targets::AbstractVector,
+function solve_targets(
+        F::System, starts, p_start::AbstractVector{<:Number}, targets::AbstractVector,
         exec::AbstractExecutor = Threaded();
-        start_parameters::AbstractVector{<:Number},
         transform_result = tuple,
         transform_parameters = identity,
         flatten::Bool = false,
@@ -282,7 +293,7 @@ function solve(
     isempty(targets) && throw(ArgumentError("No targets given."))
     q_first = transform_parameters(first(targets))
     cache = _init_parameter_sweep(
-        F, starts, q_first, exec, start_parameters,
+        F, starts, q_first, exec, p_start,
         seed, tracker_options, endgame_options, show_progress,
     )
     return _run_sweep(
@@ -293,23 +304,11 @@ end
 
 # ── Subspace sweep ─────────────────────────────────────────────────────────
 
-"""
-    solve(F::System, starts, L_start::LinearSubspace,
-          targets::AbstractVector{<:LinearSubspace}, exec = Threaded();
-          intrinsic = nothing, transform_result = tuple, flatten = false, options...)
-
-Track the solutions `starts` of `V(F) ∩ L_start` to `V(F) ∩ L` for every `L` in
-`targets`, retargeting one subspace homotopy per target. Start points and
-solutions are ambient; see [`solve`](@ref) with a single target subspace for the
-meaning of `intrinsic`, and the many-parameter `solve` for `transform_result`,
-`transform_parameters` and `flatten`.
-"""
-function solve(
+function solve_targets(
         F::System, starts, L_start::LinearSubspace,
         targets::AbstractVector{<:LinearSubspace},
         exec::AbstractExecutor = Threaded();
-        intrinsic::Union{Nothing, Bool} = nothing,
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
+        intrinsic::Bool = _default_intrinsic(L_start),
         transform_result = tuple,
         transform_parameters = identity,
         flatten::Bool = false,
@@ -321,10 +320,9 @@ function solve(
     isempty(targets) && throw(ArgumentError("No targets given."))
     L_first = transform_parameters(first(targets))
     G, points, chart, gamma = _subspace_solve_setup(
-        F, starts, L_start, L_first, seed, target_parameters,
+        F, starts, L_start, L_first, seed,
     )
-    use_intrinsic = intrinsic === nothing ? dim(L_start) <= codim(L_start) : intrinsic
-    cache = if use_intrinsic
+    cache = if intrinsic
         _init_intrinsic_subspace(
             G, points, L_start, L_first, chart, gamma, exec, seed,
             tracker_options, endgame_options, show_progress,

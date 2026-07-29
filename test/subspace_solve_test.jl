@@ -3,7 +3,8 @@ using HomotopyContinuationNext
 using HomotopyContinuationNext: Serial, Threaded, Result, PathResult, TotalDegree,
     solution, is_success, path_results, steps, nparameters, is_homogeneous,
     AmbientWorkerState, IntrinsicWorkerState, IntrinsicSubspaceHomotopy,
-    ExtrinsicSubspaceHomotopy, AffineChartHomotopy, WorkerSolveCache, _to_ambient
+    ExtrinsicSubspaceHomotopy, AffineChartHomotopy, WorkerSolveCache, _to_ambient,
+    fix_parameters
 using DynamicPolynomials: @polyvar
 using CommonSolve: CommonSolve
 using LinearAlgebra: norm
@@ -19,8 +20,9 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         L₂ = rand_subspace(2; codim = 1)
         S₁ = solutions(solve(F, L₁; show_progress = false))
         @test length(S₁) == 2
-        for intrinsic in (nothing, true, false)
-            res = solve(F, S₁, L₁, L₂; intrinsic = intrinsic, show_progress = false)
+        # `NamedTuple()` exercises the computed default.
+        for kw in (NamedTuple(), (; intrinsic = true), (; intrinsic = false))
+            res = solve(F, S₁, L₁, L₂; show_progress = false, kw...)
             @test nsolutions(res) == 2
             for s in solutions(res)
                 @test subspace_residual(L₂, s) < 1.0e-10
@@ -56,8 +58,8 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         K₂ = rand_subspace(3; dim = 2)
         S = solutions(solve(F, K₁; show_progress = false))
         @test length(S) == 4
-        for intrinsic in (nothing, true, false)
-            res = solve(F, S, K₁, K₂; intrinsic = intrinsic, show_progress = false)
+        for kw in (NamedTuple(), (; intrinsic = true), (; intrinsic = false))
+            res = solve(F, S, K₁, K₂; show_progress = false, kw...)
             @test nsolutions(res) == 4
             @test maximum(s -> subspace_residual(K₂, s), solutions(res)) < 1.0e-10
         end
@@ -70,8 +72,8 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         L₁ = rand_subspace(3; codim = 1, affine = false)
         L₂ = rand_subspace(3; codim = 1, affine = false)
         S = solutions(solve(F, L₁; show_progress = false))
-        for intrinsic in (nothing, true, false)
-            res = solve(F, S, L₁, L₂; intrinsic = intrinsic, show_progress = false)
+        for kw in (NamedTuple(), (; intrinsic = true), (; intrinsic = false))
+            res = solve(F, S, L₁, L₂; show_progress = false, kw...)
             @test nsolutions(res) == 2
             for s in solutions(res)
                 scale = norm(s, Inf)
@@ -89,8 +91,8 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         F = System([x^2 + y^2 - a]; variables = [x, y], parameters = [a])
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
-        S = solutions(solve(F, L₁; target_parameters = [5.0], show_progress = false))
-        res = solve(F, S, L₁, L₂; target_parameters = [5.0], show_progress = false)
+        S = solutions(solve(fix_parameters(F, [5.0]), L₁; show_progress = false))
+        res = solve(fix_parameters(F, [5.0]), S, L₁, L₂; show_progress = false)
         @test nsolutions(res) == 2
         @test maximum(s -> abs(s[1]^2 + s[2]^2 - 5), solutions(res)) < 1.0e-10
         @test_throws ArgumentError solve(F, S, L₁, L₂; show_progress = false)

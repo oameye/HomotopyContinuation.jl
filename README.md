@@ -35,7 +35,8 @@ real_solutions(result)
 ```
 
 - Total degree and polyhedral (BKK-optimal) start systems
-- Parameter homotopy: `solve(F, starts; start_parameters=p₁, target_parameters=p₀)`
+- Parameter homotopy: `solve(F, starts, p₁, p₀)`, many targets: `solve_targets(F, starts, p₁, targets)`
+- Parameter values are always positional; `fix_parameters(F, p)` makes a parametric system parameter-free
 - Predictor-corrector tracker with adaptive stepping and DoubleF64 refinement
 - Straight-line homotopy Taylor formulas fixed for coupled `x,t` variation
 - Raw tracker trace tooling against v2 (`benchmark/compare/trace_tracker.jl`)

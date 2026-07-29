@@ -35,6 +35,9 @@ function _check_square_or_overdetermined(::UnderdeterminedShape, F::System)::Not
     )
 end
 
+_check_square_or_overdetermined(F::FixedParameterSystem)::Nothing =
+    _check_square_or_overdetermined(F.system)
+
 # A composition carries no shape parameter, so the same check reads its size.
 function _check_square_or_overdetermined(C::CompositionSystem)::Nothing
     m, n = size(C)
@@ -53,14 +56,14 @@ end
 
 Throw when `F` still has parameters. `route` names the algorithm in the message.
 """
-function _check_parameter_free(F::SystemLike, route::String)::Nothing
+function _check_parameter_free(F::CloneableSystem, route::String)::Nothing
     np = nparameters(F)
     np == 0 || throw(
         ArgumentError(
             "$route requires a parameter-free system, but the system has $np " *
-                "parameter(s). Substitute their values first, or track from known " *
-                "start solutions with a parameter homotopy " *
-                "(`solve(F, starts; start_parameters, target_parameters)`).",
+                "parameter(s). Fix them first with `fix_parameters(F, p)`, or track " *
+                "from known start solutions with a parameter homotopy " *
+                "(`solve(F, starts, p_start, p_target)`).",
         ),
     )
     return nothing
@@ -84,6 +87,9 @@ function _check_polynomial(F::System, route::String)::Nothing
         ),
     )
 end
+
+_check_polynomial(F::FixedParameterSystem, route::String)::Nothing =
+    _check_polynomial(F.system, route)
 
 # A composed degree of `-1` comes from a stage, so the message names one.
 function _check_polynomial(C::CompositionSystem, route::String)::Nothing
@@ -123,16 +129,15 @@ function _total_degree_solve_cache(
 end
 
 function CommonSolve.init(
-        F::SystemLike, alg::TotalDegree,
+        F::CloneableSystem, alg::TotalDegree,
         exec::AbstractExecutor = Threaded();
         show_progress::Bool = true,
     )::SolveCache
-    seed = alg.seed
     _check_square_or_overdetermined(F)
     _check_parameter_free(F, "`TotalDegree`")
     _check_polynomial(F, "`TotalDegree`")
 
-    rng = Random.MersenneTwister(seed)
+    rng = Random.MersenneTwister(alg.seed)
     γ = _random_gamma(rng)
     # Dynamic call: specializes the body on the concrete `System` so that
     # `system_shape(F)` resolves statically instead of union-splitting.
@@ -141,38 +146,39 @@ function CommonSolve.init(
 end
 
 _init_total_degree_shaped(
-    F::SystemLike, alg::TotalDegree, exec::AbstractExecutor,
+    F::CloneableSystem, alg::TotalDegree, exec::AbstractExecutor,
     rng::Random.MersenneTwister, γ::ComplexF64, show_progress::Bool,
 ) = _init_total_degree(system_shape(F), F, alg, exec, rng, γ, show_progress)
 
 function _init_total_degree(
-        ::SquareShape, F::SystemLike, alg::TotalDegree, exec::AbstractExecutor,
+        ::SquareShape, F::CloneableSystem, alg::TotalDegree, exec::AbstractExecutor,
         ::Random.MersenneTwister, γ::ComplexF64, show_progress::Bool,
     )
-    degrees = F.degrees
+    degs = degrees(F)
     builder = StraightLineBuilder(
-        degrees, F, γ, alg.tracker_options, alg.endgame_options,
+        degs, F, γ, alg.tracker_options, alg.endgame_options,
     )
     return _total_degree_solve_cache(
-        exec, builder, F.evaluator, degrees, alg.seed, nothing,
+        exec, builder, F.evaluator, degs, alg.seed, nothing,
         show_progress, alg.tracker_options, alg.endgame_options, γ,
     )
 end
 
 function _init_total_degree(
-        ::OverdeterminedShape, F::SystemLike, alg::TotalDegree,
+        ::OverdeterminedShape, F::CloneableSystem, alg::TotalDegree,
         exec::AbstractExecutor, rng::Random.MersenneTwister,
         γ::ComplexF64, show_progress::Bool,
     )
     n = nvariables(F)
-    A, perm, excess_checker = _square_up(rng, F)
-    target_evaluator = _randomized_evaluator(F.evaluator, A, perm)
-    degrees = F.degrees[perm[1:n]]
+    evaluator = F.evaluator
+    A, perm, excess_checker = _square_up(rng, evaluator, degrees(F))
+    target_evaluator = _randomized_evaluator(evaluator, A, perm)
+    degs = degrees(F)[perm[1:n]]
     builder = RandomizedStraightLineBuilder(
-        degrees, F, A, perm, γ, alg.tracker_options, alg.endgame_options,
+        degs, F, A, perm, γ, alg.tracker_options, alg.endgame_options,
     )
     return _total_degree_solve_cache(
-        exec, builder, target_evaluator, degrees, alg.seed, excess_checker,
+        exec, builder, target_evaluator, degs, alg.seed, excess_checker,
         show_progress, alg.tracker_options, alg.endgame_options, γ,
     )
 end
@@ -272,24 +278,31 @@ CommonSolve.solve!(cache::SolveCache{DistributedExecutor})::Result =
 # ── Convenience: solve(F, alg, exec) ─────────────────────────────────────
 
 """
-    solve(F::System, alg=TotalDegree(), exec=Threaded())
+    solve(F::System, alg = TotalDegree(), exec = Threaded())
 
 Solve a polynomial system using homotopy continuation.
+
+`F` must be parameter-free; for a parametric system fix the values first with
+[`fix_parameters`](@ref).
 
 A [`CompositionSystem`](@ref) is accepted too: the total-degree start system
 needs only the composed degrees, which are folded from the stages, so the
 equations are never rebuilt.
 """
 function solve(
-        F::SystemLike,
+        F::CloneableSystem,
         alg::TotalDegree = TotalDegree(),
         exec::AbstractExecutor = Threaded();
         show_progress::Bool = true,
     )::Result
-    return CommonSolve.solve!(CommonSolve.init(F, alg, exec; show_progress = show_progress))
+    return CommonSolve.solve!(
+        CommonSolve.init(F, alg, exec; show_progress = show_progress),
+    )
 end
 
-function solve(F::SystemLike, exec::AbstractExecutor; show_progress::Bool = true)::Result
+function solve(
+        F::CloneableSystem, exec::AbstractExecutor; show_progress::Bool = true,
+    )::Result
     return solve(F, TotalDegree(), exec; show_progress = show_progress)
 end
 
@@ -299,7 +312,9 @@ function solve(
         exec::AbstractExecutor = Threaded();
         show_progress::Bool = true,
     )::Result
-    return CommonSolve.solve!(CommonSolve.init(F, alg, exec; show_progress = show_progress))
+    return CommonSolve.solve!(
+        CommonSolve.init(F, alg, exec; show_progress = show_progress),
+    )
 end
 
 # The polyhedral start system is built from the composed monomials, which only
@@ -321,12 +336,30 @@ CommonSolve.init(
 
 # ── Parameter homotopy ─────────────────────────────────────────────────────
 
+"""
+    solve(F::System, starts, p_start, p_target, exec = Threaded(); options...)
+
+Track the solutions `starts` of `F(x; p_start)` to `F(x; p_target)` along a
+parameter homotopy, moving the parameters linearly and leaving the equations
+untouched.
+
+`starts` may be a vector of solution vectors, a [`Result`](@ref), or a
+[`ResultIterator`](@ref), as on every route that takes start solutions.
+
+# Example
+```julia
+@polyvar x y a
+F = System([x^2 - a, y^2 - a]; variables = [x, y], parameters = [a])
+r₁ = solve(fix_parameters(F, [1.0]))
+solve(F, r₁, [1.0], [4.0])
+```
+"""
 function solve(
         F::SystemLike,
-        starts::AbstractVector{<:AbstractVector{<:Number}},
+        starts,
+        p_start::AbstractVector{<:Number},
+        p_target::AbstractVector{<:Number},
         exec::AbstractExecutor = Threaded();
-        start_parameters::AbstractVector{<:Number},
-        target_parameters::AbstractVector{<:Number},
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
@@ -334,9 +367,7 @@ function solve(
     )::Result
     return CommonSolve.solve!(
         CommonSolve.init(
-            F, starts, exec;
-            start_parameters = start_parameters,
-            target_parameters = target_parameters,
+            F, starts, p_start, p_target, exec;
             seed = seed,
             tracker_options = tracker_options,
             endgame_options = endgame_options,
@@ -347,28 +378,42 @@ end
 
 function CommonSolve.init(
         F::SystemLike,
-        starts::AbstractVector{<:AbstractVector{<:Number}},
+        starts,
+        p_start::AbstractVector{<:Number},
+        p_target::AbstractVector{<:Number},
         exec::AbstractExecutor = Threaded();
-        start_parameters::AbstractVector{<:Number},
-        target_parameters::AbstractVector{<:Number},
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
         show_progress::Bool = true,
     )
     _check_square_or_overdetermined(F)
-    @assert nparameters(F) > 0 "System must have parameters for parameter homotopy"
-    @assert length(start_parameters) == nparameters(F) "start_parameters length must match nparameters"
-    @assert length(target_parameters) == nparameters(F) "target_parameters length must match nparameters"
+    np = nparameters(F)
+    np > 0 || throw(
+        ArgumentError(
+            "a parameter homotopy requires a parametric system, but the system has " *
+                "no parameters.",
+        ),
+    )
+    length(p_start) == np || throw(
+        ArgumentError(
+            "p_start has length $(length(p_start)), but the system has $np parameter(s).",
+        ),
+    )
+    length(p_target) == np || throw(
+        ArgumentError(
+            "p_target has length $(length(p_target)), but the system has $np parameter(s).",
+        ),
+    )
 
-    sp = ComplexF64.(start_parameters)
-    tp = ComplexF64.(target_parameters)
+    sp = ComplexF64.(p_start)
+    tp = ComplexF64.(p_target)
     H = ParameterHomotopy(F.evaluator, sp, tp)
     eg = _endgame_tracker(H, tracker_options, endgame_options)
 
     builder = ParameterBuilder(F, sp, tp, tracker_options, endgame_options)
 
-    start_sols = [Vector{ComplexF64}(ComplexF64.(s)) for s in starts]
-
-    return SolveCache(exec, builder, eg, start_sols, seed, nothing, show_progress)
+    return SolveCache(
+        exec, builder, eg, _start_points(starts), seed, nothing, show_progress,
+    )
 end

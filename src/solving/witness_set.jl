@@ -17,6 +17,19 @@
 # ── WitnessSet type ──────────────────────────────────────────────────────────
 
 """
+    Irreducibility
+
+Whether a [`WitnessSet`](@ref) has been shown to be irreducible:
+`Irreducibility.IRREDUCIBLE`, `Irreducibility.REDUCIBLE`, or
+`Irreducibility.UNKNOWN` before [`decompose`](@ref) has decided.
+"""
+@enumx Irreducibility::Int8 begin
+    UNKNOWN
+    IRREDUCIBLE
+    REDUCIBLE
+end
+
+"""
     WitnessSet(F, L, points)
 
 Store the points `points` of `V(F) ∩ L` as a witness set. `F` is the system,
@@ -29,8 +42,8 @@ struct WitnessSet{S <: System}
     # only non-singular witness points
     R::Vector{Vector{ComplexF64}}
     projective::Bool
-    # set by `decompose`; nothing until decided
-    is_irreducible::Union{Nothing, Bool}
+    # set by `decompose`; UNKNOWN until decided
+    irreducibility::Irreducibility.T
 end
 
 function WitnessSet(
@@ -38,18 +51,19 @@ function WitnessSet(
         L::LinearSubspace,
         R::Vector{Vector{ComplexF64}};
         projective::Bool = is_linear(L) && is_homogeneous(F),
-        is_irreducible::Union{Nothing, Bool} = nothing,
+        irreducibility::Irreducibility.T = Irreducibility.UNKNOWN,
     )
     # A parametric system would fail deep inside membership/moves (the
     # evaluator is called with an empty parameter vector); fail fast here.
     nparameters(F) == 0 || throw(
         ArgumentError(
-            "a WitnessSet requires a parameter-free system; substitute the " *
-                "parameter values first (cf. `witness_set(F; target_parameters)`).",
+            "a `WitnessSet` requires a parameter-free system, but the system has " *
+                "$(nparameters(F)) parameter(s). Fix them first with " *
+                "`fix_parameters(F, p)`.",
         ),
     )
     return WitnessSet(
-        F, convert(LinearSubspace{ComplexF64}, L), R, projective, is_irreducible,
+        F, convert(LinearSubspace{ComplexF64}, L), R, projective, irreducibility,
     )
 end
 
@@ -99,14 +113,13 @@ The codimension of the algebraic set encoded by the witness set.
 codim(W::WitnessSet)::Int = dim(W.L)
 
 """
-    is_irreducible(W::WitnessSet)
+    is_irreducible(W::WitnessSet) -> Irreducibility.T
 
-Return `true` if `W` was computed to be irreducible, `false` if reducible, and
-`:undecided` otherwise.
+`Irreducibility.IRREDUCIBLE` if `W` was computed to be irreducible,
+`Irreducibility.REDUCIBLE` if reducible, and `Irreducibility.UNKNOWN` if
+[`decompose`](@ref) has not decided.
 """
-function is_irreducible(W::WitnessSet)
-    return W.is_irreducible === nothing ? :undecided : W.is_irreducible
-end
+is_irreducible(W::WitnessSet)::Irreducibility.T = W.irreducibility
 
 function Base.show(io::IO, W::WitnessSet)
     print(io, "Witness set for dimension $(dim(W)) of degree $(degree(W))")
@@ -116,27 +129,29 @@ end
 # ── rank / corank ────────────────────────────────────────────────────────────
 
 """
-    rank(F::System)
+    rank(F::System; rng = Random.default_rng())
 
-Numerically estimate the rank of the Jacobian of `F` at a random point.
+Numerically estimate the rank of the Jacobian of `F` at a random point drawn
+from `rng`.
 """
-function LA.rank(F::System)::Int
+function LA.rank(F::System; rng::Random.AbstractRNG = Random.default_rng())::Int
     m, n = size(F)
     u = FSVec{ComplexF64}(zeros(ComplexF64, m))
     U = FSMat{ComplexF64}(zeros(ComplexF64, m, n))
-    x = FSVec{ComplexF64}(randn(ComplexF64, n))
+    x = FSVec{ComplexF64}(randn(rng, ComplexF64, n))
     p = FSVec{ComplexF64}(ComplexF64[])
     evaluate_and_jacobian!(u, U, F.evaluator, x, p)
     return LA.rank(Matrix(U))
 end
 
 """
-    corank(F::System)
+    corank(F::System; rng = Random.default_rng())
 
 Numerically estimate the corank `nvariables(F) - rank(F)` of `F`, an upper
 bound on the dimension of `V(F)`.
 """
-corank(F::System)::Int = nvariables(F) - LA.rank(F)
+corank(F::System; rng::Random.AbstractRNG = Random.default_rng())::Int =
+    nvariables(F) - LA.rank(F; rng = rng)
 
 # ── Internal primitives ──────────────────────────────────────────────────────
 
@@ -148,17 +163,17 @@ corank(F::System)::Int = nvariables(F) - LA.rank(F)
 # appended so the combined system is square.
 function _witness_init(
         F::System,
-        L::LinearSubspace;
+        L::LinearSubspace,
+        rng::Random.MersenneTwister;
         projective::Bool = is_linear(L) && is_homogeneous(F),
         show_progress::Bool = false,
         threading::Bool = Threads.nthreads() > 1,
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
-        seed::UInt32 = rand(UInt32),
     )::Vector{Vector{ComplexF64}}
-    chart = projective ? randn(ComplexF64, nvariables(F)) : ComplexF64[]
+    chart = projective ? randn(rng, ComplexF64, nvariables(F)) : ComplexF64[]
     alg = TotalDegree(;
-        seed = seed,
+        seed = rand(rng, UInt32),
         tracker_options = tracker_options,
         endgame_options = endgame_options,
     )
@@ -177,13 +192,16 @@ function _move_witness_points(
         F::System,
         starts::AbstractVector{<:AbstractVector},
         L_start::LinearSubspace,
-        L_target::LinearSubspace;
+        L_target::LinearSubspace,
+        rng::Random.MersenneTwister;
         projective::Bool = false,
         chart::Union{Nothing, Vector{ComplexF64}} = nothing,
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
     )::Vector{Vector{ComplexF64}}
-    base = ExtrinsicSubspaceHomotopy(F.evaluator, L_start, L_target)
+    base = ExtrinsicSubspaceHomotopy(
+        F.evaluator, L_start, L_target; gamma = _random_gamma(rng),
+    )
     # In the projective setting the ambient system is positive-dimensional, so
     # wrap it in an affine chart `c·x = 1`. Start points are re-scaled onto the
     # same chart before tracking (they are projective representatives). The
@@ -191,7 +209,7 @@ function _move_witness_points(
     # branches build the SAME concrete `EndgameTracker` (no Union) and `c` is
     # always bound (no possibly-undefined binding for JET).
     c = projective ?
-        (chart === nothing ? randn(ComplexF64, nvariables(F)) : chart) :
+        (chart === nothing ? randn(rng, ComplexF64, nvariables(F)) : chart) :
         ComplexF64[]
     eg = if projective
         _endgame_tracker(AffineChartHomotopy(base, c), tracker_options, endgame_options)
@@ -231,9 +249,13 @@ Move the witness set `W` to the new linear subspace `L`.
 
 `F` may also be given as a single polynomial or a vector of polynomials.
 
-For a parametric system pass the parameter values via `target_parameters`;
+`F` must be parameter-free; fix the values first with [`fix_parameters`](@ref):
 the parameters are substituted into `F` and the returned witness set stores
 the resulting parameter-free system.
+
+Every random choice descends from `seed`, so passing the same `seed` reproduces
+the same witness set regardless of the state of the global random number
+generator.
 
 # Example
 ```julia
@@ -246,29 +268,18 @@ function witness_set(
         F::System;
         dim::Union{Nothing, Int} = nothing,
         codim::Union{Nothing, Int} = nothing,
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
         show_progress::Bool = true,
         threading::Bool = Threads.nthreads() > 1,
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
-        seed::Integer = rand(UInt32),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )
-    if nparameters(F) > 0 || target_parameters !== nothing
-        G = _fix_parameters(F, target_parameters)
-        return witness_set(
-            G;
-            dim = dim, codim = codim,
-            show_progress = show_progress, threading = threading,
-            tracker_options = tracker_options, endgame_options = endgame_options,
-            seed = seed,
-        )
-    end
-    Random.seed!(seed)
-    seed32 = UInt32(seed % UInt32)
+    _check_parameter_free(F, "`witness_set`")
+    rng = Random.MersenneTwister(seed)
     n = nvariables(F)
     projective = is_homogeneous(F)
     if dim === nothing && codim === nothing
-        variety_dim = corank(F) - (projective ? 1 : 0)
+        variety_dim = corank(F; rng = rng) - (projective ? 1 : 0)
     elseif codim !== nothing
         variety_dim = n - codim - (projective ? 1 : 0)
     else
@@ -282,40 +293,39 @@ function witness_set(
     # dim(L) = n - variety_dim, i.e. codim(L) = variety_dim. A zero-dimensional
     # variety is sliced with the whole space (codim-0 subspace).
     L = variety_dim == 0 ? _full_subspace(n) :
-        rand_subspace(n; codim = variety_dim, affine = !projective)
-    return witness_set(
-        F, L;
-        show_progress = show_progress, threading = threading,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        seed = seed32,
+        rand_subspace(rng, n; codim = variety_dim, affine = !projective)
+    # `rng` and not a fresh one from `seed`: the chart drawn downstream must be
+    # independent of the `L` just drawn from the same stream.
+    return _witness_set(
+        F, L, rng, show_progress, threading, tracker_options, endgame_options,
     )
 end
 
 function witness_set(
         F::System,
         L::LinearSubspace;
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
         show_progress::Bool = true,
         threading::Bool = Threads.nthreads() > 1,
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
-        seed::Integer = rand(UInt32),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )
-    if nparameters(F) > 0 || target_parameters !== nothing
-        G = _fix_parameters(F, target_parameters)
-        return witness_set(
-            G, L;
-            show_progress = show_progress, threading = threading,
-            tracker_options = tracker_options, endgame_options = endgame_options,
-            seed = seed,
-        )
-    end
-    seed32 = UInt32(seed % UInt32)
+    _check_parameter_free(F, "`witness_set`")
+    return _witness_set(
+        F, L, Random.MersenneTwister(seed),
+        show_progress, threading, tracker_options, endgame_options,
+    )
+end
+
+function _witness_set(
+        F::System, L::LinearSubspace, rng::Random.MersenneTwister,
+        show_progress::Bool, threading::Bool,
+        tracker_options::TrackerOptions, endgame_options::EndgameOptions,
+    )::WitnessSet
     R = _witness_init(
-        F, L;
+        F, L, rng;
         show_progress = show_progress, threading = threading,
         tracker_options = tracker_options, endgame_options = endgame_options,
-        seed = seed32,
     )
     return WitnessSet(F, L, R)
 end
@@ -326,16 +336,15 @@ function witness_set(
         F::AbstractVector{<:MP.AbstractPolynomialLike};
         dim::Union{Nothing, Int} = nothing,
         codim::Union{Nothing, Int} = nothing,
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
         show_progress::Bool = true,
         threading::Bool = Threads.nthreads() > 1,
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
-        seed::Integer = rand(UInt32),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )
     return witness_set(
         System(collect(F));
-        dim = dim, codim = codim, target_parameters = target_parameters,
+        dim = dim, codim = codim,
         show_progress = show_progress, threading = threading,
         tracker_options = tracker_options, endgame_options = endgame_options,
         seed = seed,
@@ -345,16 +354,14 @@ end
 function witness_set(
         F::AbstractVector{<:MP.AbstractPolynomialLike},
         L::LinearSubspace;
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
         show_progress::Bool = true,
         threading::Bool = Threads.nthreads() > 1,
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
-        seed::Integer = rand(UInt32),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )
     return witness_set(
         System(collect(F)), L;
-        target_parameters = target_parameters,
         show_progress = show_progress, threading = threading,
         tracker_options = tracker_options, endgame_options = endgame_options,
         seed = seed,
@@ -365,16 +372,15 @@ function witness_set(
         f::MP.AbstractPolynomialLike;
         dim::Union{Nothing, Int} = nothing,
         codim::Union{Nothing, Int} = nothing,
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
         show_progress::Bool = true,
         threading::Bool = Threads.nthreads() > 1,
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
-        seed::Integer = rand(UInt32),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )
     return witness_set(
         [f];
-        dim = dim, codim = codim, target_parameters = target_parameters,
+        dim = dim, codim = codim,
         show_progress = show_progress, threading = threading,
         tracker_options = tracker_options, endgame_options = endgame_options,
         seed = seed,
@@ -384,16 +390,14 @@ end
 function witness_set(
         f::MP.AbstractPolynomialLike,
         L::LinearSubspace;
-        target_parameters::Union{Nothing, AbstractVector{<:Number}} = nothing,
         show_progress::Bool = true,
         threading::Bool = Threads.nthreads() > 1,
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
-        seed::Integer = rand(UInt32),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )
     return witness_set(
         [f], L;
-        target_parameters = target_parameters,
         show_progress = show_progress, threading = threading,
         tracker_options = tracker_options, endgame_options = endgame_options,
         seed = seed,
@@ -405,6 +409,7 @@ function witness_set(
         L::LinearSubspace;
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )
     if W.projective && !is_linear(L)
         error(
@@ -413,7 +418,7 @@ function witness_set(
         )
     end
     R = _move_witness_points(
-        W.F, W.R, W.L, L;
+        W.F, W.R, W.L, L, Random.MersenneTwister(seed);
         projective = W.projective,
         tracker_options = tracker_options, endgame_options = endgame_options,
     )
@@ -434,17 +439,22 @@ Due to floating-point arithmetic the value is small but nonzero and must be
 compared against a tolerance. Returns `nothing` if a path-tracking failure
 prevented the test.
 
+Every random choice descends from `seed`, so passing the same `seed` reproduces
+the same trace regardless of the state of the global random number generator.
+
 [^LRS18]: Leykin, Rodriguez, Sottile. "Trace test." Arnold Math. J. 4.1 (2018).
 """
 function trace_test(
         W::WitnessSet;
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )
     L₀ = W.L
     F = W.F
     S₀ = W.R
     isempty(S₀) && return nothing
+    rng = Random.MersenneTwister(seed)
 
     # In the projective setting we fix a single affine chart `c` and place all
     # witness points (and both translated sets) on it, so the barycenters are
@@ -453,7 +463,7 @@ function trace_test(
     # type narrows to `Vector{ComplexF64}` and `on_chart!(y, chart)` resolves to
     # a concrete method (no `on_chart!(..., ::Nothing)` for JET).
     if W.projective
-        chart = randn(ComplexF64, nvariables(F))
+        chart = randn(rng, ComplexF64, nvariables(F))
         S₀c = map(S₀) do s
             y = ComplexF64.(s)
             on_chart!(y, chart)
@@ -465,18 +475,18 @@ function trace_test(
     end
 
     s₀ = sum(S₀c)
-    v = randn(ComplexF64, codim(L₀))
+    v = randn(rng, ComplexF64, codim(L₀))
     L₁ = translate(L₀, v)
     L₋₁ = translate(L₀, -v)
 
     R₁ = _move_witness_points(
-        F, S₀, L₀, L₁;
+        F, S₀, L₀, L₁, rng;
         projective = W.projective, chart = chart,
         tracker_options = tracker_options, endgame_options = endgame_options,
     )
     length(R₁) == degree(W) || return nothing
     R₋₁ = _move_witness_points(
-        F, S₀, L₀, L₋₁;
+        F, S₀, L₀, L₋₁, rng;
         projective = W.projective, chart = chart,
         tracker_options = tracker_options, endgame_options = endgame_options,
     )
@@ -512,6 +522,8 @@ For a projective witness set the query points are projective representatives
   instead of grinding through the full endgame.
 * `show_progress = true`: display a progress bar.
 * `threading = Threads.nthreads() > 1`: query the points in parallel.
+* `seed`: every random choice descends from it, so the same `seed` gives the
+  same answers regardless of the state of the global random number generator.
 """
 function membership(
         p::AbstractVector{<:Number}, W::WitnessSet;
@@ -524,13 +536,14 @@ function membership(
         ),
         show_progress::Bool = true,
         threading::Bool = Threads.nthreads() > 1,
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )::Bool
     return first(
         membership(
             [Vector{ComplexF64}(p)], W;
             atol = atol, rtol = rtol,
             tracker_options = tracker_options, endgame_options = endgame_options,
-            show_progress = show_progress, threading = threading,
+            show_progress = show_progress, threading = threading, seed = seed,
         ),
     )
 end
@@ -590,8 +603,8 @@ end
 # L_x through x with the same dimension as W.L, move the witness points there,
 # and check whether x is among the endpoints. In the projective case L_x is
 # linear through the ray of x, and all comparisons happen on the chart.
-# `R` carries this query's pre-drawn randomness (drawn in the driver from the
-# global RNG, so serial and threaded runs are bit-identical); it is consumed
+# `R` carries this query's pre-drawn randomness (drawn in the driver off the
+# seeded rng, so serial and threaded runs are bit-identical); it is consumed
 # (mutated) here. `A`/`b` are allocated fresh per query on purpose:
 # `LinearSubspace` keeps them by reference and the homotopy reads the stored
 # subspace during tracking, so they must not be buffer-reused.
@@ -661,21 +674,23 @@ function membership(
         ),
         show_progress::Bool = true,
         threading::Bool = Threads.nthreads() > 1,
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )::Vector{Bool} where {S <: System}
+    rng = Random.MersenneTwister(seed)
     F = W.F
     n = size(F)[2]
     # A single chart shared by all queries so the compared representatives are
     # consistent (only used when W is projective).
-    chart = W.projective ? randn(ComplexF64, n) : ComplexF64[]
+    chart = W.projective ? randn(rng, ComplexF64, n) : ComplexF64[]
     # Random point used to gauge the scale of F for the cheap first reject.
-    x0 = LA.normalize!(randn(ComplexF64, n))
+    x0 = LA.normalize!(randn(rng, ComplexF64, n))
     # One genericity perturbation shared by all queries and tasks, and one
     # pre-drawn random matrix per query (the only per-query randomness). Both
-    # come from the global RNG here in the driver, so threaded and serial runs
+    # are drawn here in the driver, off `rng`, so threaded and serial runs
     # consume the same stream and produce bit-identical results.
-    gamma = cis(2 * pi * rand())
+    gamma = _random_gamma(rng)
     k = codim(W.L)
-    Rs = [randn(ComplexF64, k, n) for _ in eachindex(P)]
+    Rs = [randn(rng, ComplexF64, k, n) for _ in eachindex(P)]
 
     out = Vector{Bool}(undef, length(P))
     progress = make_progress(

@@ -558,3 +558,15 @@ nexcess_solutions(r::Result)::Int = count(is_excess_solution, r.path_results)
 # nreal: nonsingular real solutions only
 nreal(r::Result; tol::Float64 = DEFAULT_REAL_TOL)::Int =
     count(c -> !r.path_results[first(c)].singular && is_real(r.path_results[first(c)]; tol = tol), r.clusters)
+
+# Points are owned copies, never aliases.
+_start_points(
+    starts::AbstractVector{<:AbstractVector{<:Number}},
+)::Vector{Vector{ComplexF64}} = [Vector{ComplexF64}(ComplexF64.(s)) for s in starts]
+_start_points(r::Result)::Vector{Vector{ComplexF64}} = [copy(s) for s in solutions(r)]
+_start_points(x) = throw(
+    ArgumentError(
+        "start solutions must be a vector of solution vectors, a `Result`, or a " *
+            "`ResultIterator`, got $(typeof(x)).",
+    ),
+)

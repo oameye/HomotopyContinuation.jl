@@ -53,7 +53,7 @@ end
 # Build the flag of (type-2, type-1) subspace pairs from a dimension-1 base
 # subspace `L₀` in n-space. For index `i` this drops the first `i-1` rows of the
 # base and, for type 2, prepends the equation `u = c`.
-function get_flag(iter, L₀::LinearSubspace)
+function get_flag(iter, L₀::LinearSubspace, rng::Random.MersenneTwister)
     A₀ = extrinsic(L₀).A          # orthonormal rows, size (n-1) × n
     b₀ = extrinsic(L₀).b
     n = size(A₀, 1) + 1
@@ -63,7 +63,7 @@ function get_flag(iter, L₀::LinearSubspace)
     Aᵤ = [A₀ zeros(ComplexF64, n - 1)]
     bᵤ = b₀
     # type 2: prepend the equation u = c
-    c = randn(ComplexF64)
+    c = randn(rng, ComplexF64)
     A = [zeros(ComplexF64, 1, m) one(ComplexF64); A₀ zeros(ComplexF64, n - 1)]
     b = [c; b₀]
 
@@ -77,9 +77,11 @@ function get_flag(iter, L₀::LinearSubspace)
     end
 end
 
-function initialize_witness_sets(codim::Int, n::Int)::Vector{WitnessPoints}
-    L₀ = rand_subspace(n; dim = 1)
-    flag = get_flag(1:codim, L₀)
+function initialize_witness_sets(
+        codim::Int, n::Int, rng::Random.MersenneTwister,
+    )::Vector{WitnessPoints}
+    L₀ = rand_subspace(rng, n; dim = 1)
+    flag = get_flag(1:codim, L₀, rng)
     out = Vector{WitnessPoints}(undef, length(flag))
     for (i, (L, Lᵤ)) in enumerate(flag)
         out[i] = WitnessPoints(L, Lᵤ, Vector{Vector{ComplexF64}}())
@@ -90,7 +92,8 @@ end
 # Witness set of each hypersurface `f_i = 0` on the seed subspace `L`. A rational
 # equation goes through its numerator, minus the zeros that are poles of it.
 function initialize_hypersurfaces(
-        F::System{P, V}, vars::Vector{V}, L::LinearSubspace;
+        F::System{P, V}, vars::Vector{V}, L::LinearSubspace,
+        rng::Random.MersenneTwister;
         threading::Bool, tracker_options::TrackerOptions,
         endgame_options::EndgameOptions,
     ) where {P, V}
@@ -101,7 +104,7 @@ function initialize_hypersurfaces(
         h = System([fs[i]]; parameters = empty(vars), variables = vars)::HS
         G, Q = _numerator_system(fs[i], h, vars)
         R = _witness_init(
-            G, L;
+            G, L, rng;
             threading = threading, tracker_options = tracker_options,
             endgame_options = endgame_options,
         )
@@ -126,6 +129,9 @@ struct RegenerationState{P, V, S <: System}
     Fᵢ::S
     tracker_options::TrackerOptions
     endgame_options::EndgameOptions
+    # Every draw below a regeneration route comes off this one stream, so the
+    # route's `seed` alone determines the result.
+    rng::Random.MersenneTwister
 end
 
 @noinline function _intersect_regeneration_phase!(
@@ -133,10 +139,11 @@ end
         eqs::Vector{P}, vars::Vector{V}, u::V,
         i::Int, codim::Int, F_prev::S,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
+        rng::Random.MersenneTwister,
         threading::Bool, atol::Float64, rtol::Float64,
     )::Nothing where {W <: WitnessSet, P, V, S <: System}
     state = RegenerationState(
-        eqs, vars, u, i, codim, F_prev, tracker_options, endgame_options,
+        eqs, vars, u, i, codim, F_prev, tracker_options, endgame_options, rng,
     )
     intersect_all!(
         out, H, state; threading = threading, atol = atol, rtol = rtol,
@@ -149,10 +156,11 @@ end
         eqs::Vector{P}, vars::Vector{V}, u::V,
         i::Int, codim::Int, Fᵢ::S,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
+        rng::Random.MersenneTwister,
         show_monodromy_progress::Bool, threading::Bool,
     )::Nothing where {P, V, S <: System}
     state = RegenerationState(
-        eqs, vars, u, i, codim, Fᵢ, tracker_options, endgame_options,
+        eqs, vars, u, i, codim, Fᵢ, tracker_options, endgame_options, rng,
     )
     fill_up!(out, monodromy_options, state, show_monodromy_progress, threading)
     return nothing
@@ -177,7 +185,8 @@ are poles of the equation are dropped.
 * `max_codim`: maximal codimension of witness supersets to compute.
 * `tracker_options`, `endgame_options`, `monodromy_options`.
 * `threading = true`: enable multi-threading.
-* `seed`: random seed.
+* `seed`: every random choice descends from it, so the same `seed` gives the same
+  witness supersets regardless of the state of the global random number generator.
 """
 function regeneration(
         F::AbstractVector{<:MP.AbstractPolynomialLike};
@@ -194,7 +203,7 @@ function regeneration(
         show_progress::Bool = true,
         show_monodromy_progress::Bool = false,
         threading::Bool = Threads.nthreads() > 1,
-        seed::Union{Nothing, Integer} = nothing,
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
     )
@@ -228,18 +237,19 @@ function regeneration(
         show_progress::Bool = true,
         show_monodromy_progress::Bool = false,
         threading::Bool = Threads.nthreads() > 1,
-        seed::Union{Nothing, Integer} = nothing,
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
     )::Vector{WitnessSet{S}} where {S <: System}
     nparameters(F) == 0 || throw(
         ArgumentError(
-            "regeneration does not support parametric systems; substitute the " *
-                "parameter values first (cf. `witness_set(F; target_parameters)`).",
+            "`regeneration` requires a parameter-free system, but the system has " *
+                "$(nparameters(F)) parameter(s). Fix them first with " *
+                "`fix_parameters(F, p)`.",
         ),
     )
     _check_regeneration_input(F, "`regeneration`")
-    seed !== nothing && Random.seed!(seed)
+    rng = Random.MersenneTwister(seed)
 
     vars = collect(variables(F))
     n = nvariables(F)         # ambient dimension
@@ -257,11 +267,11 @@ function regeneration(
     push!(vars, u)
 
     # witness supersets, out[k] for codimension k
-    out = initialize_witness_sets(codim, n)
+    out = initialize_witness_sets(codim, n, rng)
 
     # witness sets for each hypersurface f_i = 0 on the seed subspace
     H = initialize_hypersurfaces(
-        F, vars, linear_subspace(out[1]);
+        F, vars, linear_subspace(out[1]), rng;
         threading = threading, tracker_options = tracker_options,
         endgame_options = endgame_options,
     )
@@ -290,12 +300,13 @@ function regeneration(
             )
             _intersect_regeneration_phase!(
                 out, H, eqs, vars, u, i, codim, F_prev,
-                tracker_options, endgame_options, threading, atol, rtol,
+                tracker_options, endgame_options, rng, threading, atol, rtol,
             )
             Fᵢ = System(eqs[1:i]; parameters = empty(vars), variables = vars)
             _fill_regeneration_phase!(
                 out, monodromy_options, eqs, vars, u, i, codim, Fᵢ,
-                tracker_options, endgame_options, show_monodromy_progress, threading,
+                tracker_options, endgame_options, rng,
+                show_monodromy_progress, threading,
             )
         end
         progress !== nothing && ProgressMeter.next!(progress)
@@ -318,7 +329,7 @@ function regeneration(
     # Junk removal: a codim-k witness superset can pick up points where its
     # slice crosses a higher-dimensional component; those points lie on that
     # higher-dimensional witness set and are removed here.
-    _remove_contained_points!(result; atol = atol, rtol = rtol)
+    _remove_contained_points!(result, rng; atol = atol, rtol = rtol)
     filter!(W -> degree(W) > 0, result)
     return result
 end
@@ -496,7 +507,7 @@ function intersect_with_hypersurface!(
     # whole component.
     m = .!(
         _is_contained(
-            W, H, system(H);
+            W, H, system(H), state.rng;
             atol = atol, rtol = rtol,
             tracker_options = state.tracker_options,
             endgame_options = state.endgame_options,
@@ -508,7 +519,7 @@ function intersect_with_hypersurface!(
 
     # Step 2: track P_next × (d-th roots of unity) through the u-homotopy.
     F₀, G₀, d = _u_homotopy_systems(W, F, X, h, vars, u)
-    γ = cis(2π * rand())
+    γ = _random_gamma(state.rng)
     roots = ComplexF64[cis(2π * k / d) for k in 0:(d - 1)]
     if threading && length(P_next) * d > 1
         _threaded_intersection!(
@@ -617,7 +628,7 @@ end
 # X's linear equations (plus random rows), passing through each point, then
 # moves Y's witness points there and checks proximity.
 function _is_contained(
-        X::WitnessPoints, Y::WitnessSet, F::System;
+        X::WitnessPoints, Y::WitnessSet, F::System, rng::Random.MersenneTwister;
         atol::Float64, rtol::Float64,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
     )::BitVector
@@ -625,9 +636,9 @@ function _is_contained(
     LY = linear_subspace(Y)
     (isempty(points(Y)) || isempty(points(X))) && return falses(length(points(X)))
 
-    A = _membership_matrix(LX, LY)
+    A = _membership_matrix(LX, LY, rng)
     m, n = size(F)
-    x0 = LA.normalize!(randn(ComplexF64, n))
+    x0 = LA.normalize!(randn(rng, ComplexF64, n))
     y0 = FSVec{ComplexF64}(zeros(ComplexF64, m))
     y = FSVec{ComplexF64}(zeros(ComplexF64, m))
     p_empty = FSVec{ComplexF64}(ComplexF64[])
@@ -638,7 +649,9 @@ function _is_contained(
     # die with PATH_TERMINATED_INVALID_START and a whole component gets dropped.
     # The intrinsic form `x = A(t) v + a(t)` is well conditioned in every
     # dim/codim regime and tracks in only `dim(LY) <= n` coordinates.
-    Hom = IntrinsicSubspaceHomotopy(F.evaluator, LY, LY)
+    Hom = IntrinsicSubspaceHomotopy(
+        F.evaluator, LY, LY; gamma = _random_gamma(rng),
+    )
     eg = _endgame_tracker(Hom, tracker_options, endgame_options)
     u_buf = FSVec{ComplexF64}(zeros(ComplexF64, size(Hom)[2]))
     amb_buf = FSVec{ComplexF64}(zeros(ComplexF64, n))
@@ -671,7 +684,9 @@ end
 
 # Query-subspace matrix reusing X's rows: row 1 fixes u, the next `k` rows are
 # random, the rest reuse X's linear equations. b is set per point as A·x.
-function _membership_matrix(LX::LinearSubspace, LY::LinearSubspace)::Matrix{ComplexF64}
+function _membership_matrix(
+        LX::LinearSubspace, LY::LinearSubspace, rng::Random.MersenneTwister,
+    )::Matrix{ComplexF64}
     n = ambient_dim(LY)
     cX = codim(LX)
     cY = codim(LY)
@@ -680,7 +695,7 @@ function _membership_matrix(LX::LinearSubspace, LY::LinearSubspace)::Matrix{Comp
     AX = extrinsic(LX).A
     A[1, n] = one(ComplexF64)
     for i in 2:(k + 1), j in 1:n
-        A[i, j] = randn(ComplexF64)
+        A[i, j] = randn(rng, ComplexF64)
     end
     for i in 2:cX
         ℓ = k + i
@@ -700,10 +715,16 @@ function _monodromy_with_options(
         opts::MonodromyOptions;
         tracker_options::TrackerOptions = TrackerOptions(),
         threading::Bool, show_progress::Bool,
-        seed::UInt32 = rand(UInt32),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )::MonodromyResult
     cp = convert(LinearSubspace{ComplexF64}, L)
-    MS = MonodromySolver(F, cp; options = opts, tracker_options = tracker_options)
+    # `_monodromy_solve!` seeds its loops from `seed`; the solver's chart takes a
+    # tagged stream off the same seed so the two do not share draws.
+    MS = MonodromySolver(
+        F, cp;
+        options = opts, tracker_options = tracker_options,
+        rng = _tagged_rng(seed, 0x0000_0001),
+    )
     return _monodromy_solve!(
         MS, X, cp, seed, show_progress, threading ? Threaded() : Serial(),
     )
@@ -721,6 +742,7 @@ function fill_up!(
                 Fᵢ, W.R, linear_subspace(W), opts;
                 tracker_options = state.tracker_options,
                 threading = threading, show_progress = show_monodromy_progress,
+                seed = rand(state.rng, UInt32),
             )
             W.R = nsolutions(res) == 0 ? Vector{Vector{ComplexF64}}() :
                 unique_points(solutions(res))
@@ -771,7 +793,9 @@ function Base.intersect(
         threading::Bool = Threads.nthreads() > 1,
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )
+    rng = Random.MersenneTwister(seed)
     size(system(H))[1] == 1 ||
         throw(ArgumentError("The second argument must be defined by a single equation."))
     size(system(W))[2] == size(system(H))[2] ||
@@ -792,8 +816,8 @@ function Base.intersect(
     h = heqs[1]
 
     # Flags in (n+1)-space; the u-value fixes the appended coordinate.
-    flagW = get_flag(1:2, linear_subspace(W))
-    flagH = get_flag(1:1, linear_subspace(H))
+    flagW = get_flag(1:2, linear_subspace(W), rng)
+    flagH = get_flag(1:1, linear_subspace(H), rng)
     cW = _get_c(flagW)
     cH = _get_c(flagH)
 
@@ -810,7 +834,7 @@ function Base.intersect(
     intersect_state = RegenerationState(
         [eqs; h], vars_u, u, length(eqs) + 1, 2,
         System(eqs; parameters = empty(vars_u), variables = vars_u),
-        tracker_options, endgame_options,
+        tracker_options, endgame_options, rng,
     )
 
     intersect_with_hypersurface!(
@@ -820,7 +844,7 @@ function Base.intersect(
     fill_state = RegenerationState(
         [eqs; h], vars_u, u, length(eqs) + 1, 2,
         System([eqs; h]; parameters = empty(vars_u), variables = vars_u),
-        tracker_options, endgame_options,
+        tracker_options, endgame_options, rng,
     )
     Ws = W₂ === nothing ? WitnessPoints[W₁] : WitnessPoints[W₁, W₂]
     # The d-th-root tracking can reach the same solution more than once; dedupe
@@ -838,7 +862,7 @@ function Base.intersect(
     end
     # Remove spurious witness points of a lower-dimensional set that actually
     # lie on a higher-dimensional component (they are junk from the u-homotopy).
-    _remove_contained_points!(out; atol = atol, rtol = rtol)
+    _remove_contained_points!(out, rng; atol = atol, rtol = rtol)
     filter!(X -> degree(X) > 0, out)
     return length(out) == 1 ? first(out) : out
 end
@@ -846,7 +870,8 @@ end
 # For witness sets sorted by decreasing dimension, drop from each set the points
 # that are contained in any higher-dimensional set (junk points).
 function _remove_contained_points!(
-        out::Vector{<:WitnessSet}; atol::Float64, rtol::Float64,
+        out::Vector{<:WitnessSet}, rng::Random.MersenneTwister;
+        atol::Float64, rtol::Float64,
     )
     sort!(out; by = dim, rev = true)
     for i in eachindex(out)
@@ -860,6 +885,7 @@ function _remove_contained_points!(
                 membership(
                     p, out[j];
                     atol = atol, rtol = rtol, show_progress = false,
+                    seed = rand(rng, UInt32),
                 ) && (keep[idx] = false)
             end
         end
@@ -886,10 +912,12 @@ function Base.intersect(
         threading::Bool = Threads.nthreads() > 1,
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )
     _check_front_end(system(W), false)
+    rng = Random.MersenneTwister(seed)
     H = _hypersurface_witness_set(
-        f, collect(variables(system(W)));
+        f, collect(variables(system(W))), rng;
         show_progress = show_progress, threading = threading,
         tracker_options = tracker_options, endgame_options = endgame_options,
     )
@@ -899,7 +927,7 @@ function Base.intersect(
         show_monodromy_progress = show_monodromy_progress,
         tracker_options = tracker_options, endgame_options = endgame_options,
         monodromy_options = monodromy_options, threading = threading,
-        atol = atol, rtol = rtol,
+        atol = atol, rtol = rtol, seed = rand(rng, UInt32),
     )
 end
 
@@ -919,10 +947,12 @@ function Base.intersect(
         threading::Bool = Threads.nthreads() > 1,
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )
     _check_front_end(system(W), true)
+    rng = Random.MersenneTwister(seed)
     H = _hypersurface_witness_set(
-        f, _as_variables(collect(variables(system(W))));
+        f, _as_variables(collect(variables(system(W)))), rng;
         show_progress = show_progress, threading = threading,
         tracker_options = tracker_options, endgame_options = endgame_options,
     )
@@ -932,7 +962,7 @@ function Base.intersect(
         show_monodromy_progress = show_monodromy_progress,
         tracker_options = tracker_options, endgame_options = endgame_options,
         monodromy_options = monodromy_options, threading = threading,
-        atol = atol, rtol = rtol,
+        atol = atol, rtol = rtol, seed = rand(rng, UInt32),
     )
 end
 
@@ -940,7 +970,7 @@ end
 # does not use. The slice is the affine line the flag is built from, also for a
 # homogeneous `f`, whose projective slice has one dimension too many for it.
 function _hypersurface_witness_set(
-        f::MP.AbstractPolynomialLike, vars::Vector;
+        f::MP.AbstractPolynomialLike, vars::Vector, rng::Random.MersenneTwister;
         show_progress::Bool, threading::Bool,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
     )::WitnessSet
@@ -953,15 +983,16 @@ function _hypersurface_witness_set(
     )
     return witness_set(
         System([f]; parameters = empty(vars), variables = vars),
-        rand_subspace(length(vars); dim = 1);
+        rand_subspace(rng, length(vars); dim = 1);
         show_progress = show_progress, threading = threading,
         tracker_options = tracker_options, endgame_options = endgame_options,
+        seed = rand(rng, UInt32),
     )
 end
 
 # A rational `f` is solved through its numerator, with its poles dropped.
 function _hypersurface_witness_set(
-        f::Expression, vars::Vector{Expression};
+        f::Expression, vars::Vector{Expression}, rng::Random.MersenneTwister;
         show_progress::Bool, threading::Bool,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
     )::WitnessSet
@@ -975,9 +1006,10 @@ function _hypersurface_witness_set(
     h = System([f]; parameters = Expression[], variables = vars)
     G, Q = _numerator_system(f, h, vars)
     Wp = witness_set(
-        G, rand_subspace(length(vars); dim = 1);
+        G, rand_subspace(rng, length(vars); dim = 1);
         show_progress = show_progress, threading = threading,
         tracker_options = tracker_options, endgame_options = endgame_options,
+        seed = rand(rng, UInt32),
     )
     R = Q === nothing ? solutions(Wp) : _drop_poles(Q, solutions(Wp))
     return WitnessSet(h, linear_subspace(Wp), R)
