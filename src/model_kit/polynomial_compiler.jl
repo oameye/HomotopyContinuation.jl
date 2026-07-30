@@ -86,7 +86,10 @@ function _monomial_key(
     data = Int32[]
     for (var, exp) in zip(MP.variables(mono), MP.exponents(mono))
         exp == 0 && continue
-        push!(data, slot_by_symbol[Symbol(var)])
+        sym = Symbol(var)
+        slot = get(slot_by_symbol, sym, _SLOT_NONE)
+        slot == _SLOT_NONE && throw(_unknown_symbol_error(sym))
+        push!(data, slot)
         push!(data, Int32(exp))
         k = length(data) >> 1
         while k > 1 && data[2k - 3] < data[2k - 1]

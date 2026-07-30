@@ -52,6 +52,68 @@ function _check_square_or_overdetermined(C::CompositionSystem)::Nothing
 end
 
 """
+    _check_projective_determined(F, route)
+
+Throw for a homogeneous system whose projective solution set is
+positive-dimensional. `route` names the algorithm in the message.
+"""
+function _check_projective_determined(F::CloneableSystem, route::String)::Nothing
+    m, n = size(F)
+    m + 1 >= n || throw(
+        ArgumentError(
+            "$route puts the homogeneous system on an affine chart, so $m equation(s) " *
+                "in $n variables give $(m + 1). The projective solution set is " *
+                "positive-dimensional; only finitely many solutions are supported.",
+        ),
+    )
+    return nothing
+end
+
+_is_grouped(F::System)::Bool = !isempty(F.variable_groups)
+_is_grouped(::CloneableSystem)::Bool = false
+
+"""
+    _check_single_group(F)
+
+Throw for a system with more than one variable group, on a route that is about
+to put it on a single affine chart. One chart leaves such a system a cone in
+each of its other groups.
+"""
+_check_single_group(::CloneableSystem)::Nothing = nothing
+
+function _check_single_group(F::System)::Nothing
+    M = length(variable_groups(F))
+    M <= 1 || throw(
+        ArgumentError(
+            "The system has $M variable groups, which need one affine chart per " *
+                "group. Only `solve(F, TotalDegree())` charts per group; this " *
+                "route charts the variables as a whole.",
+        ),
+    )
+    return nothing
+end
+
+_polynomial_system(F::System)::System = F
+_polynomial_system(C::CompositionSystem)::System = System(C)
+_polynomial_system(F::FixedParameterSystem)::System =
+    fix_parameters(_polynomial_system(F.system), F.parameters)
+
+# Solved on a random affine chart: the slice by the whole ambient space, whose
+# chart row makes `m = n - 1` square.
+function _init_projective(
+        F::CloneableSystem, alg::Union{TotalDegree, Polyhedral},
+        exec::AbstractExecutor, show_progress::Bool, route::String,
+    )
+    # Before the count check, whose message is confusing for grouped input.
+    _check_single_group(F)
+    _check_projective_determined(F, route)
+    G = _polynomial_system(F)
+    return CommonSolve.init(
+        G, _full_subspace(nvariables(G)), alg, exec; show_progress = show_progress,
+    )
+end
+
+"""
     _check_parameter_free(F, route)
 
 Throw when `F` still has parameters. `route` names the algorithm in the message.
@@ -107,25 +169,17 @@ end
 
 # ── CommonSolve.init: System + TotalDegree ────────────────────────────────
 
-function _total_degree_solve_cache(
+function _solve_cache(
         exec::E,
         builder::B,
-        target_evaluator::SystemEvaluator,
-        degrees::Vector{Int},
+        starts::Vector{Vector{ComplexF64}},
         seed::UInt32,
         excess_checker::C,
         show_progress::Bool,
-        tracker_options::TrackerOptions,
-        endgame_options::EndgameOptions,
-        γ::ComplexF64,
     )::SolveCache{E, B, C} where {E <: AbstractExecutor, B, C}
-    start_evaluator = _total_degree_startevaluator(degrees)
-    starts = _total_degree_solutions(degrees)
-
-    H = StraightLineHomotopy(start_evaluator, target_evaluator; γ = γ)
-    eg = _endgame_tracker(H, tracker_options, endgame_options)
-
-    return SolveCache(exec, builder, eg, starts, seed, excess_checker, show_progress)
+    return SolveCache(
+        exec, builder, builder().tracker, starts, seed, excess_checker, show_progress,
+    )
 end
 
 function CommonSolve.init(
@@ -133,9 +187,20 @@ function CommonSolve.init(
         exec::AbstractExecutor = Threaded();
         show_progress::Bool = true,
     )::SolveCache
-    _check_square_or_overdetermined(F)
     _check_parameter_free(F, "`TotalDegree`")
     _check_polynomial(F, "`TotalDegree`")
+    if _is_grouped(F)
+        # First: for a grouped system homogeneity is per group. Dynamic call, as below.
+        return Base.inferencebarrier(_init_multi_homogeneous)(F, alg, exec, show_progress)
+    end
+    if is_homogeneous(F)
+        # Dynamic call: inferring the projective wrapper stack from here costs the
+        # common path ~3s.
+        return Base.inferencebarrier(_init_projective)(
+            F, alg, exec, show_progress, "`TotalDegree`",
+        )
+    end
+    _check_square_or_overdetermined(F)
 
     rng = Random.MersenneTwister(alg.seed)
     γ = _random_gamma(rng)
@@ -158,9 +223,8 @@ function _init_total_degree(
     builder = StraightLineBuilder(
         degs, F, γ, alg.tracker_options, alg.endgame_options,
     )
-    return _total_degree_solve_cache(
-        exec, builder, F.evaluator, degs, alg.seed, nothing,
-        show_progress, alg.tracker_options, alg.endgame_options, γ,
+    return _solve_cache(
+        exec, builder, _total_degree_solutions(degs), alg.seed, nothing, show_progress,
     )
 end
 
@@ -170,16 +234,14 @@ function _init_total_degree(
         γ::ComplexF64, show_progress::Bool,
     )
     n = nvariables(F)
-    evaluator = F.evaluator
-    A, perm, excess_checker = _square_up(rng, evaluator, degrees(F))
-    target_evaluator = _randomized_evaluator(evaluator, A, perm)
+    A, perm, excess_checker = _square_up(rng, F.evaluator, degrees(F))
     degs = degrees(F)[perm[1:n]]
     builder = RandomizedStraightLineBuilder(
         degs, F, A, perm, γ, alg.tracker_options, alg.endgame_options,
     )
-    return _total_degree_solve_cache(
-        exec, builder, target_evaluator, degs, alg.seed, excess_checker,
-        show_progress, alg.tracker_options, alg.endgame_options, γ,
+    return _solve_cache(
+        exec, builder, _total_degree_solutions(degs), alg.seed, excess_checker,
+        show_progress,
     )
 end
 
@@ -285,6 +347,11 @@ Solve a polynomial system using homotopy continuation.
 `F` must be parameter-free; for a parametric system fix the values first with
 [`fix_parameters`](@ref).
 
+A homogeneous `F` is solved projectively, on a random affine chart drawn from the
+algorithm's seed. One equation fewer than there are variables is therefore square,
+and the returned solutions are representatives of projective points, so any two of
+them that agree up to a complex scaling are the same solution.
+
 A [`CompositionSystem`](@ref) is accepted too: the total-degree start system
 needs only the composed degrees, which are folded from the stages, so the
 equations are never rebuilt.
@@ -305,6 +372,25 @@ function solve(
     )::Result
     return solve(F, TotalDegree(), exec; show_progress = show_progress)
 end
+
+"""
+    paths_to_track(F::System, alg = TotalDegree()) -> Int
+
+Number of paths [`solve`](@ref) would track for `F` under `alg`, without tracking
+any of them. Throws whatever `solve` would throw for input it cannot handle.
+
+For a system built with `variable_groups` this is the multi-homogeneous Bezout
+number, which is at most the total Bezout number and usually far below it.
+
+# Example
+```julia
+@polyvar x y
+paths_to_track(System([x * y - 2, x^2 - 4]))                                # 4
+paths_to_track(System([x * y - 2, x^2 - 4]; variable_groups = [[x], [y]]))  # 2
+```
+"""
+paths_to_track(F::CloneableSystem, alg::TotalDegree = TotalDegree())::Int =
+    length(CommonSolve.init(F, alg, Serial(); show_progress = false).start_solutions)
 
 function solve(
         F::System,
@@ -408,12 +494,9 @@ function CommonSolve.init(
 
     sp = ComplexF64.(p_start)
     tp = ComplexF64.(p_target)
-    H = ParameterHomotopy(F.evaluator, sp, tp)
-    eg = _endgame_tracker(H, tracker_options, endgame_options)
-
     builder = ParameterBuilder(F, sp, tp, tracker_options, endgame_options)
 
-    return SolveCache(
-        exec, builder, eg, _start_points(starts), seed, nothing, show_progress,
+    return _solve_cache(
+        exec, builder, _start_points(starts), seed, nothing, show_progress,
     )
 end

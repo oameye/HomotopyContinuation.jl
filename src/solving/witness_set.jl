@@ -171,7 +171,7 @@ function _witness_init(
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
     )::Vector{Vector{ComplexF64}}
-    chart = projective ? randn(rng, ComplexF64, nvariables(F)) : ComplexF64[]
+    chart = projective ? _affine_chart(rng, F) : ComplexF64[]
     alg = TotalDegree(;
         seed = rand(rng, UInt32),
         tracker_options = tracker_options,

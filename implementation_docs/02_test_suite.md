@@ -45,8 +45,10 @@ re-run the file alone before believing it.
 ### Not covered from v2's suite
 
 Every v2 test file has a v3 counterpart except `semialgebraic_sets_test.jl` (no
-SemialgebraicSets integration), plus the composition / `paths_to_track` / `mixed_volume` /
-`stop_early_cb` / start-target-`solve` testsets, whose APIs v3 does not have.
+SemialgebraicSets integration), plus the composition / `mixed_volume` / `stop_early_cb` /
+start-target-`solve` testsets, whose APIs v3 does not have. Of v2's "paths to track" testset
+the total-degree half is ported (`solve_test.jl` and `variable_groups_test.jl`); the
+polyhedral half waits on `mixed_volume`.
 
 `model_kit/symbolic_test.jl` is covered by `expression_test.jl` except where v2's ModelKit
 carries machinery v3 puts elsewhere or does not have:
@@ -57,6 +59,5 @@ carries machinery v3 puts elsewhere or does not have:
 | Expand | expressions are canonicalized on construction, so there is no separate expansion step (and no distributed normal form to expand *to*) |
 | Horner, to_dict, Rand / dense poly, exponents_coefficients | polynomial utilities; v3's polynomial layer is DynamicPolynomials, which provides them |
 | System (show), Homotopy | `System` has no custom `show` and there is no symbolic `Homotopy` type |
-| System variables groups + homogeneous | no multi-homogeneous variable groups |
 
 v2's `get_num_den` is `num_den`, covered by `expression_test.jl`'s `num_den` testset.

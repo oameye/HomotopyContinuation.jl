@@ -3,6 +3,7 @@ using HomotopyContinuationNext
 using HomotopyContinuationNext: TotalDegree, Polyhedral, Result, PathResult,
     PathResultCode, TrackerOptions,
     solutions, real_solutions, nsolutions, nreal, is_success, is_real,
+    nexcess_solutions, is_homogeneous, fix_parameters, FixedParameterSystem,
     total_degree_count, SolveCache, PolyhedralSolveCache,
     Serial, Threaded,
     _clone_system_evaluator, TrackingWorkerState, PolyhedralWorkerState,
@@ -237,6 +238,106 @@ using CommonSolve: CommonSolve
             r_ph = solve(F, Polyhedral(; seed = UInt32(1)); show_progress = false)
             @test nsolutions(r_td) == nsolutions(r_ph)
         end
+    end
+
+    # ── Projective (homogeneous) input ────────────────────────────────────
+    #
+    # Solutions are ambient representatives, so they are compared normalized.
+
+    projective_normalize(sols) = [s ./ s[argmax(abs.(s))] for s in sols]
+    function same_point_set(a, b)
+        nb = projective_normalize(b)
+        return length(a) == length(b) &&
+            all(u -> any(v -> maximum(abs.(u .- v)) < 1.0e-7, nb), projective_normalize(a))
+    end
+
+    @testset "projective: square after the chart row" begin
+        @polyvar x y z
+        F = System(
+            [
+                2.3 * x^2 + 1.2 * y^2 + 3x * z - 2y * z + 3 * z^2,
+                2.3 * x^2 + 1.2 * y^2 + 5x * z + 2y * z - 5 * z^2,
+            ]
+        )
+        @test is_homogeneous(F)
+        run(alg, exec = Serial()) = solve(F, alg, exec; show_progress = false)
+
+        r = run(TotalDegree(; seed = UInt32(0x1234)))
+        for res in (r, run(Polyhedral(; seed = UInt32(0x1234))))
+            @test res.tracked_paths == 4
+            @test count(is_success, res.path_results) == 4
+            @test nsolutions(res) == 4
+            for v in projective_normalize(solutions(res))
+                @test abs(2.3v[1]^2 + 1.2v[2]^2 + 3v[1] * v[3] - 2v[2] * v[3] + 3v[3]^2) < 1.0e-8
+                @test abs(2.3v[1]^2 + 1.2v[2]^2 + 5v[1] * v[3] + 2v[2] * v[3] - 5v[3]^2) < 1.0e-8
+            end
+        end
+
+        # Two of the four points have z = 0, which the chart z = 1 would not reach.
+        @test count(s -> abs(s[3]) < 1.0e-8 * maximum(abs.(s)), solutions(r)) == 2
+
+        # Independent of the chart drawn, the algorithm, and the executor.
+        for (alg, exec) in (
+                (TotalDegree(; seed = UInt32(99)), Serial()),
+                (Polyhedral(; seed = UInt32(99)), Serial()),
+                (TotalDegree(; seed = UInt32(0x1234)), Threaded()),
+            )
+            @test same_point_set(solutions(run(alg, exec)), solutions(r))
+        end
+    end
+
+    @testset "projective: overdetermined after the chart row" begin
+        @polyvar x y z
+        # 3 equations in 3 variables, so the chart row makes it overdetermined:
+        # the square-up keeps the 3 largest of the degrees [3, 3, 1, 1].
+        F = System(
+            [
+                (x^2 + y^2 + x * y - 3 * z^2) * (x + 3z),
+                (x^2 + y^2 + x * y - 3 * z^2) * (y - x + 2z),
+                2x + 5y - 3z,
+            ]
+        )
+        for alg in (TotalDegree(; seed = UInt32(0x1234)), Polyhedral(; seed = UInt32(0x1234)))
+            r = solve(F, alg, Serial(); show_progress = false)
+            @test r.tracked_paths == 9
+            @test count(is_success, r.path_results) == 2
+            @test nsolutions(r) == 2
+            @test nexcess_solutions(r) == 3
+        end
+
+        # Equation order does not change the Bezout count: degrees [3, 1, 4] plus
+        # the chart row track 4 * 3 * 1 paths either way.
+        G = System(
+            [
+                (x^2 + y^2 + x * y - 3 * z^2) * (x + 3z),
+                2x + 5y - 3z,
+                (x^2 + y^2 + x * y - 3 * z^2) * (y^2 - x * z + 2 * z^2),
+            ]
+        )
+        r = solve(G, TotalDegree(; seed = UInt32(0x1234)), Serial(); show_progress = false)
+        @test r.tracked_paths == 12
+        @test count(is_success, r.path_results) == 2
+    end
+
+    @testset "projective: composition and fixed parameters" begin
+        @polyvar u v w a
+        run(F) = solve(F, TotalDegree(; seed = UInt32(5)), Serial(); show_progress = false)
+        L = System([2u - v + w, u + 3w, v - w]; variables = [u, v, w])
+
+        C = System([u * v - w^2, u^2 + v * w]; variables = [u, v, w]) ∘ L
+        @test is_homogeneous(C)
+        rc = run(C)
+        @test rc.tracked_paths == 4
+        @test nsolutions(rc) == 4
+        @test same_point_set(solutions(rc), solutions(run(System(C))))
+
+        Cp = System([u * v - a * w^2, u^2 + v * w]; variables = [u, v, w], parameters = [a]) ∘ L
+        FP = fix_parameters(Cp, [2.0])
+        @test FP isa FixedParameterSystem
+        @test is_homogeneous(FP)
+        rf = run(FP)
+        @test nsolutions(rf) == 4
+        @test same_point_set(solutions(rf), solutions(run(fix_parameters(System(Cp), [2.0]))))
     end
 
     # ── Parameter homotopy tests ──────────────────────────────────────────
@@ -611,5 +712,24 @@ using CommonSolve: CommonSolve
         m_serial = sort([length(c) for c in r_serial.clusters])
         m_threaded = sort([length(c) for c in r_threaded.clusters])
         @test m_serial == m_threaded
+    end
+
+    @testset "paths_to_track" begin
+        @polyvar x y z
+        @test paths_to_track(System([x^2 + y^2 - 4, x * y - 1])) == 4
+        @test paths_to_track(
+            System([2y + 3 * y^2 - x * y^3, x + 4 * x^2 - 2 * x^3 * y]),
+        ) == 16
+        for F in (
+                System([x^2 + y^2 - 4, x * y - 1]),
+                # Projective: one chart row makes the square system one smaller.
+                System([x^2 + y^2 - z^2, x * y - z^2]),
+                System([(x^2 - 4) * (x * y - 2), x * y - 2, x^2 - 4]),
+                System([x^2 - y, x + y - 1]) ∘ System([x + y, x - y]),
+            )
+            alg = TotalDegree(; seed = UInt32(11))
+            @test paths_to_track(F, alg) ==
+                solve(F, alg, Serial(); show_progress = false).tracked_paths
+        end
     end
 end

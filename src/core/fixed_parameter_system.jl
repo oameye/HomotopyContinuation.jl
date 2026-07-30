@@ -18,9 +18,13 @@ substitute into and binds them instead.
 """
 function fix_parameters(F::System{P, V, M}, p::AbstractVector{<:Number})::System where {P, V, M}
     values = _parameter_values(F, p)
+    # Not named `variables`: the local would shadow the getter on its own rhs.
+    vars = collect(variables(F))
+    groups = variable_groups(F)
     return System(
         _substitute(polynomials(F), collect(parameters(F)), values);
-        variables = collect(variables(F)), compile = M,
+        variables = vars, compile = M,
+        variable_groups = isempty(groups) ? nothing : [vars[g] for g in groups],
     )
 end
 
@@ -84,6 +88,8 @@ nvariables(F::FixedParameterSystem)::Int = nvariables(F.system)
 nparameters(::FixedParameterSystem)::Int = 0
 system_shape(F::FixedParameterSystem) = system_shape(F.system)
 Base.size(F::FixedParameterSystem)::Tuple{Int, Int} = size(F.system)
+# Conservative: binding values can only create homogeneity, never destroy it.
+is_homogeneous(F::FixedParameterSystem)::Bool = is_homogeneous(F.system)
 
 """
     CloneableSystem

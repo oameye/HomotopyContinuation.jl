@@ -50,6 +50,37 @@ function (b::RandomizedStraightLineBuilder)()::TrackingWorkerState
 end
 
 """
+    MultiHomogeneousBuilder
+
+Builder for the multi-homogeneous total-degree homotopy. The start system is a
+`System` like the target, so both are cloned per worker. `subspace` holds the
+chart rows, one per variable group, and is codimension zero when the system is
+not homogeneous; `perm` is empty unless the charted target is squared up.
+"""
+struct MultiHomogeneousBuilder{G <: System, S <: System}
+    start_system::G
+    target_system::S
+    A::FSMat{ComplexF64}
+    perm::Vector{Int}
+    subspace::LinearSubspace{ComplexF64}
+    γ::ComplexF64
+    tracker_options::TrackerOptions
+    endgame_options::EndgameOptions
+end
+
+function (b::MultiHomogeneousBuilder)()::TrackingWorkerState
+    start_eval = _clone_system_evaluator(b.start_system)
+    target_eval = _clone_system_evaluator(b.target_system)
+    codim(b.subspace) == 0 ||
+        (target_eval = _sliced_evaluator(target_eval, b.subspace, ComplexF64[]))
+    isempty(b.perm) ||
+        (target_eval = _randomized_evaluator(target_eval, b.A, b.perm))
+    H = StraightLineHomotopy(start_eval, target_eval; γ = b.γ)
+    eg = _endgame_tracker(H, b.tracker_options, b.endgame_options)
+    return TrackingWorkerState(eg)
+end
+
+"""
     ParameterBuilder
 
 Builder for parameter homotopy via ParameterHomotopy (general parameter

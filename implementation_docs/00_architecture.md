@@ -112,7 +112,7 @@ src/                                         ~17,450 lines total
 └── solving/
     ├── executor.jl                  (140)   AbstractExecutor, Serial, Threaded, DistributedExecutor
     ├── worker_state.jl              (117)   TrackingWorkerState, PolyhedralWorkerState, _clone_system_evaluator
-    ├── builder.jl                   (236)   StraightLineBuilder, ParameterBuilder, subspace builders, PolyhedralBuilder
+    ├── builder.jl                   (266)   StraightLineBuilder, ParameterBuilder, subspace builders, PolyhedralBuilder
     ├── solve.jl                     (206)   solve() API, CommonSolve integration, serial/threaded dispatch
     ├── total_degree.jl              (167)   Bezout start system
     ├── polyhedral.jl                (513)   Two-phase: toric + coefficient, MixedSubdivisions
@@ -199,7 +199,8 @@ struct System{P, V, M, S}
     equation_scales::Vector{Float64}   # factor each input equation was divided by
     nvars::Int; nparams::Int
     variable_groups::Vector{Vector{Int}}
-    is_homogeneous::Bool
+    group_degrees::Matrix{Int}         # degree per group per equation; empty when ungrouped
+    is_homogeneous::Bool               # per group when grouped
     _support_coefficients::Base.RefValue{SupportCoefficients} # filled on first use
     # GC roots — interpreters must stay alive for FunctionWrapper closures
     _interp_f64::Interpreter{Vector{ComplexF64}}
@@ -409,12 +410,13 @@ end
 `PolyhedralSolveCache{E,B,S,C}` and `WorkerSolveCache{E,W,B}`.
 
 **Builder pattern.** Each builder stores immutable reconstruction data and produces fresh
-worker state per task via `builder()`. Nine live in `solving/builder.jl`, plus two in
+worker state per task via `builder()`. Ten live in `solving/builder.jl`, plus two in
 `solving/monodromy.jl`:
 
 ```julia
 StraightLineBuilder             → TrackingWorkerState   (TotalDegree)
 RandomizedStraightLineBuilder   → TrackingWorkerState   (squared-up overdetermined)
+MultiHomogeneousBuilder         → TrackingWorkerState   (variable-group total degree)
 ParameterBuilder                → TrackingWorkerState   (parameter homotopy)
 SlicedStraightLineBuilder       → TrackingWorkerState   (total degree against a slice)
 ParameterRetargetBuilder        → AmbientWorkerState    (retargeted parameter homotopy)
@@ -423,6 +425,11 @@ ChartExtrinsicSubspaceBuilder   → AmbientWorkerState    (projective subspace m
 IntrinsicSubspaceBuilder        → IntrinsicWorkerState  (subspace move, intrinsic)
 PolyhedralBuilder               → PolyhedralWorkerState (two-phase polyhedral)
 ```
+
+A builder is the only place that knows how its homotopy is stacked. Every `init` takes the
+cache's own tracker from `builder()` too, so the serial tracker and the worker trackers cannot
+be built two different ways: `_solve_cache` for the `SolveCache` routes, `builder()` directly
+for `WorkerSolveCache` and `PolyhedralSolveCache`.
 
 Thread safety: `_clone_system_evaluator(sys)` creates a fresh `SystemEvaluator` from the
 system's `InstructionSequence`s (immutable, shared) with independent interpreter tapes

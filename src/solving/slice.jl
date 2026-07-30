@@ -82,11 +82,17 @@ end
 
 # ── solve(F, L) ──────────────────────────────────────────────────────────────
 
+# Every route that charts a projective system draws it here, so one guard covers all.
+function _affine_chart(rng::Random.MersenneTwister, F::System)::Vector{ComplexF64}
+    _check_single_group(F)
+    return randn(rng, ComplexF64, nvariables(F))
+end
+
 # Draw the affine chart for a projective problem. `seed` makes it reproducible.
 function _sliced_solve_setup(F::System, L::LinearSubspace, seed::UInt32)
     _check_parameter_free(F, "`solve(F, L)`")
     chart = if is_linear(L) && is_homogeneous(F)
-        randn(Random.MersenneTwister(seed), ComplexF64, nvariables(F))
+        _affine_chart(Random.MersenneTwister(seed), F)
     else
         ComplexF64[]
     end
@@ -121,15 +127,14 @@ function _init_sliced_total_degree(
         _rebuild_sliced(G, L, chart), alg, exec; show_progress = show_progress,
     )
 
-    degrees = [G.degrees; ones(Int, nrows - m)]
+    degs = [G.degrees; ones(Int, nrows - m)]
     subspace = convert(LinearSubspace{ComplexF64}, L)
     γ = _random_gamma(alg.seed)
     builder = SlicedStraightLineBuilder(
-        degrees, G, subspace, chart, γ, alg.tracker_options, alg.endgame_options,
+        degs, G, subspace, chart, γ, alg.tracker_options, alg.endgame_options,
     )
-    return _total_degree_solve_cache(
-        exec, builder, _sliced_evaluator(G.evaluator, subspace, chart), degrees,
-        alg.seed, nothing, show_progress, alg.tracker_options, alg.endgame_options, γ,
+    return _solve_cache(
+        exec, builder, _total_degree_solutions(degs), alg.seed, nothing, show_progress,
     )
 end
 

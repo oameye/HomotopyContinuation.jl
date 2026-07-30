@@ -34,7 +34,7 @@ export nexcess_solutions, nfailed
 export nresults, results, multiplicity
 export is_success, is_singular, is_nonsingular, is_at_infinity, is_real, is_excess_solution
 export is_failed, is_finite
-export TotalDegree, Polyhedral, Result, PathResult
+export TotalDegree, Polyhedral, Result, PathResult, paths_to_track
 export path_results, seed, ntracked, failed, at_infinity, nonsingular, singular
 export recluster, clusters, cluster_of
 export statistics, ResultStatistics
@@ -141,6 +141,7 @@ include("solving/polyhedral.jl")
 include("solving/result.jl")
 include("solving/solve.jl")
 include("solving/slice.jl")
+include("solving/multi_homogeneous.jl")
 include("solving/subspace_solve.jl")
 include("solving/sweep.jl")
 include("solving/result_iterator.jl")

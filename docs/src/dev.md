@@ -109,7 +109,7 @@ This gives us three practical benefits:
 Two constraints matter:
 
 - `support_coefficients(F::System)` is only defined for parameter-free systems, because parameterized systems do not have constant `ComplexF64` coefficients
-- `is_homogeneous` is currently stored metadata; it is not yet used by the current solve/tracker code paths, though it was important in HC v2 for projective/affine logic
+- `is_homogeneous` decides whether a route works projectively: the plain, sliced, subspace, witness-set and monodromy routes all read it to draw a random affine chart `c·x - 1`, which is what makes a homogeneous system with `m = n - 1` equations square. With `variable_groups` it means homogeneous in every group separately, and one chart row is drawn per group; only `solve(F, TotalDegree())` does that, so a route about to draw a single chart for all the variables rejects a system with more than one group instead
 
 The general architectural lesson is: MP polynomials are the symbolic layer for this branch. We should prefer storing and querying that source representation over reintroducing a second user-facing symbolic AST.
 

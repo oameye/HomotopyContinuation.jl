@@ -7,6 +7,7 @@ using HomotopyContinuationNext: _SupportSystem, _stage_system, evaluate!, FSVec,
     _distributed_monodromy_solve!
 using HomotopyContinuationNext: monodromy_solve, permutations, trace, is_success,
     MonodromyCode
+using HomotopyContinuationNext: variable_groups, multi_degrees, is_homogeneous
 using DynamicPolynomials: @polyvar
 using Distributed: Distributed, addprocs, rmprocs, workers, remotecall_eval
 using Serialization: serialize, deserialize
@@ -82,6 +83,17 @@ end
             pt, ps = ComplexF64[0.7, -1.3], ComplexF64[2.0, 5.0]
             @test evaluate_at(H.evaluator, pt, ps) ==
                 evaluate_at(F_param.evaluator, pt, ps)
+        end
+
+        @testset "grouped System" begin
+            @polyvar u v s t
+            G = System(
+                [u * s - 2v * t, u^2 - 4 * v^2]; variable_groups = [[u, v], [s, t]],
+            )
+            H = roundtrip(G)
+            @test variable_groups(H) == variable_groups(G)
+            @test multi_degrees(H) == multi_degrees(G)
+            @test is_homogeneous(H) == is_homogeneous(G)
         end
 
         @testset "_SupportSystem" begin
@@ -179,6 +191,28 @@ end
             @test same_paths(
                 serial, solve(C, alg, DistributedExecutor(); show_progress = false),
             ) == ""
+        end
+
+        @testset "total degree, variable groups" begin
+            @polyvar u v s t
+            alg = TotalDegree(; seed = UInt32(23))
+            for G in (
+                    System([u * s - 2, u^2 - 4]; variable_groups = [[u], [s]]),
+                    System(
+                        [u * s - 2v * t, u^2 - 4 * v^2];
+                        variable_groups = [[u, v], [s, t]],
+                    ),
+                    System(
+                        [(u^2 - 4 * v^2) * (u * s - v * t), u * s - v * t, u^2 - v^2];
+                        variable_groups = [[u, v], [s, t]],
+                    ),
+                )
+                serial = solve(G, alg, Serial(); show_progress = false)
+                @test nsolutions(serial) == 2
+                @test same_paths(
+                    serial, solve(G, alg, DistributedExecutor(); show_progress = false),
+                ) == ""
+            end
         end
 
         @testset "polyhedral" begin

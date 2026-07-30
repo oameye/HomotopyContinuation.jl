@@ -1036,11 +1036,7 @@ function expression_to_sexpr(
         idx > 0 && return SExpr.SVar(idx)
         idx = get(param_to_idx, storage.name, 0)
         idx > 0 && return SExpr.SParam(idx)
-        throw(
-            ArgumentError(
-                "symbol $(storage.name) is neither a variable nor a parameter of the system",
-            ),
-        )
+        throw(_unknown_symbol_error(storage.name))
     elseif storage isa EAddStorage
         return _canonical_add(
             SExprT[expression_to_sexpr(a, var_to_idx, param_to_idx) for a in storage.args],

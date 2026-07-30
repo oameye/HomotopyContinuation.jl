@@ -309,6 +309,18 @@ end
             [a^4 + a^3 + a^2 + a, b^5 + b^4 + b^3 + b^2 + b], [a, b], no_params,
         )
     end
+
+    @testset "incomplete variable list" begin
+        @polyvar x y
+        @polyvar u1 u2 u3 u4
+        big = [u1^2 + u2 * u3 - 1, u1 + u2^2 - u3, u1 * u2 * u3 - u4, u4^2 - u1 - 1]
+        @test _prefer_direct_polynomial_lowering([x^2 + y - 1], [x], _empty_vars(big))
+        @test !_prefer_direct_polynomial_lowering(big, [u1, u2, u3], _empty_vars(big))
+        @test_throws ArgumentError System([x^2 + y - 1, x + y^2 - 1]; variables = [x])
+        @test_throws ArgumentError System(big; variables = [u1, u2, u3])
+        # groups fix the variable list, so an incomplete cover fails the same way
+        @test_throws ArgumentError System(big; variable_groups = [[u1, u2], [u3]])
+    end
 end
 
 # ─────────────────────────────────────────────────────────────────────────

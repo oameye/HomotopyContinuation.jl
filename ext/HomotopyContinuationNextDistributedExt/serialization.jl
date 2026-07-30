@@ -20,16 +20,7 @@ function Serialization.serialize(s::AbstractSer, sys::HCN.System)
     Serialization.serialize(s, collect(sys.polys))
     Serialization.serialize(s, collect(sys.parameters))
     Serialization.serialize(s, collect(sys.variables))
-    Serialization.serialize(s, sys.degrees)
-    Serialization.serialize(s, sys.equation_scales)
-    Serialization.serialize(s, sys.nvars)
-    Serialization.serialize(s, sys.nparams)
-    Serialization.serialize(s, sys.variable_groups)
-    Serialization.serialize(s, sys.is_homogeneous)
-    Serialization.serialize(s, sys._interp_f64.sequence)
-    Serialization.serialize(s, sys._interp_jac.sequence)
-    Serialization.serialize(s, size(sys.evaluator))
-    Serialization.serialize(s, HCN.nparameters(sys.evaluator))
+    Serialization.serialize(s, HCN._lowered(sys))
     return nothing
 end
 
@@ -39,43 +30,12 @@ function Serialization.deserialize(
     polys = Serialization.deserialize(s)::Vector{P}
     parameters = Serialization.deserialize(s)::Vector{V}
     variables = Serialization.deserialize(s)::Vector{V}
-    degrees = Serialization.deserialize(s)::Vector{Int}
-    equation_scales = Serialization.deserialize(s)::Vector{Float64}
-    nvars = Serialization.deserialize(s)::Int
-    nparams = Serialization.deserialize(s)::Int
-    variable_groups = Serialization.deserialize(s)::Vector{Vector{Int}}
-    is_homogeneous = Serialization.deserialize(s)::Bool
-    seq_eval = Serialization.deserialize(s)::HCN.InstructionSequence
-    seq_jac = Serialization.deserialize(s)::HCN.InstructionSequence
-    neqs, nvariables = Serialization.deserialize(s)::Tuple{Int, Int}
-    neval_params = Serialization.deserialize(s)::Int
+    lowered = Serialization.deserialize(s)::HCN.LoweredInput
 
-    interp_f64 = HCN.Interpreter(Vector{ComplexF64}, seq_eval)
-    interp_df64 = HCN.Interpreter(Vector{HCN.ComplexDF64}, seq_eval)
-    interp_jac = HCN.Interpreter(Vector{ComplexF64}, seq_jac)
-    interp_t1 = HCN.Interpreter(
-        Vector{HCN.TruncatedTaylorSeries{2, ComplexF64}}, seq_eval,
-    )
-    interp_t2 = HCN.Interpreter(
-        Vector{HCN.TruncatedTaylorSeries{3, ComplexF64}}, seq_eval,
-    )
-    interp_t3 = HCN.Interpreter(
-        Vector{HCN.TruncatedTaylorSeries{4, ComplexF64}}, seq_eval,
-    )
-    evaluator = HCN._build_mode_evaluator(
-        _compile_strategy(M), seq_eval, seq_jac,
-        interp_f64, interp_df64, interp_jac, interp_t1, interp_t2, interp_t3,
-        neqs, nvariables, neval_params,
-    )
-
-    return HCN.System{P, V, M, S}(
-        HCN._to_fsvec(polys), HCN._to_fsvec(parameters), HCN._to_fsvec(variables),
-        evaluator, degrees, equation_scales, nvars, nparams,
-        variable_groups, is_homogeneous,
-        HCN.LazyRef{HCN.SupportCoefficients}(),
-        interp_f64, interp_df64, interp_jac, interp_t1, interp_t2, interp_t3,
-        M,
-    )
+    return HCN._build_compiled_system(
+        _compile_strategy(M), polys, variables, parameters, lowered,
+        length(polys), length(variables), length(parameters), S(),
+    )::HCN.System{P, V, M, S}
 end
 
 # ── _SupportSystem ──────────────────────────────────────────────────────────

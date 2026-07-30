@@ -42,6 +42,7 @@ struct System{P, V, M, S <: SystemShape}
     nvars::Int
     nparams::Int
     variable_groups::Vector{Vector{Int}}
+    group_degrees::Matrix{Int}
     is_homogeneous::Bool
     _support_coefficients::LazyRef{SupportCoefficients}
     _interp_f64::Interpreter{Vector{ComplexF64}}
@@ -60,6 +61,7 @@ function System(
         parameters::AbstractVector,
         variables::AbstractVector,
         compile::CompileMode.T = CompileMode.INTERPRETED,
+        variable_groups::Vector{Vector{Int}} = Vector{Int}[],
     )::System
     neqs = length(polys)
     nvars = length(variables)
@@ -84,13 +86,16 @@ function System(
     builder = Base.inferencebarrier(builder)
     shape = Base.inferencebarrier(shape)
     normalized, lowered = _lower_input(polys, variables, parameters)
+    isempty(variable_groups) ||
+        (lowered = _group_input(lowered, normalized, variables, variable_groups))
     return _dispatch_system_build(
         builder, normalized, variables, parameters, lowered, neqs, nvars, nparams, shape,
     )
 end
 
 """
-    System(polys; parameters=[], variables=..., compile=CompileMode.INTERPRETED) -> System
+    System(polys; parameters=[], variables=..., variable_groups=nothing,
+           compile=CompileMode.INTERPRETED) -> System
 
 Build a `System` from a vector of MultivariatePolynomials polynomials.
 Compiles the full interpreter pipeline and caches everything for reuse.
@@ -104,16 +109,34 @@ Compiles the full interpreter pipeline and caches everything for reuse.
 first `solve` starts tracking immediately. The compiled modes trade a
 per-system compilation pause for modestly faster solves; worthwhile when
 repeatedly solving the same system.
+
+`variable_groups` partitions the variables into groups, one degree per group
+instead of one total degree. [`solve`](@ref) with [`TotalDegree`](@ref) then
+tracks the multi-homogeneous Bezout number of paths, which is at most the total
+Bezout number and usually far below it. The groups must cover every variable
+exactly once, and when `variables` is omitted they also fix the variable order.
+
+```julia
+@polyvar x y v w
+System([x * y - 2v * w, x^2 - 4v^2]; variable_groups = [[x, v], [y, w]])
+```
 """
 function System(
         polys::AbstractVector{<:MP.AbstractPolynomialLike};
         parameters = nothing,
         variables = nothing,
+        variable_groups = nothing,
         compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
     parameters === nothing && (parameters = _empty_vars(polys))
-    variables === nothing && (variables = _effective_variables(polys, parameters))
-    return System(polys, parameters, variables, compile)
+    if variables === nothing
+        variables = variable_groups === nothing ?
+            _effective_variables(polys, parameters) : reduce(vcat, variable_groups)
+    end
+    return System(
+        polys, parameters, variables, compile,
+        _variable_group_indices(variable_groups, variables),
+    )
 end
 
 """
@@ -132,12 +155,20 @@ function System(
         exprs::AbstractVector{Expression};
         parameters = nothing,
         variables = nothing,
+        variable_groups = nothing,
         compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
     params = parameters === nothing ? Expression[] : _as_variables(parameters)
-    vars = variables === nothing ? _default_variables(exprs, params) :
+    vars = if variables !== nothing
         _as_variables(variables)
-    return System(exprs, params, vars, compile)
+    elseif variable_groups !== nothing
+        _as_variables(reduce(vcat, variable_groups))
+    else
+        _default_variables(exprs, params)
+    end
+    return System(
+        exprs, params, vars, compile, _variable_group_indices(variable_groups, vars),
+    )
 end
 
 # `MP.RationalPoly` has no polynomial representation, so it routes through the
@@ -146,17 +177,23 @@ function System(
         polys::AbstractVector{<:MP.RationalPoly};
         parameters = nothing,
         variables = nothing,
+        variable_groups = nothing,
         compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
     params = parameters === nothing ? Expression[] : _as_variables(parameters)
-    vars = if variables === nothing
+    vars = if variables !== nothing
+        _as_variables(variables)
+    elseif variable_groups !== nothing
+        _as_variables(reduce(vcat, variable_groups))
+    else
         _as_variables(
             _rational_variables(polys, parameters === nothing ? () : parameters),
         )
-    else
-        _as_variables(variables)
     end
-    return System(_as_expressions(polys), params, vars, compile)
+    return System(
+        _as_expressions(polys), params, vars, compile,
+        _variable_group_indices(variable_groups, vars),
+    )
 end
 
 function _as_variables(vars::AbstractVector)::Vector{Expression}
@@ -194,6 +231,17 @@ polynomials(F::System) = F.polys
 variables(F::System) = F.variables
 parameters(F::System) = F.parameters
 variable_groups(F::System) = F.variable_groups
+
+"""
+    multi_degrees(F::System) -> Matrix{Int}
+
+Degree of every equation of `F` in every variable group: one row per group of
+`variable_groups(F)`, one column per equation. An ungrouped system has the
+single row `degrees(F)`.
+"""
+multi_degrees(F::System)::Matrix{Int} =
+    isempty(F.variable_groups) ? reshape(F.degrees, 1, :) : F.group_degrees
+# For a grouped system: homogeneous in every group separately.
 is_homogeneous(F::System)::Bool = F.is_homogeneous
 function support_coefficients(F::System)::SupportCoefficients
     nparameters(F) == 0 ||
@@ -258,6 +306,51 @@ function _variable_degrees(
     return degs, homogeneous
 end
 
+## ── Variable groups ─────────────────────────────────────────────────────────
+
+_variable_group_indices(::Nothing, ::AbstractVector)::Vector{Vector{Int}} = Vector{Int}[]
+
+# Matched by name, so either front-end's variable type is accepted.
+@noinline function _variable_group_indices(
+        groups, variables::AbstractVector,
+    )::Vector{Vector{Int}}
+    Base.@nospecialize groups variables
+    index = Dict{Symbol, Int}(Symbol(v) => i for (i, v) in enumerate(variables))
+    assigned = fill(0, length(variables))
+    out = Vector{Vector{Int}}(undef, length(groups))
+    for (j, group) in enumerate(groups)
+        idx = Vector{Int}(undef, length(group))
+        for (l, v) in enumerate(group)
+            i = get(index, Symbol(v), 0)
+            i == 0 && throw(
+                ArgumentError("`$v` is in a variable group but not a variable of the system."),
+            )
+            assigned[i] == 0 || throw(
+                ArgumentError("`$v` is in variable group $(assigned[i]) and in group $j."),
+            )
+            assigned[i] = j
+            idx[l] = i
+        end
+        out[j] = idx
+    end
+    missing_var = findfirst(iszero, assigned)
+    missing_var === nothing || throw(
+        ArgumentError(
+            "`$(variables[missing_var])` is a variable of the system but is in no " *
+                "variable group; the groups must cover every variable.",
+        ),
+    )
+    return out
+end
+
+_group_degrees(
+    polys::AbstractVector{<:MP.AbstractPolynomialLike}, vars::AbstractVector,
+)::Tuple{Vector{Int}, Bool} = _variable_degrees(polys, vars)
+
+_group_degrees(
+    exprs::AbstractVector{Expression}, vars::AbstractVector,
+)::Tuple{Vector{Int}, Bool} = _expression_degrees(exprs, _as_variables(vars))
+
 ## ── Front-end lowering ──────────────────────────────────────────────────────
 
 """
@@ -270,6 +363,39 @@ struct LoweredInput
     is_homogeneous::Bool
     # factor each input equation was divided by
     scales::Vector{Float64}
+    variable_groups::Vector{Vector{Int}}
+    group_degrees::Matrix{Int}
+end
+
+LoweredInput(
+    seq_eval::InstructionSequence, seq_jac::InstructionSequence, degrees::Vector{Int},
+    is_homogeneous::Bool, scales::Vector{Float64},
+) = LoweredInput(
+    seq_eval, seq_jac, degrees, is_homogeneous, scales,
+    Vector{Int}[], Matrix{Int}(undef, 0, 0),
+)
+
+_lowered(sys::System)::LoweredInput = LoweredInput(
+    sys._interp_f64.sequence, sys._interp_jac.sequence, sys.degrees,
+    sys.is_homogeneous, sys.equation_scales, sys.variable_groups, sys.group_degrees,
+)
+
+@noinline function _group_input(
+        lowered::LoweredInput, polys::AbstractVector, variables::AbstractVector,
+        groups::Vector{Vector{Int}},
+    )::LoweredInput
+    Base.@nospecialize polys variables
+    D = Matrix{Int}(undef, length(groups), length(lowered.degrees))
+    homogeneous = true
+    for (j, group) in enumerate(groups)
+        degs, hom = _group_degrees(polys, variables[group])
+        D[j, :] .= degs
+        homogeneous &= hom
+    end
+    return LoweredInput(
+        lowered.seq_eval, lowered.seq_jac, lowered.degrees, homogeneous,
+        lowered.scales, groups, D,
+    )
 end
 
 # Called from a frame that still knows the concrete input type: dispatching behind
@@ -460,7 +586,7 @@ end
         fs_parameters,
         fs_variables,
         evaluator, lowered.degrees, lowered.scales, nvars, nparams,
-        Vector{Int}[], lowered.is_homogeneous,
+        lowered.variable_groups, lowered.group_degrees, lowered.is_homogeneous,
         LazyRef{SupportCoefficients}(),
         interp_f64, interp_df64, interp_jac,
         interp_t1, interp_t2, interp_t3,

@@ -385,6 +385,10 @@ end
 
 ## ── Polynomial → SExpr conversion ──────────────────────────────────────────
 
+@noinline _unknown_symbol_error(sym::Symbol)::ArgumentError = ArgumentError(
+    "symbol $sym is neither a variable nor a parameter of the system",
+)
+
 """
     poly_to_sexpr(poly, var_to_idx, param_to_idx) -> SExprT
 
@@ -408,8 +412,13 @@ function poly_to_sexpr(
             exp == 0 && continue
             sym = Symbol(var)
             idx_var = get(var_to_idx, sym, 0)
-            idx_param = get(param_to_idx, sym, 0)
-            base = idx_var > 0 ? SExpr.SVar(idx_var) : SExpr.SParam(idx_param)
+            base = if idx_var > 0
+                SExpr.SVar(idx_var)
+            else
+                idx_param = get(param_to_idx, sym, 0)
+                idx_param > 0 || throw(_unknown_symbol_error(sym))
+                SExpr.SParam(idx_param)
+            end
             push!(factors, exp == 1 ? base : SExpr.SPow(base, exp))
         end
 

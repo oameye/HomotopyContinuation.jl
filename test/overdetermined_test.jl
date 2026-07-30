@@ -246,9 +246,12 @@ include("minors_polys.jl")
         @test_throws ArgumentError solve(affine_under, TotalDegree(; seed = UInt32(2)), Serial(); show_progress = false)
         @test_throws ArgumentError solve(affine_under, Polyhedral(; seed = UInt32(2)), Serial(); show_progress = false)
 
+        # Homogeneous input is counted after the chart row, so the message names it.
         proj_under = System([2.3 * x^2 + 1.2 * y^2 + 3 * x * z])
         @test_throws ArgumentError solve(proj_under, TotalDegree(; seed = UInt32(2)), Serial(); show_progress = false)
+        @test_throws "affine chart" solve(proj_under, TotalDegree(; seed = UInt32(2)), Serial(); show_progress = false)
         @test_throws ArgumentError solve(proj_under, Polyhedral(; seed = UInt32(2)), Serial(); show_progress = false)
+        @test_throws "affine chart" solve(proj_under, Polyhedral(; seed = UInt32(2)), Serial(); show_progress = false)
     end
 
     # Parameter homotopy: underdetermined systems throw, affine and

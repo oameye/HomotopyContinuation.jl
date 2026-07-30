@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-07-29.
+Last updated: 2026-07-30.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
@@ -383,17 +383,38 @@ listed under "v2 parity gaps" below and are the remaining work toward full parit
 Found by comparing every v2 `@testset` against the v3 suite on 2026-07-29. Each entry names
 the v2 test that stays unported until the feature lands. Ordered by consequence.
 
-- [ ] **Multi-homogeneous (variable-group) total degree.** `System` accepts and stores
-  `variable_groups` but nothing reads it: no `multi_degrees`, no multi-homogeneous Bezout
-  count, no product start system. Unports `solve_test.jl` "total degree (variable groups)"
-  (affine and projective, square and overdetermined) and `symbolic_test.jl`
-  "System variables groups + homogeneous".
-- [ ] **Projective total degree and polyhedral.** `_init_total_degree` dispatches on
-  `SquareShape`/`OverdeterminedShape` only, so a homogeneous system with `m = n - 1` is
-  underdetermined and throws. v3 draws a chart on the sliced, subspace and witness routes
-  (`slice.jl:136`, `subspace_solve.jl:228`, `witness_set.jl:40`) but not on the plain ones.
-  Unports the `proj_square`, `proj_ov` and `proj_ov_reordering` cases of `solve_test.jl`
-  "total degree (simple)".
+- [x] **Multi-homogeneous (variable-group) total degree.** `System(polys; variable_groups)`
+  stores the groups as index vectors and `is_homogeneous` becomes per-group, which is strictly
+  stronger and is what makes the count valid. The start system is a `System` built from
+  `Expression`s (a product of powers of linear forms per equation, so the interpreter supplies
+  its Taylor coefficients), and its solutions come from one small LU per assignment of
+  equations to groups. `_multi_start_coefficients` puts an identity block in the leading
+  columns, which is what makes a single group covering every variable reproduce the plain
+  route exactly, paths and all. The M chart rows are one codim-M `LinearSubspace`, so the
+  target is charted by the existing `SlicedSystem` rather than a multi-chart wrapper, and
+  charting happens *before* the square-up with a zero fold block on the chart rows: they then
+  stay chart rows, the excess check runs on a full-rank `[F; charts]`, and the folded degrees
+  keep the per-group maxima instead of v2's `[D I]`, which inflates them (proj_ov: 5 paths
+  against v2's 17). `_check_single_group` rides on `_affine_chart`, the one place a route draws
+  a chart for all the variables at once, so a route that would leave a cone per remaining group
+  rejects the input without having to remember the check. A grouped system that never reaches a
+  chart draw (an affine slice, a group-inhomogeneous system) is accepted with the groups unused.
+  Closes `solve_test.jl` "total degree (variable groups)" and `symbolic_test.jl`
+  "System variables groups + homogeneous". Tests: `test/variable_groups_test.jl`.
+- [x] **Projective total degree and polyhedral.** Both plain routes test `is_homogeneous` ahead
+  of the shape and delegate to the sliced route with the whole ambient space as `L`
+  (`_init_projective`), so the seeded chart draw keeps its single home in `_sliced_solve_setup`.
+  Homogeneity before shape is the consequential part: it makes a *square* homogeneous system
+  projective rather than a cone in ambient coordinates, which is v2's rule and the only reading
+  under which it has finitely many solutions. `_check_projective_determined` counts the chart row,
+  so `m ≥ n − 1` is determined, and path counts match v2. A homogeneous `CompositionSystem` or
+  `FixedParameterSystem` goes through `_polynomial_system`, paying a rebuild the square case
+  would not need if `SlicedStraightLineBuilder` took a `CloneableSystem`.
+  The branch must stay behind `Base.inferencebarrier`: without it the plain route infers the
+  sliced stack, worth 6.5s versus 3.5s on a first affine `solve(F, TotalDegree())`.
+  Closes the `proj_square`, `proj_ov` and `proj_ov_reordering` cases of `solve_test.jl`
+  "total degree (simple)" and the projective half of its "polyhedral" testset.
+  Tests: `test/solve_test.jl` "projective: …".
 - [x] **`fix_parameters(F, p)`**, and **`FixedParameterSystem`**. One public operation fixes a
   parametric system at one parameter value, and its result is what every route accepts:
   `solve(fix_parameters(F, p), TotalDegree())`, `solve(fix_parameters(F, p), L, Polyhedral())`,
@@ -426,9 +447,13 @@ the v2 test that stays unported until the feature lands. Ordered by consequence.
 - [ ] **Tracker path iterator** `iterator(tracker, x, t₁, t₀)` yielding `(x, t)` per accepted
   step. `ResultIterator` is a different thing (lazy per-path at solve level). Unports
   `tracker_test.jl` "iterator".
-- [ ] **`paths_to_track`, `mixed_volume`**, and the polyhedral `only_torus` / `only_non_zero`
-  options. `total_degree_count` covers the total-degree half and is unexported. Unports
-  `solve_test.jl` "paths to track" and `polyhedral_test.jl` "only torus".
+- [ ] **`mixed_volume`**, the `Polyhedral` method of `paths_to_track`, and the polyhedral
+  `only_torus` / `only_non_zero` options. `paths_to_track(F, TotalDegree())` is done and
+  exported; it counts `init`'s start solutions rather than deriving the number a second time,
+  so it agrees with `Result.tracked_paths` on every route (grouped, projective, squared-up,
+  sliced). It therefore materializes them, where v2 counts a lazy iterator; the fix if that
+  ever costs, for a Bezout number large enough to matter, is lazy start solutions rather than
+  a second derivation of the count. Unports `polyhedral_test.jl` "only torus".
 - [ ] **Symbolic `Homotopy` type** (`Homotopy(h, vars, t; parameters)`) for user-defined
   homotopies, with `nvariables`/`variables`/`parameters`/`show`. v3 has only the built-in
   concrete homotopies. Unports `symbolic_test.jl` "Homotopy".
@@ -599,9 +624,10 @@ Audited 2026-07-28 over `src/`, `ext/` and `lib/`. Findings below, most conseque
   Taylor coefficient from the shared `evaluate_chart` / `_chart_taylor_row`
   (`affine_chart.jl:81,135`), and neither wraps the other. Which one a route picks is per
   call site and unexplained: `builder.jl:193` and `witness_set.jl:572` build an
-  `AffineChartSystem`, `slice.jl:182` builds a `SlicedSystem` carrying a chart. A new
-  projective route has to guess, and the chart-row Taylor pitfall documented in
-  `01_decisions.md` ("Appended linear rows") now has two places to get wrong.
+  `AffineChartSystem`, `slice.jl:182` builds a `SlicedSystem` carrying a chart, and the plain
+  projective routes reach the latter by slicing with `_full_subspace` rather than adding a
+  third spelling. A new projective route still has to guess, and the chart-row Taylor pitfall
+  documented in `01_decisions.md` ("Appended linear rows") has two places to get wrong.
 - **The certification subpackage depends on 32 core names, 26 of them unexported.** Its
   `using HomotopyContinuationNext:` list
   (`lib/HomotopyContinuationNextCertification/src/HomotopyContinuationNextCertification.jl:26`)

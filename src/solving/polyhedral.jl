@@ -442,9 +442,14 @@ function CommonSolve.init(
         exec::AbstractExecutor = Threaded();
         show_progress::Bool = true,
     )::PolyhedralSolveCache
-    _check_square_or_overdetermined(F)
     _check_parameter_free(F, "`Polyhedral`")
     _check_polynomial(F, "`Polyhedral`")
+    if is_homogeneous(F)
+        return Base.inferencebarrier(_init_projective)(
+            F, alg, exec, show_progress, "`Polyhedral`",
+        )::PolyhedralSolveCache
+    end
+    _check_square_or_overdetermined(F)
     # Dynamic call: specializes the body on the concrete `System` so that
     # `system_shape(F)` resolves statically instead of union-splitting.
     initializer = Base.inferencebarrier(_init_polyhedral)
@@ -527,10 +532,7 @@ function _init_polyhedral(
     #    This avoids a synthetic DynamicPolynomials -> System compiler round trip.
     support_system = _support_system(support)
 
-    # 7. Build toric homotopy (phase 1: t goes from 0 to 1)
-    #    Toric tracker uses conservative max_initial_step_size=0.2
-    toric_H = ToricHomotopy(support_system.evaluator, start_coeffs)
-    toric_heval = HomotopyEvaluator(toric_H)
+    # 7. Toric phase (t goes from 0 to 1), on a conservative max_initial_step_size
     toric_opts = TrackerOptions(;
         max_steps = alg.tracker_options.max_steps,
         max_step_size = alg.tracker_options.max_step_size,
@@ -544,27 +546,23 @@ function _init_polyhedral(
         β_τ = alg.tracker_options.β_τ,
         strict_β_τ = alg.tracker_options.strict_β_τ,
     )
-    toric_tracker = Tracker(toric_heval; options = toric_opts)
 
-    # 8. Build coefficient homotopy (phase 2: t goes from 1 to 0)
+    # 8. Coefficient phase (t goes from 1 to 0)
     flat_start = reduce(vcat, start_coeffs)
     flat_target = reduce(vcat, target_coeffs)
-    coeff_H = CoefficientHomotopy(support_system.evaluator, flat_start, flat_target)
-    coeff_tracker = _endgame_tracker(
-        coeff_H, alg.tracker_options, alg.endgame_options,
-    )
 
     builder = PolyhedralBuilder(
         support_system, start_coeffs, flat_start, flat_target,
         toric_opts, alg.tracker_options, alg.endgame_options,
     )
+    worker = builder()
 
     return PolyhedralSolveCache(
         exec, builder,
-        toric_tracker, coeff_tracker, toric_H,
+        worker.toric_tracker, worker.coeff_tracker, worker.toric_homotopy,
         support, lifting,
         all_starts, seed,
-        Vector{ComplexF64}(undef, size(support[1], 1)),
+        worker.x_buffer,
         support_system,
         excess_checker,
         show_progress,

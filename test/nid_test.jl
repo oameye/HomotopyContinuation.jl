@@ -79,9 +79,12 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         )
         @test isa(N2, NumericalIrreducibleDecomposition)
 
+        # Seeded: unseeded, the monodromy decomposition occasionally finds only one
+        # of the two 1-dimensional components counted below.
         N3 = nid(
             F;
             monodromy_options = MonodromyOptions(; trace_test_tol = 1.0e-5),
+            seed = UInt32(0x1234),
             show_progress = false,
         )
         @test isa(N3, NumericalIrreducibleDecomposition)
