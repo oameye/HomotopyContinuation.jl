@@ -81,6 +81,82 @@ function (b::MultiHomogeneousBuilder)()::TrackingWorkerState
 end
 
 """
+    StartTargetBuilder
+
+Builder for the straight-line homotopy between two parameter-free systems.
+`chart` is empty unless they are homogeneous, and goes on the homotopy.
+"""
+struct StartTargetBuilder{G <: CloneableSystem, S <: CloneableSystem}
+    start_system::G
+    target_system::S
+    chart::Vector{ComplexF64}
+    γ::ComplexF64
+    tracker_options::TrackerOptions
+    endgame_options::EndgameOptions
+end
+
+function (b::StartTargetBuilder)()::TrackingWorkerState
+    H = StraightLineHomotopy(
+        _clone_system_evaluator(b.start_system),
+        _clone_system_evaluator(b.target_system);
+        γ = b.γ,
+    )
+    eg = isempty(b.chart) ?
+        _endgame_tracker(H, b.tracker_options, b.endgame_options) :
+        _endgame_tracker(
+            AffineChartHomotopy(H, b.chart), b.tracker_options, b.endgame_options,
+        )
+    return TrackingWorkerState(eg)
+end
+
+"""
+    SharedHomotopyBuilder
+
+Builder wrapping a caller's homotopy as it stands, so a cache holding one runs
+on one task. [`ClonedHomotopyBuilder`](@ref) is what the other executors get.
+"""
+struct SharedHomotopyBuilder{H <: AbstractHomotopy}
+    homotopy::H
+    tracker_options::TrackerOptions
+    endgame_options::EndgameOptions
+end
+
+(b::SharedHomotopyBuilder)()::TrackingWorkerState =
+    TrackingWorkerState(_endgame_tracker(b.homotopy, b.tracker_options, b.endgame_options))
+
+"""
+    ClonedHomotopyBuilder
+
+Builder rebuilding a caller's homotopy per task, so the caller's own is never
+tracked.
+"""
+struct ClonedHomotopyBuilder{H <: AbstractHomotopy}
+    homotopy::H
+    tracker_options::TrackerOptions
+    endgame_options::EndgameOptions
+end
+
+(b::ClonedHomotopyBuilder)()::TrackingWorkerState = TrackingWorkerState(
+    _endgame_tracker(
+        _clone_homotopy(b.homotopy), b.tracker_options, b.endgame_options,
+    ),
+)
+
+"""
+    HomotopyBuilder
+
+Builder calling `build()` per task, which must return a fresh homotopy.
+"""
+struct HomotopyBuilder{F <: Function}
+    build::F
+    tracker_options::TrackerOptions
+    endgame_options::EndgameOptions
+end
+
+(b::HomotopyBuilder)()::TrackingWorkerState =
+    TrackingWorkerState(_endgame_tracker(b.build(), b.tracker_options, b.endgame_options))
+
+"""
     ParameterBuilder
 
 Builder for parameter homotopy via ParameterHomotopy (general parameter

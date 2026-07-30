@@ -32,6 +32,9 @@ struct TotalDegreeStartSystem <: AbstractSystem
     degrees::Vector{Int}
 end
 
+_clone_system(F::TotalDegreeStartSystem)::TotalDegreeStartSystem =
+    TotalDegreeStartSystem(copy(F.degrees))
+
 Base.size(F::TotalDegreeStartSystem)::Tuple{Int, Int} =
     (length(F.degrees), length(F.degrees))
 

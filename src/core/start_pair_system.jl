@@ -34,6 +34,9 @@ function _StartPairSystem(F::SystemEvaluator)::_StartPairSystem
     )
 end
 
+_clone_system(S::_StartPairSystem)::_StartPairSystem =
+    _StartPairSystem(_clone_system_evaluator(S.F))
+
 Base.size(S::_StartPairSystem)::Tuple{Int, Int} =
     (size(S.F)[1], S.nvars + S.nparams)
 nparameters(::_StartPairSystem)::Int = 0

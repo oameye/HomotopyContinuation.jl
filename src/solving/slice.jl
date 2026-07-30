@@ -83,7 +83,9 @@ end
 # ── solve(F, L) ──────────────────────────────────────────────────────────────
 
 # Every route that charts a projective system draws it here, so one guard covers all.
-function _affine_chart(rng::Random.MersenneTwister, F::System)::Vector{ComplexF64}
+function _affine_chart(
+        rng::Random.MersenneTwister, F::CloneableSystem,
+    )::Vector{ComplexF64}
     _check_single_group(F)
     return randn(rng, ComplexF64, nvariables(F))
 end

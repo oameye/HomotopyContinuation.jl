@@ -54,6 +54,11 @@ end
 
 Base.size(H::StraightLineHomotopy) = size(H.target)
 
+_clone_homotopy(H::StraightLineHomotopy)::StraightLineHomotopy =
+    StraightLineHomotopy(
+    _clone_system_evaluator(H.start), _clone_system_evaluator(H.target); γ = H.γ,
+)
+
 ## evaluate! — H(x,t) = γ·t·G(x) + (1-t)·F(x)
 
 function evaluate!(

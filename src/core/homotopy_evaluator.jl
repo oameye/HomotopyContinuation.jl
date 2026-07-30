@@ -67,6 +67,15 @@ end
 
 Base.size(H::HomotopyEvaluator) = H._size
 
+# Copying would keep a raw pointer to the original homotopy's buffers. Unlike
+# `SystemEvaluator` there is no rebuild thunk, so refuse rather than alias.
+Base.deepcopy_internal(::HomotopyEvaluator, ::IdDict) = throw(
+    ArgumentError(
+        "a HomotopyEvaluator cannot be copied; give the homotopy holding it a " *
+            "`_clone_homotopy` method.",
+    ),
+)
+
 function evaluate!(
         u::FSVec{ComplexF64}, H::HomotopyEvaluator,
         x::FSVec{ComplexF64}, t::ComplexF64,

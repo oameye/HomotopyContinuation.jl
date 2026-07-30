@@ -287,8 +287,25 @@ function _support_evaluator(
         ),
         (nequations, nvariables),
         nparams,
+        SystemFactory(
+            _SupportEvaluatorCloner(
+                eval_sequence, jacobian_sequence, nequations, nvariables, nparams,
+            ),
+        ),
     )
 end
+
+struct _SupportEvaluatorCloner
+    eval_sequence::InstructionSequence
+    jacobian_sequence::InstructionSequence
+    nequations::Int
+    nvariables::Int
+    nparams::Int
+end
+
+(c::_SupportEvaluatorCloner)()::SystemEvaluator = _support_evaluator(
+    c.eval_sequence, c.jacobian_sequence, c.nequations, c.nvariables, c.nparams,
+)
 
 function _unsupported_support_taylor!(::Any, ::Any, ::Any)::Nothing
     throw(
@@ -311,15 +328,8 @@ function _support_system(support::Vector{Matrix{Int32}})::_SupportSystem
     return _SupportSystem(evaluator, eval_sequence, jacobian_sequence)
 end
 
-function _clone_system_evaluator(system::_SupportSystem)::SystemEvaluator
-    eval_sequence = system.eval_sequence
-    jacobian_sequence = system.jacobian_sequence
-    nequations, nvariables = size(system.evaluator)
-    nparams = nparameters(system.evaluator)
-    return _support_evaluator(
-        eval_sequence, jacobian_sequence, nequations, nvariables, nparams,
-    )
-end
+_clone_system_evaluator(system::_SupportSystem)::SystemEvaluator =
+    _clone_system_evaluator(system.evaluator)
 
 # ── CommonSolve.init: polys + Polyhedral ────────────────────────────────────
 

@@ -189,6 +189,14 @@ mutable struct IntrinsicSubspaceHomotopy <: AbstractHomotopy
     const gamma::ComplexF64
 end
 
+# `start` already carries the perturbation, so undo it and let the constructor
+# reapply; `gamma` keeps its meaning for a later `set_subspaces!`.
+_clone_homotopy(H::IntrinsicSubspaceHomotopy)::IntrinsicSubspaceHomotopy =
+    IntrinsicSubspaceHomotopy(
+    _clone_system_evaluator(H.system), _apply_gamma(inv(H.gamma), H.start), H.target;
+    gamma = H.gamma,
+)
+
 # Normalize a caller-supplied gamma to |gamma| = 1, or 1 when disabled (nothing).
 _normalize_gamma(gamma::Nothing)::ComplexF64 = one(ComplexF64)
 _normalize_gamma(gamma::ComplexF64)::ComplexF64 = gamma / abs(gamma)
@@ -284,6 +292,12 @@ mutable struct ExtrinsicSubspaceHomotopy <: AbstractHomotopy
     # or exactly 1 when disabled.
     const gamma::ComplexF64
 end
+
+_clone_homotopy(H::ExtrinsicSubspaceHomotopy)::ExtrinsicSubspaceHomotopy =
+    ExtrinsicSubspaceHomotopy(
+    _clone_system_evaluator(H.system), _apply_gamma(inv(H.gamma), H.start), H.target;
+    gamma = H.gamma,
+)
 
 function ExtrinsicSubspaceHomotopy(
         system::SystemEvaluator,

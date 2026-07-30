@@ -47,6 +47,10 @@ function _ComposedSystem(
     )
 end
 
+_clone_system(C::_ComposedSystem)::_ComposedSystem = _ComposedSystem(
+    _clone_system_evaluator(C.g), _clone_system_evaluator(C.f), C.f_scale,
+)
+
 Base.size(C::_ComposedSystem)::Tuple{Int, Int} = (size(C.g)[1], size(C.f)[2])
 nparameters(C::_ComposedSystem)::Int = max(nparameters(C.g), nparameters(C.f))
 
@@ -218,7 +222,6 @@ taylor!(
 
 # A stage is a thunk producing a fresh evaluator, so a composition of any depth
 # is one concrete type and every worker can clone the whole chain.
-const SystemFactory = FunctionWrapper{SystemEvaluator, Tuple{}}
 # Converting a stage's equations costs as much as it has terms, so they sit
 # behind a second thunk.
 const StageEquations = FunctionWrapper{Vector{Expression}, Tuple{}}

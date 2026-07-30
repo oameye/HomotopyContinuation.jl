@@ -54,63 +54,7 @@ end
 
 # ── System evaluator cloning ─────────────────────────────────────────────────
 
-"""
-    _clone_system_evaluator(sys::System) -> SystemEvaluator
-
-Create a fresh `SystemEvaluator` from `sys`'s instruction sequences. The new evaluator
-has independent interpreter tapes (mutable) but shares the instruction sequences (immutable).
-Preserves the compile mode: INTERPRETED rebuilds all 6 interpreters, COMPILED rebuilds
-4 interpreters + re-generates @RuntimeGeneratedFunctions for eval/jac, COMPILED_ALL
-re-generates everything including Taylor via RuntimeGeneratedFunctions.
-"""
-function _clone_system_evaluator(
-        sys::System{P, V, CompileMode.INTERPRETED, S},
-    )::SystemEvaluator where {P, V, S}
-    seq_eval = sys._interp_f64.sequence
-    seq_jac = sys._interp_jac.sequence
-    m, n = size(sys.evaluator)
-    np = nparameters(sys.evaluator)
-    return _build_system_evaluator(
-        Interpreter(Vector{ComplexF64}, seq_eval),
-        Interpreter(Vector{ComplexDF64}, seq_eval),
-        Interpreter(Vector{ComplexF64}, seq_jac),
-        Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, seq_eval),
-        Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval),
-        Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval),
-        m, n, np,
-    )
-end
-
-function _clone_system_evaluator(
-        sys::System{P, V, CompileMode.COMPILED, S},
-    )::SystemEvaluator where {P, V, S}
-    seq_eval = sys._interp_f64.sequence
-    seq_jac = sys._interp_jac.sequence
-    m, n = size(sys.evaluator)
-    np = nparameters(sys.evaluator)
-    return _build_compiled_evaluator(
-        seq_eval, seq_jac,
-        Interpreter(Vector{ComplexDF64}, seq_eval),
-        _build_taylor_fws(
-            Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, seq_eval),
-            Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval),
-            Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval),
-        ),
-        m, n, np,
-    )
-end
-
-function _clone_system_evaluator(
-        sys::System{P, V, CompileMode.COMPILED_ALL, S},
-    )::SystemEvaluator where {P, V, S}
-    seq_eval = sys._interp_f64.sequence
-    seq_jac = sys._interp_jac.sequence
-    m, n = size(sys.evaluator)
-    np = nparameters(sys.evaluator)
-    return _build_compiled_evaluator(
-        seq_eval, seq_jac,
-        Interpreter(Vector{ComplexDF64}, seq_eval),
-        _build_taylor_fws(seq_eval),
-        m, n, np,
-    )
-end
+# The evaluator carries the thunk that rebuilds it, so the compile mode is
+# already accounted for and a system only has to hand over its evaluator.
+_clone_system_evaluator(sys::System)::SystemEvaluator =
+    _clone_system_evaluator(sys.evaluator)

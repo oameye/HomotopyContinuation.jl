@@ -52,6 +52,9 @@ _randomized_evaluator(
     inner::SystemEvaluator, A::FSMat{ComplexF64}, perm::Vector{Int},
 )::SystemEvaluator = SystemEvaluator(RandomizedSystem(inner, A, perm))
 
+_clone_system(R::RandomizedSystem)::RandomizedSystem =
+    RandomizedSystem(_clone_system_evaluator(R.system), R.A, R.perm)
+
 # u[i] = v[perm[i]] + Σ_j A[i,j]·v[perm[n+j]]
 function _randomize!(
         u::FSVec{ComplexF64}, A::FSMat{ComplexF64}, perm::Vector{Int},

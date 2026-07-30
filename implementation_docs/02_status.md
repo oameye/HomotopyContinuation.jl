@@ -6,7 +6,7 @@ Last updated: 2026-07-30.
 - `make benchmark` — steady-state timings
 - `make compare` — v3/v2 ratios
 - `julia --project=benchmark benchmark/compare/tracking.jl` — end-to-end solve comparison
-- `make test` runs the core suite (53 files, parallel via ParallelTestRunner) then the certification subpackage; `make test-cert` runs only the latter
+- `make test` runs the core suite (54 files, parallel via ParallelTestRunner) then the certification subpackage; `make test-cert` runs only the latter
 
 ## Summary
 
@@ -24,8 +24,9 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
 `DistributedExecutor` cover single-task, multi-task and multi-process tracking.
 
 A testset-by-testset comparison against v2's suite on 2026-07-29 found 11 v2 test files
-that are not fully ported, all because the feature behind them does not exist yet. They are
-listed under "v2 parity gaps" below and are the remaining work toward full parity.
+that were not fully ported, all because the feature behind them did not exist yet. They are
+listed under "v2 parity gaps" below, the closed ones marked as such, and the rest are the
+remaining work toward full parity.
 
 ## Feature Checklist
 
@@ -38,6 +39,12 @@ listed under "v2 parity gaps" below and are the remaining work toward full parit
   live in the type domain; caches interpreters for all eval modes and stores original MP polys)
 - [x] `SystemEvaluator` / `HomotopyEvaluator` type firewall (FunctionWrapper, 10 wrappers each,
   including a DF64-output evaluate for extended-precision residual combining)
+- [x] **Every evaluator carries the thunk that rebuilds it** (`_clone`). Tapes are mutable, so
+  a task needs its own evaluator, and nothing else survives the erasure. Each wrapper system
+  implements `_clone_system`; `_clone_system_evaluator` collapsed to one method, homotopies
+  clone, and the extension serializes an evaluator as its cloner. A caller's own type falls
+  back to `deepcopy`, which the `deepcopy_internal` hook makes safe. TTFX unchanged
+  (`01_decisions.md`).
 - [x] StraightLineHomotopy, CoefficientHomotopy, ToricHomotopy
 - [x] Cauchy product Taylor convolution for parametric homotopies
 - [x] Two-stage toric reparameterization (weight renormalization when max_weight ≥ 10)
@@ -133,12 +140,13 @@ listed under "v2 parity gaps" below and are the remaining work toward full parit
 - [x] Threading via OhMyThreads.jl: `Serial`/`Threaded` executor types, builder/worker-state
   pattern for thread-safe evaluator cloning, `@tasks`/`@local` work distribution
 - [x] Multi-process tracking: `DistributedExecutor` in the `Distributed` package extension,
-  covering every route (total degree, polyhedral, parameter homotopy,
-  subspace moves in both regimes, both sweep kinds, and monodromy). Dynamic batching over a
+  covering every route (total degree, polyhedral, parameter homotopy, start to target,
+  an explicit homotopy object, subspace moves in both regimes, both sweep kinds, and
+  monodromy). Dynamic batching over a
   `RemoteChannel`, each process internally threaded, results stored by global path index so
   that at a fixed seed they are bit-identical to `Serial()` at any batch size.
-  `Serialization` methods for `System`, `_SupportSystem` and `CompositionSystem` ship builders
-  as plain data
+  `Serialization` methods for `System`, `_SupportSystem`, `CompositionSystem`,
+  `FixedParameterSystem` and `SystemEvaluator` ship builders as plain data
 - [x] Overdetermined systems: `RandomizedSystem` square-up (identity block plus random fold of
   the lowest-degree equations, permutation keeps degrees exact), wired into total-degree
   (squared-up evaluator) and polyhedral (merged support/coefficients), excess-solution
@@ -431,11 +439,21 @@ the v2 test that stays unported until the feature lands. Ordered by consequence.
   algorithms, square and overdetermined, all three compile modes, both executors, composition)
   plus the bound wrapper's hot-path entry in `test/alloc_check_test.jl`. Closes
   `systems_test.jl` "FixedParameterSystem".
-- [ ] **`solve(G, F, starts)`** between two parameter-fixed systems, which
-  `FixedParameterSystem` now makes expressible. Unports the second half of `solve_test.jl`
-  "solve (start target)".
-- [ ] **`solve(H::AbstractHomotopy, starts)`**: tracking an explicit homotopy object.
-  Unports `solve_test.jl` "solve (Homotopy)".
+- [x] **`solve(G, F, starts)`** between two parameter-free systems: tracks
+  `γ·t·G(x) + (1 − t)·F(x)`, with `γ` and the projective chart drawn from `seed`. Both may be
+  any `CloneableSystem`, so a parametric problem reaches it as
+  `solve(fix_parameters(f, p₁), fix_parameters(f, p₀), starts)`, which replaces v2's
+  `start_parameters`/`target_parameters` here and is the ported half of v2's testset. Threads
+  and distributes like the other routes. A homogeneous pair takes any projective
+  representatives; an overdetermined pair is tracked rectangular, as in v2, with no excess
+  check. Closes the second half of `solve_test.jl` "solve (start target)".
+- [x] **`solve(H::AbstractHomotopy, starts, exec)`** on all three executors: `Serial()` tracks
+  the homotopy given, the others rebuild it per task, both bit-identical to serial (76.7 ms
+  against 14.6 ms on 8 threads, 81 paths). A caller's homotopy with no `_clone_homotopy`
+  method is rebuilt by `deepcopy`, so it threads too. Start points are in the
+  homotopy's coordinates, except that an `AffineChartHomotopy` takes projective
+  representatives. Closes `solve_test.jl` "solve (Homotopy)". Both routes in
+  `src/solving/homotopy_solve.jl`; tests: `test/homotopy_solve_test.jl`.
 - [ ] **`stop_early_cb`**, serial and threaded. Unports `solve_test.jl` "stop early callback".
 - [ ] **SemialgebraicSets.jl integration**: `SemialgebraicSetsHCSolver` with
   `excess_residual_tol`, `real_atol`, `real_rtol`, `compile`, and its `show`. Unports all of

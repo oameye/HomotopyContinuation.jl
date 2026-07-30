@@ -85,6 +85,27 @@ end
                 evaluate_at(F_param.evaluator, pt, ps)
         end
 
+        @testset "FixedParameterSystem" begin
+            ps = ComplexF64[2.0, 5.0]
+            G = FixedParameterSystem(F_param, ps)
+            H = roundtrip(G)
+            @test typeof(H) === typeof(G)
+            @test H.parameters == G.parameters
+            @test degrees(H) == degrees(G)
+            pt = ComplexF64[0.7, -1.3]
+            @test evaluate_at(H.evaluator, pt, ComplexF64[]) ==
+                evaluate_at(G.evaluator, pt, ComplexF64[])
+        end
+
+        @testset "SystemEvaluator" begin
+            # Only the rebuild thunk ships; the far side calls it.
+            ev = roundtrip(F.evaluator)
+            @test size(ev) == size(F.evaluator)
+            pt = ComplexF64[0.7, -1.3]
+            @test evaluate_at(ev, pt, ComplexF64[]) ==
+                evaluate_at(F.evaluator, pt, ComplexF64[])
+        end
+
         @testset "grouped System" begin
             @polyvar u v s t
             G = System(
@@ -241,6 +262,27 @@ end
             serial = solve(F_param, starts, p₀, q, Serial(); opts...)
             for exec in (DistributedExecutor(), DistributedExecutor(; batch_size = 1))
                 @test same_paths(serial, solve(F_param, starts, p₀, q, exec; opts...)) == ""
+            end
+        end
+
+        @testset "start-target" begin
+            G = fix_parameters(F_param, p₀)
+            H = fix_parameters(F_param, ComplexF64[2.3, 0.9])
+            opts = (; seed = UInt32(55), show_progress = false)
+            serial = solve(G, H, starts, Serial(); opts...)
+            @test nsolutions(serial) == 4
+            for exec in (DistributedExecutor(), DistributedExecutor(; batch_size = 1))
+                @test same_paths(serial, solve(G, H, starts, exec; opts...)) == ""
+            end
+        end
+
+        @testset "explicit homotopy" begin
+            H = ParameterHomotopy(F_param, p₀, ComplexF64[2.3, 0.9])
+            opts = (; seed = UInt32(55), show_progress = false)
+            serial = solve(H, starts, Serial(); opts...)
+            @test nsolutions(serial) == 4
+            for exec in (DistributedExecutor(), DistributedExecutor(; batch_size = 1))
+                @test same_paths(serial, solve(H, starts, exec; opts...)) == ""
             end
         end
 

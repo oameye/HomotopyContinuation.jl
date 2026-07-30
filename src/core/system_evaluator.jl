@@ -77,7 +77,24 @@ struct SystemEvaluator
     _taylor_3_param!::SysTaylor3ParamFW
     _size::Tuple{Int, Int}
     _nparameters::Int
+    _clone::FunctionWrapper{SystemEvaluator, Tuple{}}
 end
+
+const SystemFactory = FunctionWrapper{SystemEvaluator, Tuple{}}
+
+# An evaluator equal to `S` with its own tapes, usable from another task.
+_clone_system_evaluator(S::SystemEvaluator)::SystemEvaluator = S._clone()
+
+# A copied `FunctionWrapper` keeps a raw pointer to the original closure, so a
+# copied evaluator would silently run the original tapes. Rebuild instead.
+Base.deepcopy_internal(S::SystemEvaluator, stackdict::IdDict)::SystemEvaluator =
+    get!(() -> S._clone(), stackdict, S)
+
+struct _EvaluatorCloner{F <: AbstractSystem}
+    system::F
+end
+
+(c::_EvaluatorCloner)()::SystemEvaluator = SystemEvaluator(_clone_system(c.system))
 
 ## Lazy extended-precision wrappers
 
@@ -226,5 +243,6 @@ function SystemEvaluator(F::AbstractSystem)
         SysTaylor3ParamFW((u, tx, tp) -> (taylor!(u, Val(3), F, tx, tp); nothing)),
         size(F),
         nparameters(F),
+        SystemFactory(_EvaluatorCloner(F)),
     )
 end

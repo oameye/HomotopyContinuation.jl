@@ -174,6 +174,13 @@ end
         taylor!(u, Val(1), seval, tv, p)
         @test u[1] ≈ 4.0 + 0im  # 2*2*1 + 0
         @test u[2] ≈ 3.0 + 0im  # 2*0 + 1*3
+
+        # A caller's system needs no `_clone_system` method to be usable from a
+        # second task.
+        clone = HC._clone_system_evaluator(seval)
+        v = FSVec{ComplexF64}(zeros(ComplexF64, 2))
+        evaluate!(v, clone, x, p)
+        @test v == ComplexF64[6.0, 4.0]
     end
 
     # ── FW transparency: SystemEvaluator must match raw Interpreter ──────

@@ -44,6 +44,10 @@ _sliced_evaluator(
     inner::SystemEvaluator, L::LinearSubspace, chart::Vector{ComplexF64},
 )::SystemEvaluator = SystemEvaluator(SlicedSystem(inner, L, chart))
 
+_clone_system(S::SlicedSystem)::SlicedSystem = SlicedSystem(
+    _clone_system_evaluator(S.system), copy(S.Aᵗ), copy(S.b), copy(S.chart),
+)
+
 _nlinear(S::SlicedSystem)::Int = size(S.Aᵗ, 2)
 
 function Base.size(S::SlicedSystem)::Tuple{Int, Int}

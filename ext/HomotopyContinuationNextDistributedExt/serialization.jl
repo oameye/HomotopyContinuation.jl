@@ -7,6 +7,26 @@
 
 const AbstractSer = Serialization.AbstractSerializer
 
+# ── SystemEvaluator ─────────────────────────────────────────────────────────
+#
+# The kernel wrappers cannot cross a process; the rebuild thunk closes over plain
+# data, so ship that and call it. This is how a homotopy reaches another process.
+function Serialization.serialize(s::AbstractSer, ev::HCN.SystemEvaluator)
+    Serialization.serialize_type(s, HCN.SystemEvaluator)
+    Serialization.serialize(s, ev._clone.obj)
+    return nothing
+end
+
+function Serialization.deserialize(
+        s::AbstractSer, ::Type{HCN.SystemEvaluator},
+    )::HCN.SystemEvaluator
+    return _cloner(Serialization.deserialize(s))()::HCN.SystemEvaluator
+end
+
+# `FunctionWrapper` keeps an immutable callable behind a `Ref`, a mutable one bare.
+_cloner(obj::Base.RefValue) = obj[]
+_cloner(obj) = obj
+
 function _compile_strategy(mode::HCN.CompileMode.T)
     mode === HCN.CompileMode.INTERPRETED && return HCN.InterpretedCompile()
     mode === HCN.CompileMode.COMPILED && return HCN.CompiledCompile()
@@ -62,6 +82,24 @@ function Serialization.deserialize(
         ),
         eval_sequence, jacobian_sequence,
     )
+end
+
+# ── FixedParameterSystem ────────────────────────────────────────────────────
+
+# Only the source and the values ship; the binding is rebuilt on the far side.
+function Serialization.serialize(s::AbstractSer, F::HCN.FixedParameterSystem)
+    Serialization.serialize_type(s, typeof(F))
+    Serialization.serialize(s, F.system)
+    Serialization.serialize(s, F.parameters)
+    return nothing
+end
+
+function Serialization.deserialize(
+        s::AbstractSer, ::Type{HCN.FixedParameterSystem{S}},
+    )::HCN.FixedParameterSystem{S} where {S}
+    system = Serialization.deserialize(s)::S
+    values = Serialization.deserialize(s)::Vector{ComplexF64}
+    return HCN.FixedParameterSystem(system, values)
 end
 
 # ── CompositionSystem ───────────────────────────────────────────────────────

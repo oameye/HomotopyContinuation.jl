@@ -17,6 +17,8 @@ struct AffineChartSystem <: AbstractSystem
 end
 
 Base.size(F::AffineChartSystem) = (size(F.system)[1] + 1, size(F.system)[2])
+_clone_system(F::AffineChartSystem)::AffineChartSystem =
+    AffineChartSystem(_clone_system_evaluator(F.system), copy(F.chart))
 nparameters(F::AffineChartSystem)::Int = nparameters(F.system)
 
 """
@@ -32,6 +34,9 @@ struct AffineChartHomotopy{H <: AbstractHomotopy} <: AbstractHomotopy
 end
 
 Base.size(H::AffineChartHomotopy) = (size(H.homotopy)[1] + 1, size(H.homotopy)[2])
+
+_clone_homotopy(H::AffineChartHomotopy)::AffineChartHomotopy =
+    AffineChartHomotopy(_clone_homotopy(H.homotopy), copy(H.chart))
 
 """
     on_affine_chart(F::System)

@@ -25,6 +25,8 @@ const QUALIFIED_ACCESS_IGNORE = (
     # Base.broadcastable is the documented broadcast customization
     # hook but is not declared public in Base:
     :broadcastable,
+    # Base.deepcopy_internal is the documented `deepcopy` customization hook:
+    :deepcopy_internal,
     # Deliberate construction-time compiler barrier used to isolate
     # mutually exclusive TTFX-heavy backends:
     :inferencebarrier,

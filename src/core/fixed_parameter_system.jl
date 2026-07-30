@@ -111,6 +111,9 @@ end
 _BoundParameterSystem(system::SystemEvaluator, p::AbstractVector{<:Number}) =
     _BoundParameterSystem(system, FSVec{ComplexF64}(Vector{ComplexF64}(p)))
 
+_clone_system(F::_BoundParameterSystem)::_BoundParameterSystem =
+    _BoundParameterSystem(_clone_system_evaluator(F.system), F.p)
+
 Base.size(F::_BoundParameterSystem)::Tuple{Int, Int} = size(F.system)
 nparameters(::_BoundParameterSystem)::Int = 0
 

@@ -82,7 +82,7 @@ A 50-expression bypass threshold regressed instruction counts 30-65%. `opt_cse` 
 
 ### Builder/worker-state threading pattern
 
-Thread safety by reconstruction, not cloning. `Builder` stores immutable data (degrees, system, γ, options) and produces a fresh `WorkerState` per call. `_clone_system_evaluator` builds new interpreter tapes from shared `InstructionSequence`s and preserves `CompileMode` (re-generating RGFs). OhMyThreads `@tasks`/`@local` creates one worker state per task, not per path. `deepcopy` was rejected: it copies immutable data wastefully and mishandles RGFs.
+Thread safety by reconstruction, not cloning. `Builder` stores immutable data (degrees, system, γ, options) and produces a fresh `WorkerState` per call. `_clone_system_evaluator` builds new interpreter tapes from shared `InstructionSequence`s and preserves `CompileMode` (re-generating RGFs). OhMyThreads `@tasks`/`@local` creates one worker state per task, not per path. `deepcopy` is the fallback for a caller's own system, not the mechanism here: it copies read-only data wastefully.
 
 ### Distributed.jl over MPI or Dagger
 
@@ -228,6 +228,24 @@ Two consequences worth knowing. Substitution renormalizes the equations per para
 `FixedParameterSystem` keeps the source system beside its bound evaluator, because a worker must not share the evaluator's mutable tapes: `_clone_system_evaluator` rebuilds the binding around a fresh clone of the source. It reports the degrees, shape and variable count of the system it wraps, so the shape dispatch and the square-up path treat it as any other parameter-free input. `CloneableSystem` is the union of the three things a route can clone an evaluator from and is the bound on the two straight-line builders. The `AbstractSystem` doing the actual binding is the internal `_BoundParameterSystem`.
 
 The excess-solution checker evaluates the original overdetermined system with an empty parameter vector, so it is handed `F.evaluator`, which for a `FixedParameterSystem` is already the bound one.
+
+### An evaluator carries the thunk that rebuilds it (MEASURED)
+
+The tapes behind the firewall are mutable, so two tasks may not share an evaluator, and nothing else survives the erasure: the wrappers keep no sequence and no source system. `deepcopy` is not a way out but a trap, since `FunctionWrapper` calls through `objptr`, a raw pointer into the original closure, so a deepcopied wrapper runs the *original* tapes while looking independent. That is why v2's route to threading a homotopy, deepcopying the tracker, has no v3 equivalent.
+
+So `SystemEvaluator` carries an eleventh wrapper, `_clone`. Cloners hold the instruction sequences (interpreted, compiled, support) or the wrapper `AbstractSystem`, whose `_clone_system` clones the inner evaluator, shares read-only data and lets the constructor allocate buffers. Consequences: `_clone_system_evaluator` collapses to one method on an evaluator; `_clone_homotopy` is one line per homotopy, so `solve(H, starts, Threaded())` rebuilds per task (76.7 ms serial against 14.6 ms on 8 threads, 81 paths, fields identical); and the extension serializes an evaluator *as its cloner*, which is plain data all the way down, so `DistributedExecutor()` works too.
+
+Cost: one `FunctionWrapper` per construction. Load + build + first solve unchanged within noise (11.50/11.83 s at HEAD against 11.56/11.85/10.67 s, fresh processes at `-t 4`).
+
+A caller's own type needs no rule: `_clone_system` and `_clone_homotopy` fall back to `deepcopy`, and `Base.deepcopy_internal` on `SystemEvaluator` rebuilds instead of copying the trap pointer. `HomotopyEvaluator` has no thunk to rebuild from, so copying one throws rather than aliasing. An explicit rule is still cheaper (it shares the read-only data), and `solve(build_homotopy, starts, exec)` remains for building a homotopy per task directly.
+
+Start points are in the homotopy's own coordinates, except that an `AffineChartHomotopy` takes projective representatives and `init` places them on its chart, once per solve rather than per path (v2 renormalizes in `set_solution!`).
+
+### The start-target route charts the homotopy, not the two systems
+
+Appending `v'x - 1` to both systems would leave the homotopy carrying `(γt + 1 - t)(v'x - 1)`, a rescaled chart row degenerating at `t = 1/(1 - γ)`. That is off the real segment for generic `γ`, so it costs conditioning rather than correctness, but the `AffineChartHomotopy` wrapper is free and exact.
+
+An overdetermined pair is tracked rectangular through `MatrixWorkspace`'s QR path, not squared up: the caller supplies the start solutions, so there is no start system to square up against, and no excess check runs.
 
 ### Appended linear rows: Taylor coefficient is `A x_K`, not zero
 

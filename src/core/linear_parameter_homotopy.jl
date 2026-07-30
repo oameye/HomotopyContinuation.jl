@@ -100,6 +100,11 @@ ParameterHomotopy(
 
 Base.size(H::LinearParameterHomotopy) = size(H.system)
 
+_clone_homotopy(H::LinearParameterHomotopy{S}) where {S} =
+    LinearParameterHomotopy{S}(
+    _clone_system_evaluator(H.system), H.start_p, H.target_p,
+)
+
 ## Retargeting (cold path, e.g. 4 calls per monodromy loop). Recomputes dp and
 ## invalidates the p(t) cache so the next evaluate!/taylor! rebuilds p(t).
 

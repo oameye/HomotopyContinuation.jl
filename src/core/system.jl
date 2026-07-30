@@ -9,11 +9,6 @@ struct OverdeterminedShape <: SystemShape end
 
 const SupportCoefficients = Tuple{Vector{Matrix{Int32}}, Vector{Vector{ComplexF64}}}
 
-abstract type SystemCompileStrategy end
-struct InterpretedCompile <: SystemCompileStrategy end
-struct CompiledCompile <: SystemCompileStrategy end
-struct CompiledAllCompile <: SystemCompileStrategy end
-
 """
     System
 
@@ -611,29 +606,84 @@ function _build_mode_evaluator(
 end
 
 function _build_mode_evaluator(
-        ::CompiledCompile, seq_eval::InstructionSequence, seq_jac::InstructionSequence,
+        mode::CompiledCompile, seq_eval::InstructionSequence,
+        seq_jac::InstructionSequence,
         ::Interpreter{Vector{ComplexF64}}, interp_df64,
         ::Interpreter{Vector{ComplexF64}}, interp_t1, interp_t2, interp_t3,
         neqs::Int, nvars::Int, nparams::Int,
     )::SystemEvaluator
     return _build_compiled_evaluator(
-        seq_eval, seq_jac, interp_df64,
+        mode, seq_eval, seq_jac, interp_df64,
         _build_taylor_fws(interp_t1, interp_t2, interp_t3),
         neqs, nvars, nparams,
     )
 end
 
 function _build_mode_evaluator(
-        ::CompiledAllCompile, seq_eval::InstructionSequence, seq_jac::InstructionSequence,
+        mode::CompiledAllCompile, seq_eval::InstructionSequence,
+        seq_jac::InstructionSequence,
         ::Interpreter{Vector{ComplexF64}}, interp_df64,
         ::Interpreter{Vector{ComplexF64}}, ::Interpreter, ::Interpreter, ::Interpreter,
         neqs::Int, nvars::Int, nparams::Int,
     )::SystemEvaluator
     return _build_compiled_evaluator(
-        seq_eval, seq_jac, interp_df64, _build_taylor_fws(seq_eval),
+        mode, seq_eval, seq_jac, interp_df64, _build_taylor_fws(seq_eval),
         neqs, nvars, nparams,
     )
 end
+
+# One cloner per compile mode: the sequences are the whole recipe, the tapes
+# around them are what must not be shared.
+
+struct _InterpretedCloner
+    seq_eval::InstructionSequence
+    seq_jac::InstructionSequence
+    neqs::Int
+    nvars::Int
+    nparams::Int
+end
+
+function (c::_InterpretedCloner)()::SystemEvaluator
+    seq_eval, seq_jac = c.seq_eval, c.seq_jac
+    return _build_system_evaluator(
+        Interpreter(Vector{ComplexF64}, seq_eval),
+        Interpreter(Vector{ComplexDF64}, seq_eval),
+        Interpreter(Vector{ComplexF64}, seq_jac),
+        Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, seq_eval),
+        Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval),
+        Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval),
+        c.neqs, c.nvars, c.nparams,
+    )
+end
+
+struct _CompiledCloner{M <: Union{CompiledCompile, CompiledAllCompile}}
+    mode::M
+    seq_eval::InstructionSequence
+    seq_jac::InstructionSequence
+    neqs::Int
+    nvars::Int
+    nparams::Int
+end
+
+function (c::_CompiledCloner)()::SystemEvaluator
+    seq_eval = c.seq_eval
+    return _build_compiled_evaluator(
+        c.mode, seq_eval, c.seq_jac,
+        Interpreter(Vector{ComplexDF64}, seq_eval),
+        _clone_taylor_fws(c.mode, seq_eval),
+        c.neqs, c.nvars, c.nparams,
+    )
+end
+
+_clone_taylor_fws(::CompiledCompile, seq_eval::InstructionSequence) =
+    _build_taylor_fws(
+    Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, seq_eval),
+    Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval),
+    Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval),
+)
+
+_clone_taylor_fws(::CompiledAllCompile, seq_eval::InstructionSequence) =
+    _build_taylor_fws(seq_eval)
 
 @noinline function _execute_eval_fw!(
         u::AbstractVector, interp::Interpreter, x::AbstractVector, p::AbstractVector,
@@ -721,6 +771,11 @@ function _build_system_evaluator(
     evaluation_fws = _build_interpreted_evaluation_fws(
         interp_f64, interp_df64, interp_jac,
     )
+    clone = SystemFactory(
+        _InterpretedCloner(
+            interp_f64.sequence, interp_jac.sequence, neqs, nvars, nparams,
+        ),
+    )
     return SystemEvaluator(
         evaluation_fws...,
         taylor_1,
@@ -729,6 +784,7 @@ function _build_system_evaluator(
         param_taylor...,
         (neqs, nvars),
         nparams,
+        clone,
     )
 end
 

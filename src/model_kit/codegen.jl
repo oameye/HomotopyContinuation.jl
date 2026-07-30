@@ -4,6 +4,11 @@
 # Constants become literals, variables become x[i], intermediates become τₖ.
 # No tape vector needed — LLVM optimizes across the entire function.
 
+abstract type SystemCompileStrategy end
+struct InterpretedCompile <: SystemCompileStrategy end
+struct CompiledCompile <: SystemCompileStrategy end
+struct CompiledAllCompile <: SystemCompileStrategy end
+
 function _op_globalref(op::OpType.T)::GlobalRef
     return GlobalRef(parentmodule(OpType), op_call(op))
 end
@@ -277,6 +282,7 @@ function _build_taylor_fws(seq_eval::InstructionSequence)
 end
 
 function _build_compiled_evaluator(
+        mode::Union{CompiledCompile, CompiledAllCompile},
         seq_eval::InstructionSequence,
         seq_jac::InstructionSequence,
         interp_df64::Interpreter{Vector{ComplexDF64}},
@@ -295,5 +301,6 @@ function _build_compiled_evaluator(
         taylor_fws...,
         (neqs, nvars),
         nparams,
+        SystemFactory(_CompiledCloner(mode, seq_eval, seq_jac, neqs, nvars, nparams)),
     )
 end
