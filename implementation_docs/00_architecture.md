@@ -440,6 +440,9 @@ COMPILED/COMPILED_ALL re-generates `@RuntimeGeneratedFunction`s.
 OhMyThreads `@tasks`/`@local` handles work distribution. `@local` creates one worker state
 per task (amortized), not per path.
 
+Each route currently derives its own task count and early-stop handling from the executor
+rather than sharing one fan-out primitive; see `07_executor_fanout_debt.md`.
+
 **Distributed** (`ext/HomotopyContinuationNextDistributedExt.jl`, weakdeps `Distributed` and
 `Serialization`). The same flat index space as the threaded loops, split across processes:
 
