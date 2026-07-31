@@ -5,52 +5,49 @@
 #   Phase 2 (coefficient): Track from generic system to target through CoefficientHomotopy (t: 1 -> 0)
 
 """
-    Polyhedral(; seed, max_steps, extended_precision, ...)
+    Polyhedral(; early_stop_callback, tracker_options, endgame_options, seed, show_progress)
 
 Algorithm that constructs a polyhedral (BKK-optimal) start system using mixed subdivisions.
 The number of paths tracked equals the mixed volume, which is at most the Bezout bound.
 
-Accepts all `TrackerOptions` fields as keyword arguments, or a pre-built
-`tracker_options` object.
+`early_stop_callback` is called with each successful [`PathResult`](@ref); return
+`true` to stop. Paths already running still finish, so which extra results appear
+is not reproducible under [`Threaded`](@ref) or [`DistributedExecutor`](@ref).
 
 # Examples
 ```julia
 @polyvar x y
 result = solve(System([x^2 + y - 1, x*y - 2]), Polyhedral())
 
-# Tune tracker options directly
-result = solve(F, Polyhedral(; max_steps=500, extended_precision=false))
+# Tune tracker options
+result = solve(F, Polyhedral(; tracker_options = TrackerOptions(; max_steps = 500)))
 ```
 """
-struct Polyhedral
-    tracker_options::TrackerOptions
-    endgame_options::EndgameOptions
-    seed::UInt32
+struct Polyhedral <: AbstractAlgorithm
+    common::CommonOptions
+    early_stop::EarlyStop
 end
 
-function Polyhedral(;
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        max_steps::Int = tracker_options.max_steps,
-        max_step_size::Float64 = tracker_options.max_step_size,
-        max_initial_step_size::Float64 = tracker_options.max_initial_step_size,
-        extended_precision::Bool = tracker_options.extended_precision,
-        min_step_size::Float64 = tracker_options.min_step_size,
-        terminate_cond::Float64 = tracker_options.terminate_cond,
-        a::Float64 = tracker_options.a,
-        β_a::Float64 = tracker_options.β_a,
-        β_ω::Float64 = tracker_options.β_ω,
-        β_τ::Float64 = tracker_options.β_τ,
-        strict_β_τ::Float64 = tracker_options.strict_β_τ,
-    )
-    opts = TrackerOptions(;
-        max_steps, max_step_size, max_initial_step_size,
-        extended_precision, min_step_size, terminate_cond,
-        a, β_a, β_ω, β_τ, strict_β_τ,
-    )
-    return Polyhedral(opts, endgame_options, seed)
-end
+Polyhedral(;
+    early_stop_callback = _never_stop,
+    tracker_options::TrackerOptions = TrackerOptions(),
+    endgame_options::EndgameOptions = EndgameOptions(),
+    seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+    show_progress::Bool = true,
+) = Polyhedral(
+    CommonOptions(tracker_options, endgame_options, seed, show_progress),
+    _early_stop(early_stop_callback),
+)
+
+early_stop_callback(alg::Polyhedral)::EarlyStop = alg.early_stop
+
+# A parent derives its children's seeds from its own, so one top-level seed
+# reproduces every stage.
+_reseed(alg::Polyhedral, seed::UInt32)::Polyhedral =
+    Polyhedral(_with_seed(alg.common, seed), alg.early_stop)
+
+_quiet(alg::Polyhedral)::Polyhedral =
+    Polyhedral(_quiet(alg.common), alg.early_stop)
 
 """
     PolyhedralSolveCache
@@ -75,6 +72,7 @@ struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S, C}
     # ExcessSolutionChecker for overdetermined systems, Nothing for square ones
     excess_checker::C
     show_progress::Bool
+    early_stop::EarlyStop
 end
 
 # ── Helper: randomize support/coefficients for overdetermined systems ───────
@@ -449,27 +447,27 @@ end
 
 function CommonSolve.init(
         F::System, alg::Polyhedral,
-        exec::AbstractExecutor = Threaded();
-        show_progress::Bool = true,
+        exec::AbstractExecutor = Threaded(),
     )::PolyhedralSolveCache
     _check_parameter_free(F, "`Polyhedral`")
     _check_polynomial(F, "`Polyhedral`")
     if is_homogeneous(F)
         return Base.inferencebarrier(_init_projective)(
-            F, alg, exec, show_progress, "`Polyhedral`",
+            F, alg, exec, "`Polyhedral`",
         )::PolyhedralSolveCache
     end
     _check_square_or_overdetermined(F)
     # Dynamic call: specializes the body on the concrete `System` so that
     # `system_shape(F)` resolves statically instead of union-splitting.
     initializer = Base.inferencebarrier(_init_polyhedral)
-    return initializer(F, alg, exec, show_progress)::PolyhedralSolveCache
+    return initializer(F, alg, exec)::PolyhedralSolveCache
 end
 
 function _init_polyhedral(
-        F::System, alg::Polyhedral, exec::AbstractExecutor, show_progress::Bool,
+        F::System, alg::Polyhedral, exec::AbstractExecutor,
     )::PolyhedralSolveCache
-    seed = alg.seed
+    show_progress = _show_progress(alg)
+    seed = _seed(alg)
     n = F.nvars
 
     # Task-local RNG seeded from user seed — deterministic without mutating global state.
@@ -544,17 +542,17 @@ function _init_polyhedral(
 
     # 7. Toric phase (t goes from 0 to 1), on a conservative max_initial_step_size
     toric_opts = TrackerOptions(;
-        max_steps = alg.tracker_options.max_steps,
-        max_step_size = alg.tracker_options.max_step_size,
-        max_initial_step_size = min(alg.tracker_options.max_initial_step_size, 0.2),
-        extended_precision = alg.tracker_options.extended_precision,
-        min_step_size = alg.tracker_options.min_step_size,
-        terminate_cond = alg.tracker_options.terminate_cond,
-        a = alg.tracker_options.a,
-        β_a = alg.tracker_options.β_a,
-        β_ω = alg.tracker_options.β_ω,
-        β_τ = alg.tracker_options.β_τ,
-        strict_β_τ = alg.tracker_options.strict_β_τ,
+        max_steps = _tracker_options(alg).max_steps,
+        max_step_size = _tracker_options(alg).max_step_size,
+        max_initial_step_size = min(_tracker_options(alg).max_initial_step_size, 0.2),
+        extended_precision = _tracker_options(alg).extended_precision,
+        min_step_size = _tracker_options(alg).min_step_size,
+        terminate_cond = _tracker_options(alg).terminate_cond,
+        a = _tracker_options(alg).a,
+        β_a = _tracker_options(alg).β_a,
+        β_ω = _tracker_options(alg).β_ω,
+        β_τ = _tracker_options(alg).β_τ,
+        strict_β_τ = _tracker_options(alg).strict_β_τ,
     )
 
     # 8. Coefficient phase (t goes from 1 to 0)
@@ -563,7 +561,7 @@ function _init_polyhedral(
 
     builder = PolyhedralBuilder(
         support_system, start_coeffs, flat_start, flat_target,
-        toric_opts, alg.tracker_options, alg.endgame_options,
+        toric_opts, _tracker_options(alg), _endgame_options(alg),
     )
     worker = builder()
 
@@ -576,6 +574,7 @@ function _init_polyhedral(
         support_system,
         excess_checker,
         show_progress,
+        early_stop_callback(alg),
     )
 end
 
@@ -739,6 +738,7 @@ function _solve_polyhedral_serial(cache::PolyhedralSolveCache{Serial}, progress)
 
     stats = ProgressStats()
 
+    stop = cache.early_stop
     for (k, (cell, x₀)) in enumerate(cache.start_solutions)
         pr = _track_polyhedral_path!(
             cache.toric_tracker, cache.coeff_tracker, cache.toric_homotopy,
@@ -746,9 +746,12 @@ function _solve_polyhedral_serial(cache::PolyhedralSolveCache{Serial}, progress)
         )
         push!(path_results, pr)
         update_progress!(progress, k, stats, pr)
+        is_success(pr) && stop(pr) && break
     end
 
-    return _finalize_result(path_results, n_paths, cache.seed, cache.excess_checker)
+    return _finalize_result(
+        path_results, length(path_results), cache.seed, cache.excess_checker,
+    )
 end
 
 # ── CommonSolve.solve!: threaded two-phase path tracking ─────────────────
@@ -778,20 +781,28 @@ function _solve_polyhedral_threaded(cache::PolyhedralSolveCache{Threaded}, progr
     counter = Threads.Atomic{Int}(0)
     plock = ReentrantLock()
 
+    stop = cache.early_stop
+    stopped = Threads.Atomic{Bool}(false)
+
     @tasks for i in eachindex(starts)
         @set ntasks = nt
         @local ws = cache.builder()
 
-        cell, x₀ = starts[i]
-        results[i] = _track_polyhedral_path!(ws, support, lifting, cell, x₀, i)
+        if !stopped[]
+            cell, x₀ = starts[i]
+            pr = _track_polyhedral_path!(ws, support, lifting, cell, x₀, i)
+            results[i] = pr
 
-        if progress !== nothing
-            k = Threads.atomic_add!(counter, 1) + 1
-            @lock plock update_progress!(progress, k, stats, results[i])
+            if progress !== nothing
+                k = Threads.atomic_add!(counter, 1) + 1
+                @lock plock update_progress!(progress, k, stats, pr)
+            end
+            is_success(pr) && stop(pr) && (stopped[] = true)
         end
     end
 
-    return _finalize_result(results, n_paths, cache.seed, cache.excess_checker)
+    tracked = _assigned_results(results)
+    return _finalize_result(tracked, length(tracked), cache.seed, cache.excess_checker)
 end
 
 # ── CommonSolve.solve!: distributed (extension) ──────────────────────────

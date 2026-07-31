@@ -1,7 +1,7 @@
 using Test, Random
 using LinearAlgebra
 using HomotopyContinuationNext
-using HomotopyContinuationNext: find_start_pair, monodromy_solve, permutations,
+using HomotopyContinuationNext: find_start_pair, permutations,
     is_heuristic_stop, verify_solution_completeness, parameters, trace,
     SymmetricGroup, multiplicities, InfNorm
 using DynamicPolynomials: @polyvar, subs, differentiate, monomials, coefficient
@@ -28,17 +28,21 @@ function rand_poly(vars, d::Int; homogeneous::Bool = false)
     return sum(randn(ComplexF64) * m for m in mons)
 end
 
-@testset "toric ED: monodromy_solve options" begin
+@testset "toric ED: Monodromy options" begin
     F, uv = toric_ed_system()
 
     # out of the box: heuristic stop after finding all 21 solutions
-    r0 = monodromy_solve(F; seed = UInt32(0x008b8683), threading = false, show_progress = false)
+    r0 = solve(F, Monodromy(; seed = UInt32(0x008b8683), show_progress = false), Serial())
     @test is_heuristic_stop(r0)
     @test nsolutions(r0) == 21
 
-    r = monodromy_solve(
-        F; target_solutions_count = 21, max_loops_no_progress = 50,
-        threading = false, seed = UInt32(0x008b8684), show_progress = false,
+    r = solve(
+        F,
+        Monodromy(;
+            target_solutions_count = 21, max_loops_no_progress = 50,
+            seed = UInt32(0x008b8684), show_progress = false,
+        ),
+        Serial(),
     )
     @test is_success(r)
     @test nsolutions(r) == 21
@@ -46,24 +50,36 @@ end
     @test isempty(sprint(show, r)) == false
 
     # seed reproducibility: identical loop counts
-    r2 = monodromy_solve(
-        F; target_solutions_count = 21, max_loops_no_progress = 50,
-        threading = false, seed = r.seed, show_progress = false,
+    r2 = solve(
+        F,
+        Monodromy(;
+            target_solutions_count = 21, max_loops_no_progress = 50, seed = r.seed,
+            show_progress = false,
+        ),
+        Serial(),
     )
     @test r2.statistics.tracked_loops[] == r.statistics.tracked_loops[]
 
     # threading
-    rt = monodromy_solve(
-        F; target_solutions_count = 21, max_loops_no_progress = 50,
-        threading = true, seed = UInt32(0x008b8685), show_progress = false,
+    rt = solve(
+        F,
+        Monodromy(;
+            target_solutions_count = 21, max_loops_no_progress = 50,
+            seed = UInt32(0x008b8685), show_progress = false,
+        ),
+        Threaded(),
     )
     @test is_success(rt)
     @test nsolutions(rt) == 21
 
     # timeout stops the run before all solutions are found
-    r_timeout = monodromy_solve(
-        F; target_solutions_count = 21, timeout = 1.0e-12,
-        seed = UInt32(0x008b8686), threading = false, show_progress = false,
+    r_timeout = solve(
+        F,
+        Monodromy(;
+            target_solutions_count = 21, timeout = 1.0e-12, seed = UInt32(0x008b8686),
+            show_progress = false,
+        ),
+        Serial(),
     )
     @test nsolutions(r_timeout) < 21
 end
@@ -74,51 +90,79 @@ end
     x₀, p₀ = find_start_pair(F)
 
     # input of length > 1 (duplicated start solutions)
-    r = monodromy_solve(
-        F, [x₀ for _ in 1:30], p₀;
-        target_solutions_count = 21, max_loops_no_progress = 50,
-        seed = UInt32(0x008b8688), threading = false, show_progress = false,
+    r = solve(
+        F,
+        [x₀ for _ in 1:30],
+        p₀,
+        Monodromy(;
+            target_solutions_count = 21, max_loops_no_progress = 50,
+            seed = UInt32(0x008b8688), show_progress = false,
+        ),
+        Serial(),
     )
     @test nsolutions(r) == 21
 
     # raw polynomial input with explicit parameters
-    r = monodromy_solve(
-        collect(F.polys), [x₀], p₀;
-        parameters = collect(uv),
-        target_solutions_count = 21, max_loops_no_progress = 50,
-        seed = UInt32(0x008b8689), threading = false, show_progress = false,
+    r = solve(
+        System(collect(F.polys); parameters = collect(uv)),
+        [x₀],
+        p₀,
+        Monodromy(;
+            target_solutions_count = 21, max_loops_no_progress = 50,
+            seed = UInt32(0x008b8689), show_progress = false,
+        ),
+        Serial(),
     )
     @test nsolutions(r) == 21
 
     # degenerate distance: everything is identified
-    r = monodromy_solve(
-        F, [x₀], p₀; distance = (x, y) -> 0.0,
-        seed = UInt32(0x008b868a), threading = false, show_progress = false,
+    r = solve(
+        F,
+        [x₀],
+        p₀,
+        Monodromy(;
+            distance = (x, y) -> 0.0, seed = UInt32(0x008b868a), show_progress = false,
+        ),
+        Serial(),
     )
     @test nsolutions(r) == 1
 
     # distance without the triangle inequality (squared Euclidean)
-    r = monodromy_solve(
-        F, [x₀], p₀; distance = (x, y) -> norm(x - y, 2)^2,
-        target_solutions_count = 21, max_loops_no_progress = 50,
-        seed = UInt32(0x008b868b), threading = false, show_progress = false,
+    r = solve(
+        F,
+        [x₀],
+        p₀,
+        Monodromy(;
+            distance = (x, y) -> norm(x - y, 2)^2, target_solutions_count = 21,
+            max_loops_no_progress = 50, seed = UInt32(0x008b868b), show_progress = false,
+        ),
+        Serial(),
     )
     @test nsolutions(r) == 21
 
     # explicit triangle_inequality choices
     for ti in (false, true)
-        r = monodromy_solve(
-            F, [x₀], p₀; triangle_inequality = ti,
-            target_solutions_count = 21, max_loops_no_progress = 50,
-            seed = UInt32(0x008b868c), threading = false, show_progress = false,
+        r = solve(
+            F,
+            [x₀],
+            p₀,
+            Monodromy(;
+                target_solutions_count = 21, max_loops_no_progress = 50,
+                seed = UInt32(0x008b868c), show_progress = false,
+                triangle_inequality = ti,
+            ),
+            Serial(),
         )
         @test nsolutions(r) == 21
     end
 
     # heuristic stop without a target count
-    r = monodromy_solve(
-        F, [x₀], p₀;
-        seed = UInt32(0x008b868d), threading = false, show_progress = false,
+    r = solve(
+        F,
+        [x₀],
+        p₀,
+        Monodromy(; seed = UInt32(0x008b868d), show_progress = false),
+        Serial(),
     )
     @test is_heuristic_stop(r)
 end
@@ -135,37 +179,57 @@ end
     end
 
     # group action without equivalence classes still finds all 21
-    r = monodromy_solve(
-        F, [x₀], p₀;
-        target_solutions_count = 21, max_loops_no_progress = 100,
-        equivalence_classes = false, group_action = roots_of_unity,
-        seed = UInt32(0x008b868f), threading = false, show_progress = false,
+    r = solve(
+        F,
+        [x₀],
+        p₀,
+        Monodromy(;
+            target_solutions_count = 21, max_loops_no_progress = 100,
+            equivalence_classes = false, group_action = roots_of_unity,
+            seed = UInt32(0x008b868f), show_progress = false,
+        ),
+        Serial(),
     )
     @test nsolutions(r) == 21
 
     # equivalence classes: 21 solutions collapse into 7 orbits
-    r = monodromy_solve(
-        F, [x₀], p₀;
-        equivalence_classes = true, target_solutions_count = 7,
-        max_loops_no_progress = 50, group_actions = roots_of_unity,
-        seed = UInt32(0x008b8690), threading = false, show_progress = false,
+    r = solve(
+        F,
+        [x₀],
+        p₀,
+        Monodromy(;
+            equivalence_classes = true, target_solutions_count = 7,
+            max_loops_no_progress = 50, group_actions = roots_of_unity,
+            seed = UInt32(0x008b8690), show_progress = false,
+        ),
+        Serial(),
     )
     @test nresults(r) == 7
 
     # equivalence classes are on by default when a group action is given
-    r = monodromy_solve(
-        F, [x₀], p₀;
-        group_action = roots_of_unity, max_loops_no_progress = 50,
-        seed = UInt32(0x008b8691), threading = false, show_progress = false,
+    r = solve(
+        F,
+        [x₀],
+        p₀,
+        Monodromy(;
+            group_action = roots_of_unity, max_loops_no_progress = 50,
+            seed = UInt32(0x008b8691), show_progress = false,
+        ),
+        Serial(),
     )
     @test nsolutions(r) == 7
 
     for rl in (:all, :random, :none)
-        r = monodromy_solve(
-            F, [x₀], p₀;
-            group_action = roots_of_unity, target_solutions_count = 7,
-            reuse_loops = rl, max_loops_no_progress = 200,
-            seed = UInt32(0x008b8692), threading = false, show_progress = false,
+        r = solve(
+            F,
+            [x₀],
+            p₀,
+            Monodromy(;
+                group_action = roots_of_unity, target_solutions_count = 7, reuse_loops = rl,
+                max_loops_no_progress = 200, seed = UInt32(0x008b8692),
+                show_progress = false,
+            ),
+            Serial(),
         )
         @test nresults(r) == 7
     end
@@ -223,17 +287,25 @@ end
     S₃ = SymmetricGroup(3)
     relabeling(v) = map(p -> [v[1:3][p]..., v[4:6][p]..., v[7:9][p]...], S₃)
 
-    R = monodromy_solve(
-        f; group_action = relabeling, show_progress = false,
-        max_loops_no_progress = 1, seed = UInt32(0x6d31), threading = false,
+    R = solve(
+        f,
+        Monodromy(;
+            group_action = relabeling, show_progress = false, max_loops_no_progress = 1,
+            seed = UInt32(0x6d31),
+        ),
+        Serial(),
     )
     @test nsolutions(R) ≤ 225
 
     for threading in (true, false)
-        R = monodromy_solve(
-            f; group_action = relabeling, show_progress = false,
-            max_loops_no_progress = 20, target_solutions_count = 225,
-            threading = threading, seed = UInt32(0x6d32),
+        R = solve(
+            f,
+            Monodromy(;
+                group_action = relabeling, show_progress = false,
+                max_loops_no_progress = 20, target_solutions_count = 225,
+                seed = UInt32(0x6d32),
+            ),
+            Threaded(),
         )
         @test nsolutions(R) == 225
     end
@@ -262,9 +334,13 @@ end
         v -> map(p -> [v[1:2][p]..., v[3:4][p]..., v[5:6][p]..., v[7]], S₂)
     end
 
-    R = monodromy_solve(
-        M2; group_action = relabeling, show_progress = false,
-        threading = false, max_loops_no_progress = 10, seed = UInt32(0x9a01),
+    R = solve(
+        M2,
+        Monodromy(;
+            group_action = relabeling, show_progress = false, max_loops_no_progress = 10,
+            seed = UInt32(0x9a01),
+        ),
+        Serial(),
     )
     @test nsolutions(R) == 9
 end
@@ -275,10 +351,15 @@ end
     c₂ = (w[1] + 2)^2 + w[2]^2 - 1
 
     F = System([c₁ * c₂, a * w[1] + b * w[2] - c]; variables = w, parameters = [a, b, c])
-    S = monodromy_solve(
-        F, [[1.0, 0.0]], [1, 1, 1];
-        permutations = true, max_loops_no_progress = 20,
-        seed = UInt32(0xbe01), threading = false, show_progress = false,
+    S = solve(
+        F,
+        [[1.0, 0.0]],
+        [1, 1, 1],
+        Monodromy(;
+            permutations = true, max_loops_no_progress = 20, seed = UInt32(0xbe01),
+            show_progress = false,
+        ),
+        Serial(),
     )
     A = permutations(S)
     B = permutations(S; reduced = false)
@@ -294,12 +375,14 @@ end
         variables = w,
     )
     Random.seed!(0xbe02)
-    start_res = solve(F₁; show_progress = false)
+    start_res = solve(F₁, TotalDegree(; show_progress = false))
     @test nsolutions(start_res) == 4
-    S4 = monodromy_solve(
-        F, solutions(start_res), [1, 1, 1];
-        permutations = true, seed = UInt32(0xbe03),
-        threading = false, show_progress = false,
+    S4 = solve(
+        F,
+        solutions(start_res),
+        [1, 1, 1],
+        Monodromy(; permutations = true, seed = UInt32(0xbe03), show_progress = false),
+        Serial(),
     )
     C = permutations(S4)
     @test size(C, 1) == 4
@@ -310,21 +393,32 @@ end
     @polyvar x[1:4]
     f1 = rand_poly(x, 6)
     F = System([f1]; variables = x)
-    res = monodromy_solve(F; dim = 3, threading = false, seed = UInt32(0x00011e02), show_progress = false)
+    res = solve(
+        F,
+        Monodromy(; dim = 3, seed = UInt32(0x00011e02), show_progress = false),
+        Serial(),
+    )
     @test nsolutions(res) == 6
     @test trace(res) < 1.0e-6
     @test is_success(res)
 
-    res = monodromy_solve(
-        F; dim = 3, trace_test = false, threading = false,
-        seed = UInt32(0x00011e03), show_progress = false,
+    res = solve(
+        F,
+        Monodromy(;
+            dim = 3, trace_test = false, seed = UInt32(0x00011e03), show_progress = false,
+        ),
+        Serial(),
     )
     @test nsolutions(res) == 6
     @test is_heuristic_stop(res)
 
-    res = monodromy_solve(
-        F; dim = 3, trace_test = true, trace_test_tol = 1.0e-50,
-        threading = false, seed = UInt32(0x00011e04), show_progress = false,
+    res = solve(
+        F,
+        Monodromy(;
+            dim = 3, trace_test = true, trace_test_tol = 1.0e-50, seed = UInt32(0x00011e04),
+            show_progress = false,
+        ),
+        Serial(),
     )
     @test nsolutions(res) == 6
     @test is_heuristic_stop(res)
@@ -332,14 +426,22 @@ end
     # homogeneous hypersurface in P^3
     f1h = rand_poly(x, 6; homogeneous = true)
     Fh = System([f1h]; variables = x)
-    res = monodromy_solve(Fh; dim = 2, seed = UInt32(0x00011e05), threading = false, show_progress = false)
+    res = solve(
+        Fh,
+        Monodromy(; dim = 2, seed = UInt32(0x00011e05), show_progress = false),
+        Serial(),
+    )
     @test nsolutions(res) == 6
     @test trace(res) < 1.0e-6
     @test is_success(res)
 
     # curve of degree 6*3*4 = 72 in C^4
     Fc = System([f1, rand_poly(x, 3), rand_poly(x, 4)]; variables = x)
-    res = monodromy_solve(Fc; codim = 3, seed = UInt32(0x00011e06), threading = false, show_progress = false)
+    res = solve(
+        Fc,
+        Monodromy(; codim = 3, seed = UInt32(0x00011e06), show_progress = false),
+        Serial(),
+    )
     @test nsolutions(res) == 72
     @test trace(res) < 1.0e-6
     @test is_success(res)
@@ -347,12 +449,16 @@ end
 
 @testset "parameter homotopy from a monodromy result" begin
     F, uv = toric_ed_system()
-    mres = monodromy_solve(
-        F; target_solutions_count = 21, max_loops_no_progress = 20,
-        threading = false, seed = UInt32(0xf001), show_progress = false,
+    mres = solve(
+        F,
+        Monodromy(;
+            target_solutions_count = 21, max_loops_no_progress = 20, seed = UInt32(0xf001),
+            show_progress = false,
+        ),
+        Serial(),
     )
     Random.seed!(0xf002)
-    r = solve(F, mres, randn(ComplexF64, 4); show_progress = false)
+    r = solve(F, mres, randn(ComplexF64, 4), Continuation(; show_progress = false))
     @test nsolutions(r) == 21
 end
 
@@ -362,25 +468,35 @@ end
     l = a * x + b * y + c
     sys = System([f, l]; variables = [x, y], parameters = [a, b, c])
     res = solve(
-        sys, [[-0.6 - 0.8im, -1.2 + 0.4im]],
-        [1.0 + 0im, 2.0 + 0im, 3.0 + 0im], [1.0 + 0im, 2.0 + 0im, 3.0 + 0im];
-        seed = UInt32(0xce01), show_progress = false,
+        sys,
+        [[-0.6 - 0.8im, -1.2 + 0.4im]],
+        [1.0 + 0im, 2.0 + 0im, 3.0 + 0im],
+        [1.0 + 0im, 2.0 + 0im, 3.0 + 0im],
+        Continuation(; seed = UInt32(0xce01), show_progress = false),
     )
     @test nsolutions(res) == 1
     # complete the witness set by monodromy, then verify
-    mres = monodromy_solve(
-        sys, solutions(res), [1.0 + 0im, 2.0 + 0im, 3.0 + 0im];
-        target_solutions_count = 2, seed = UInt32(0xce02),
-        threading = false, show_progress = false,
+    mres = solve(
+        sys,
+        solutions(res),
+        [1.0 + 0im, 2.0 + 0im, 3.0 + 0im],
+        Monodromy(;
+            target_solutions_count = 2, seed = UInt32(0xce02), show_progress = false,
+        ),
+        Serial(),
     )
     @test nsolutions(mres) == 2
     sols = solutions(mres)
     p123 = [1.0 + 0im, 2.0 + 0im, 3.0 + 0im]
-    @test verify_solution_completeness(sys, sols, p123; show_progress = false) === true
-    @test verify_solution_completeness(sys, sols[1:1], p123; show_progress = false) in (false, nothing)
+    @test verify_solution_completeness(sys, sols, p123, Monodromy(; show_progress = false)) === true
+    @test verify_solution_completeness(sys, sols[1:1], p123, Monodromy(; show_progress = false)) in (false, nothing)
     # an impossibly strict trace tolerance rejects even the full set
     @test verify_solution_completeness(
-        sys, sols, p123; trace_tol = 1.0e-60, show_progress = false,
+        sys,
+        sols,
+        p123,
+        Monodromy(; show_progress = false);
+        trace_tol = 1.0e-60
     ) in (false, nothing)
 end
 
@@ -388,9 +504,13 @@ end
     @polyvar y[1:2] p[1:2]
     F = System([y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]]; variables = y, parameters = p)
     # an absurdly large rtol identifies the two solutions with each other
-    r = monodromy_solve(
-        F; unique_points_rtol = 10.0, max_loops_no_progress = 3,
-        seed = UInt32(0xd001), threading = false, show_progress = false,
+    r = solve(
+        F,
+        Monodromy(;
+            unique_points_rtol = 10.0, max_loops_no_progress = 3, seed = UInt32(0xd001),
+            show_progress = false,
+        ),
+        Serial(),
     )
     @test nsolutions(r) == 1
 end
@@ -464,12 +584,16 @@ end
     fL₁ = f ∘ L₁
     distance(x, y) = maximum(abs, evaluate_at(fL₁, x) .- evaluate_at(fL₁, y))
 
-    points = monodromy_solve(
-        C, [b₁], params;
-        distance = distance, unique_points_rtol = 1.0e-8,
-        unique_points_atol = 1.0e-14, target_solutions_count = 305,
-        max_loops_no_progress = 20, threading = false, show_progress = false,
-        seed = UInt32(0x5717),
+    points = solve(
+        C,
+        [b₁],
+        params,
+        Monodromy(;
+            distance = distance, unique_points_rtol = 1.0e-8, unique_points_atol = 1.0e-14,
+            target_solutions_count = 305, max_loops_no_progress = 20, show_progress = false,
+            seed = UInt32(0x5717),
+        ),
+        Serial(),
     )
     @test is_success(points)
     @test nsolutions(points) == 305

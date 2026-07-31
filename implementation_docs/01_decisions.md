@@ -143,8 +143,8 @@ Every route that consumes randomness takes `seed::UInt32 = rand(Random.RandomDev
 
 Consequences worth knowing before adding a route:
 
-- **Sub-computations take a seed drawn off the route's stream** (`rand(rng, UInt32)`), not the route's own seed. Reusing one seed for repeated calls rebuilds identical randomness: `decompose` and regeneration's `fill_up!` call `_monodromy_solve!` several times expecting different loops each time, and passing the same seed would make them generate the same loops and never converge.
-- **A route that must both record `seed` verbatim and seed a sub-computation with it** uses `_tagged_rng(seed, tag)`, whose seed *vector* cannot collide with `MersenneTwister(seed)`'s. `monodromy_solve` needs this: its result records the user's seed, while its setup draws (start pair, chart) must not share the stream its loop generation derives from the same seed.
+- **Sub-computations take a seed drawn off the route's stream** (`rand(rng, UInt32)`), not the route's own seed. Reusing one seed for repeated calls rebuilds identical randomness: the decomposition stage and regeneration's `fill_up!` call `_monodromy_solve!` several times expecting different loops each time, and passing the same seed would make them generate the same loops and never converge.
+- **A route that must both record `seed` verbatim and seed a sub-computation with it** uses `_tagged_rng(seed, tag)`, whose seed *vector* cannot collide with `MersenneTwister(seed)`'s. `Monodromy` needs this: its result records the user's seed, while its setup draws (start pair, chart) must not share the stream its loop generation derives from the same seed.
 - **`MersenneTwister` is not thread-safe**, so all draws from one stream must be on one task. Where a draw sits inside a threaded region (`ReuseLoops.RANDOM` in the threaded monodromy worker) each task gets its own stream derived from the seed. Draws that only *look* threaded are fine when they precede the tasks: `membership` and the u-homotopy intersection both pre-draw in the driver, which is also what makes them bit-identical across threading modes.
 - **A homotopy constructor's `gamma` default draws from the global RNG**, so a seeded route must pass `gamma` explicitly. Every worker of one solver must also get the *same* gamma, since they track the same homotopy, so it is drawn once and stored (`SubspaceMonodromyBuilder.gamma`) rather than defaulted per worker.
 - **`rand`/`randn` with no result to reproduce takes an `rng` instead of a seed**, defaulting to `Random.default_rng()` the way `rand` itself does: `LA.rank`, `corank`, `find_start_pair`, `rand_subspace`, the `MonodromySolver` constructors, and the chart/gamma defaults of the homotopy constructors.
@@ -194,15 +194,53 @@ The same restructure collapsed four accumulate functions (serial/threaded × nes
 
 The rule the whole surface follows: **a route that evaluates `F(x; p)` takes values, positionally. A route that needs the equations themselves takes a system, and `fix_parameters(F, p)` is the one operation that produces a parameter-free one. No parameter value is ever a keyword argument.**
 
-The evaluation-versus-construction line is what makes it exception-free. Certification, a monodromy base point and the two ends of a homotopy only evaluate `F` at a value, so they take the value: `certify(F, X, p)`, `monodromy_solve(F, S, p)`, `solve(F, starts, p_start, p_target)`, `ParameterHomotopy(F, p₁, p₀)`. Total degree and polyhedral build a start system from the target's degrees and monomial support, `slice` appends linear rows to the equations, and `witness_set`/`nid`/`regeneration` store the system and evaluate it later through `membership`, `intersect`, `decompose` and `trace_test`, so those take a system. That deleted 22 `target_parameters::Union{Nothing, AbstractVector{<:Number}}` keywords across five files, and the routes that never had the keyword (`nid`, `regeneration`) gained the capability for free.
+The evaluation-versus-construction line is what makes it exception-free. Certification, a monodromy base point and the two ends of a homotopy only evaluate `F` at a value, so they take the value: `certify(F, X, p)`, `solve(F, S, p, Monodromy())`, `solve(F, starts, p_start, p_target)`, `ParameterHomotopy(F, p₁, p₀)`. Total degree and polyhedral build a start system from the target's degrees and monomial support, `slice` appends linear rows to the equations, and `Witness`/`Decomposition`/`Regeneration` store the system and evaluate it later through `membership`, `intersect` and `trace_test`, so those take a system. That deleted 22 `target_parameters::Union{Nothing, AbstractVector{<:Number}}` keywords across five files, and the routes that never had the keyword gained the capability for free.
 
-The parameter routes went positional to match the subspace routes, which already were: `solve(F, starts, L_start, L_target)` and `solve_targets(F, starts, L_start, Ltargets)`. These are the same two operations, and the spelling used to differ only because the moving thing was a `Vector` rather than a `LinearSubspace`.
+The parameter routes went positional to match the subspace routes, which already were: `solve(F, starts, L_start, L_target)` and `solve(F, starts, L_start, Ltargets, Sweep())`. These are the same two operations, and the spelling used to differ only because the moving thing was a `Vector` rather than a `LinearSubspace`.
 
 The one place a value is taken where a system would be expected is `certify`, and the reason is rigor: `p` is enclosed to `max_precision` bits, so what is certified is `F` at an enclosure of `p`. `certify(fix_parameters(F, p), X)` also works but answers a different question, certifying the substituted system whose coefficients are already-rounded `ComplexF64` products of `p`.
 
-### `solve` returns a `Result`, `solve_targets` returns a `Vector`
+### One verb, `solve`; the algorithm slot carries single-vs-many
 
-The many-target route is a separate verb rather than a `solve` method, because the single-vs-many distinction cannot be carried by a positional slot's type. `solve_targets(F, S₀, p₀, 1:20; transform_parameters = i -> table[i])` passes bare numbers as targets, and `1:20` is an `AbstractVector{<:Number}`, indistinguishable from a single 20-value target. Keywords cannot dispatch, so no annotation resolves it either; v2 resolves it with a runtime `!isa(transform_parameters(first(targets)), Number)` branch, which would make the return type value-dependent. A distinct verb frees the slot, keeps metadata targets working, and removes the wart of one function returning `Result` or `Vector{Tuple}` depending on argument types. Only the public verb is new: `sweep.jl`, `_run_sweep` and `_init_parameter_sweep` keep their names.
+The many-target route returns a `Vector` where the single-target one returns a `Result`, and the distinction cannot be carried by the targets slot's type: `solve(F, S₀, p₀, 1:20, Sweep(; transform_parameters = i -> table[i]))` passes bare numbers as targets, and `1:20` is an `AbstractVector{<:Number}`, indistinguishable from a single 20-value target. v2 resolves it with a runtime `!isa(transform_parameters(first(targets)), Number)` branch, which makes the return type value-dependent.
+
+`Sweep` in the algorithm slot resolves it by dispatch instead, which is why `Sweep` is the one algorithm that may **not** be defaulted: its targets slot is a bare `AbstractVector`, so a defaulted `Sweep` would generate a 4-positional method ambiguous with the single-target parameter homotopy. A separate verb would also work, but it costs a second name for the same operation and re-opens the question of where its options live.
+
+### Where an option lives: executor vs algorithm
+
+The executor answers *where the work runs* — `ntasks`, `pids`, `tasks_per_process`, `batch_size` — and nothing else. Everything else, reporting included, is on the algorithm struct, so `solve` takes no keyword arguments. `threading::Bool` is gone from all 22 sites it occupied; it could not express `ntasks` and could not reach `DistributedExecutor` at all, so `witness_set`, `regeneration`, `decompose`, `nid`, `membership`, `verify_solution_completeness` and `intersect` were silently single-machine.
+
+Putting `show_progress` on the algorithm rather than leaving it a keyword is a uniformity choice, not a performance one: it is a runtime `Bool` on the cache selecting between two `@noinline` functions behind an inference barrier, so where the `Bool` comes from does not disturb TTFX. Its accepted cost is that display policy is part of algorithm identity, i.e. `TotalDegree(; seed = s) != TotalDegree(; seed = s, show_progress = false)`.
+
+Three invariants keep nesting honest:
+
+- **Seeds descend.** A parent draws each child's seed off its own stream (`_reseed`), so one top-level seed reproduces every stage.
+- **Endgame defaults are per algorithm.** `Regeneration` and `Intersection` default to `sing_cond = 1e12` and `Membership` to the same, so the u-homotopy rejects points on higher-dimensional components as singular instead of collecting them as spurious isolated points. `Decomposition` **replaces** its nested `Regeneration`'s endgame options with `sing_accuracy = 1e-10`; that is what the nid path has always run with, and a default `Regeneration()` inside a `Decomposition()` must not silently reinstate `sing_cond = 1e12`.
+- **No silently-dead nested field.** `Monodromy` has no `endgame_options` field, because nothing on the monodromy path reads one. A field that is live or dead depending on where the value is stored is worse than a missing one, since no test here can catch it.
+
+### `Result` and `MonodromyResult` stay separate types under one interface
+
+```
+AbstractResult
+├── AbstractSolutionResult   Result, MonodromyResult
+└──                          WitnessSet, NumericalIrreducibleDecomposition
+```
+
+`solutions`, `real_solutions`, `nsolutions`, `nsingular`, `nnonsingular`, `nreal`, `results` and `nresults` are defined once on `AbstractSolutionResult`, against `path_results(r)` and a per-type `_solution_indices(r)`. That second function is what a shared body needs and `path_results` alone cannot supply: `Result` clusters a fixed path set *afterwards*, so several paths map to one solution and the representative is `first(cluster)`; monodromy dedups *during* the run through `UniquePoints`, so every index is already a representative. A single `_passes` filter behind all of them keeps the `only_real` / `only_nonsingular` / `only_singular` semantics from drifting apart.
+
+The two concrete types stay separate. Merging them would put four `Union{Nothing, …}` fields on `Result`, the hot common return type, and `multiplicity` means different things on each: paths converging to one point versus one entry per distinct solution.
+
+**`is_success` is deliberately not in the interface.** It does not exist on `Result` at all, and on `MonodromyResult` it means "reached the target solution count", which has no `Result` counterpart. `seed` also stays per-type, since `WitnessSet` has no seed field.
+
+### `early_stop_callback` and what `tracked_paths` means
+
+Only the four tracking algorithms carry it: `TotalDegree`, `Polyhedral`, `Continuation`, `Sweep`. Stopping a witness set, a regeneration or a decomposition early yields a *wrong* answer rather than a partial one, so a field there would be a silent no-op.
+
+It is typed `FunctionWrapper{Bool, Tuple{PathResult}}`, the firewall the package already uses for `SystemEvaluator`, so the algorithm stays one concrete type whatever the callback is and no cache specialization is generated per callback. The dynamic call is once per completed path, off the tracker's inner loop.
+
+`tracked_paths` is **the number of paths that actually ran**, not the number planned. `nfailed` is derived as `tracked_paths - successes - excess - at_infinity`, so passing the planned count would make a run stopped after 1 of 64 paths report 63 failures. `paths_to_track` therefore agrees with `Result.tracked_paths` only when no callback fires, which is every call that does not set one.
+
+`@tasks` cannot `break`, so the threaded loops check an atomic and **skip**, leaving `#undef` slots that `_assigned_results` filters out. Which extra paths complete after the flag is set is not reproducible under `Threaded`. Under `DistributedExecutor` the callback runs driver-side at `batch_size` granularity: the closure never leaves the driver, so nothing has to serialize it (a `FunctionWrapper` wraps a raw pointer and cannot cross processes).
 
 ### Fixing parameters: a `System` substitutes, a composition binds (MEASURED)
 
@@ -339,7 +377,7 @@ This does not translate into first-call time. A probe build that never loads OhM
 
 ### Explicit kwargs in monodromy
 
-Every forwarding boundary (`monodromy_solve`, `verify_solution_completeness`, internal solves) enumerates its keywords explicitly, since the repo forbids kwargs splatting (blocks inference). This is the main reason `monodromy.jl` is ~280 lines larger than its v2 counterpart.
+Every forwarding boundary (`Monodromy`, `verify_solution_completeness`, internal solves) enumerates its keywords explicitly, since the repo forbids kwargs splatting (blocks inference). This is the main reason `monodromy.jl` is ~280 lines larger than its v2 counterpart.
 
 ### Fresh `@polyvar` for augmented variables
 

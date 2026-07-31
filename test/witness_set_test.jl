@@ -24,7 +24,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
 
         F = System([x^2 + y^2 - 5]; variables = [x, y])
 
-        W = witness_set(F; show_progress = false)
+        W = solve(F, Witness(; show_progress = false))
 
         @test dim(W) == 1
         @test codim(W) == 1
@@ -33,7 +33,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
 
         L = LinearSubspace([1 1], [-1])
 
-        W_L = witness_set(W, L)
+        W_L = solve(W, L, Witness())
         @test degree(W_L) == 2
         @test sort(real.(solutions(W_L))) ≈ [[-2, 1], [1, -2]]
         @test linear_subspace(W_L) == convert(typeof(linear_subspace(W_L)), L)
@@ -41,8 +41,8 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test trace_test(W) < 1.0e-8
         @test_throws MethodError trace_test(W; shwo_progress = false)
 
-        W_seed₁ = witness_set(F; seed = UInt32(0x1234), threading = false, show_progress = false)
-        W_seed₂ = witness_set(F; seed = UInt32(0x1234), threading = false, show_progress = false)
+        W_seed₁ = solve(F, Witness(; seed = UInt32(0x1234), show_progress = false), Serial())
+        W_seed₂ = solve(F, Witness(; seed = UInt32(0x1234), show_progress = false), Serial())
         @test linear_subspace(W_seed₁) == linear_subspace(W_seed₂)
         @test points(W_seed₁) == points(W_seed₂)
     end
@@ -51,13 +51,13 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @polyvar x y
 
         # single polynomial and vector of polynomials
-        @test degree(witness_set(x^2 + y^2 - 5; show_progress = false)) == 2
-        @test degree(witness_set([x^2 + y^2 - 5]; show_progress = false)) == 2
+        @test degree(solve(x^2 + y^2 - 5, Witness(; show_progress = false))) == 2
+        @test degree(solve([x^2 + y^2 - 5], Witness(; show_progress = false))) == 2
 
         L = LinearSubspace([1 1], [-1])
-        W_L = witness_set(x^2 + y^2 - 5, L; show_progress = false)
+        W_L = solve(x^2 + y^2 - 5, L, Witness(; show_progress = false))
         @test sort(real.(solutions(W_L))) ≈ [[-2, 1], [1, -2]]
-        W_L2 = witness_set([x^2 + y^2 - 5], L; show_progress = false)
+        W_L2 = solve([x^2 + y^2 - 5], L, Witness(; show_progress = false))
         @test sort(real.(solutions(W_L2))) ≈ [[-2, 1], [1, -2]]
 
         # a WitnessSet requires a parameter-free system
@@ -71,7 +71,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
 
         F = System([x^2 + y^2 - 5z^2]; variables = [x, y, z])
 
-        W = witness_set(F; show_progress = false)
+        W = solve(F, Witness(; show_progress = false))
 
         @test dim(W) == 1
         @test codim(W) == 2
@@ -80,26 +80,26 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test trace_test(W) < 1.0e-8
 
         L = LinearSubspace([1 1 1])
-        W_L = witness_set(W, L)
+        W_L = solve(W, L, Witness())
         @test degree(W_L) == 2
 
         L = rand_subspace(3; codim = 1, affine = false)
-        W_L = witness_set(W, L)
+        W_L = solve(W, L, Witness())
         @test degree(W_L) == 2
 
         L = rand_subspace([x, y, z]; codim = 1, affine = false)
-        W_L = witness_set(W, L)
+        W_L = solve(W, L, Witness())
         @test degree(W_L) == 2
 
         L = rand_subspace(3; codim = 1, affine = true)
-        @test_throws ErrorException witness_set(W, L)
+        @test_throws ErrorException solve(W, L, Witness())
     end
 
     @testset "projective membership" begin
         @polyvar x y z
 
         F = System([x^2 + y^2 - 5z^2]; variables = [x, y, z])
-        W = witness_set(F; show_progress = false)
+        W = solve(F, Witness(; show_progress = false))
         @test W.projective
 
         # any projective representative works (arbitrary complex scaling)
@@ -107,19 +107,19 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         pt_off = randn(ComplexF64, 3)
         q0 = solutions(W)[1]
 
-        @test membership(pt_on, W; threading = false, show_progress = false)
-        @test !membership(pt_off, W; threading = false, show_progress = false)
-        @test membership([pt_on, pt_off, q0], W; threading = false, show_progress = false) ==
+        @test membership(pt_on, W, Membership(; show_progress = false), Serial())
+        @test !membership(pt_off, W, Membership(; show_progress = false), Serial())
+        @test membership([pt_on, pt_off, q0], W, Membership(; show_progress = false), Serial()) ==
             [true, false, true]
         # threaded driver (with one thread this still exercises the task path)
-        @test membership([pt_on, pt_off, q0], W; threading = true, show_progress = false) ==
+        @test membership([pt_on, pt_off, q0], W, Membership(; show_progress = false), Threaded()) ==
             [true, false, true]
     end
 
     @testset "zero-dimensional" begin
         # projective: two points in P^1
         @polyvar s t
-        W0p = witness_set(System([s^2 - t^2]; variables = [s, t]); show_progress = false)
+        W0p = solve(System([s^2 - t^2]; variables = [s, t]), Witness(; show_progress = false))
         @test degree(W0p) == 2
         @test dim(W0p) == 0
         @test trace_test(W0p) < 1.0e-8
@@ -127,21 +127,26 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         # affine: four isolated points
         @polyvar a b
         F0 = System([a^2 - 1, b^2 - 4]; variables = [a, b])
-        W0a = witness_set(F0; show_progress = false)
+        W0a = solve(F0, Witness(; show_progress = false))
         @test degree(W0a) == 4
         @test dim(W0a) == 0
-        @test membership([ComplexF64[1, 2], ComplexF64[1, 3]], W0a; threading = false, show_progress = false) ==
+        @test membership(
+            [ComplexF64[1, 2], ComplexF64[1, 3]],
+            W0a,
+            Membership(; show_progress = false),
+            Serial(),
+        ) ==
             [true, false]
 
         # explicit dim = 0 kwarg
-        @test degree(witness_set(F0; dim = 0, show_progress = false)) == 4
+        @test degree(solve(F0, Witness(; dim = 0, show_progress = false))) == 4
     end
 
     @testset "parametric (fix_parameters)" begin
         @polyvar u v p q
         F = System([u^2 + v^2 - p * q]; variables = [u, v], parameters = [p, q])
 
-        W = witness_set(fix_parameters(F, [2.0, 2.5]); show_progress = false)
+        W = solve(fix_parameters(F, [2.0, 2.5]), Witness(; show_progress = false))
         @test degree(W) == 2
         @test dim(W) == 1
         # the stored system is parameter-free (parameters substituted)
@@ -149,21 +154,21 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test trace_test(W) < 1.0e-8
 
         # the fixed witness set moves like any other
-        W_L = witness_set(W, LinearSubspace([1 1], [-1]))
+        W_L = solve(W, LinearSubspace([1 1], [-1]), Witness())
         @test degree(W_L) == 2
 
         # explicit subspace entry point takes a fixed-parameter system too
         L = rand_subspace(2; codim = 1)
-        W2 = witness_set(fix_parameters(F, [2.0, 2.5]), L; show_progress = false)
+        W2 = solve(fix_parameters(F, [2.0, 2.5]), L, Witness(; show_progress = false))
         @test degree(W2) == 2
 
         # errors: missing, spurious, and wrong-length parameter values
-        @test_throws ArgumentError witness_set(F)
-        @test_throws ArgumentError witness_set(fix_parameters(F, [1.0]))
+        @test_throws ArgumentError solve(F, Witness())
+        @test_throws ArgumentError solve(fix_parameters(F, [1.0]), Witness())
         G = System([u^2 + v^2 - 5]; variables = [u, v])
-        @test_throws ArgumentError witness_set(fix_parameters(G, [1.0]))
+        @test_throws ArgumentError solve(fix_parameters(G, [1.0]), Witness())
         # regeneration rejects parametric systems loudly
-        @test_throws ArgumentError regeneration(F)
+        @test_throws ArgumentError solve(F, Regeneration())
     end
 
     @testset "dim / codim" begin
@@ -179,9 +184,9 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             ]
         )
 
-        @test degree(witness_set(f; dim = 1, show_progress = false)) == 16
-        @test degree(witness_set(f; codim = 4, show_progress = false)) == 16
-        @test degree(witness_set(f; show_progress = false)) == 16
+        @test degree(solve(f, Witness(; dim = 1, show_progress = false))) == 16
+        @test degree(solve(f, Witness(; codim = 4, show_progress = false))) == 16
+        @test degree(solve(f, Witness(; show_progress = false))) == 16
 
         homogeneous = false
         f = System(
@@ -192,9 +197,9 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
                 rand_poly(x, 2; homogeneous = homogeneous),
             ]
         )
-        @test degree(witness_set(f; dim = 2, show_progress = false)) == 16
-        @test degree(witness_set(f; codim = 4, show_progress = false)) == 16
-        @test degree(witness_set(f; show_progress = false)) == 16
+        @test degree(solve(f, Witness(; dim = 2, show_progress = false))) == 16
+        @test degree(solve(f, Witness(; codim = 4, show_progress = false))) == 16
+        @test degree(solve(f, Witness(; show_progress = false))) == 16
     end
 
     @polyvar x y z
@@ -207,22 +212,22 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
     ]
 
     @testset "membership" begin
-        W = witness_set(System(F); codim = 2, show_progress = false)
+        W = solve(System(F), Witness(; codim = 2, show_progress = false))
 
         pt = randn(3)
         q0 = solutions(W)[1]
 
-        @test !membership(pt, W; show_progress = false)
-        @test membership(q0, W; show_progress = false)
-        a = membership([pt, q0], W; show_progress = false)
+        @test !membership(pt, W, Membership(; show_progress = false))
+        @test membership(q0, W, Membership(; show_progress = false))
+        a = membership([pt, q0], W, Membership(; show_progress = false))
         @test a == [false, true]
-        @test membership([pt, q0], W; show_progress = true) == [false, true]
+        @test membership([pt, q0], W, Membership(; show_progress = true)) == [false, true]
     end
 
     @testset "intersect" begin
-        H = [witness_set(System([f]); show_progress = false) for f in F]
+        H = [solve(System([f]), Witness(; show_progress = false)) for f in F]
         B = intersect(H[1], H[2])
-        C = vcat([intersect(Hi, H[3]; show_progress = false) for Hi in B]...)
+        C = vcat([intersect(Hi, H[3], Intersection(; show_progress = false)) for Hi in B]...)
         @test sort(degree.(C)) == [2, 8, 8]
     end
 
@@ -234,11 +239,11 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         l2 = rand_subspace(2; codim = 1)
 
         # slicing the circle with a codim-1 subspace gives 2 points
-        W1 = witness_set(Fcirc, l1; show_progress = false)
+        W1 = solve(Fcirc, l1, Witness(; show_progress = false))
         @test degree(W1) == 2
 
         # extrinsic move: the moved points lie on the target subspace
-        W2 = witness_set(W1, l2)
+        W2 = solve(W1, l2, Witness())
         @test degree(W2) == 2
         for pt in solutions(W2)
             @test norm(l2(pt)) < 1.0e-10
@@ -272,7 +277,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         S = a1^2 + a2^2 + a3^2 - 1
         P = a2 - a1^2
         L = rand_subspace(3; codim = 1)
-        W4 = witness_set([S, P], L; show_progress = false)
+        W4 = solve([S, P], L, Witness(; show_progress = false))
         @test degree(W4) == 4
 
         # the sliced system is [F; A x − b]
@@ -293,10 +298,10 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
 
     @testset "intersect threaded" begin
         # exercise the threaded u-homotopy root tracking explicitly
-        H = [witness_set(System([f]); show_progress = false) for f in F]
-        B = intersect(H[1], H[2]; threading = true)
+        H = [solve(System([f]), Witness(; show_progress = false)) for f in F]
+        B = intersect(H[1], H[2], Intersection(), Threaded())
         C = vcat(
-            [intersect(Hi, H[3]; show_progress = false, threading = true) for Hi in B]...
+            [intersect(Hi, H[3], Intersection(; show_progress = false), Threaded()) for Hi in B]...
         )
         @test sort(degree.(C)) == [2, 8, 8]
     end
@@ -334,18 +339,18 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
 
         s = UInt32(0xBEEF)
         routes = (
-            ("witness_set(F)", () -> witness_set(Faff; seed = s, show_progress = false)),
+            ("solve(F, Witness())", () -> solve(Faff, Witness(; seed = s, show_progress = false))),
             (
-                "witness_set(F, L)",
-                () -> witness_set(Faff, Laff; seed = s, show_progress = false),
+                "solve(F, L, Witness())",
+                () -> solve(Faff, Laff, Witness(; seed = s, show_progress = false)),
             ),
             (
-                "witness_set(F) projective",
-                () -> witness_set(Fhom; seed = s, show_progress = false),
+                "solve(F, Witness()) projective",
+                () -> solve(Fhom, Witness(; seed = s, show_progress = false)),
             ),
             (
-                "witness_set(F, L) projective",
-                () -> witness_set(Fhom, Lhom; seed = s, show_progress = false),
+                "solve(F, L, Witness()) projective",
+                () -> solve(Fhom, Lhom, Witness(; seed = s, show_progress = false)),
             ),
         )
         @testset "$name" for (name, route) in routes
@@ -354,10 +359,10 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             @test !advances_ambient(route)
         end
 
-        W = witness_set(Faff; seed = UInt32(0x55), show_progress = false)
+        W = solve(Faff, Witness(; seed = UInt32(0x55), show_progress = false))
         L2 = rand_subspace(2; codim = 1)
 
-        move = () -> witness_set(W, L2; seed = s)
+        move = () -> solve(W, L2, Witness(; seed = s))
         M1, M2 = from_two_states(move)
         @test pts_agree(solutions(M1), solutions(M2))
         @test !advances_ambient(move)
@@ -368,7 +373,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test !advances_ambient(trace)
 
         q = solutions(W)[1]
-        mem = () -> membership(q, W; seed = s, show_progress = false)
+        mem = () -> membership(q, W, Membership(; seed = s, show_progress = false))
         m1, m2 = from_two_states(mem)
         @test m1 == m2 == true
         @test !advances_ambient(mem)

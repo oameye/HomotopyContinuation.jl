@@ -5,33 +5,8 @@
 # by construction (the cache's single tracker is reused), and no clustering or
 # excess-solution reclassification happens; call `Result(ri)` for those.
 
-"""
-    ResultIterator(cache[, mask])
-
-Lazily track the paths of a solve cache, yielding one [`PathResult`](@ref) per
-start solution. `mask` selects which start solutions are tracked (all by
-default); see [`bitmask_filter`](@ref).
-
-Build one with [`result_iterator`](@ref) rather than from a cache directly.
-"""
-struct ResultIterator{C}
-    cache::C
-    mask::BitVector
-
-    # `length(ri)` counts the mask, so a mask of the wrong length would make the
-    # advertised length disagree with what iteration yields.
-    function ResultIterator{C}(cache::C, mask::BitVector) where {C}
-        n = length(cache.start_solutions)
-        length(mask) == n || throw(
-            ArgumentError("The mask has length $(length(mask)), expected $n."),
-        )
-        return new{C}(cache, mask)
-    end
-end
-
-ResultIterator(cache::C, mask::BitVector) where {C} = ResultIterator{C}(cache, mask)
-ResultIterator(cache::C) where {C} =
-    ResultIterator{C}(cache, trues(length(cache.start_solutions)))
+# The type itself is in `starts.jl`, which `StartsLike` forces to be compiled
+# before every route that takes start solutions.
 
 # ── One path per cache kind ────────────────────────────────────────────────
 
@@ -155,12 +130,13 @@ _excess_checker(::WorkerSolveCache) = nothing
 """
     result_iterator(F::System, alg = TotalDegree()) -> ResultIterator
     result_iterator(F::System, L::LinearSubspace, alg = TotalDegree())
-    result_iterator(F::System, starts, p_start, p_target; options...)
-    result_iterator(F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace;
-                    intrinsic, options...)
+    result_iterator(F::System, starts, p_start, p_target, alg = Continuation())
+    result_iterator(F::System, starts, L_start::LinearSubspace,
+                    L_target::LinearSubspace, alg = Continuation())
 
 Build a [`ResultIterator`](@ref) for the same problems [`solve`](@ref) accepts,
-tracking paths lazily instead of all at once. Tracking is serial.
+tracking paths lazily instead of all at once. Tracking is serial, so the
+algorithm's `show_progress` is ignored.
 
 A `ResultIterator` may be passed as the start solutions of another `solve` or
 `result_iterator`; its successful endpoints are used.
@@ -176,65 +152,32 @@ real_paths = bitmask_filter(is_real, ri)
 ```
 """
 result_iterator(F::System, alg::TotalDegree = TotalDegree())::ResultIterator =
-    ResultIterator(CommonSolve.init(F, alg, Serial(); show_progress = false))
+    ResultIterator(CommonSolve.init(F, _quiet(alg), Serial()))
 
 result_iterator(F::System, alg::Polyhedral)::ResultIterator =
-    ResultIterator(CommonSolve.init(F, alg, Serial(); show_progress = false))
+    ResultIterator(CommonSolve.init(F, _quiet(alg), Serial()))
 
-function result_iterator(
-        F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree()
-    )::ResultIterator
-    return ResultIterator(
-        CommonSolve.init(
-            F, L, alg, Serial();
-            show_progress = false,
-        ),
-    )
-end
+result_iterator(
+    F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree(),
+)::ResultIterator = ResultIterator(CommonSolve.init(F, L, _quiet(alg), Serial()))
 
-function result_iterator(
-        F::System, L::LinearSubspace, alg::Polyhedral
-    )::ResultIterator
-    return ResultIterator(
-        CommonSolve.init(
-            F, L, alg, Serial();
-            show_progress = false,
-        ),
-    )
-end
+result_iterator(
+    F::System, L::LinearSubspace, alg::Polyhedral,
+)::ResultIterator = ResultIterator(CommonSolve.init(F, L, _quiet(alg), Serial()))
 
-function result_iterator(
-        F::System, starts,
-        p_start::AbstractVector{<:Number}, p_target::AbstractVector{<:Number};
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-    )::ResultIterator
-    return ResultIterator(
-        CommonSolve.init(
-            F, starts, p_start, p_target, Serial();
-            seed = seed, tracker_options = tracker_options,
-            endgame_options = endgame_options, show_progress = false,
-        ),
-    )
-end
+result_iterator(
+    F::System, starts::StartsLike, p_start::AbstractVector{<:Number},
+    p_target::AbstractVector{<:Number}, alg::Continuation = Continuation(),
+)::ResultIterator = ResultIterator(
+    CommonSolve.init(F, starts, p_start, p_target, _quiet(alg), Serial()),
+)
 
-function result_iterator(
-        F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace;
-        intrinsic::Bool = _default_intrinsic(L_start),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-    )::ResultIterator
-    return ResultIterator(
-        CommonSolve.init(
-            F, starts, L_start, L_target, Serial();
-            intrinsic = intrinsic,
-            seed = seed, tracker_options = tracker_options,
-            endgame_options = endgame_options, show_progress = false,
-        ),
-    )
-end
+result_iterator(
+    F::System, starts::StartsLike, L_start::LinearSubspace,
+    L_target::LinearSubspace, alg::Continuation = Continuation(),
+)::ResultIterator = ResultIterator(
+    CommonSolve.init(F, starts, L_start, L_target, _quiet(alg), Serial()),
+)
 
 # A `ResultIterator` used as start solutions contributes every successful
 # endpoint, tracked on the spot. Singular endpoints are kept, unlike

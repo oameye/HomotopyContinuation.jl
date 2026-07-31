@@ -5,7 +5,7 @@ using HomotopyContinuationNext: Serial, Threaded, DistributedExecutor, Result,
 using HomotopyContinuationNext: _SupportSystem, _stage_system, evaluate!, FSVec,
     nparameters, _distributed_solve!, _distributed_sweep_entries,
     _distributed_monodromy_solve!
-using HomotopyContinuationNext: monodromy_solve, permutations, trace, is_success,
+using HomotopyContinuationNext: permutations, trace, is_success,
     MonodromyCode
 using HomotopyContinuationNext: variable_groups, multi_degrees, is_homogeneous
 using DynamicPolynomials: @polyvar
@@ -162,7 +162,11 @@ end
     @testset "no worker process" begin
         @test workers() == [Distributed.myid()]
         err = try
-            solve(F, TotalDegree(; seed = UInt32(99)), DistributedExecutor(); show_progress = false)
+            solve(
+                F,
+                TotalDegree(; seed = UInt32(99), show_progress = false),
+                DistributedExecutor(),
+            )
             nothing
         catch e
             e
@@ -182,8 +186,8 @@ end
         lockstep = DistributedExecutor(; pids = [pids[1]], tasks_per_process = 1)
 
         @testset "total degree" begin
-            alg = TotalDegree(; seed = UInt32(99))
-            serial = solve(F, alg, Serial(); show_progress = false)
+            alg = TotalDegree(; seed = UInt32(99), show_progress = false)
+            serial = solve(F, alg, Serial())
             @test nsolutions(serial) > 0
             for exec in (
                     DistributedExecutor(),
@@ -192,25 +196,42 @@ end
                     lockstep,
                 )
                 @test same_paths(
-                    serial, solve(F, alg, exec; show_progress = false),
+                    serial, solve(F, alg, exec),
                 ) == ""
             end
         end
 
+        # The callback runs driver-side at batch granularity: a `FunctionWrapper`
+        # wraps a raw pointer and cannot cross processes.
+        @testset "early_stop_callback, driver-side" begin
+            full = solve(F, TotalDegree(; seed = UInt32(99), show_progress = false), Serial())
+            stopped = solve(
+                F,
+                TotalDegree(;
+                    seed = UInt32(99), show_progress = false,
+                    early_stop_callback = _ -> true,
+                ),
+                DistributedExecutor(; batch_size = 1),
+            )
+            @test 0 < stopped.tracked_paths < full.tracked_paths
+            @test nfailed(stopped) == 0
+            @test length(path_results(stopped)) == stopped.tracked_paths
+        end
+
         @testset "total degree, overdetermined" begin
             alg = TotalDegree(; seed = UInt32(31))
-            serial = solve(F_over, alg, Serial(); show_progress = false)
+            serial = solve(F_over, alg, Serial())
             @test same_paths(
-                serial, solve(F_over, alg, DistributedExecutor(); show_progress = false),
+                serial, solve(F_over, alg, DistributedExecutor()),
             ) == ""
         end
 
         @testset "total degree, composition" begin
             C = System([x + y, x - 2]) ∘ System([y^2 + 2x + 3, x - 1])
             alg = TotalDegree(; seed = UInt32(17))
-            serial = solve(C, alg, Serial(); show_progress = false)
+            serial = solve(C, alg, Serial())
             @test same_paths(
-                serial, solve(C, alg, DistributedExecutor(); show_progress = false),
+                serial, solve(C, alg, DistributedExecutor()),
             ) == ""
         end
 
@@ -228,21 +249,21 @@ end
                         variable_groups = [[u, v], [s, t]],
                     ),
                 )
-                serial = solve(G, alg, Serial(); show_progress = false)
+                serial = solve(G, alg, Serial())
                 @test nsolutions(serial) == 2
                 @test same_paths(
-                    serial, solve(G, alg, DistributedExecutor(); show_progress = false),
+                    serial, solve(G, alg, DistributedExecutor()),
                 ) == ""
             end
         end
 
         @testset "polyhedral" begin
-            alg = Polyhedral(; seed = UInt32(99))
-            serial = solve(F, alg, Serial(); show_progress = false)
+            alg = Polyhedral(; seed = UInt32(99), show_progress = false)
+            serial = solve(F, alg, Serial())
             @test nsolutions(serial) > 0
             for exec in (DistributedExecutor(), DistributedExecutor(; batch_size = 1))
                 @test same_paths(
-                    serial, solve(F, alg, exec; show_progress = false),
+                    serial, solve(F, alg, exec),
                 ) == ""
             end
         end
@@ -251,7 +272,8 @@ end
         starts = solutions(
             solve(
                 System([x^2 + y^2 - 3.0, x * y - 0.5]),
-                TotalDegree(; seed = UInt32(7)), Serial(); show_progress = false,
+                TotalDegree(; seed = UInt32(7), show_progress = false),
+                Serial(),
             ),
         )
 
@@ -259,9 +281,9 @@ end
             @test length(starts) == 4
             q = ComplexF64[2.3, 0.9]
             opts = (; seed = UInt32(55), show_progress = false)
-            serial = solve(F_param, starts, p₀, q, Serial(); opts...)
+            serial = solve(F_param, starts, p₀, q, Continuation(; opts...), Serial())
             for exec in (DistributedExecutor(), DistributedExecutor(; batch_size = 1))
-                @test same_paths(serial, solve(F_param, starts, p₀, q, exec; opts...)) == ""
+                @test same_paths(serial, solve(F_param, starts, p₀, q, Continuation(; opts...), exec)) == ""
             end
         end
 
@@ -269,20 +291,20 @@ end
             G = fix_parameters(F_param, p₀)
             H = fix_parameters(F_param, ComplexF64[2.3, 0.9])
             opts = (; seed = UInt32(55), show_progress = false)
-            serial = solve(G, H, starts, Serial(); opts...)
+            serial = solve(G, H, starts, Continuation(; opts...), Serial())
             @test nsolutions(serial) == 4
             for exec in (DistributedExecutor(), DistributedExecutor(; batch_size = 1))
-                @test same_paths(serial, solve(G, H, starts, exec; opts...)) == ""
+                @test same_paths(serial, solve(G, H, starts, Continuation(; opts...), exec)) == ""
             end
         end
 
         @testset "explicit homotopy" begin
             H = ParameterHomotopy(F_param, p₀, ComplexF64[2.3, 0.9])
             opts = (; seed = UInt32(55), show_progress = false)
-            serial = solve(H, starts, Serial(); opts...)
+            serial = solve(H, starts, Continuation(; opts...), Serial())
             @test nsolutions(serial) == 4
             for exec in (DistributedExecutor(), DistributedExecutor(; batch_size = 1))
-                @test same_paths(serial, solve(H, starts, exec; opts...)) == ""
+                @test same_paths(serial, solve(H, starts, Continuation(; opts...), exec)) == ""
             end
         end
 
@@ -291,24 +313,26 @@ end
         W = rand_subspace(3; codim = 1)
         starts_V = solutions(
             solve(
-                F_curve, V, TotalDegree(; seed = UInt32(3)), Serial();
-                show_progress = false,
+                F_curve,
+                V,
+                TotalDegree(; seed = UInt32(3), show_progress = false),
+                Serial(),
             ),
         )
 
         @testset "subspace to subspace, intrinsic = $intr" for intr in (false, true)
             @test length(starts_V) == 2
             opts = (; intrinsic = intr, seed = UInt32(8), show_progress = false)
-            serial = solve(F_curve, starts_V, V, W, Serial(); opts...)
+            serial = solve(F_curve, starts_V, V, W, Continuation(; opts...), Serial())
             @test same_paths(
-                serial, solve(F_curve, starts_V, V, W, DistributedExecutor(); opts...),
+                serial, solve(F_curve, starts_V, V, W, Continuation(; opts...), DistributedExecutor()),
             ) == ""
         end
 
         @testset "parameter sweep" begin
             targets = [ComplexF64[2.0 + 0.1k, 0.4 + 0.05k] for k in 1:7]
             opts = (; seed = UInt32(55), show_progress = false)
-            serial = solve_targets(F_param, starts, p₀, targets, Serial(); opts...)
+            serial = solve(F_param, starts, p₀, targets, Sweep(; opts...), Serial())
             @test length(serial) == length(targets)
             # `batch_size = 3` puts a batch boundary inside a target, which is
             # what exercises the retarget bookkeeping.
@@ -319,7 +343,7 @@ end
                     lockstep,
                 )
                 @test same_sweep(
-                    serial, solve_targets(F_param, starts, p₀, targets, exec; opts...),
+                    serial, solve(F_param, starts, p₀, targets, Sweep(; opts...), exec),
                 ) == ""
             end
         end
@@ -327,7 +351,7 @@ end
         @testset "subspace sweep" begin
             targets = [rand_subspace(3; codim = 1) for _ in 1:5]
             opts = (; seed = UInt32(8), show_progress = false)
-            serial = solve_targets(F_curve, starts_V, V, targets, Serial(); opts...)
+            serial = solve(F_curve, starts_V, V, targets, Sweep(; opts...), Serial())
             @test length(serial) == length(targets)
             for exec in (
                     DistributedExecutor(),
@@ -336,7 +360,7 @@ end
                     lockstep,
                 )
                 @test same_sweep(
-                    serial, solve_targets(F_curve, starts_V, V, targets, exec; opts...),
+                    serial, solve(F_curve, starts_V, V, targets, Sweep(; opts...), exec),
                 ) == ""
             end
         end
@@ -353,7 +377,7 @@ end
                 seed = UInt32(123), show_progress = false,
                 target_solutions_count = 4, max_loops_no_progress = 50,
             )
-            serial = monodromy_solve(G, Serial(); opts...)
+            serial = solve(G, Monodromy(; opts...), Serial())
             @test nsolutions(serial) == 4
 
             for exec in (
@@ -361,7 +385,7 @@ end
                     DistributedExecutor(; batch_size = 1),
                     lockstep,
                 )
-                r = monodromy_solve(G, exec; opts...)
+                r = solve(G, Monodromy(; opts...), exec)
                 @test r.returncode == serial.returncode
                 @test nsolutions(r) == 4
                 for s in solutions(serial)
@@ -370,9 +394,7 @@ end
             end
 
             @testset "permutations" begin
-                r = monodromy_solve(
-                    G, DistributedExecutor(); permutations = true, opts...,
-                )
+                r = solve(G, Monodromy(; permutations = true, opts...), DistributedExecutor())
                 perm = permutations(r)
                 @test size(perm, 1) == 4
                 for k in axes(perm, 2)
@@ -385,10 +407,10 @@ end
             @testset "subspace with trace test" begin
                 Q = System([x^2 + 2y^2 + 3z^2 + x * y - 1]; variables = [x, y, z])
                 q_opts = (; dim = 2, seed = UInt32(99), show_progress = false)
-                serial_q = monodromy_solve(Q, Serial(); q_opts...)
+                serial_q = solve(Q, Monodromy(; q_opts...), Serial())
                 @test nsolutions(serial_q) == 2 && is_success(serial_q)
                 for exec in (DistributedExecutor(), lockstep)
-                    r = monodromy_solve(Q, exec; q_opts...)
+                    r = solve(Q, Monodromy(; q_opts...), exec)
                     @test nsolutions(r) == 2
                     @test is_success(r)
                     @test trace(r) !== nothing && trace(r) < 1.0e-10
@@ -396,17 +418,20 @@ end
             end
 
             @testset "timeout" begin
-                r = monodromy_solve(
-                    G, DistributedExecutor(); seed = UInt32(123),
-                    show_progress = false, timeout = 0.0,
-                    target_solutions_count = 4, max_loops_no_progress = 50,
+                r = solve(
+                    G,
+                    Monodromy(;
+                        seed = UInt32(123), show_progress = false, timeout = 0.0,
+                        target_solutions_count = 4, max_loops_no_progress = 50,
+                    ),
+                    DistributedExecutor(),
                 )
                 @test r.returncode == MonodromyCode.TIMEOUT
             end
         end
 
         @testset "error reporting" begin
-            alg = TotalDegree(; seed = UInt32(99))
+            alg = TotalDegree(; seed = UInt32(99), show_progress = false)
 
             # A worker that never loaded the package must say so, rather than
             # failing somewhere inside deserialization.
@@ -414,8 +439,7 @@ end
             try
                 err = try
                     solve(
-                        F, alg, DistributedExecutor(; pids = bare);
-                        show_progress = false,
+                        F, alg, DistributedExecutor(; pids = bare),
                     )
                     nothing
                 catch e
@@ -430,9 +454,13 @@ end
             # An error thrown while tracking arrives as the error the system
             # raised, not as a `RemoteException` wrapping it.
             err = try
-                solve_targets(
-                    F_param, starts, p₀, [ComplexF64[1.0]], DistributedExecutor();
-                    seed = UInt32(1), show_progress = false,
+                solve(
+                    F_param,
+                    starts,
+                    p₀,
+                    [ComplexF64[1.0]],
+                    Sweep(; seed = UInt32(1), show_progress = false),
+                    DistributedExecutor(),
                 )
                 nothing
             catch e

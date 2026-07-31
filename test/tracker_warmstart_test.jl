@@ -38,8 +38,12 @@ end
     @polyvar y q
     G = System([y^2 - q]; variables = [y], parameters = [q])
     res = solve(
-        G, [[1.0 + 0.0im]], [1.0 + 0im], [9.0 + 0im], Serial();
-        seed = UInt32(1), show_progress = false,
+        G,
+        [[1.0 + 0.0im]],
+        [1.0 + 0im],
+        [9.0 + 0im],
+        Continuation(; seed = UInt32(1), show_progress = false),
+        Serial(),
     )
     r = first(path_results(res))
     @test r.ω > 0.0 && isfinite(r.ω)

@@ -1,13 +1,14 @@
 ## TotalDegree — Bezout bound start system for homotopy continuation.
 
 """
-    TotalDegree(; seed, max_steps, extended_precision, ...)
+    TotalDegree(; early_stop_callback, tracker_options, endgame_options, seed, show_progress)
 
 Algorithm that constructs a total-degree (Bezout) start system.
-The number of paths tracked is prod(degrees) — the Bezout bound.
+The number of paths tracked is prod(degrees), the Bezout bound.
 
-Accepts all `TrackerOptions` fields as keyword arguments, or a pre-built
-`tracker_options` object.
+`early_stop_callback` is called with each successful [`PathResult`](@ref); return
+`true` to stop. Paths already running still finish, so which extra results appear
+is not reproducible under [`Threaded`](@ref) or [`DistributedExecutor`](@ref).
 
 # Examples
 ```julia
@@ -16,16 +17,15 @@ F = System([x^2 + y - 1, x*y - 2])
 result = solve(F, TotalDegree())
 
 # With explicit seed for reproducibility
-result = solve(F, TotalDegree(; seed=UInt32(42)))
+result = solve(F, TotalDegree(; seed = UInt32(42)))
 
-# Tune tracker options directly
-result = solve(F, TotalDegree(; max_steps=500, extended_precision=false))
+# Tune tracker options
+result = solve(F, TotalDegree(; tracker_options = TrackerOptions(; max_steps = 500)))
 ```
 """
-struct TotalDegree
-    tracker_options::TrackerOptions
-    endgame_options::EndgameOptions
-    seed::UInt32
+struct TotalDegree <: AbstractAlgorithm
+    common::CommonOptions
+    early_stop::EarlyStop
 end
 
 struct TotalDegreeStartSystem <: AbstractSystem
@@ -126,29 +126,26 @@ taylor!(
     tx::TaylorVector{4, ComplexF64}, ::TaylorVector{4, ComplexF64}
 )::Nothing = _td_taylor!(u, v, F, tx)
 
-function TotalDegree(;
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        max_steps::Int = tracker_options.max_steps,
-        max_step_size::Float64 = tracker_options.max_step_size,
-        max_initial_step_size::Float64 = tracker_options.max_initial_step_size,
-        extended_precision::Bool = tracker_options.extended_precision,
-        min_step_size::Float64 = tracker_options.min_step_size,
-        terminate_cond::Float64 = tracker_options.terminate_cond,
-        a::Float64 = tracker_options.a,
-        β_a::Float64 = tracker_options.β_a,
-        β_ω::Float64 = tracker_options.β_ω,
-        β_τ::Float64 = tracker_options.β_τ,
-        strict_β_τ::Float64 = tracker_options.strict_β_τ,
-    )
-    opts = TrackerOptions(;
-        max_steps, max_step_size, max_initial_step_size,
-        extended_precision, min_step_size, terminate_cond,
-        a, β_a, β_ω, β_τ, strict_β_τ,
-    )
-    return TotalDegree(opts, endgame_options, seed)
-end
+TotalDegree(;
+    early_stop_callback = _never_stop,
+    tracker_options::TrackerOptions = TrackerOptions(),
+    endgame_options::EndgameOptions = EndgameOptions(),
+    seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+    show_progress::Bool = true,
+) = TotalDegree(
+    CommonOptions(tracker_options, endgame_options, seed, show_progress),
+    _early_stop(early_stop_callback),
+)
+
+early_stop_callback(alg::TotalDegree)::EarlyStop = alg.early_stop
+
+# A parent derives its children's seeds from its own, so one top-level seed
+# reproduces every stage.
+_reseed(alg::TotalDegree, seed::UInt32)::TotalDegree =
+    TotalDegree(_with_seed(alg.common, seed), alg.early_stop)
+
+_quiet(alg::TotalDegree)::TotalDegree =
+    TotalDegree(_quiet(alg.common), alg.early_stop)
 
 function _total_degree_startsystem(degrees::Vector{Int})::TotalDegreeStartSystem
     return TotalDegreeStartSystem(copy(degrees))

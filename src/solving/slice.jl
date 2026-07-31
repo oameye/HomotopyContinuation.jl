@@ -118,7 +118,7 @@ end
 # machinery (excess-solution checker) apply unchanged.
 function _init_sliced_total_degree(
         G::System, L::LinearSubspace, chart::Vector{ComplexF64},
-        alg::TotalDegree, exec::AbstractExecutor, show_progress::Bool,
+        alg::TotalDegree, exec::AbstractExecutor,
     )
     # The square branch below reads `G.degrees` directly, so guard first: a
     # degree of -1 would size the start-solution array negatively.
@@ -126,39 +126,34 @@ function _init_sliced_total_degree(
     m = size(G)[1]
     nrows = m + codim(L) + (isempty(chart) ? 0 : 1)
     nrows == nvariables(G) || return CommonSolve.init(
-        _rebuild_sliced(G, L, chart), alg, exec; show_progress = show_progress,
+        _rebuild_sliced(G, L, chart), alg, exec,
     )
 
     degs = [G.degrees; ones(Int, nrows - m)]
     subspace = convert(LinearSubspace{ComplexF64}, L)
-    γ = _random_gamma(alg.seed)
+    γ = _random_gamma(_seed(alg))
     builder = SlicedStraightLineBuilder(
-        degs, G, subspace, chart, γ, alg.tracker_options, alg.endgame_options,
+        degs, G, subspace, chart, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, _total_degree_solutions(degs), alg.seed, nothing, show_progress,
+        exec, builder, _total_degree_solutions(degs), _seed(alg), nothing,
+        _show_progress(alg), early_stop_callback(alg),
     )
 end
 
 function CommonSolve.init(
         F::System, L::LinearSubspace, alg::TotalDegree,
-        exec::AbstractExecutor = Threaded();
-        show_progress::Bool = true,
+        exec::AbstractExecutor = Threaded(),
     )
-    G, chart = _sliced_solve_setup(F, L, alg.seed)
-    return _init_sliced_total_degree(G, L, chart, alg, exec, show_progress)
+    G, chart = _sliced_solve_setup(F, L, _seed(alg))
+    return _init_sliced_total_degree(G, L, chart, alg, exec)
 end
 
-function CommonSolve.init(
-        F::System, L::LinearSubspace, alg::Polyhedral,
-        exec::AbstractExecutor = Threaded();
-        show_progress::Bool = true,
-    )::PolyhedralSolveCache
-    return CommonSolve.init(
-        _sliced_solve_system(F, L, alg.seed), alg, exec;
-        show_progress = show_progress,
-    )
-end
+CommonSolve.init(
+    F::System, L::LinearSubspace, alg::Polyhedral,
+    exec::AbstractExecutor = Threaded(),
+)::PolyhedralSolveCache =
+    CommonSolve.init(_sliced_solve_system(F, L, _seed(alg)), alg, exec)
 
 """
     solve(F::System, L::LinearSubspace, alg = TotalDegree(), exec = Threaded())
@@ -177,39 +172,15 @@ L = rand_subspace(2; codim = 1)
 result = solve(F, L)
 ```
 """
-function solve(
-        F::System, L::LinearSubspace,
-        alg::TotalDegree = TotalDegree(),
-        exec::AbstractExecutor = Threaded();
-        show_progress::Bool = true,
-    )::Result
-    return CommonSolve.solve!(
-        CommonSolve.init(
-            F, L, alg, exec;
-            show_progress = show_progress,
-        ),
-    )
-end
+solve(
+    F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree(),
+    exec::AbstractExecutor = Threaded(),
+)::Result = CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
 
-function solve(
-        F::System, L::LinearSubspace, alg::Polyhedral,
-        exec::AbstractExecutor = Threaded();
-        show_progress::Bool = true,
-    )::Result
-    return CommonSolve.solve!(
-        CommonSolve.init(
-            F, L, alg, exec;
-            show_progress = show_progress,
-        ),
-    )
-end
+solve(
+    F::System, L::LinearSubspace, alg::Polyhedral,
+    exec::AbstractExecutor = Threaded(),
+)::Result = CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
 
-function solve(
-        F::System, L::LinearSubspace, exec::AbstractExecutor;
-        show_progress::Bool = true,
-    )::Result
-    return solve(
-        F, L, TotalDegree(), exec;
-        show_progress = show_progress,
-    )
-end
+solve(F::System, L::LinearSubspace, exec::AbstractExecutor)::Result =
+    solve(F, L, TotalDegree(), exec)

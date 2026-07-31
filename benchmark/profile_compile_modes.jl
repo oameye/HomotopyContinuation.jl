@@ -23,10 +23,10 @@ function _katsura(vars, n)
 end
 
 function flat_report(sys, label; reps = 300)
-    solve(sys, TotalDegree(), Serial(); show_progress = false)
+    solve(sys, TotalDegree(; show_progress = false), Serial())
     Profile.clear()
     @profile for _ in 1:reps
-        solve(sys, TotalDegree(), Serial(); show_progress = false)
+        solve(sys, TotalDegree(; show_progress = false), Serial())
     end
     io = IOBuffer()
     Profile.print(io; format = :flat, sortedby = :count, mincount = 20, C = false)

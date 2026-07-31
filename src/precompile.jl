@@ -15,13 +15,13 @@ using PrecompileTools: @compile_workload, @setup_workload
         interpreted_system = System(precompile_polys; compile = CompileMode.INTERPRETED)
         System(precompile_polys; compile = CompileMode.COMPILED)
 
-        algorithm = TotalDegree(; seed = UInt32(1))
-        solve(interpreted_system, algorithm, Serial(); show_progress = false)
-        solve(interpreted_system, algorithm, Threaded(1); show_progress = false)
+        algorithm = TotalDegree(; seed = UInt32(1), show_progress = false)
+        solve(interpreted_system, algorithm, Serial())
+        solve(interpreted_system, algorithm, Threaded(1))
 
         solve(
-            interpreted_system, Polyhedral(; seed = UInt32(1)), Serial();
-            show_progress = false,
+            interpreted_system,
+            Polyhedral(; seed = UInt32(1), show_progress = false), Serial(),
         )
 
         overdetermined_system = System(
@@ -31,7 +31,7 @@ using PrecompileTools: @compile_workload, @setup_workload
                 precompile_x * precompile_y - 0.25,
             ]
         )
-        solve(overdetermined_system, algorithm, Serial(); show_progress = false)
+        solve(overdetermined_system, algorithm, Serial())
 
         parameter_system = System(
             [precompile_x^2 - precompile_parameter];
@@ -39,16 +39,15 @@ using PrecompileTools: @compile_workload, @setup_workload
         )
         find_start_pair(parameter_system)
         solve(
-            parameter_system, [ComplexF64[1]], ComplexF64[1], ComplexF64[2], Serial();
-            seed = UInt32(1),
-            show_progress = false,
+            parameter_system, [ComplexF64[1]], ComplexF64[1], ComplexF64[2],
+            Continuation(; seed = UInt32(1), show_progress = false), Serial(),
         )
-        monodromy_solve(
-            parameter_system, [ComplexF64[1]], ComplexF64[1];
-            target_solutions_count = 2,
-            seed = UInt32(1),
-            threading = false,
-            show_progress = false,
+        solve(
+            parameter_system, [ComplexF64[1]], ComplexF64[1],
+            Monodromy(;
+                target_solutions_count = 2, seed = UInt32(1), show_progress = false,
+            ),
+            Serial(),
         )
 
         subspace = rand_subspace(4; dim = 2)

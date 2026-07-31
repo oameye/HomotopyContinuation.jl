@@ -41,10 +41,10 @@ function _check_start_length(points::Vector{Vector{ComplexF64}}, n::Int)::Nothin
 end
 
 """
-    solve(G, F, starts, exec = Threaded(); options...)
+    solve(G, F, starts, alg = Continuation(), exec = Threaded())
 
 Track the solutions `starts` of `G` to `F` along `γ·t·G(x) + (1 - t)·F(x)`,
-with `γ` drawn from `seed`.
+with `γ` drawn from the algorithm's seed.
 
 Both systems must be parameter-free and of the same size; fix a parametric one
 with [`fix_parameters`](@ref). A homogeneous pair is tracked on a random affine
@@ -60,39 +60,31 @@ F = System([x^2 - a, x * y - a + b]; variables = [x, y], parameters = [a, b])
 solve(fix_parameters(F, [1, 0]), fix_parameters(F, [2, 4]), [[1, 1]])
 ```
 """
-function solve(
-        G::CloneableSystem,
-        F::CloneableSystem,
-        starts,
-        exec::AbstractExecutor = Threaded();
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
-    )::Result
-    return CommonSolve.solve!(
-        CommonSolve.init(
-            G, F, starts, exec;
-            seed = seed,
-            tracker_options = tracker_options,
-            endgame_options = endgame_options,
-            show_progress = show_progress,
-        ),
-    )
-end
+solve(
+    G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
+    alg::Continuation = Continuation(), exec::AbstractExecutor = Threaded(),
+)::Result = CommonSolve.solve!(CommonSolve.init(G, F, starts, alg, exec))
+
+solve(
+    G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
+    exec::AbstractExecutor,
+)::Result = solve(G, F, starts, Continuation(), exec)
+
+CommonSolve.init(
+    G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
+    exec::AbstractExecutor,
+)::SolveCache = CommonSolve.init(G, F, starts, Continuation(), exec)
 
 function CommonSolve.init(
         G::CloneableSystem,
         F::CloneableSystem,
-        starts,
-        exec::AbstractExecutor = Threaded();
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
+        starts::StartsLike,
+        alg::Continuation = Continuation(),
+        exec::AbstractExecutor = Threaded(),
     )::SolveCache
     _check_start_target(G, F)
 
+    seed = _seed(alg)
     rng = Random.MersenneTwister(seed)
     γ = _random_gamma(rng)
     chart = is_homogeneous(F) ? _affine_chart(rng, F) : ComplexF64[]
@@ -102,9 +94,12 @@ function CommonSolve.init(
     isempty(chart) || _place_on_chart!(points, chart)
 
     builder = StartTargetBuilder(
-        G, F, chart, γ, tracker_options, endgame_options,
+        G, F, chart, γ, _tracker_options(alg), _endgame_options(alg),
     )
-    return _solve_cache(exec, builder, points, seed, nothing, show_progress)
+    return _solve_cache(
+        exec, builder, points, seed, nothing, _show_progress(alg),
+        early_stop_callback(alg),
+    )
 end
 
 # ── solve(H, starts) ───────────────────────────────────────────────────────
@@ -127,7 +122,7 @@ end
 
 function _homotopy_cache(
         exec::AbstractExecutor, builder, H::AbstractHomotopy, starts,
-        seed::UInt32, show_progress::Bool,
+        alg::Continuation,
     )::SolveCache
     m, n = size(H)
     m >= n || throw(
@@ -140,11 +135,14 @@ function _homotopy_cache(
     points = _start_points(starts)
     _check_start_length(points, n)
     _place_on_chart!(points, H)
-    return _solve_cache(exec, builder, points, seed, nothing, show_progress)
+    return _solve_cache(
+        exec, builder, points, _seed(alg), nothing, _show_progress(alg),
+        early_stop_callback(alg),
+    )
 end
 
 """
-    solve(H::AbstractHomotopy, starts, exec = Serial(); options...)
+    solve(H::AbstractHomotopy, starts, alg = Continuation(), exec = Serial())
 
 Track the solutions `starts` of `H(x, 1)` to `t = 0`.
 
@@ -162,37 +160,29 @@ F = System([x^2 - a, x * y - a + b]; variables = [x, y], parameters = [a, b])
 solve(ParameterHomotopy(F, [1, 0], [2, 4]), [[1, 1]])
 ```
 """
-function solve(
-        H::AbstractHomotopy,
-        starts,
-        exec::AbstractExecutor = Serial();
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
-    )::Result
-    return CommonSolve.solve!(
-        CommonSolve.init(
-            H, starts, exec;
-            seed = seed,
-            tracker_options = tracker_options,
-            endgame_options = endgame_options,
-            show_progress = show_progress,
-        ),
-    )
-end
+solve(
+    H::AbstractHomotopy, starts::StartsLike,
+    alg::Continuation = Continuation(), exec::AbstractExecutor = Serial(),
+)::Result = CommonSolve.solve!(CommonSolve.init(H, starts, alg, exec))
+
+solve(
+    H::AbstractHomotopy, starts::StartsLike, exec::AbstractExecutor,
+)::Result = solve(H, starts, Continuation(), exec)
+
+CommonSolve.init(
+    H::AbstractHomotopy, starts::StartsLike, exec::AbstractExecutor,
+)::SolveCache = CommonSolve.init(H, starts, Continuation(), exec)
 
 function CommonSolve.init(
         H::AbstractHomotopy,
-        starts,
-        exec::AbstractExecutor = Serial();
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
+        starts::StartsLike,
+        alg::Continuation = Continuation(),
+        exec::AbstractExecutor = Serial(),
     )::SolveCache
-    builder = _homotopy_builder(exec, H, tracker_options, endgame_options)
-    return _homotopy_cache(exec, builder, H, starts, seed, show_progress)
+    builder = _homotopy_builder(
+        exec, H, _tracker_options(alg), _endgame_options(alg),
+    )
+    return _homotopy_cache(exec, builder, H, starts, alg)
 end
 
 _homotopy_builder(
@@ -209,7 +199,7 @@ function _homotopy_builder(
 end
 
 """
-    solve(build_homotopy::Function, starts, exec; options...)
+    solve(build_homotopy::Function, starts, alg, exec)
 
 Track the solutions `starts` of `H(x, 1)` to `t = 0`, where
 `H = build_homotopy()`, one homotopy per task.
@@ -218,34 +208,26 @@ Every call must allocate a homotopy sharing nothing mutable with the others. One
 built around an existing system's evaluator does *not* qualify: the evaluator
 carries the interpreter tapes.
 """
-function solve(
-        build_homotopy::Function,
-        starts,
-        exec::AbstractExecutor;
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
-    )::Result
-    return CommonSolve.solve!(
-        CommonSolve.init(
-            build_homotopy, starts, exec;
-            seed = seed,
-            tracker_options = tracker_options,
-            endgame_options = endgame_options,
-            show_progress = show_progress,
-        ),
-    )
-end
+solve(
+    build_homotopy::Function, starts::StartsLike,
+    alg::Continuation, exec::AbstractExecutor,
+)::Result = CommonSolve.solve!(
+    CommonSolve.init(build_homotopy, starts, alg, exec),
+)
+
+solve(
+    build_homotopy::Function, starts::StartsLike, exec::AbstractExecutor,
+)::Result = solve(build_homotopy, starts, Continuation(), exec)
+
+CommonSolve.init(
+    build_homotopy::Function, starts::StartsLike, exec::AbstractExecutor,
+)::SolveCache = CommonSolve.init(build_homotopy, starts, Continuation(), exec)
 
 function CommonSolve.init(
         build_homotopy::Function,
-        starts,
-        exec::AbstractExecutor;
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
+        starts::StartsLike,
+        alg::Continuation,
+        exec::AbstractExecutor,
     )::SolveCache
     H = build_homotopy()
     H isa AbstractHomotopy || throw(
@@ -254,6 +236,30 @@ function CommonSolve.init(
                 "starts, exec)` needs a function returning an `AbstractHomotopy`.",
         ),
     )
-    builder = HomotopyBuilder(build_homotopy, tracker_options, endgame_options)
-    return _homotopy_cache(exec, builder, H, starts, seed, show_progress)
+    builder = HomotopyBuilder(
+        build_homotopy, _tracker_options(alg), _endgame_options(alg),
+    )
+    return _homotopy_cache(exec, builder, H, starts, alg)
+end
+
+for f in (:(solve), :(CommonSolve.init))
+    @eval begin
+        $f(
+            ::CloneableSystem, ::CloneableSystem, starts,
+            ::Continuation = Continuation(), ::AbstractExecutor = Threaded(),
+        ) = _bad_starts(starts)
+        $f(
+            ::CloneableSystem, ::CloneableSystem, starts, ::AbstractExecutor,
+        ) = _bad_starts(starts)
+
+        $f(
+            ::AbstractHomotopy, starts, ::Continuation = Continuation(),
+            ::AbstractExecutor = Serial(),
+        ) = _bad_starts(starts)
+        $f(::AbstractHomotopy, starts, ::AbstractExecutor) = _bad_starts(starts)
+
+        $f(::Function, starts, ::Continuation, ::AbstractExecutor) =
+            _bad_starts(starts)
+        $f(::Function, starts, ::AbstractExecutor) = _bad_starts(starts)
+    end
 end

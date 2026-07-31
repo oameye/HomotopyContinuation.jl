@@ -4,7 +4,7 @@ using HomotopyContinuationNext
 using HomotopyContinuationNext: FSVec, FSMat, TaylorVector, ComplexDF64, DoubleF64,
     evaluate!, evaluate_and_jacobian!, taylor!, equation_scales, nparameters,
     nvariables, variables, parameters, subs, newton, NewtonReturnCode,
-    monodromy_solve, find_start_pair, degrees, is_homogeneous,
+    find_start_pair, degrees, is_homogeneous,
     SystemEvaluator, _StartPairSystem, _clone_system_evaluator
 
 fsvec(v) = FSVec{ComplexF64}(collect(ComplexF64, v))
@@ -278,13 +278,13 @@ end
     # total degree folds the stage degrees, so the equations are never rebuilt
     @test degrees(C) == [2, 2]
 
-    r = solve(C; show_progress = false)
+    r = solve(C, TotalDegree(; show_progress = false))
     @test nsolutions(r) == 2
     for s in solutions(r)
         @test norm(evaluate_system(C, s), Inf) < 1.0e-10
     end
 
-    rp = solve(C, Polyhedral(); show_progress = false)
+    rp = solve(C, Polyhedral(; show_progress = false))
     @test nsolutions(rp) == 2
 
     # a non-polynomial stage names the composition, not the outermost equations
@@ -292,7 +292,8 @@ end
     nonpolynomial = System([s^2, 1 / t]; variables = [s, t]) ∘
         System([s + t, s - t]; variables = [s, t])
     @test_throws ArgumentError solve(
-        System([s * t, s^2]; variables = [s, t]) ∘ nonpolynomial; show_progress = false,
+        System([s * t, s^2]; variables = [s, t]) ∘ nonpolynomial,
+        TotalDegree(; show_progress = false),
     )
 end
 
@@ -325,7 +326,7 @@ end
 
     p₀ = ComplexF64[3.0, 1.0]
     target = System([x^2 + y^2 - 3.0, x + y - 1.0]; variables = [x, y])
-    truth = solutions(solve(target; show_progress = false))
+    truth = solutions(solve(target, TotalDegree(; show_progress = false)))
     @test length(truth) == 2
     starts = [A \ (s - c) for s in truth]
 
@@ -334,9 +335,7 @@ end
     @test norm(A * res.x + c - truth[1], Inf) < 1.0e-8
 
     q = ComplexF64[5.0, 2.0]
-    r = solve(
-        C, starts, p₀, q; show_progress = false,
-    )
+    r = solve(C, starts, p₀, q, Continuation(; show_progress = false))
     @test nsolutions(r) == 2
     for s in solutions(r)
         z = A * s + c
@@ -355,12 +354,17 @@ end
 
     p₀ = ComplexF64[3.0, 1.0]
     target = System([x^2 + y^2 - 3.0, x + y - 1.0]; variables = [x, y])
-    truth = solutions(solve(target; show_progress = false))
+    truth = solutions(solve(target, TotalDegree(; show_progress = false)))
     start = A \ (truth[1] - c)
 
-    r = monodromy_solve(
-        C, [start], p₀; target_solutions_count = 2, threading = false,
-        show_progress = false, seed = UInt32(0x5cbe),
+    r = solve(
+        C,
+        [start],
+        p₀,
+        Monodromy(;
+            target_solutions_count = 2, show_progress = false, seed = UInt32(0x5cbe),
+        ),
+        Serial(),
     )
     @test nsolutions(r) == 2
     found = sort([A * s + c for s in solutions(r)]; by = z -> real(z[1]))
@@ -386,9 +390,12 @@ end
     @test length(p) == 2
     @test norm(evaluate_system(C, start, p), Inf) < 1.0e-10
 
-    r = monodromy_solve(
-        C; target_solutions_count = 2, threading = false,
-        show_progress = false, seed = UInt32(0x5cc2),
+    r = solve(
+        C,
+        Monodromy(;
+            target_solutions_count = 2, show_progress = false, seed = UInt32(0x5cc2),
+        ),
+        Serial(),
     )
     @test nsolutions(r) == 2
 

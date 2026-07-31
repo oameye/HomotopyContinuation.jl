@@ -11,6 +11,7 @@ struct SolveCache{E <: AbstractExecutor, B, C}
     # ExcessSolutionChecker for overdetermined systems, Nothing for square ones
     excess_checker::C
     show_progress::Bool
+    early_stop::EarlyStop
 end
 
 """
@@ -102,15 +103,13 @@ _polynomial_system(F::FixedParameterSystem)::System =
 # chart row makes `m = n - 1` square.
 function _init_projective(
         F::CloneableSystem, alg::Union{TotalDegree, Polyhedral},
-        exec::AbstractExecutor, show_progress::Bool, route::String,
+        exec::AbstractExecutor, route::String,
     )
     # Before the count check, whose message is confusing for grouped input.
     _check_single_group(F)
     _check_projective_determined(F, route)
     G = _polynomial_system(F)
-    return CommonSolve.init(
-        G, _full_subspace(nvariables(G)), alg, exec; show_progress = show_progress,
-    )
+    return CommonSolve.init(G, _full_subspace(nvariables(G)), alg, exec)
 end
 
 """
@@ -145,7 +144,7 @@ function _check_polynomial(F::System, route::String)::Nothing
                 "least one equation uses division by a variable, a negative power, " *
                 "or a unary function of a variable. Clear denominators first, or " *
                 "track from known start solutions with a parameter homotopy or " *
-                "`monodromy_solve`.",
+                "`Monodromy`.",
         ),
     )
 end
@@ -162,7 +161,7 @@ function _check_polynomial(C::CompositionSystem, route::String)::Nothing
                 "variables, but at least one stage equation uses division by a " *
                 "variable, a negative power, or a unary function of a variable. " *
                 "Clear denominators first, or track from known start solutions " *
-                "with a parameter homotopy or `monodromy_solve`.",
+                "with a parameter homotopy or `Monodromy`.",
         ),
     )
 end
@@ -176,72 +175,71 @@ function _solve_cache(
         seed::UInt32,
         excess_checker::C,
         show_progress::Bool,
+        early_stop::EarlyStop = NEVER_STOP,
     )::SolveCache{E, B, C} where {E <: AbstractExecutor, B, C}
     return SolveCache(
         exec, builder, builder().tracker, starts, seed, excess_checker, show_progress,
+        early_stop,
     )
 end
 
 function CommonSolve.init(
         F::CloneableSystem, alg::TotalDegree,
-        exec::AbstractExecutor = Threaded();
-        show_progress::Bool = true,
+        exec::AbstractExecutor = Threaded(),
     )::SolveCache
     _check_parameter_free(F, "`TotalDegree`")
     _check_polynomial(F, "`TotalDegree`")
     if _is_grouped(F)
         # First: for a grouped system homogeneity is per group. Dynamic call, as below.
-        return Base.inferencebarrier(_init_multi_homogeneous)(F, alg, exec, show_progress)
+        return Base.inferencebarrier(_init_multi_homogeneous)(F, alg, exec)
     end
     if is_homogeneous(F)
         # Dynamic call: inferring the projective wrapper stack from here costs the
         # common path ~3s.
-        return Base.inferencebarrier(_init_projective)(
-            F, alg, exec, show_progress, "`TotalDegree`",
-        )
+        return Base.inferencebarrier(_init_projective)(F, alg, exec, "`TotalDegree`")
     end
     _check_square_or_overdetermined(F)
 
-    rng = Random.MersenneTwister(alg.seed)
+    rng = Random.MersenneTwister(_seed(alg))
     γ = _random_gamma(rng)
     # Dynamic call: specializes the body on the concrete `System` so that
     # `system_shape(F)` resolves statically instead of union-splitting.
     initializer = Base.inferencebarrier(_init_total_degree_shaped)
-    return initializer(F, alg, exec, rng, γ, show_progress)
+    return initializer(F, alg, exec, rng, γ)
 end
 
 _init_total_degree_shaped(
     F::CloneableSystem, alg::TotalDegree, exec::AbstractExecutor,
-    rng::Random.MersenneTwister, γ::ComplexF64, show_progress::Bool,
-) = _init_total_degree(system_shape(F), F, alg, exec, rng, γ, show_progress)
+    rng::Random.MersenneTwister, γ::ComplexF64,
+) = _init_total_degree(system_shape(F), F, alg, exec, rng, γ)
 
 function _init_total_degree(
         ::SquareShape, F::CloneableSystem, alg::TotalDegree, exec::AbstractExecutor,
-        ::Random.MersenneTwister, γ::ComplexF64, show_progress::Bool,
+        ::Random.MersenneTwister, γ::ComplexF64,
     )
     degs = degrees(F)
     builder = StraightLineBuilder(
-        degs, F, γ, alg.tracker_options, alg.endgame_options,
+        degs, F, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, _total_degree_solutions(degs), alg.seed, nothing, show_progress,
+        exec, builder, _total_degree_solutions(degs), _seed(alg), nothing,
+        _show_progress(alg), early_stop_callback(alg),
     )
 end
 
 function _init_total_degree(
         ::OverdeterminedShape, F::CloneableSystem, alg::TotalDegree,
-        exec::AbstractExecutor, rng::Random.MersenneTwister,
-        γ::ComplexF64, show_progress::Bool,
+        exec::AbstractExecutor, rng::Random.MersenneTwister, γ::ComplexF64,
     )
     n = nvariables(F)
     A, perm, excess_checker = _square_up(rng, F.evaluator, degrees(F))
     degs = degrees(F)[perm[1:n]]
     builder = RandomizedStraightLineBuilder(
-        degs, F, A, perm, γ, alg.tracker_options, alg.endgame_options,
+        degs, F, A, perm, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, _total_degree_solutions(degs), alg.seed, excess_checker,
-        show_progress,
+        exec, builder, _total_degree_solutions(degs), _seed(alg), excess_checker,
+        _show_progress(alg), early_stop_callback(alg),
     )
 end
 
@@ -283,14 +281,16 @@ function _solve_total_degree_serial(cache::SolveCache{Serial}, progress)::Result
     sizehint!(path_results, n_paths)
 
     stats = ProgressStats()
+    stop = cache.early_stop
     for (k, x₀) in enumerate(cache.start_solutions)
         pr = _track_path!(eg, x₀, k)
         push!(path_results, pr)
         update_progress!(progress, k, stats, pr)
+        is_success(pr) && stop(pr) && break
     end
 
     return _finalize_result(
-        path_results, n_paths, cache.seed, cache.excess_checker,
+        path_results, length(path_results), cache.seed, cache.excess_checker,
     )
 end
 
@@ -318,18 +318,25 @@ function _solve_total_degree_threaded(cache::SolveCache{Threaded}, progress)::Re
     stats = ProgressStats()
     counter = Threads.Atomic{Int}(0)
     plock = ReentrantLock()
+    stop = cache.early_stop
+    stopped = Threads.Atomic{Bool}(false)
 
     @tasks for i in eachindex(starts)
         @set ntasks = nt
         @local ws = cache.builder()
-        results[i] = _track_path!(ws, starts[i], i)
-        if progress !== nothing
-            k = Threads.atomic_add!(counter, 1) + 1
-            @lock plock update_progress!(progress, k, stats, results[i])
+        if !stopped[]
+            pr = _track_path!(ws, starts[i], i)
+            results[i] = pr
+            if progress !== nothing
+                k = Threads.atomic_add!(counter, 1) + 1
+                @lock plock update_progress!(progress, k, stats, pr)
+            end
+            is_success(pr) && stop(pr) && (stopped[] = true)
         end
     end
 
-    return _finalize_result(results, n_paths, cache.seed, cache.excess_checker)
+    tracked = _assigned_results(results)
+    return _finalize_result(tracked, length(tracked), cache.seed, cache.excess_checker)
 end
 
 # ── CommonSolve.solve!: distributed (extension) ────────────────────────────
@@ -359,19 +366,13 @@ equations are never rebuilt.
 function solve(
         F::CloneableSystem,
         alg::TotalDegree = TotalDegree(),
-        exec::AbstractExecutor = Threaded();
-        show_progress::Bool = true,
+        exec::AbstractExecutor = Threaded(),
     )::Result
-    return CommonSolve.solve!(
-        CommonSolve.init(F, alg, exec; show_progress = show_progress),
-    )
+    return CommonSolve.solve!(CommonSolve.init(F, alg, exec))
 end
 
-function solve(
-        F::CloneableSystem, exec::AbstractExecutor; show_progress::Bool = true,
-    )::Result
-    return solve(F, TotalDegree(), exec; show_progress = show_progress)
-end
+solve(F::CloneableSystem, exec::AbstractExecutor)::Result =
+    solve(F, TotalDegree(), exec)
 
 """
     paths_to_track(F::System, alg = TotalDegree()) -> Int
@@ -390,40 +391,26 @@ paths_to_track(System([x * y - 2, x^2 - 4]; variable_groups = [[x], [y]]))  # 2
 ```
 """
 paths_to_track(F::CloneableSystem, alg::TotalDegree = TotalDegree())::Int =
-    length(CommonSolve.init(F, alg, Serial(); show_progress = false).start_solutions)
+    length(CommonSolve.init(F, _quiet(alg), Serial()).start_solutions)
 
-function solve(
-        F::System,
-        alg::Polyhedral,
-        exec::AbstractExecutor = Threaded();
-        show_progress::Bool = true,
-    )::Result
-    return CommonSolve.solve!(
-        CommonSolve.init(F, alg, exec; show_progress = show_progress),
-    )
-end
+solve(
+    F::System, alg::Polyhedral, exec::AbstractExecutor = Threaded(),
+)::Result = CommonSolve.solve!(CommonSolve.init(F, alg, exec))
 
 # The polyhedral start system is built from the composed monomials, which only
 # the substituted equations carry.
-function solve(
-        C::CompositionSystem,
-        alg::Polyhedral,
-        exec::AbstractExecutor = Threaded();
-        show_progress::Bool = true,
-    )::Result
-    return solve(System(C), alg, exec; show_progress = show_progress)
-end
+solve(
+    C::CompositionSystem, alg::Polyhedral, exec::AbstractExecutor = Threaded(),
+)::Result = solve(System(C), alg, exec)
 
 CommonSolve.init(
-    C::CompositionSystem, alg::Polyhedral,
-    exec::AbstractExecutor = Threaded();
-    show_progress::Bool = true,
-) = CommonSolve.init(System(C), alg, exec; show_progress = show_progress)
+    C::CompositionSystem, alg::Polyhedral, exec::AbstractExecutor = Threaded(),
+) = CommonSolve.init(System(C), alg, exec)
 
 # ── Parameter homotopy ─────────────────────────────────────────────────────
 
 """
-    solve(F::System, starts, p_start, p_target, exec = Threaded(); options...)
+    solve(F::System, starts, p_start, p_target, alg = Continuation(), exec = Threaded())
 
 Track the solutions `starts` of `F(x; p_start)` to `F(x; p_target)` along a
 parameter homotopy, moving the parameters linearly and leaving the equations
@@ -442,36 +429,34 @@ solve(F, r₁, [1.0], [4.0])
 """
 function solve(
         F::SystemLike,
-        starts,
+        starts::StartsLike,
         p_start::AbstractVector{<:Number},
         p_target::AbstractVector{<:Number},
-        exec::AbstractExecutor = Threaded();
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
+        alg::Continuation = Continuation(),
+        exec::AbstractExecutor = Threaded(),
     )::Result
     return CommonSolve.solve!(
-        CommonSolve.init(
-            F, starts, p_start, p_target, exec;
-            seed = seed,
-            tracker_options = tracker_options,
-            endgame_options = endgame_options,
-            show_progress = show_progress,
-        ),
+        CommonSolve.init(F, starts, p_start, p_target, alg, exec),
     )
 end
 
+solve(
+    F::SystemLike, starts::StartsLike, p_start::AbstractVector{<:Number},
+    p_target::AbstractVector{<:Number}, exec::AbstractExecutor,
+)::Result = solve(F, starts, p_start, p_target, Continuation(), exec)
+
+CommonSolve.init(
+    F::SystemLike, starts::StartsLike, p_start::AbstractVector{<:Number},
+    p_target::AbstractVector{<:Number}, exec::AbstractExecutor,
+) = CommonSolve.init(F, starts, p_start, p_target, Continuation(), exec)
+
 function CommonSolve.init(
         F::SystemLike,
-        starts,
+        starts::StartsLike,
         p_start::AbstractVector{<:Number},
         p_target::AbstractVector{<:Number},
-        exec::AbstractExecutor = Threaded();
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
+        alg::Continuation = Continuation(),
+        exec::AbstractExecutor = Threaded(),
     )
     _check_square_or_overdetermined(F)
     np = nparameters(F)
@@ -494,9 +479,27 @@ function CommonSolve.init(
 
     sp = ComplexF64.(p_start)
     tp = ComplexF64.(p_target)
-    builder = ParameterBuilder(F, sp, tp, tracker_options, endgame_options)
+    builder = ParameterBuilder(
+        F, sp, tp, _tracker_options(alg), _endgame_options(alg),
+    )
 
     return _solve_cache(
-        exec, builder, _start_points(starts), seed, nothing, show_progress,
+        exec, builder, _start_points(starts), _seed(alg), nothing,
+        _show_progress(alg), early_stop_callback(alg),
     )
+end
+
+for f in (:(solve), :(CommonSolve.init))
+    @eval begin
+        $f(
+            ::SystemLike, starts, ::AbstractVector{<:Number},
+            ::AbstractVector{<:Number}, ::Continuation = Continuation(),
+            ::AbstractExecutor = Threaded(),
+        ) = _bad_starts(starts)
+
+        $f(
+            ::SystemLike, starts, ::AbstractVector{<:Number},
+            ::AbstractVector{<:Number}, ::AbstractExecutor,
+        ) = _bad_starts(starts)
+    end
 end

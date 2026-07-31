@@ -2,6 +2,13 @@
 
 Planned, not implemented. Line numbers are from the tree at the time of writing.
 
+The API unification (`00_architecture.md`, "The solving API") landed first, so the signature
+list below grew by every new `solve` route: the algorithm and executor slots are the last two
+positional arguments on all of them. That does not change this document's thesis — algorithm
+structs never enter a cache (`SolveCache{E,B,C}` is parameterized by executor, builder and
+excess-checker, never by the algorithm), so their type parameters do not reach the hot loop.
+The parameters this document is about are the *builder* and *system* ones, which still do.
+
 ## Why
 
 `System{P, V, M, S}` carries four type parameters. `01_decisions.md` ("System{P, V} type
@@ -108,8 +115,8 @@ Same for the direct clone sites at `witness_set.jl:571` and `regeneration.jl:581
 `builder.jl:59`) to `SystemHandle`, with thin `System`/`CompositionSystem` methods at each
 public entry point that build the handle and forward. Anything that needs the equations
 stays on the concrete type *above* the conversion, exactly as `_lower_input` runs before
-the barrier today: `find_start_pair` keeps its two concrete methods, and `monodromy_solve`
-computes the start pair before erasing. `_check_square_or_overdetermined` loses its shape
+the barrier today: `find_start_pair` keeps its two concrete methods, and the `Monodromy`
+route computes the start pair before erasing. `_check_square_or_overdetermined` loses its shape
 dispatch on the handle path and compares sizes, as the composition method already does.
 Delete `SystemLike`, `SystemFactory`, `_SystemCloner`. Run `make test`.
 

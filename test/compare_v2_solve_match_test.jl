@@ -15,7 +15,10 @@ using HomotopyContinuation.ModelKit: @var
 
     @testset "x²-1, y²-4 solutions agree" begin
         @polyvar nx ny
-        r3 = Next.solve(Next.System([nx^2 - 1, ny^2 - 4]); show_progress = false)
+        r3 = Next.solve(
+            Next.System([nx^2 - 1, ny^2 - 4]),
+            Next.TotalDegree(; show_progress = false),
+        )
 
         @var hx hy
         r2 = HC.solve(HC.ModelKit.System([hx^2 - 1, hy^2 - 4]); show_progress = false)
@@ -33,8 +36,8 @@ using HomotopyContinuation.ModelKit: @var
         @polyvar nx ny na
         F3 = Next.System([nx^2 - na, ny^2 - na]; parameters = [na])
         F3_fixed = Next.System([nx^2 - 1, ny^2 - 1])
-        starts3 = Next.solutions(Next.solve(F3_fixed; show_progress = false))
-        r3 = Next.solve(F3, starts3, [1.0], [4.0]; show_progress = false)
+        starts3 = Next.solutions(Next.solve(F3_fixed, Next.TotalDegree(; show_progress = false)))
+        r3 = Next.solve(F3, starts3, [1.0], [4.0], Next.Continuation(; show_progress = false))
 
         @var hx hy ha
         F2 = HC.ModelKit.System([hx^2 - ha, hy^2 - ha]; parameters = [ha])

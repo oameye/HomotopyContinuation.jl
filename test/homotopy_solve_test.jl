@@ -86,7 +86,7 @@ end
         f = System([x^2 - a, x * y - a + b]; variables = [x, y], parameters = [a, b])
         G = fix_parameters(f, [1, 0])
         F = fix_parameters(f, [2, 4])
-        r = solve(G, F, [[1.0, 1.0]]; show_progress = false)
+        r = solve(G, F, [[1.0, 1.0]], Continuation(; show_progress = false))
         @test nsolutions(r) == 1
         @test max_distance(solutions(r), [[sqrt(2), -sqrt(2)]]) < 1.0e-8
         @test r.tracked_paths == 1
@@ -96,7 +96,12 @@ end
         h = System([x^2 - a, y - b]; variables = [x, y], parameters = [a, b])
         C = fix_parameters(h ∘ System([x, y]; variables = [x, y]), [4, 3])
         @test C isa FixedParameterSystem
-        rc = solve(fix_parameters(h, [1, 2]), C, [[1.0, 2.0]]; show_progress = false)
+        rc = solve(
+            fix_parameters(h, [1, 2]),
+            C,
+            [[1.0, 2.0]],
+            Continuation(; show_progress = false),
+        )
         @test nsolutions(rc) == 1
         @test max_distance(solutions(rc), [[2.0, 3.0]]) < 1.0e-8
     end
@@ -105,18 +110,23 @@ end
         @polyvar x y
         G = System([x^2 + y^2 - 5, x * y - 2]; variables = [x, y])
         F = System([x^2 + 3y^2 - 7, x * y + x - 3]; variables = [x, y])
-        starts = solve(G; show_progress = false)
+        starts = solve(G, TotalDegree(; show_progress = false))
         @test nsolutions(starts) == 4
 
-        reference = solutions(solve(F; show_progress = false))
-        r = solve(G, F, starts; show_progress = false)
+        reference = solutions(solve(F, TotalDegree(; show_progress = false)))
+        r = solve(G, F, starts, Continuation(; show_progress = false))
         @test nsolutions(r) == 4
         @test max_distance(solutions(r), reference) < 1.0e-8
 
         # Start solutions in every accepted shape.
-        @test nsolutions(solve(G, F, solutions(starts); show_progress = false)) == 4
+        @test nsolutions(solve(G, F, solutions(starts), Continuation(; show_progress = false))) == 4
         @test nsolutions(
-            solve(G, F, result_iterator(G, TotalDegree()); show_progress = false),
+            solve(
+                G,
+                F,
+                result_iterator(G, TotalDegree()),
+                Continuation(; show_progress = false),
+            ),
         ) == 4
     end
 
@@ -124,16 +134,22 @@ end
         @polyvar x y
         G = System([x^2 + y^2 - 5, x * y - 2]; variables = [x, y])
         F = System([x^2 + 3y^2 - 7, x * y + x - 3]; variables = [x, y])
-        starts = solutions(solve(G; show_progress = false))
+        starts = solutions(solve(G, TotalDegree(; show_progress = false)))
         seed = UInt32(0x1234)
-        serial = solve(G, F, starts, Serial(); seed = seed, show_progress = false)
-        threaded = solve(G, F, starts, Threaded(); seed = seed, show_progress = false)
+        serial = solve(G, F, starts, Continuation(; seed = seed, show_progress = false), Serial())
+        threaded = solve(G, F, starts, Continuation(; seed = seed, show_progress = false), Threaded())
         for (u, v) in zip(path_results(serial), path_results(threaded))
             for field in fieldnames(typeof(u))
                 @test isequal(getfield(u, field), getfield(v, field))
             end
         end
-        other = solve(G, F, starts, Serial(); seed = UInt32(0x99), show_progress = false)
+        other = solve(
+            G,
+            F,
+            starts,
+            Continuation(; seed = UInt32(0x99), show_progress = false),
+            Serial(),
+        )
         @test nsolutions(other) == nsolutions(serial)
     end
 
@@ -146,14 +162,14 @@ end
         F = System([sum(coeffs[3] .* mons), sum(coeffs[4] .* mons)])
         @test is_homogeneous(G) && is_homogeneous(F)
 
-        starts = solutions(solve(G; show_progress = false))
+        starts = solutions(solve(G, TotalDegree(; show_progress = false)))
         @test length(starts) == 4
         # Any representative of the projective point is accepted: the route
         # places the start points on its chart.
         scaled = [(3.7 - 1.2im) .* s for s in starts]
 
-        reference = _normalize_projective.(solutions(solve(F; show_progress = false)))
-        r = solve(G, F, scaled; show_progress = false)
+        reference = _normalize_projective.(solutions(solve(F, TotalDegree(; show_progress = false))))
+        r = solve(G, F, scaled, Continuation(; show_progress = false))
         @test nsolutions(r) == 4
         @test max_distance(_normalize_projective.(solutions(r)), reference) < 1.0e-8
     end
@@ -163,7 +179,7 @@ end
         G = System([x^2 - 1, y^2 - 1, x - y]; variables = [x, y])
         F = System([x^2 - 4, y^2 - 4, x - y]; variables = [x, y])
         starts = [[1.0, 1.0], [-1.0, -1.0]]
-        r = solve(G, F, starts; show_progress = false)
+        r = solve(G, F, starts, Continuation(; show_progress = false))
         @test nsolutions(r) == 2
         @test max_distance(solutions(r), [[2.0, 2.0], [-2.0, -2.0]]) < 1.0e-8
     end
@@ -173,7 +189,7 @@ end
         parametric = System([x^2 - a, y - 1]; variables = [x, y], parameters = [a])
         square = System([x^2 - 1, y - 1]; variables = [x, y])
         err = try
-            solve(parametric, square, [[1.0, 1.0]]; show_progress = false)
+            solve(parametric, square, [[1.0, 1.0]], Continuation(; show_progress = false))
         catch e
             e
         end
@@ -181,7 +197,12 @@ end
         @test occursin("fix_parameters", err.msg)
 
         err = try
-            solve(square, System([x^2 - 4]; variables = [x]), [[1.0, 1.0]]; show_progress = false)
+            solve(
+                square,
+                System([x^2 - 4]; variables = [x]),
+                [[1.0, 1.0]],
+                Continuation(; show_progress = false),
+            )
         catch e
             e
         end
@@ -192,7 +213,8 @@ end
             solve(
                 System([x^2 - y^2]; variables = [x, y]),
                 System([x^2 - y^2 - 1]; variables = [x, y]),
-                [[1.0, 1.0]]; show_progress = false,
+                [[1.0, 1.0]],
+                Continuation(; show_progress = false),
             )
         catch e
             e
@@ -202,7 +224,12 @@ end
 
         underdetermined = System([x * y - 1]; variables = [x, y])
         err = try
-            solve(underdetermined, System([x * y - 4]; variables = [x, y]), [[1.0, 1.0]]; show_progress = false)
+            solve(
+                underdetermined,
+                System([x * y - 4]; variables = [x, y]),
+                [[1.0, 1.0]],
+                Continuation(; show_progress = false),
+            )
         catch e
             e
         end
@@ -210,7 +237,7 @@ end
         @test occursin("positive-dimensional", err.msg)
 
         err = try
-            solve(square, square, [[1.0]]; show_progress = false)
+            solve(square, square, [[1.0]], Continuation(; show_progress = false))
         catch e
             e
         end
@@ -222,12 +249,19 @@ end
         @polyvar x y a b
         f = System([x^2 - a, x * y - a + b]; variables = [x, y], parameters = [a, b])
         H = ParameterHomotopy(f, [1, 0], [2, 4])
-        r = solve(H, [[1.0, 1.0]]; show_progress = false)
+        r = solve(H, [[1.0, 1.0]], Continuation(; show_progress = false))
         @test nsolutions(r) == 1
         @test max_distance(solutions(r), [[sqrt(2), -sqrt(2)]]) < 1.0e-8
 
         # The same paths the typed parameter-homotopy route tracks.
-        typed = solve(f, [[1.0, 1.0]], [1, 0], [2, 4], Serial(); show_progress = false)
+        typed = solve(
+            f,
+            [[1.0, 1.0]],
+            [1, 0],
+            [2, 4],
+            Continuation(; show_progress = false),
+            Serial(),
+        )
         @test max_distance(solutions(r), solutions(typed)) < 1.0e-8
 
         @polyvar u v
@@ -236,9 +270,9 @@ end
         SL = StraightLineHomotopy(
             _clone_system_evaluator(G), _clone_system_evaluator(F); γ = complex(0.6, 0.8),
         )
-        starts = solutions(solve(G; show_progress = false))
-        reference = solutions(solve(F; show_progress = false))
-        rsl = solve(SL, starts; show_progress = false)
+        starts = solutions(solve(G, TotalDegree(; show_progress = false)))
+        reference = solutions(solve(F, TotalDegree(; show_progress = false)))
+        rsl = solve(SL, starts, Continuation(; show_progress = false))
         @test nsolutions(rsl) == 4
         @test max_distance(solutions(rsl), reference) < 1.0e-8
     end
@@ -259,9 +293,9 @@ end
         @test H isa AffineChartHomotopy
         @test size(H) == (3, 3)
 
-        starts = [(2.5 + 0.5im) .* s for s in solutions(solve(G; show_progress = false))]
-        reference = _normalize_projective.(solutions(solve(F; show_progress = false)))
-        r = solve(H, starts; show_progress = false)
+        starts = [(2.5 + 0.5im) .* s for s in solutions(solve(G, TotalDegree(; show_progress = false)))]
+        reference = _normalize_projective.(solutions(solve(F, TotalDegree(; show_progress = false))))
+        r = solve(H, starts, Continuation(; show_progress = false))
         @test nsolutions(r) == 4
         @test max_distance(_normalize_projective.(solutions(r)), reference) < 1.0e-8
     end
@@ -273,10 +307,15 @@ end
         H = StraightLineHomotopy(
             _clone_system_evaluator(G), _clone_system_evaluator(F); γ = complex(0.6, 0.8),
         )
-        starts = solutions(solve(G; show_progress = false))
+        starts = solutions(solve(G, TotalDegree(; show_progress = false)))
 
-        serial = solve(H, starts, Serial(); seed = UInt32(4), show_progress = false)
-        threaded = solve(H, starts, Threaded(); seed = UInt32(4), show_progress = false)
+        serial = solve(H, starts, Continuation(; seed = UInt32(4), show_progress = false), Serial())
+        threaded = solve(
+            H,
+            starts,
+            Continuation(; seed = UInt32(4), show_progress = false),
+            Threaded(),
+        )
         @test nsolutions(threaded) == 4
         for (u, v) in zip(path_results(serial), path_results(threaded))
             for field in fieldnames(typeof(u))
@@ -286,7 +325,7 @@ end
 
         # Every task rebuilds the homotopy, so the caller's own buffers are
         # untouched and it can be tracked again afterwards.
-        again = solve(H, starts, Serial(); seed = UInt32(4), show_progress = false)
+        again = solve(H, starts, Continuation(; seed = UInt32(4), show_progress = false), Serial())
         @test solutions(again) == solutions(serial)
     end
 
@@ -333,7 +372,7 @@ end
         H = ParameterHomotopy(f, [1, 0], [2, 4])
 
         err = try
-            solve(H, [[1.0]]; show_progress = false)
+            solve(H, [[1.0]], Continuation(; show_progress = false))
         catch e
             e
         end
@@ -343,8 +382,9 @@ end
         underdetermined = System([x * y - a]; variables = [x, y], parameters = [a])
         err = try
             solve(
-                ParameterHomotopy(underdetermined, [1], [4]), [[1.0, 1.0]];
-                show_progress = false,
+                ParameterHomotopy(underdetermined, [1], [4]),
+                [[1.0, 1.0]],
+                Continuation(; show_progress = false),
             )
         catch e
             e
@@ -363,8 +403,8 @@ end
                 γ = complex(0.6, 0.8),
             ),
         )
-        starts = solutions(solve(G; show_progress = false))
-        reference = solutions(solve(F; show_progress = false))
+        starts = solutions(solve(G, TotalDegree(; show_progress = false)))
+        reference = solutions(solve(F, TotalDegree(; show_progress = false)))
 
         # The default rebuild copies the buffers and rebuilds the tapes.
         C = _clone_homotopy(H)
@@ -375,8 +415,13 @@ end
         @test C.inner.u_start !== H.inner.u_start
         @test C.inner.γ == H.inner.γ
 
-        serial = solve(H, starts, Serial(); seed = UInt32(9), show_progress = false)
-        threaded = solve(H, starts, Threaded(); seed = UInt32(9), show_progress = false)
+        serial = solve(H, starts, Continuation(; seed = UInt32(9), show_progress = false), Serial())
+        threaded = solve(
+            H,
+            starts,
+            Continuation(; seed = UInt32(9), show_progress = false),
+            Threaded(),
+        )
         @test nsolutions(serial) == 4
         @test max_distance(solutions(serial), reference) < 1.0e-8
         @test max_distance(solutions(threaded), reference) < 1.0e-8
@@ -398,11 +443,11 @@ end
         build() = StraightLineHomotopy(
             _clone_system_evaluator(G), _clone_system_evaluator(F); γ = complex(0.6, 0.8),
         )
-        starts = solutions(solve(G; show_progress = false))
-        reference = solutions(solve(F; show_progress = false))
+        starts = solutions(solve(G, TotalDegree(; show_progress = false)))
+        reference = solutions(solve(F, TotalDegree(; show_progress = false)))
 
-        serial = solve(build, starts, Serial(); show_progress = false)
-        threaded = solve(build, starts, Threaded(); show_progress = false)
+        serial = solve(build, starts, Continuation(; show_progress = false), Serial())
+        threaded = solve(build, starts, Continuation(; show_progress = false), Threaded())
         @test nsolutions(serial) == 4
         @test max_distance(solutions(serial), reference) < 1.0e-8
         @test max_distance(solutions(threaded), reference) < 1.0e-8
@@ -412,7 +457,7 @@ end
         end
 
         err = try
-            solve(() -> G, starts, Serial(); show_progress = false)
+            solve(() -> G, starts, Continuation(; show_progress = false), Serial())
         catch e
             e
         end
@@ -424,8 +469,11 @@ end
         @polyvar x y
         G = System([x^2 + y^2 - 5, x * y - 2]; variables = [x, y])
         F = System([x^2 + 3y^2 - 7, x * y + x - 3]; variables = [x, y])
-        starts = solutions(solve(G; show_progress = false))
-        cache = init(G, F, starts, Serial(); seed = UInt32(11), show_progress = false)
+        starts = solutions(solve(G, TotalDegree(; show_progress = false)))
+        cache = init(
+            G, F, starts,
+            Continuation(; seed = UInt32(11), show_progress = false), Serial(),
+        )
         r1 = solve!(cache)
         r2 = solve!(cache)
         @test solutions(r1) == solutions(r2)

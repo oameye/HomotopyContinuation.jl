@@ -13,7 +13,7 @@ using LinearAlgebra: cond
 @testset "Path diagnostics accessors" begin
     @polyvar x y
     F = System([x^2 + y^2 - 1, x + y - 1])   # two finite solutions
-    res = solve(F, TotalDegree(; seed = UInt32(0x1234)); show_progress = false)
+    res = solve(F, TotalDegree(; seed = UInt32(0x1234), show_progress = false))
     prs = path_results(res)
     @test !isempty(prs)
     r = first(prs)

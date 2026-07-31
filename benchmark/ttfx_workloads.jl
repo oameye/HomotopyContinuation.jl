@@ -14,12 +14,13 @@ using HomotopyContinuationNext:
     Result,
     Tracker,
     UniquePoints,
+    DEFAULT_CLUSTER_ATOL,
+    DEFAULT_CLUSTER_RTOL,
     _cluster_solutions,
     add!,
     ambient_coordinates!,
     intrinsic_coordinates!,
     linear_subspace_homotopy,
-    monodromy_solve,
     on_chart!,
     rand_subspace,
     track!,
@@ -79,9 +80,8 @@ function _solve_total_degree(mode, executor; progress = false)
     F = _square_system(mode)
     return solve(
         F,
-        TotalDegree(; seed = UInt32(0x1234)),
-        executor;
-        show_progress = progress,
+        TotalDegree(; seed = UInt32(0x1234), show_progress = progress),
+        executor,
     )
 end
 
@@ -89,9 +89,8 @@ function _solve_polyhedral(mode, executor)
     F = _square_system(mode)
     return solve(
         F,
-        Polyhedral(; seed = UInt32(0x1234)),
-        executor;
-        show_progress = false,
+        Polyhedral(; seed = UInt32(0x1234), show_progress = false),
+        executor,
     )
 end
 
@@ -121,9 +120,8 @@ function run(::Val{:parameter_interpreted_serial})
         [[1.0 + 0.0im]],
         [1.0 + 0.0im],
         [9.0 + 0.0im],
-        Serial();
-        seed = UInt32(1),
-        show_progress = false,
+        Continuation(; seed = UInt32(1), show_progress = false),
+        Serial(),
     )
 end
 
@@ -140,9 +138,8 @@ function run(::Val{:parameter_compiled_all_threaded})
         [[1.0 + 0.0im]],
         [1.0 + 0.0im],
         [9.0 + 0.0im],
-        Threaded(1);
-        seed = UInt32(1),
-        show_progress = false,
+        Continuation(; seed = UInt32(1), show_progress = false),
+        Threaded(1),
     )
 end
 
@@ -154,18 +151,16 @@ end
 function run(::Val{:overdetermined_total_degree})
     return solve(
         _overdetermined_system(),
-        TotalDegree(; seed = UInt32(0x42)),
-        Serial();
-        show_progress = false,
+        TotalDegree(; seed = UInt32(0x42), show_progress = false),
+        Serial(),
     )
 end
 
 function run(::Val{:overdetermined_polyhedral})
     return solve(
         _overdetermined_system(),
-        Polyhedral(; seed = UInt32(0x42)),
-        Serial();
-        show_progress = false,
+        Polyhedral(; seed = UInt32(0x42), show_progress = false),
+        Serial(),
     )
 end
 
@@ -174,9 +169,8 @@ function run(::Val{:singular_endgame})
     F = System([(x - 1)^2, y - 1]; variables = [x, y])
     return solve(
         F,
-        TotalDegree(; seed = UInt32(3)),
-        Serial();
-        show_progress = false,
+        TotalDegree(; seed = UInt32(3), show_progress = false),
+        Serial(),
     )
 end
 
@@ -273,7 +267,9 @@ end
 
 function run(::Val{:slice_solve})
     F, L = _conic_and_line()
-    return solve(F, L, TotalDegree(; seed = UInt32(0x1234)), Serial(); show_progress = false)
+    return solve(
+        F, L, TotalDegree(; seed = UInt32(0x1234), show_progress = false), Serial(),
+    )
 end
 
 function run(::Val{:slice_solve_projective})
@@ -281,14 +277,16 @@ function run(::Val{:slice_solve_projective})
     F = System([x^2 + y^2 - z^2]; variables = [x, y, z])
     Random.seed!(6)
     L = rand_subspace(3; codim = 1, affine = false)
-    return solve(F, L, TotalDegree(; seed = UInt32(0x1234)), Serial(); show_progress = false)
+    return solve(
+        F, L, TotalDegree(; seed = UInt32(0x1234), show_progress = false), Serial(),
+    )
 end
 
 function run(::Val{:witness_set_build})
     @polyvar x y z
     F = System([x^2 + y^2 + z^2 - 1]; variables = [x, y, z])
-    return witness_set(
-        F; dim = 2, seed = UInt32(0x1234), threading = false, show_progress = false,
+    return solve(
+        F, Witness(; dim = 2, seed = UInt32(0x1234), show_progress = false), Serial(),
     )
 end
 
@@ -309,9 +307,9 @@ end
 
 function run(::Val{:parameter_sweep})
     F, starts, p₀, targets = _parameter_sweep_problem()
-    return solve_targets(
-        F, starts, p₀, targets, Serial();
-        seed = UInt32(0x1234), show_progress = false,
+    return solve(
+        F, starts, p₀, targets,
+        Sweep(; seed = UInt32(0x1234), show_progress = false), Serial(),
     )
 end
 
@@ -319,15 +317,20 @@ function _subspace_sweep_problem()
     F, L₀ = _conic_and_line()
     Random.seed!(23)
     targets = [rand_subspace(2; codim = 1) for _ in 1:3]
-    starts = solutions(solve(F, L₀, Serial(); show_progress = false))
+    starts = solutions(
+        solve(F, L₀, TotalDegree(; show_progress = false), Serial()),
+    )
     return F, starts, L₀, targets
 end
 
 function _subspace_sweep(intrinsic::Bool)
     F, starts, L₀, targets = _subspace_sweep_problem()
-    return solve_targets(
-        F, starts, L₀, targets, Serial();
-        intrinsic = intrinsic, seed = UInt32(0x1234), show_progress = false,
+    return solve(
+        F, starts, L₀, targets,
+        Sweep(;
+            intrinsic = intrinsic, seed = UInt32(0x1234), show_progress = false,
+        ),
+        Serial(),
     )
 end
 
@@ -350,37 +353,36 @@ function _monodromy_system()
 end
 
 function run(::Val{:monodromy_serial})
-    return monodromy_solve(
-        _monodromy_system();
-        target_solutions_count = 2,
-        seed = UInt32(7),
-        threading = false,
-        show_progress = false,
+    return solve(
+        _monodromy_system(),
+        Monodromy(;
+            target_solutions_count = 2, seed = UInt32(7), show_progress = false,
+        ),
+        Serial(),
     )
 end
 
 
 function run(::Val{:monodromy_threaded})
-    return monodromy_solve(
-        _monodromy_system();
-        target_solutions_count = 2,
-        seed = UInt32(7),
-        threading = true,
-        show_progress = false,
+    return solve(
+        _monodromy_system(),
+        Monodromy(;
+            target_solutions_count = 2, seed = UInt32(7), show_progress = false,
+        ),
+        Threaded(),
     )
 end
 
 function run(::Val{:monodromy_group_action})
     @polyvar x p
     F = System([x^2 - p]; variables = [x], parameters = [p])
-    return monodromy_solve(
-        F,
-        [[2.0 + 0.0im]],
-        [4.0 + 0.0im];
-        group_action = solution -> ([-solution[1]],),
-        seed = UInt32(11),
-        threading = false,
-        show_progress = false,
+    return solve(
+        F, [[2.0 + 0.0im]], [4.0 + 0.0im],
+        Monodromy(;
+            group_action = solution -> ([-solution[1]],),
+            seed = UInt32(11), show_progress = false,
+        ),
+        Serial(),
     )
 end
 
@@ -390,25 +392,18 @@ function run(::Val{:monodromy_subspace_trace})
         [z[1]^2 + 2z[2]^2 + 3z[3]^2 + z[1] * z[2] - 1];
         variables = z,
     )
-    return monodromy_solve(
-        F;
-        dim = 2,
-        seed = UInt32(99),
-        threading = false,
-        show_progress = false,
+    return solve(
+        F, Monodromy(; dim = 2, seed = UInt32(99), show_progress = false), Serial(),
     )
 end
 
 function run(::Val{:verify_completeness})
     F = _monodromy_system()
-    result = monodromy_solve(
-        F;
-        target_solutions_count = 2,
-        seed = UInt32(21),
-        threading = false,
-        show_progress = false,
+    alg = Monodromy(;
+        target_solutions_count = 2, seed = UInt32(21), show_progress = false,
     )
-    return verify_solution_completeness(F, result; show_progress = false)
+    result = solve(F, alg, Serial())
+    return verify_solution_completeness(F, result, alg, Serial())
 end
 
 function run(::Val{:unique_points_group_action})
@@ -464,7 +459,9 @@ function run(::Val{:result_clustering})
             ),
         )
     end
-    return _cluster_solutions(path_results)
+    return _cluster_solutions(
+        path_results, DEFAULT_CLUSTER_ATOL, DEFAULT_CLUSTER_RTOL, nothing,
+    )
 end
 
 run(::Val{:progress_enabled}) =

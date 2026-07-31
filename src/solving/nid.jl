@@ -1,38 +1,101 @@
 ## Numerical irreducible decomposition (NID).
 #
-# `decompose` splits each witness superset (from `regeneration`) into irreducible
-# components using monodromy permutations plus the trace test.
-# `numerical_irreducible_decomposition` / `nid` glue `regeneration` and
-# `decompose` together and store the result in a `NumericalIrreducibleDecomposition`.
+# `Decomposition` splits each witness superset of the `Regeneration` stage into
+# irreducible components using monodromy permutations plus the trace test, and
+# collects them in a `NumericalIrreducibleDecomposition`.
+
+# A tighter singular-accuracy threshold than `_REGENERATION_ENDGAME`, so the
+# regeneration u-homotopy rejects points on higher-dimensional components as
+# singular rather than over-collecting them.
+const _DECOMPOSITION_ENDGAME = EndgameOptions(;
+    max_endgame_steps = 100, max_endgame_extended_steps = 100, sing_accuracy = 1.0e-10,
+)
+
+_decompose_stage_monodromy() =
+    MonodromyOptions(; trace_test_tol = 1.0e-10, parameter_sampler = weighted_normal)
+
+"""
+    Decomposition(; regeneration, monodromy, max_iters, warning, options...)
+
+Compute the numerical irreducible decomposition of a variety: run the
+equation-by-equation stage to obtain witness supersets, then split each into
+irreducible components.
+
+Applied to a [`WitnessSet`](@ref) it runs only the splitting stage.
+
+`regeneration` configures the first stage and `monodromy` the second; the two use
+different trace-test tolerances, so they are separate. `max_iters` bounds the
+splitting iterations. The remaining options configure the first stage, and a
+`regeneration` given explicitly carries its own; `endgame_options` applies there
+too, since the splitting stage runs no endgame. `show_monodromy_progress` draws
+the bar of every monodromy run of the splitting stage.
+"""
+struct Decomposition{R <: Regeneration, MO <: MonodromyOptions} <: AbstractAlgorithm
+    common::CommonOptions
+    regeneration::R
+    monodromy::MO
+    show_monodromy_progress::Bool
+    max_iters::Int
+    warning::Bool
+end
+
+function Decomposition(;
+        regeneration::Union{Nothing, Regeneration} = nothing,
+        monodromy::MonodromyOptions = _decompose_stage_monodromy(),
+        max_iters::Int = 50,
+        warning::Bool = true,
+        sorted::Bool = true,
+        max_codim::Union{Nothing, Int} = nothing,
+        atol::Float64 = 1.0e-14,
+        rtol::Float64 = sqrt(eps()),
+        tracker_options::TrackerOptions = TrackerOptions(),
+        endgame_options::EndgameOptions = _DECOMPOSITION_ENDGAME,
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        show_progress::Bool = true,
+        show_monodromy_progress::Bool = false,
+    )
+    regen = if regeneration !== nothing
+        regeneration
+    else
+        Regeneration(;
+            sorted = sorted, max_codim = max_codim, atol = atol, rtol = rtol,
+            tracker_options = tracker_options,
+            endgame_options = endgame_options,
+            seed = seed, show_progress = show_progress,
+            show_monodromy_progress = show_monodromy_progress,
+        )
+    end
+    return Decomposition(
+        CommonOptions(tracker_options, endgame_options, seed, show_progress),
+        regen, monodromy, show_monodromy_progress, max_iters, warning,
+    )
+end
+
+_reseed(alg::Decomposition, seed::UInt32) = Decomposition(
+    _with_seed(alg.common, seed), alg.regeneration, alg.monodromy,
+    alg.show_monodromy_progress, alg.max_iters, alg.warning,
+)
 
 # ── decompose ────────────────────────────────────────────────────────────────
 
 """
-    decompose(W::WitnessSet; options...)
-    decompose(Ws::Vector{<:WitnessSet}; options...)
+    solve(W::WitnessSet, alg::Decomposition = Decomposition(), exec = Threaded())
+    solve(Ws::Vector{<:WitnessSet}, alg::Decomposition, exec = Threaded())
 
-Decompose a witness set (or witness superset) into irreducible components.
-
-# Options
-* `monodromy_options`: [`MonodromyOptions`](@ref) for the monodromy runs.
-* `max_iters = 50`: maximal number of decomposition iterations.
-* `warning = true`: warn when the trace test fails.
-* `threading = true`: enable multi-threading.
-* `seed`: every random choice descends from it, so the same `seed` gives the same
-  components regardless of the state of the global random number generator.
+Decompose a witness set (or witness superset) into irreducible components. See
+[`Decomposition`](@ref) for the options.
 """
-function decompose(
-        Ws::Vector{WT};
-        monodromy_options::MonodromyOptions = MonodromyOptions(;
-            trace_test_tol = 1.0e-10, parameter_sampler = weighted_normal,
-        ),
-        max_iters::Int = 50,
-        warning::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        show_monodromy_progress::Bool = false,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+function solve(
+        Ws::Vector{WT},
+        alg::Decomposition,
+        exec::AbstractExecutor = Threaded(),
     )::Vector{WT} where {WT <: WitnessSet}
-    rng = Random.MersenneTwister(seed)
+    monodromy_options = alg.monodromy
+    max_iters = alg.max_iters
+    warning = alg.warning
+    show_monodromy_progress = alg.show_monodromy_progress
+    tracker_options = _tracker_options(alg)
+    rng = Random.MersenneTwister(_seed(alg))
 
     Ws = sort(Ws; by = dim, rev = true)
     options = _decompose_monodromy_options(monodromy_options)
@@ -42,8 +105,8 @@ function decompose(
     for witness in Ws
         if degree(witness) > 0
             dec = _decompose_with_monodromy(
-                witness, options, max_iters, warning, rng;
-                threading = threading, show_monodromy_progress = show_monodromy_progress,
+                witness, options, max_iters, warning, rng, exec,
+                show_monodromy_progress, tracker_options,
             )
             append!(out, dec)
         end
@@ -51,24 +114,14 @@ function decompose(
     return out
 end
 
-function decompose(
-        W::WitnessSet;
-        monodromy_options::MonodromyOptions = MonodromyOptions(;
-            trace_test_tol = 1.0e-10, parameter_sampler = weighted_normal,
-        ),
-        max_iters::Int = 50,
-        warning::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        show_monodromy_progress::Bool = false,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-    )
-    return decompose(
-        [W];
-        monodromy_options = monodromy_options, max_iters = max_iters,
-        warning = warning, threading = threading,
-        show_monodromy_progress = show_monodromy_progress, seed = seed,
-    )
-end
+solve(
+    W::WitnessSet, alg::Decomposition = Decomposition(),
+    exec::AbstractExecutor = Threaded(),
+) = solve([W], alg, exec)
+
+solve(
+    F::PolynomialInput, alg::Decomposition, exec::AbstractExecutor = Threaded(),
+) = solve(_as_system(F), alg, exec)
 
 # Persistent point identities across repeated monodromy calls. The index owns a
 # separate `UniquePoints` with exactly the solver's distance, group-action, and
@@ -160,8 +213,8 @@ end
 
 function _decompose_with_monodromy(
         W::WT, options::MonodromyOptions, max_iters::Int,
-        warning::Bool, rng::Random.MersenneTwister;
-        threading::Bool, show_monodromy_progress::Bool,
+        warning::Bool, rng::Random.MersenneTwister, exec::AbstractExecutor,
+        show_monodromy_progress::Bool, tracker_options::TrackerOptions,
     )::Vector{WT} where {WT <: WitnessSet}
     P = points(W)
     L = linear_subspace(W)
@@ -178,11 +231,12 @@ function _decompose_with_monodromy(
     end
 
     cp = convert(LinearSubspace{ComplexF64}, L)
-    MS = MonodromySolver(G, cp; options = options, rng = rng)
+    MS = MonodromySolver(
+        G, cp; options = options, tracker_options = tracker_options, rng = rng,
+    )
 
     res = _monodromy_solve!(
-        MS, P, cp, rand(rng, UInt32), show_monodromy_progress,
-        threading ? Threaded() : Serial(),
+        MS, P, cp, rand(rng, UInt32), show_monodromy_progress, exec,
     )
 
     if warning && (something(trace(res), Inf) > options.trace_test_tol)
@@ -213,8 +267,7 @@ function _decompose_with_monodromy(
             active = [master[k] for k in eachindex(master) if !done[k]]
             n_before = length(master)
             res = _monodromy_solve!(
-                MS, active, cp, rand(rng, UInt32), show_monodromy_progress,
-                threading ? Threaded() : Serial(),
+                MS, active, cp, rand(rng, UInt32), show_monodromy_progress, exec,
             )
             _absorb_monodromy_result!(identity, res, options)
             d += length(master) - n_before      # new points grow the total degree
@@ -230,8 +283,7 @@ function _decompose_with_monodromy(
         for orbit in values(orbit_of)
             P_orbit = master[orbit]
             res_orbit = _monodromy_solve!(
-                MS, P_orbit, cp, rand(rng, UInt32), show_monodromy_progress,
-                threading ? Threaded() : Serial(),
+                MS, P_orbit, cp, rand(rng, UInt32), show_monodromy_progress, exec,
             )
             something(trace(res_orbit), Inf) < options.trace_test_tol || continue
 
@@ -288,9 +340,9 @@ end
     NumericalIrreducibleDecomposition
 
 Stores the irreducible components of `V(F)` as witness sets grouped by
-dimension. Construct with [`numerical_irreducible_decomposition`](@ref).
+dimension. Construct with [`Decomposition`](@ref).
 """
-struct NumericalIrreducibleDecomposition{W <: WitnessSet}
+struct NumericalIrreducibleDecomposition{W <: WitnessSet} <: AbstractResult
     Witness_Sets::Dict{Int, Vector{W}}
     seed::UInt32
 end
@@ -434,113 +486,28 @@ end
 # ── Top-level entry points ───────────────────────────────────────────────────
 
 """
-    numerical_irreducible_decomposition(F::System; options...)
-    nid(F::System; options...)
+    solve(F, alg::Decomposition, exec = Threaded())
 
-Compute the numerical irreducible decomposition of `V(F)`: run [`regeneration`](@ref)
-to obtain witness supersets, then [`decompose`](@ref) each into irreducible
-components.
+Compute the numerical irreducible decomposition of `V(F)`, returned as a
+[`NumericalIrreducibleDecomposition`](@ref): run the [`Regeneration`](@ref) stage
+to obtain witness supersets, then split each into irreducible components.
 
-# Options
-* `sorted = true`, `max_codim`: forwarded to [`regeneration`](@ref).
-* `tracker_options`, `endgame_options`.
-* `monodromy_options_for_regeneration`, `monodromy_options_for_decompose`.
-* `max_iters = 50`: maximal decomposition iterations.
-* `warning = true`, `threading = true`, `seed`.
+`F` may be a [`System`](@ref), a single polynomial or a vector of polynomials. See
+[`Decomposition`](@ref) for the options. Both stages draw from `seed`, so the same
+`seed` gives the same decomposition regardless of the state of the global random
+number generator.
 """
-function numerical_irreducible_decomposition(
-        F::S;
-        tracker_options::TrackerOptions = TrackerOptions(),
-        # Capped endgame steps and a tighter singular-accuracy threshold (1e-10)
-        # so the regeneration u-homotopy rejects points on higher-dimensional
-        # components as singular rather than over-collecting them.
-        endgame_options::EndgameOptions = EndgameOptions(;
-            max_endgame_steps = 100, max_endgame_extended_steps = 100,
-            sing_accuracy = 1.0e-10,
-        ),
-        monodromy_options_for_regeneration::MonodromyOptions = MonodromyOptions(;
-            trace_test = true, parameter_sampler = weighted_normal,
-        ),
-        monodromy_options_for_decompose::MonodromyOptions = MonodromyOptions(;
-            trace_test_tol = 1.0e-10, parameter_sampler = weighted_normal,
-        ),
-        monodromy_options::Union{Nothing, MonodromyOptions} = nothing,
-        show_progress::Bool = true,
-        show_monodromy_progress::Bool = false,
-        max_iters::Int = 50,
-        sorted::Bool = true,
-        max_codim::Union{Int, Nothing} = nothing,
-        warning::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        atol::Float64 = 1.0e-14,
-        rtol::Float64 = sqrt(eps()),
+function solve(
+        F::S,
+        alg::Decomposition,
+        exec::AbstractExecutor = Threaded(),
     )::NumericalIrreducibleDecomposition{WitnessSet{S}} where {S <: System}
+    seed = _seed(alg)
     rng = Random.MersenneTwister(seed)
 
-    # `monodromy_options`, when given, overrides both the regeneration and the
-    # decompose monodromy options (convenience alias).
-    if monodromy_options !== nothing
-        monodromy_options_for_regeneration = monodromy_options
-        monodromy_options_for_decompose = monodromy_options
-    end
-
-    Ws = regeneration(
-        F;
-        sorted = sorted, max_codim = max_codim,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        monodromy_options = monodromy_options_for_regeneration,
-        show_progress = show_progress,
-        show_monodromy_progress = show_monodromy_progress,
-        threading = threading, seed = rand(rng, UInt32), atol = atol, rtol = rtol,
-    )
-    dec = decompose(
-        Ws;
-        monodromy_options = monodromy_options_for_decompose,
-        max_iters = max_iters, warning = warning,
-        show_monodromy_progress = show_monodromy_progress,
-        threading = threading, seed = rand(rng, UInt32),
-    )
+    # Each stage gets a seed derived from this one, so a single `seed` reproduces
+    # the whole decomposition.
+    Ws = solve(F, _reseed(alg.regeneration, rand(rng, UInt32)), exec)
+    dec = solve(Ws, _reseed(alg, rand(rng, UInt32)), exec)
     return NumericalIrreducibleDecomposition(dec, seed)
 end
-
-function numerical_irreducible_decomposition(
-        F::AbstractVector{<:MP.AbstractPolynomialLike};
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(;
-            max_endgame_steps = 100, max_endgame_extended_steps = 100,
-            sing_accuracy = 1.0e-10,
-        ),
-        monodromy_options_for_regeneration::MonodromyOptions = MonodromyOptions(;
-            trace_test = true, parameter_sampler = weighted_normal,
-        ),
-        monodromy_options_for_decompose::MonodromyOptions = MonodromyOptions(;
-            trace_test_tol = 1.0e-10, parameter_sampler = weighted_normal,
-        ),
-        monodromy_options::Union{Nothing, MonodromyOptions} = nothing,
-        show_progress::Bool = true,
-        show_monodromy_progress::Bool = false,
-        max_iters::Int = 50,
-        sorted::Bool = true,
-        max_codim::Union{Int, Nothing} = nothing,
-        warning::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        atol::Float64 = 1.0e-14,
-        rtol::Float64 = sqrt(eps()),
-    )
-    return numerical_irreducible_decomposition(
-        System(F);
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        monodromy_options_for_regeneration = monodromy_options_for_regeneration,
-        monodromy_options_for_decompose = monodromy_options_for_decompose,
-        monodromy_options = monodromy_options,
-        show_progress = show_progress,
-        show_monodromy_progress = show_monodromy_progress,
-        max_iters = max_iters, sorted = sorted, max_codim = max_codim,
-        warning = warning, threading = threading, seed = seed,
-        atol = atol, rtol = rtol,
-    )
-end
-
-const nid = numerical_irreducible_decomposition

@@ -4,7 +4,7 @@ using HomotopyContinuationNext
 using HomotopyContinuationNext: TotalDegree, Polyhedral, Serial, Threaded,
     solutions, nsolutions, nexcess_solutions, is_success, is_homogeneous,
     variables, variable_groups, multi_degrees, degrees, fix_parameters,
-    paths_to_track, rand_subspace, LinearSubspace, witness_set, CompileMode,
+    paths_to_track, rand_subspace, LinearSubspace, CompileMode,
     evaluate!, FSVec,
     _group_dims, _bezout_assignments, _multi_bezout_count, _multi_start_coefficients,
     _multi_start_system, _multi_start_solutions
@@ -29,7 +29,7 @@ same_group_points(a, b, groups) =
     length(a) == length(b) && all(u -> any(v -> group_proportional(u, v, groups), b), a)
 
 run_td(F, seed, exec = Serial()) =
-    solve(F, TotalDegree(; seed = UInt32(seed)), exec; show_progress = false)
+    solve(F, TotalDegree(; seed = UInt32(seed), show_progress = false), exec)
 
 @testset "Variable groups" begin
 
@@ -93,9 +93,9 @@ run_td(F, seed, exec = Serial()) =
                     variable_groups = [[x], [y]],
                 ),
             )
-            alg = TotalDegree(; seed = UInt32(5))
+            alg = TotalDegree(; seed = UInt32(5), show_progress = false)
             @test paths_to_track(F, alg) ==
-                solve(F, alg, Serial(); show_progress = false).tracked_paths
+                solve(F, alg, Serial()).tracked_paths
         end
     end
 
@@ -235,27 +235,23 @@ run_td(F, seed, exec = Serial()) =
         L = LinearSubspace(
             randn(MersenneTwister(0x07), ComplexF64, 2, 4), zeros(ComplexF64, 2),
         )
-        @test_throws ArgumentError solve(
-            F, Polyhedral(; seed = UInt32(1)), Serial(); show_progress = false,
-        )
-        @test_throws "variable groups" solve(
-            F, L, TotalDegree(; seed = UInt32(1)), Serial(); show_progress = false,
-        )
-        @test_throws "variable groups" solve(
-            F, L, Polyhedral(; seed = UInt32(1)), Serial(); show_progress = false,
-        )
-        @test_throws "variable groups" witness_set(F)
+        @test_throws ArgumentError solve(F, Polyhedral(; seed = UInt32(1), show_progress = false), Serial())
+        @test_throws "variable groups" solve(F, L, TotalDegree(; seed = UInt32(1), show_progress = false), Serial())
+        @test_throws "variable groups" solve(F, L, Polyhedral(; seed = UInt32(1), show_progress = false), Serial())
+        @test_throws "variable groups" solve(F, Witness())
 
         # An affine slice draws no chart, so the shape is rejected, not the groups.
         @test_throws "positive-dimensional" solve(
-            F, rand_subspace(4; codim = 1), TotalDegree(; seed = UInt32(1)), Serial();
-            show_progress = false,
+            F,
+            rand_subspace(4; codim = 1),
+            TotalDegree(; seed = UInt32(1), show_progress = false),
+            Serial(),
         )
 
         # A single group is the ordinary projective problem, so it is accepted.
         P = System([x^2 + y^2 - v^2, x * y - v^2]; variable_groups = [[x, y, v]])
         @test nsolutions(
-            solve(P, Polyhedral(; seed = UInt32(1)), Serial(); show_progress = false),
+            solve(P, Polyhedral(; seed = UInt32(1), show_progress = false), Serial()),
         ) == 4
     end
 end

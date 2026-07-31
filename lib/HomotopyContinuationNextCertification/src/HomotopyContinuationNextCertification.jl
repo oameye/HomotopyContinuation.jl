@@ -41,7 +41,9 @@ using HomotopyContinuationNext:
     # results consumed by the certify entry points
     Result, PathResult, MonodromyResult,
     # progress bar helper
-    make_progress
+    make_progress,
+    # executors: certification is Serial/Threaded only, see `Certification`
+    Serial, Threaded
 
 # Core functions extended with methods on certification types.
 import HomotopyContinuationNext: is_real, solutions
@@ -52,7 +54,7 @@ include("acb_interpreter.jl")
 include("certification.jl")
 include("certification_arb.jl")
 
-export certify, SolutionCertificate, ExtendedSolutionCertificate, CertificationResult,
+export certify, Certification, SolutionCertificate, ExtendedSolutionCertificate, CertificationResult,
     CertificationCache, is_certified, is_real, is_complex, is_positive,
     solution_candidate, certified_solution_interval,
     certified_solution_interval_after_krawczyk, certificate_index,

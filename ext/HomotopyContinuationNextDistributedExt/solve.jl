@@ -134,9 +134,11 @@ function _solve_total_degree_distributed(
     n_paths = length(starts)
     results = _distributed_map(
         cache.executor, TrackWork(cache.builder, starts), n_paths, report,
+        cache.early_stop,
     )
+    tracked = HCN._assigned_results(results)
     return HCN._finalize_result(
-        results, n_paths, cache.seed, cache.excess_checker,
+        tracked, length(tracked), cache.seed, cache.excess_checker,
     )
 end
 
@@ -167,9 +169,12 @@ function _solve_polyhedral_distributed(
     starts = cache.start_solutions
     n_paths = length(starts)
     work = PolyhedralWork(cache.builder, starts, cache.support, cache.lifting)
-    results = _distributed_map(cache.executor, work, n_paths, report)
+    results = _distributed_map(
+        cache.executor, work, n_paths, report, cache.early_stop,
+    )
+    tracked = HCN._assigned_results(results)
     return HCN._finalize_result(
-        results, n_paths, cache.seed, cache.excess_checker,
+        tracked, length(tracked), cache.seed, cache.excess_checker,
     )
 end
 
@@ -201,8 +206,10 @@ function _solve_worker_distributed(
     n_paths = length(starts)
     results = _distributed_map(
         cache.executor, TrackWork(cache.builder, starts), n_paths, report,
+        cache.early_stop,
     )
-    return HCN._finalize_result(results, n_paths, cache.seed, nothing)
+    tracked = HCN._assigned_results(results)
+    return HCN._finalize_result(tracked, length(tracked), cache.seed, nothing)
 end
 
 # ── Many-target sweeps ──────────────────────────────────────────────────────

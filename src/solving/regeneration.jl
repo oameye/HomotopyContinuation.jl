@@ -19,7 +19,7 @@
 """
     WitnessPoints(L, Lᵤ, R)
 
-Internal container used by [`regeneration`](@ref). Stores witness points `R`
+Internal container used by [`Regeneration`](@ref). Stores witness points `R`
 together with the two flag subspaces used by u-regeneration: `L` sets `u = c`
 (type 2), `Lᵤ` leaves `u` free (type 1).
 """
@@ -93,21 +93,22 @@ end
 # equation goes through its numerator, minus the zeros that are poles of it.
 function initialize_hypersurfaces(
         F::System{P, V}, vars::Vector{V}, L::LinearSubspace,
-        rng::Random.MersenneTwister;
-        threading::Bool, tracker_options::TrackerOptions,
-        endgame_options::EndgameOptions,
+        rng::Random.MersenneTwister, exec::AbstractExecutor,
+        tracker_options::TrackerOptions, endgame_options::EndgameOptions,
     ) where {P, V}
     fs = polynomials(F)
+    hyper_alg = Witness(;
+        solver = TotalDegree(;
+            tracker_options = tracker_options, endgame_options = endgame_options,
+        ),
+        show_progress = false,
+    )
     HS = System{P, V, CompileMode.INTERPRETED, UnderdeterminedShape}
     out = Vector{WitnessSet{HS}}(undef, length(fs))
     for i in eachindex(fs)
         h = System([fs[i]]; parameters = empty(vars), variables = vars)::HS
         G, Q = _numerator_system(fs[i], h, vars)
-        R = _witness_init(
-            G, L, rng;
-            threading = threading, tracker_options = tracker_options,
-            endgame_options = endgame_options,
-        )
+        R = _witness_init(G, L, rng, hyper_alg, exec)
         out[i] = WitnessSet(h, L, Q === nothing ? R : _drop_poles(Q, R))
     end
     return out
@@ -140,14 +141,12 @@ end
         i::Int, codim::Int, F_prev::S,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
         rng::Random.MersenneTwister,
-        threading::Bool, atol::Float64, rtol::Float64,
+        exec::AbstractExecutor, atol::Float64, rtol::Float64,
     )::Nothing where {W <: WitnessSet, P, V, S <: System}
     state = RegenerationState(
         eqs, vars, u, i, codim, F_prev, tracker_options, endgame_options, rng,
     )
-    intersect_all!(
-        out, H, state; threading = threading, atol = atol, rtol = rtol,
-    )
+    intersect_all!(out, H, state, exec; atol = atol, rtol = rtol)
     return nothing
 end
 
@@ -157,90 +156,142 @@ end
         i::Int, codim::Int, Fᵢ::S,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
         rng::Random.MersenneTwister,
-        show_monodromy_progress::Bool, threading::Bool,
+        show_monodromy_progress::Bool, exec::AbstractExecutor,
     )::Nothing where {P, V, S <: System}
     state = RegenerationState(
         eqs, vars, u, i, codim, Fᵢ, tracker_options, endgame_options, rng,
     )
-    fill_up!(out, monodromy_options, state, show_monodromy_progress, threading)
+    fill_up!(out, monodromy_options, state, show_monodromy_progress, exec)
     return nothing
 end
+
+# A tighter singular-condition threshold than the global default, so points lying
+# on a higher-dimensional component (ill-conditioned at t = 0) are rejected as
+# singular by the u-homotopy instead of collected as spurious isolated points.
+const _REGENERATION_ENDGAME = EndgameOptions(;
+    max_endgame_steps = 100, max_endgame_extended_steps = 100, sing_cond = 1.0e12,
+)
+
+_equation_by_equation_monodromy() =
+    MonodromyOptions(; trace_test = true, parameter_sampler = weighted_normal)
+
+"""
+    Regeneration(; sorted, max_codim, monodromy, atol, rtol, options...)
+
+Solve a system equation by equation and return a [`WitnessSet`](@ref) for every
+dimension, without decomposing into irreducible components (a witness *superset*).
+
+Every equation must be polynomial or rational in the variables. A rational
+equation is handled through its numerator, and numerator zeros that are poles of
+the equation are dropped.
+
+`sorted` sorts the equations by decreasing degree; `max_codim` bounds the
+codimension computed. `show_progress` draws the codimension bar,
+`show_monodromy_progress` the bar of every monodromy fill-up underneath it.
+"""
+struct Regeneration{MO <: MonodromyOptions} <: AbstractAlgorithm
+    common::CommonOptions
+    monodromy::MO
+    show_monodromy_progress::Bool
+    sorted::Bool
+    max_codim::Union{Nothing, Int}
+    atol::Float64
+    rtol::Float64
+end
+
+Regeneration(;
+    sorted::Bool = true,
+    max_codim::Union{Nothing, Int} = nothing,
+    monodromy::MonodromyOptions = _equation_by_equation_monodromy(),
+    atol::Float64 = 1.0e-14,
+    rtol::Float64 = sqrt(eps()),
+    tracker_options::TrackerOptions = TrackerOptions(),
+    endgame_options::EndgameOptions = _REGENERATION_ENDGAME,
+    seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+    show_progress::Bool = true,
+    show_monodromy_progress::Bool = false,
+) = Regeneration(
+    CommonOptions(tracker_options, endgame_options, seed, show_progress),
+    monodromy, show_monodromy_progress, sorted, max_codim, atol, rtol,
+)
+
+"""
+    Intersection(; monodromy, atol, rtol, options...)
+
+Intersect a [`WitnessSet`](@ref) with another witness set or with a hypersurface,
+by one regeneration step followed by a monodromy fill-up.
+
+One regeneration step renders no bar of its own: `show_progress` applies to the
+witness set computed for a hypersurface argument, and `show_monodromy_progress`
+to the fill-up.
+"""
+struct Intersection{MO <: MonodromyOptions} <: AbstractAlgorithm
+    common::CommonOptions
+    monodromy::MO
+    show_monodromy_progress::Bool
+    atol::Float64
+    rtol::Float64
+end
+
+Intersection(;
+    monodromy::MonodromyOptions = _equation_by_equation_monodromy(),
+    atol::Float64 = 1.0e-14,
+    rtol::Float64 = sqrt(eps()),
+    tracker_options::TrackerOptions = TrackerOptions(),
+    endgame_options::EndgameOptions = _REGENERATION_ENDGAME,
+    seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+    show_progress::Bool = false,
+    show_monodromy_progress::Bool = false,
+) = Intersection(
+    CommonOptions(tracker_options, endgame_options, seed, show_progress),
+    monodromy, show_monodromy_progress, atol, rtol,
+)
+
+_reseed(alg::Regeneration, seed::UInt32) = Regeneration(
+    _with_seed(alg.common, seed), alg.monodromy, alg.show_monodromy_progress,
+    alg.sorted, alg.max_codim, alg.atol, alg.rtol,
+)
+
+_reseed(alg::Intersection, seed::UInt32) = Intersection(
+    _with_seed(alg.common, seed), alg.monodromy, alg.show_monodromy_progress,
+    alg.atol, alg.rtol,
+)
 
 # ── regeneration ─────────────────────────────────────────────────────────────
 
 """
-    regeneration(F::System; options...)
+    solve(F, alg::Regeneration, exec = Threaded())
 
 Solve `F = 0` equation-by-equation and return a [`WitnessSet`](@ref) for every
 dimension without decomposing into irreducible components (a witness
 *superset*). Based on the u-regeneration algorithm of Duff, Leykin and
 Rodriguez (https://arxiv.org/abs/2206.02869).
 
+`F` may be a [`System`](@ref), a single polynomial or a vector of polynomials,
+and must be parameter-free; fix the values first with [`fix_parameters`](@ref).
 Every equation must be polynomial or rational in the variables of `F`. A rational
 equation is handled through its numerator, and the zeros of the numerator that
 are poles of the equation are dropped.
 
-# Options
-* `sorted = true`: sort the polynomials of `F` by decreasing degree.
-* `max_codim`: maximal codimension of witness supersets to compute.
-* `tracker_options`, `endgame_options`, `monodromy_options`.
-* `threading = true`: enable multi-threading.
-* `seed`: every random choice descends from it, so the same `seed` gives the same
-  witness supersets regardless of the state of the global random number generator.
+See [`Regeneration`](@ref) for the options. Every random choice descends from its
+`seed`, so the same `seed` gives the same witness supersets regardless of the
+state of the global random number generator.
 """
-function regeneration(
-        F::AbstractVector{<:MP.AbstractPolynomialLike};
-        sorted::Bool = true,
-        max_codim::Union{Int, Nothing} = nothing,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(;
-            max_endgame_steps = 100, max_endgame_extended_steps = 100,
-            sing_cond = 1.0e12,
-        ),
-        monodromy_options::MonodromyOptions = MonodromyOptions(;
-            trace_test = true, parameter_sampler = weighted_normal,
-        ),
-        show_progress::Bool = true,
-        show_monodromy_progress::Bool = false,
-        threading::Bool = Threads.nthreads() > 1,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        atol::Float64 = 1.0e-14,
-        rtol::Float64 = sqrt(eps()),
-    )
-    return regeneration(
-        System(F);
-        sorted = sorted, max_codim = max_codim,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        monodromy_options = monodromy_options,
-        show_progress = show_progress,
-        show_monodromy_progress = show_monodromy_progress,
-        threading = threading, seed = seed, atol = atol, rtol = rtol,
-    )
-end
-
-function regeneration(
-        F::S;
-        sorted::Bool = true,
-        max_codim::Union{Int, Nothing} = nothing,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        # A tighter singular-condition threshold (1e12 vs the 1e14 global
-        # default) so points lying on a higher-dimensional component, which are
-        # ill-conditioned at t = 0, are rejected as singular by the u-homotopy
-        # instead of being collected as spurious isolated points.
-        endgame_options::EndgameOptions = EndgameOptions(;
-            max_endgame_steps = 100, max_endgame_extended_steps = 100,
-            sing_cond = 1.0e12,
-        ),
-        monodromy_options::MonodromyOptions = MonodromyOptions(;
-            trace_test = true, parameter_sampler = weighted_normal,
-        ),
-        show_progress::Bool = true,
-        show_monodromy_progress::Bool = false,
-        threading::Bool = Threads.nthreads() > 1,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        atol::Float64 = 1.0e-14,
-        rtol::Float64 = sqrt(eps()),
+function solve(
+        F::S,
+        alg::Regeneration,
+        exec::AbstractExecutor = Threaded(),
     )::Vector{WitnessSet{S}} where {S <: System}
+    sorted = alg.sorted
+    max_codim = alg.max_codim
+    tracker_options = _tracker_options(alg)
+    endgame_options = _endgame_options(alg)
+    monodromy_options = alg.monodromy
+    show_progress = _show_progress(alg)
+    show_monodromy_progress = alg.show_monodromy_progress
+    seed = _seed(alg)
+    atol = alg.atol
+    rtol = alg.rtol
     nparameters(F) == 0 || throw(
         ArgumentError(
             "`regeneration` requires a parameter-free system, but the system has " *
@@ -271,9 +322,8 @@ function regeneration(
 
     # witness sets for each hypersurface f_i = 0 on the seed subspace
     H = initialize_hypersurfaces(
-        F, vars, linear_subspace(out[1]), rng;
-        threading = threading, tracker_options = tracker_options,
-        endgame_options = endgame_options,
+        F, vars, linear_subspace(out[1]), rng, exec,
+        tracker_options, endgame_options,
     )
 
     # sort equations by decreasing degree
@@ -300,13 +350,13 @@ function regeneration(
             )
             _intersect_regeneration_phase!(
                 out, H, eqs, vars, u, i, codim, F_prev,
-                tracker_options, endgame_options, rng, threading, atol, rtol,
+                tracker_options, endgame_options, rng, exec, atol, rtol,
             )
             Fᵢ = System(eqs[1:i]; parameters = empty(vars), variables = vars)
             _fill_regeneration_phase!(
                 out, monodromy_options, eqs, vars, u, i, codim, Fᵢ,
                 tracker_options, endgame_options, rng,
-                show_monodromy_progress, threading,
+                show_monodromy_progress, exec,
             )
         end
         progress !== nothing && ProgressMeter.next!(progress)
@@ -329,7 +379,7 @@ function regeneration(
     # Junk removal: a codim-k witness superset can pick up points where its
     # slice crosses a higher-dimensional component; those points lie on that
     # higher-dimensional witness set and are removed here.
-    _remove_contained_points!(result, rng; atol = atol, rtol = rtol)
+    _remove_contained_points!(result, rng, exec; atol = atol, rtol = rtol)
     filter!(W -> degree(W) > 0, result)
     return result
 end
@@ -465,11 +515,15 @@ _fresh_variable(vars::Vector{V}) where {V} = V(_fresh_variable_name(vars))
 _fresh_variable(vars::Vector{Expression})::Expression =
     variable(_fresh_variable_name(vars))
 
+solve(
+    F::PolynomialInput, alg::Regeneration, exec::AbstractExecutor = Threaded(),
+) = solve(_as_system(F), alg, exec)
+
 # ── Intersection with a hypersurface ─────────────────────────────────────────
 
 function intersect_all!(
-        out, H, state::RegenerationState;
-        threading::Bool, atol::Float64, rtol::Float64,
+        out, H, state::RegenerationState, exec::AbstractExecutor;
+        atol::Float64, rtol::Float64,
     )
     i = state.i
     codim = state.codim
@@ -481,8 +535,7 @@ function intersect_all!(
         if k < i
             Wₖ₊₁ = k < codim ? out[k + 1] : nothing
             intersect_with_hypersurface!(
-                Wₖ, Hᵢ, Wₖ₊₁, state;
-                threading = threading, atol = atol, rtol = rtol,
+                Wₖ, Hᵢ, Wₖ₊₁, state, exec; atol = atol, rtol = rtol,
             )
         end
     end
@@ -490,8 +543,8 @@ function intersect_all!(
 end
 
 function intersect_with_hypersurface!(
-        W::WitnessPoints, H::WitnessSet, X, state::RegenerationState;
-        threading::Bool, atol::Float64, rtol::Float64,
+        W::WitnessPoints, H::WitnessSet, X, state::RegenerationState,
+        exec::AbstractExecutor; atol::Float64, rtol::Float64,
     )
     F = state.Fᵢ
     h = state.eqs[state.i]
@@ -521,10 +574,10 @@ function intersect_with_hypersurface!(
     F₀, G₀, d = _u_homotopy_systems(W, F, X, h, vars, u)
     γ = _random_gamma(state.rng)
     roots = ComplexF64[cis(2π * k / d) for k in 0:(d - 1)]
-    if threading && length(P_next) * d > 1
+    if _wants_tasks(exec) && length(P_next) * d > 1
         _threaded_intersection!(
             X, P_next, roots, F₀, G₀, γ,
-            state.tracker_options, state.endgame_options,
+            state.tracker_options, state.endgame_options, _local_ntasks(exec),
         )
     else
         Hom = StraightLineHomotopy(F₀.evaluator, G₀.evaluator; γ = γ)
@@ -580,11 +633,11 @@ function _threaded_intersection!(
         X::WitnessPoints, P::Vector{Vector{ComplexF64}}, roots::Vector{ComplexF64},
         F₀::S1, G₀::S2, γ::ComplexF64,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
+        nt::Int,
     )::Nothing where {S1 <: System, S2 <: System}
     nroots = length(roots)
     njobs = length(P) * nroots
     results = [ComplexF64[] for _ in 1:njobs]
-    nt = Threads.nthreads()
     @tasks for k in 1:njobs
         @set ntasks = nt
         @local eg = _endgame_tracker(
@@ -713,8 +766,8 @@ end
 function _monodromy_with_options(
         F::System, X::AbstractVector{<:AbstractVector}, L::LinearSubspace,
         opts::MonodromyOptions;
-        tracker_options::TrackerOptions = TrackerOptions(),
-        threading::Bool, show_progress::Bool,
+        exec::AbstractExecutor, tracker_options::TrackerOptions = TrackerOptions(),
+        show_progress::Bool = false,
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )::MonodromyResult
     cp = convert(LinearSubspace{ComplexF64}, L)
@@ -725,14 +778,12 @@ function _monodromy_with_options(
         options = opts, tracker_options = tracker_options,
         rng = _tagged_rng(seed, 0x0000_0001),
     )
-    return _monodromy_solve!(
-        MS, X, cp, seed, show_progress, threading ? Threaded() : Serial(),
-    )
+    return _monodromy_solve!(MS, X, cp, seed, show_progress, exec)
 end
 
 function fill_up!(
         out, monodromy_options::MonodromyOptions, state::RegenerationState,
-        show_monodromy_progress::Bool, threading::Bool,
+        show_monodromy_progress::Bool, exec::AbstractExecutor,
     )
     Fᵢ = state.Fᵢ
     for W in out
@@ -740,8 +791,8 @@ function fill_up!(
             opts = _regeneration_monodromy_options(monodromy_options, W)
             res = _monodromy_with_options(
                 Fᵢ, W.R, linear_subspace(W), opts;
-                tracker_options = state.tracker_options,
-                threading = threading, show_progress = show_monodromy_progress,
+                exec = exec, tracker_options = state.tracker_options,
+                show_progress = show_monodromy_progress,
                 seed = rand(state.rng, UInt32),
             )
             W.R = nsolutions(res) == 0 ? Vector{Vector{ComplexF64}}() :
@@ -758,44 +809,30 @@ end
 _get_c(flag) = extrinsic(flag[1][1]).b[1]
 
 """
-    intersect(W::WitnessSet, H::WitnessSet; options...)
+    intersect(W::WitnessSet, H::WitnessSet, alg = Intersection(), exec = Threaded())
 
 Intersect the witness set `W` with the witness set `H` of a single hypersurface,
 returning the witness set(s) of `V(system(W)) ∩ V(system(H))` obtained by one
 u-regeneration step. Returns a single `WitnessSet` when the result has one
 dimension, otherwise a `Vector{WitnessSet}`.
 
-    intersect(W::WitnessSet, f; options...)
+    intersect(W::WitnessSet, f, alg = Intersection(), exec = Threaded())
 
 Compute a witness set `H` for the hypersurface `f` and return `intersect(W, H)`.
 """
 function Base.intersect(
         W::WitnessSet,
-        H::WitnessSet;
-        # `show_progress` is accepted for API consistency with `regeneration` /
-        # `nid` (both take it) and to keep unknown-keyword typos loud rather than
-        # silently swallowed. `intersect` performs a single u-regeneration step
-        # and renders no step-level bar; the monodromy fill-up sub-progress is
-        # controlled by `show_monodromy_progress`.
-        show_progress::Bool = false,
-        show_monodromy_progress::Bool = false,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        # Endgame options (see `regeneration` above): the tighter sing_cond
-        # rejects near-singular points on higher-dimensional components that
-        # would otherwise over-collect the u-homotopy output.
-        endgame_options::EndgameOptions = EndgameOptions(;
-            max_endgame_steps = 100, max_endgame_extended_steps = 100,
-            sing_cond = 1.0e12,
-        ),
-        monodromy_options::MonodromyOptions = MonodromyOptions(;
-            trace_test = true, parameter_sampler = weighted_normal,
-        ),
-        threading::Bool = Threads.nthreads() > 1,
-        atol::Float64 = 1.0e-14,
-        rtol::Float64 = sqrt(eps()),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        H::WitnessSet,
+        alg::Intersection = Intersection(),
+        exec::AbstractExecutor = Threaded(),
     )
-    rng = Random.MersenneTwister(seed)
+    show_monodromy_progress = alg.show_monodromy_progress
+    tracker_options = _tracker_options(alg)
+    endgame_options = _endgame_options(alg)
+    monodromy_options = alg.monodromy
+    atol = alg.atol
+    rtol = alg.rtol
+    rng = Random.MersenneTwister(_seed(alg))
     size(system(H))[1] == 1 ||
         throw(ArgumentError("The second argument must be defined by a single equation."))
     size(system(W))[2] == size(system(H))[2] ||
@@ -838,8 +875,7 @@ function Base.intersect(
     )
 
     intersect_with_hypersurface!(
-        W₁, Hᵤ, W₂, intersect_state;
-        threading = threading, atol = atol, rtol = rtol,
+        W₁, Hᵤ, W₂, intersect_state, exec; atol = atol, rtol = rtol,
     )
     fill_state = RegenerationState(
         [eqs; h], vars_u, u, length(eqs) + 1, 2,
@@ -852,7 +888,7 @@ function Base.intersect(
     for Wi in Ws
         isempty(Wi.R) || (Wi.R = unique_points(Wi.R))
     end
-    fill_up!(Ws, monodromy_options, fill_state, show_monodromy_progress, threading)
+    fill_up!(Ws, monodromy_options, fill_state, show_monodromy_progress, exec)
 
     G = System([eqs; h]; parameters = empty(vars), variables = vars)
     out = WitnessSet[]
@@ -862,7 +898,7 @@ function Base.intersect(
     end
     # Remove spurious witness points of a lower-dimensional set that actually
     # lie on a higher-dimensional component (they are junk from the u-homotopy).
-    _remove_contained_points!(out, rng; atol = atol, rtol = rtol)
+    _remove_contained_points!(out, rng, exec; atol = atol, rtol = rtol)
     filter!(X -> degree(X) > 0, out)
     return length(out) == 1 ? first(out) : out
 end
@@ -870,8 +906,8 @@ end
 # For witness sets sorted by decreasing dimension, drop from each set the points
 # that are contained in any higher-dimensional set (junk points).
 function _remove_contained_points!(
-        out::Vector{<:WitnessSet}, rng::Random.MersenneTwister;
-        atol::Float64, rtol::Float64,
+        out::Vector{<:WitnessSet}, rng::Random.MersenneTwister,
+        exec::AbstractExecutor; atol::Float64, rtol::Float64,
     )
     sort!(out; by = dim, rev = true)
     for i in eachindex(out)
@@ -883,9 +919,9 @@ function _remove_contained_points!(
             for (idx, p) in enumerate(Wi.R)
                 keep[idx] || continue
                 membership(
-                    p, out[j];
-                    atol = atol, rtol = rtol, show_progress = false,
-                    seed = rand(rng, UInt32),
+                    p, out[j],
+                    Membership(; show_progress = false, seed = rand(rng, UInt32)),
+                    exec; atol = atol, rtol = rtol,
                 ) && (keep[idx] = false)
             end
         end
@@ -898,81 +934,48 @@ end
 
 function Base.intersect(
         W::WitnessSet,
-        f::MP.AbstractPolynomialLike;
-        show_progress::Bool = false,
-        show_monodromy_progress::Bool = false,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(;
-            max_endgame_steps = 100, max_endgame_extended_steps = 100,
-            sing_cond = 1.0e12,
-        ),
-        monodromy_options::MonodromyOptions = MonodromyOptions(;
-            trace_test = true, parameter_sampler = weighted_normal,
-        ),
-        threading::Bool = Threads.nthreads() > 1,
-        atol::Float64 = 1.0e-14,
-        rtol::Float64 = sqrt(eps()),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        f::MP.AbstractPolynomialLike,
+        alg::Intersection = Intersection(),
+        exec::AbstractExecutor = Threaded(),
     )
     _check_front_end(system(W), false)
-    rng = Random.MersenneTwister(seed)
-    H = _hypersurface_witness_set(
-        f, collect(variables(system(W))), rng;
-        show_progress = show_progress, threading = threading,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-    )
-    return intersect(
-        W, H;
-        show_progress = show_progress,
-        show_monodromy_progress = show_monodromy_progress,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        monodromy_options = monodromy_options, threading = threading,
-        atol = atol, rtol = rtol, seed = rand(rng, UInt32),
-    )
+    rng = Random.MersenneTwister(_seed(alg))
+    H = _hypersurface_witness_set(f, collect(variables(system(W))), rng, alg, exec)
+    # A derived seed, so the regeneration step does not replay the stream that
+    # produced H's slice.
+    return intersect(W, H, _reseed(alg, rand(rng, UInt32)), exec)
 end
 
 function Base.intersect(
         W::WitnessSet,
-        f::Expression;
-        show_progress::Bool = false,
-        show_monodromy_progress::Bool = false,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(;
-            max_endgame_steps = 100, max_endgame_extended_steps = 100,
-            sing_cond = 1.0e12,
-        ),
-        monodromy_options::MonodromyOptions = MonodromyOptions(;
-            trace_test = true, parameter_sampler = weighted_normal,
-        ),
-        threading::Bool = Threads.nthreads() > 1,
-        atol::Float64 = 1.0e-14,
-        rtol::Float64 = sqrt(eps()),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        f::Expression,
+        alg::Intersection = Intersection(),
+        exec::AbstractExecutor = Threaded(),
     )
     _check_front_end(system(W), true)
-    rng = Random.MersenneTwister(seed)
+    rng = Random.MersenneTwister(_seed(alg))
     H = _hypersurface_witness_set(
-        f, _as_variables(collect(variables(system(W)))), rng;
-        show_progress = show_progress, threading = threading,
-        tracker_options = tracker_options, endgame_options = endgame_options,
+        f, _as_variables(collect(variables(system(W)))), rng, alg, exec,
     )
-    return intersect(
-        W, H;
-        show_progress = show_progress,
-        show_monodromy_progress = show_monodromy_progress,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        monodromy_options = monodromy_options, threading = threading,
-        atol = atol, rtol = rtol, seed = rand(rng, UInt32),
-    )
+    return intersect(W, H, _reseed(alg, rand(rng, UInt32)), exec)
 end
 
 # Witness set of `V(f)` in the ambient space of `vars`, which may hold variables `f`
 # does not use. The slice is the affine line the flag is built from, also for a
 # homogeneous `f`, whose projective slice has one dimension too many for it.
+_hypersurface_witness(alg::Intersection, seed::UInt32)::Witness{TotalDegree} =
+    Witness(
+    _with_seed(alg.common, seed), nothing, nothing,
+    TotalDegree(;
+        tracker_options = _tracker_options(alg),
+        endgame_options = _endgame_options(alg),
+        seed = seed, show_progress = _show_progress(alg),
+    ),
+)
+
 function _hypersurface_witness_set(
-        f::MP.AbstractPolynomialLike, vars::Vector, rng::Random.MersenneTwister;
-        show_progress::Bool, threading::Bool,
-        tracker_options::TrackerOptions, endgame_options::EndgameOptions,
+        f::MP.AbstractPolynomialLike, vars::Vector, rng::Random.MersenneTwister,
+        alg::Intersection, exec::AbstractExecutor,
     )::WitnessSet
     extra = setdiff(MP.effective_variables(f), vars)
     isempty(extra) || throw(
@@ -981,20 +984,18 @@ function _hypersurface_witness_set(
                 "but `$(f)` also uses $(join(extra, ", ")).",
         ),
     )
-    return witness_set(
+    return solve(
         System([f]; parameters = empty(vars), variables = vars),
-        rand_subspace(rng, length(vars); dim = 1);
-        show_progress = show_progress, threading = threading,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        seed = rand(rng, UInt32),
+        rand_subspace(rng, length(vars); dim = 1),
+        _hypersurface_witness(alg, rand(rng, UInt32)),
+        exec,
     )
 end
 
 # A rational `f` is solved through its numerator, with its poles dropped.
 function _hypersurface_witness_set(
-        f::Expression, vars::Vector{Expression}, rng::Random.MersenneTwister;
-        show_progress::Bool, threading::Bool,
-        tracker_options::TrackerOptions, endgame_options::EndgameOptions,
+        f::Expression, vars::Vector{Expression}, rng::Random.MersenneTwister,
+        alg::Intersection, exec::AbstractExecutor,
     )::WitnessSet
     (p, q) = num_den(f)
     (degree(p, vars) < 0 || degree(q, vars) < 0) && throw(
@@ -1005,11 +1006,9 @@ function _hypersurface_witness_set(
     )
     h = System([f]; parameters = Expression[], variables = vars)
     G, Q = _numerator_system(f, h, vars)
-    Wp = witness_set(
-        G, rand_subspace(rng, length(vars); dim = 1);
-        show_progress = show_progress, threading = threading,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        seed = rand(rng, UInt32),
+    Wp = solve(
+        G, rand_subspace(rng, length(vars); dim = 1),
+        _hypersurface_witness(alg, rand(rng, UInt32)), exec,
     )
     R = Q === nothing ? solutions(Wp) : _drop_poles(Q, solutions(Wp))
     return WitnessSet(h, linear_subspace(Wp), R)

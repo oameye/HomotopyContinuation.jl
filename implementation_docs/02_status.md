@@ -176,7 +176,7 @@ remaining work toward full parity.
   including the appended-row Taylor coefficient `c·x_K` for the chart row (see
   `01_decisions.md`); `AffineChartHomotopy` keeps `0` because a homotopy is only ever the
   outermost wrapper, where the predictor has already zeroed that row
-- [x] `monodromy_solve` at full v2 parity: `find_start_pair`, serial and threaded
+- [x] `solve(F, [sols, p], Monodromy(), exec)` at full v2 parity: `find_start_pair`, serial and threaded
   (Channel job queue) execution, `MonodromyOptions` (~27 explicit kwargs, no splatting),
   `reuse_loops` (`:all`/`:random`/`:none`), heuristic stop, `target_solutions_count`,
   equivalence classes via group actions, `LinearSubspace` parameters, permutations, trace
@@ -221,8 +221,8 @@ remaining work toward full parity.
     at `t = 1` and back out through `_to_ambient` at the `t` each path reported. Consequences:
     clustering compares ambient points (v2 clusters intrinsic ones), and per-path diagnostics
     (accuracy, residual, condition number, valuation) stay in tracking coordinates, as in v2.
-  - `solve_targets(F, starts, p_start, targets, exec; ...)` and
-    `solve_targets(F, starts, L_start, targets, exec; ...)`: one homotopy built and retargeted per target
+  - `solve(F, starts, p_start, targets, Sweep(), exec)` and
+    `solve(F, starts, L_start, targets, Sweep(), exec)`: one homotopy built and retargeted per target
     (`target_parameters!` through the concrete handle in the worker state), `transform_result`,
     `transform_parameters` and `flatten` matching v2's four return shapes. Threading runs over the
     (target, path) product, each task owning its worker state and retargeting it when it crosses a
@@ -240,13 +240,13 @@ remaining work toward full parity.
     solve.
   - Tests: `test/{sliced_solve,subspace_solve,many_targets,result_iterator}_test.jl`
 - [x] **Witness sets and numerical irreducible decomposition (NID)** for affine systems, in core
-  (`src/solving/{witness_set,regeneration,nid}.jl`). Provides `witness_set` (dim/codim, explicit
-  subspace, move), `trace_test`, `membership`, `intersect(W, H)` / `intersect(W, f)`; `regeneration`
-  (u-regeneration, Duff/Leykin/Rodriguez); `decompose` plus `NumericalIrreducibleDecomposition`
-  (`nid` / `numerical_irreducible_decomposition`, `ncomponents`, `degrees`, `witness_sets`,
+  (`src/solving/{witness_set,regeneration,nid}.jl`). Provides `Witness` (dim/codim, explicit
+  subspace, move), `trace_test`, `membership`, `intersect(W, H)` / `intersect(W, f)`; `Regeneration`
+  (u-regeneration, Duff/Leykin/Rodriguez); `Decomposition` plus `NumericalIrreducibleDecomposition`
+  (`ncomponents`, `degrees`, `witness_sets`,
   hand-rolled degree table with no PrettyTables dep). Covers projective witness sets,
   zero-dimensional varieties, witness sets of a `fix_parameters` system, rational input to
-  `regeneration`/`nid`/`intersect`, and threaded membership and intersection.
+  `Regeneration`/`Decomposition`/`intersect`, and threaded membership and intersection.
   Tests: `test/{witness_set,nid}_test.jl`.
 
   Key design choices, all deviations from v2:
@@ -259,7 +259,7 @@ remaining work toward full parity.
   - `decompose` follows v2's control flow but tracks orbit connectivity by point identity plus
     union-find, immune to index drift.
   - Parametric input substitutes values into `F` (`_fix_parameters`) and stores the
-    parameter-free system, so no parameter plumbing reaches moves/trace/membership/decompose.
+    parameter-free system, so no parameter plumbing reaches moves/trace/membership/decomposition.
   - Threaded intersection clones evaluators instead of `deepcopy`ing trackers (unsafe with
     FunctionWrappers) and pushes endpoints in serial order.
   - `membership` is bit-identical across threading modes: all randomness is drawn in the
@@ -291,7 +291,7 @@ remaining work toward full parity.
 
 - [x] **System composition** (`src/core/composition_system.jl`): `compose(G, F)` and the infix
   `G ∘ F` build `G(F(x; p); p)`, accepted by every route that only evaluates the system
-  (`solve` from start solutions, `solve` by total degree, `monodromy_solve`, `newton`,
+  (`solve` from start solutions, `solve` by total degree, `Monodromy`, `newton`,
   `find_start_pair`, all typed on `SystemLike = Union{System, CompositionSystem}`). Routes
   that need the composed monomials or equations (polyhedral, witness sets,
   `verify_solution_completeness`) reach a composition through `System(C)`, matching how v2
@@ -362,7 +362,7 @@ remaining work toward full parity.
   states hold one homotopy each, so the memo needs no lock, and the working set of a monodromy
   loop or a subspace sweep is a handful of pairs.
 
-- [x] **Distributed monodromy** (`ext/.../monodromy.jl`): `monodromy_solve(F, [sols, p],
+- [x] **Distributed monodromy** (`ext/.../monodromy.jl`): `solve(F, [sols, p], Monodromy(),
   DistributedExecutor())`. The shared state never leaves the calling process: it keeps the job
   queue, the `UniquePoints` set, the trace matrix, the statistics and the loop list, and hands
   out single loops as `MonodromyJob`s (loop, start point, its `ω`/`μ`/precision flag) that come
@@ -423,12 +423,18 @@ the v2 test that stays unported until the feature lands. Ordered by consequence.
   Closes the `proj_square`, `proj_ov` and `proj_ov_reordering` cases of `solve_test.jl`
   "total degree (simple)" and the projective half of its "polyhedral" testset.
   Tests: `test/solve_test.jl` "projective: …".
+- [x] **`AbstractResult` / `AbstractSolutionResult`**: `Result` and `MonodromyResult` share one
+  set of accessor bodies (`solutions`, `real_solutions`, `nsolutions`, `nsingular`,
+  `nnonsingular`, `nreal`, `results`, `nresults`), so `MonodromyResult` gained `Result`'s filter
+  keywords and `path_results`. `WitnessSet` and `NumericalIrreducibleDecomposition` are
+  `AbstractResult` but hold no path set. `is_success` and `seed` stay per type; see
+  `01_decisions.md`.
 - [x] **`fix_parameters(F, p)`**, and **`FixedParameterSystem`**. One public operation fixes a
   parametric system at one parameter value, and its result is what every route accepts:
   `solve(fix_parameters(F, p), TotalDegree())`, `solve(fix_parameters(F, p), L, Polyhedral())`,
-  `witness_set(fix_parameters(F, p))`. No solve route takes parameter values any more, which
-  removed 22 `target_parameters::Union{Nothing, …}` keywords across five files and gave `nid`
-  and `regeneration` the capability for free; `start_parameters`/`target_parameters` survive
+  `solve(fix_parameters(F, p), Witness())`. No solve route takes parameter values any more, which
+  removed 22 `target_parameters::Union{Nothing, …}` keywords across five files and gave
+  `Decomposition` and `Regeneration` the capability for free; `start_parameters`/`target_parameters` survive
   only on the parameter-homotopy and sweep routes, where they name two different ends. A
   `System` has the values substituted into its equations; a `CompositionSystem` has no
   equations to substitute into and gets a `FixedParameterSystem`, which binds them at the
@@ -454,7 +460,10 @@ the v2 test that stays unported until the feature lands. Ordered by consequence.
   homotopy's coordinates, except that an `AffineChartHomotopy` takes projective
   representatives. Closes `solve_test.jl` "solve (Homotopy)". Both routes in
   `src/solving/homotopy_solve.jl`; tests: `test/homotopy_solve_test.jl`.
-- [ ] **`stop_early_cb`**, serial and threaded. Unports `solve_test.jl` "stop early callback".
+- [x] **`early_stop_callback`** on `TotalDegree`, `Polyhedral`, `Continuation`, on all three
+  executors (driver-side at `batch_size` granularity under `DistributedExecutor`). v2 spells it
+  `stop_early_cb`. `tracked_paths` now means the number of paths that actually ran, so `nfailed`
+  stays 0 when a callback stops a run early; see `01_decisions.md`.
 - [ ] **SemialgebraicSets.jl integration**: `SemialgebraicSetsHCSolver` with
   `excess_residual_tol`, `real_atol`, `real_rtol`, `compile`, and its `show`. Unports all of
   `semialgebraic_sets_test.jl`.
@@ -469,7 +478,7 @@ the v2 test that stays unported until the feature lands. Ordered by consequence.
   `only_torus` / `only_non_zero` options. `paths_to_track(F, TotalDegree())` is done and
   exported; it counts `init`'s start solutions rather than deriving the number a second time,
   so it agrees with `Result.tracked_paths` on every route (grouped, projective, squared-up,
-  sliced). It therefore materializes them, where v2 counts a lazy iterator; the fix if that
+  sliced) whenever no `early_stop_callback` fires — `tracked_paths` counts paths that ran. It therefore materializes them, where v2 counts a lazy iterator; the fix if that
   ever costs, for a Bezout number large enough to matter, is lazy start solutions rather than
   a second derivation of the count. Unports `polyhedral_test.jl` "only torus".
 - [ ] **Symbolic `Homotopy` type** (`Homotopy(h, vars, t; parameters)`) for user-defined
@@ -601,17 +610,16 @@ Audited 2026-07-28 over `src/`, `ext/` and `lib/`. Findings below, most conseque
   a union at runtime) but `01_decisions.md` documents every other `inferencebarrier` use and
   not this one, so a new route reproduces it by copying a neighbour rather than by reading a
   rationale, and nothing states what breaks if it is dropped.
-- **Two spellings of parallelism.** The solve routes take a positional
-  `exec::AbstractExecutor`; `witness_set`, `membership`, `regeneration` and `nid` take a
-  `threading::Bool` kwarg and convert at the last moment with `threading ? Threaded() :
-  Serial()` (`witness_set.jl:165`, `nid.jl:185,218,235`, `regeneration.jl:708`).
-  `monodromy_solve` accepts both and lets the executor win (`monodromy.jl:1686`). 83
-  mentions of `threading` across `src/solving/`. The consequence is not cosmetic: witness
-  sets, NID and regeneration cannot reach `DistributedExecutor` at all, even though the
-  monodromy solver they call into can, and even though those are the routes whose per-loop
-  cost is highest and therefore the ones the ~5 ms channel handoff would disappear against.
-  `membership` additionally hard-codes `nt = Threads.nthreads()` (`witness_set.jl:688`)
-  rather than reading a task count off an executor, so `Threaded(2)` cannot bound it.
+- **`DistributedExecutor` reachability past the initial solve.** Every route now takes a
+  positional `exec::AbstractExecutor` and `threading::Bool` is gone, so witness sets, NID and
+  regeneration accept a `DistributedExecutor` and it reaches their initial solve and their
+  monodromy stages. It does not yet reach the witness *moves*, the u-homotopy intersection or
+  `membership`: `_move_witness_points` loops serially and builds its tracker inline,
+  `_threaded_intersection!` builds its tracker inside `@tasks` with no builder type, and
+  `membership` uses a bespoke `MembershipState`. None of the eleven builders in `builder.jl` is
+  involved, so each needs a builder, a work unit in `ext/.../solve.jl` and serialization.
+  `membership` additionally hard-codes `nt = Threads.nthreads()` rather than reading a task
+  count off its executor, so `Threaded(2)` cannot bound it.
 - **Four progress-bar idioms.** `progress.jl` offers `make_progress`/`update_progress!` and
   `make_many_progress`/`update_many_progress!`; monodromy has its own `ProgressUnknown`
   pair (`monodromy.jl:1457,1269`); `membership` reuses `make_progress` but drives it with

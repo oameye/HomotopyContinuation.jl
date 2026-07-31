@@ -13,6 +13,34 @@
 # Certificate types
 # ─────────────────────────────────────────────────────────────────────────────
 
+"""
+    Certification(; max_precision, refine_solution, extended_certificate, show_progress)
+
+Options for [`certify`](@ref).
+
+`max_precision` bounds the bit precision of the Arb fallback,
+`refine_solution` refines each solution before certifying it, and
+`extended_certificate` additionally stores the Krawczyk operator data.
+
+Certification carries no tracker, endgame or seed: it evaluates interval
+arithmetic at given solutions rather than tracking paths.
+"""
+struct Certification
+    max_precision::Int
+    refine_solution::Bool
+    extended_certificate::Bool
+    show_progress::Bool
+end
+
+Certification(;
+    max_precision::Int = 256,
+    refine_solution::Bool = true,
+    extended_certificate::Bool = false,
+    show_progress::Bool = true,
+) = Certification(
+    max_precision, refine_solution, extended_certificate, show_progress,
+)
+
 abstract type AbstractSolutionCertificate end
 
 """
@@ -946,19 +974,13 @@ function _certify(
         F::System,
         solution_candidates::AbstractVector{<:AbstractVector{<:Number}},
         p::Union{Nothing, CertificationParameters},
-        cache::CertificationCache;
-        extended_certificate::Bool = false,
-        show_progress::Bool = true,
-        threading::Bool = true,
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
+        cache::CertificationCache,
+        alg::Certification,
+        exec::Union{Serial, Threaded},
     )
-    CertT = extended_certificate ? ExtendedSolutionCertificate : SolutionCertificate
-    return _certify_impl(
-        F, solution_candidates, p, cache, CertT;
-        show_progress = show_progress, threading = threading,
-        max_precision = max_precision, refine_solution = refine_solution,
-    )
+    CertT = alg.extended_certificate ? ExtendedSolutionCertificate :
+        SolutionCertificate
+    return _certify_impl(F, solution_candidates, p, cache, CertT, alg, exec)
 end
 
 function _certify_impl(
@@ -966,12 +988,13 @@ function _certify_impl(
         solution_candidates::AbstractVector{<:AbstractVector{<:Number}},
         p::Union{Nothing, CertificationParameters},
         cache::CertificationCache,
-        ::Type{CertT};
-        show_progress::Bool = true,
-        threading::Bool = true,
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
+        ::Type{CertT},
+        alg::Certification,
+        exec::Union{Serial, Threaded},
     ) where {CertT <: AbstractSolutionCertificate}
+    show_progress = alg.show_progress
+    max_precision = alg.max_precision
+    refine_solution = alg.refine_solution
     m, n = size(F)
     m == n || throw(ArgumentError("We can only certify solutions to square systems."))
     if isnothing(p) && nparameters(F) > 0
@@ -984,12 +1007,12 @@ function _certify_impl(
 
     progress = make_progress(N, show_progress; desc = "Certifying $N solutions... ")
 
-    if threading && Threads.nthreads() > 1 && N > 1
+    if exec isa Threaded && exec.ntasks > 1 && N > 1
         plock = ReentrantLock()
         # One cache per task (certify_solution mutates its buffers). Reuse the
         # caller-provided `cache` as one of them rather than discarding it, and
         # build only the remaining `nt - 1`.
-        nt = min(Threads.nthreads(), N)
+        nt = min(exec.ntasks, N)
         pool = Channel{CertificationCache}(nt)
         put!(pool, cache)
         for _ in 2:nt
@@ -1042,8 +1065,8 @@ end
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
-    certify(F, solutions, [p]; options...)
-    certify(F, result, [p]; options...)
+    certify(F, solutions, [p], alg = Certification(), exec = Threaded(); cache)
+    certify(F, result, [p], alg = Certification(), exec = Threaded(); cache)
 
 Attempt to certify that the approximate `solutions` correspond to true solutions
 of the square polynomial system `F(x; p)` using interval arithmetic and the
@@ -1054,10 +1077,8 @@ enclosure of `p`. This is a stronger statement than
 `certify(fix_parameters(F, p), solutions)`, which certifies the substituted
 system, whose coefficients are already-rounded `ComplexF64` products of `p`.
 
-## Options
-- `show_progress = true`: show a progress bar.
-- `max_precision = 256`: maximum bit precision used in the Arb fallback.
-- `extended_certificate = false`: also store the Krawczyk operator data.
+See [`Certification`](@ref) for the options. `exec` is [`Serial`](@ref) or
+[`Threaded`](@ref); certificates hold Arb data, which does not cross processes.
 """
 function certify end
 
@@ -1070,34 +1091,24 @@ function certify(
         # Not `fix_parameters(F, p)`: substituting would round the coefficients,
         # and the enclosure has to be of `p` itself.
         p::Union{Nothing, AbstractArray} = nothing,
-        cache::CertificationCache = CertificationCache(F);
-        show_progress::Bool = true,
-        threading::Bool = true,
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
-        extended_certificate::Bool = false,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
     )
-    cert_params = certification_parameters(p; prec = max_precision)
-    return _certify(
-        F, X, cert_params, cache;
-        show_progress, threading, max_precision, refine_solution, extended_certificate,
-    )
+    cert_params = certification_parameters(p; prec = alg.max_precision)
+    return _certify(F, X, cert_params, cache, alg, exec)
 end
 
 function certify(
         F::System,
         x::AbstractVector{<:Number},
         p::Union{Nothing, AbstractArray} = nothing,
-        cache::CertificationCache = CertificationCache(F);
-        show_progress::Bool = true,
-        threading::Bool = true,
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
-        extended_certificate::Bool = false,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
     )
     return certify(
-        F, [convert(Vector{ComplexF64}, x)], p, cache;
-        show_progress, threading, max_precision, refine_solution, extended_certificate,
+        F, [convert(Vector{ComplexF64}, x)], p, alg, exec; cache = cache,
     )
 end
 
@@ -1105,16 +1116,12 @@ function certify(
         F::System,
         X::Result,
         p::Union{Nothing, AbstractArray} = nothing,
-        cache::CertificationCache = CertificationCache(F);
-        show_progress::Bool = true,
-        threading::Bool = true,
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
-        extended_certificate::Bool = false,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
     )
     return certify(
-        F, solutions(X), p, cache;
-        show_progress, threading, max_precision, refine_solution, extended_certificate,
+        F, solutions(X), p, alg, exec; cache = cache,
     )
 end
 
@@ -1122,16 +1129,12 @@ function certify(
         F::System,
         r::PathResult,
         p::Union{Nothing, AbstractArray} = nothing,
-        cache::CertificationCache = CertificationCache(F);
-        show_progress::Bool = true,
-        threading::Bool = true,
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
-        extended_certificate::Bool = false,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
     )
     return certify(
-        F, [solution(r)], p, cache;
-        show_progress, threading, max_precision, refine_solution, extended_certificate,
+        F, [solution(r)], p, alg, exec; cache = cache,
     )
 end
 
@@ -1139,33 +1142,38 @@ function certify(
         F::System,
         r::AbstractVector{<:PathResult},
         p::Union{Nothing, AbstractArray} = nothing,
-        cache::CertificationCache = CertificationCache(F);
-        show_progress::Bool = true,
-        threading::Bool = true,
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
-        extended_certificate::Bool = false,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
     )
     return certify(
-        F, solution.(r), p, cache;
-        show_progress, threading, max_precision, refine_solution, extended_certificate,
+        F, solution.(r), p, alg, exec; cache = cache,
     )
 end
 
 function certify(
         F::System,
         X::MonodromyResult,
-        cache::CertificationCache = CertificationCache(F);
-        show_progress::Bool = true,
-        threading::Bool = true,
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
-        extended_certificate::Bool = false,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
     )
     return certify(
-        F, solutions(X), parameters(X), cache;
-        show_progress, threading, max_precision, refine_solution, extended_certificate,
+        F, solutions(X), parameters(X), alg, exec; cache = cache,
     )
+end
+
+# A parameter-free system takes no `p` slot at all, so the algorithm may sit
+# where `p` would.
+for XT in (
+        :(AbstractVector{<:AbstractVector{<:Number}}), :(AbstractVector{<:Number}),
+        :(AbstractVector{<:PathResult}), :Result, :PathResult,
+    )
+    @eval certify(
+        F::System, X::$XT, alg::Certification,
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
+    ) = certify(F, X, nothing, alg, exec; cache = cache)
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1293,7 +1301,7 @@ Return the midpoint approximations of the stored distinct certified solutions.
 solutions(d::DistinctCertifiedSolutions) = map(solution_approximation, certificates(d))
 
 """
-    distinct_certified_solutions(F, S, p = nothing; threading = true, show_progress = true, max_precision = 256, refine_solution = true, extended_certificate = false)
+    distinct_certified_solutions(F, S, p = nothing, alg = Certification(), exec = Threaded())
 
 Certify the solutions `S` of the (parametric) system `F` and return a
 [`DistinctCertifiedSolutions`](@ref) holding only the distinct certified ones.
@@ -1301,41 +1309,36 @@ Certify the solutions `S` of the (parametric) system `F` and return a
 function distinct_certified_solutions(
         F::System,
         S::AbstractVector{<:AbstractVector{<:Number}},
-        p = nothing;
-        threading::Bool = true,
-        show_progress::Bool = true,
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
-        extended_certificate::Bool = false,
+        p = nothing,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded(),
     )
     d = DistinctCertifiedSolutions(
         F, p;
-        extended_certificate = extended_certificate, max_precision = max_precision,
+        extended_certificate = alg.extended_certificate,
+        max_precision = alg.max_precision,
     )
-    return distinct_certified_solutions!(
-        d, S;
-        threading = threading, show_progress = show_progress,
-        max_precision = max_precision, refine_solution = refine_solution,
-    )
+    return distinct_certified_solutions!(d, S, alg, exec)
 end
 
 """
-    distinct_certified_solutions!(d::DistinctCertifiedSolutions, S; threading = true, show_progress = true, max_precision = 256, refine_solution = true)
+    distinct_certified_solutions!(d::DistinctCertifiedSolutions, S, alg = Certification(), exec = Threaded())
 
 Add every solution in `S` to `d`, keeping only distinct certified ones.
 """
 function distinct_certified_solutions!(
         d::DistinctCertifiedSolutions,
-        S::AbstractVector{<:AbstractVector{<:Number}};
-        threading::Bool = true,
-        show_progress::Bool = true,
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
+        S::AbstractVector{<:AbstractVector{<:Number}},
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded(),
     )
+    show_progress = alg.show_progress
+    max_precision = alg.max_precision
+    refine_solution = alg.refine_solution
     progress = make_progress(
         length(S), show_progress; desc = "Certifying $(length(S)) solutions... ",
     )
-    if threading && Threads.nthreads() > 1
+    if exec isa Threaded && exec.ntasks > 1
         plock = ReentrantLock()
         @tasks for i in eachindex(S)
             @local cache = CertificationCache(d.system)

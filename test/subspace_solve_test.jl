@@ -18,11 +18,11 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         F = System([x^2 + y^2 - 5]; variables = [x, y])
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
-        S₁ = solutions(solve(F, L₁; show_progress = false))
+        S₁ = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
         @test length(S₁) == 2
         # `NamedTuple()` exercises the computed default.
         for kw in (NamedTuple(), (; intrinsic = true), (; intrinsic = false))
-            res = solve(F, S₁, L₁, L₂; show_progress = false, kw...)
+            res = solve(F, S₁, L₁, L₂, Continuation(; kw..., show_progress = false))
             @test nsolutions(res) == 2
             for s in solutions(res)
                 @test subspace_residual(L₂, s) < 1.0e-10
@@ -47,7 +47,9 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         cache2 = CommonSolve.init(G, starts, K, K, Serial())
         @test cache2.worker isa AmbientWorkerState{ExtrinsicSubspaceHomotopy}
 
-        forced = CommonSolve.init(G, starts, K, K, Serial(); intrinsic = true)
+        forced = CommonSolve.init(
+            G, starts, K, K, Continuation(; intrinsic = true), Serial(),
+        )
         @test forced.worker isa IntrinsicWorkerState
     end
 
@@ -56,10 +58,10 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         F = System([x^2 + y^2 - 5, x * y + 1]; variables = [x, y, z])
         K₁ = rand_subspace(3; dim = 2)
         K₂ = rand_subspace(3; dim = 2)
-        S = solutions(solve(F, K₁; show_progress = false))
+        S = solutions(solve(F, K₁, TotalDegree(; show_progress = false)))
         @test length(S) == 4
         for kw in (NamedTuple(), (; intrinsic = true), (; intrinsic = false))
-            res = solve(F, S, K₁, K₂; show_progress = false, kw...)
+            res = solve(F, S, K₁, K₂, Continuation(; kw..., show_progress = false))
             @test nsolutions(res) == 4
             @test maximum(s -> subspace_residual(K₂, s), solutions(res)) < 1.0e-10
         end
@@ -71,9 +73,9 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         @test is_homogeneous(F)
         L₁ = rand_subspace(3; codim = 1, affine = false)
         L₂ = rand_subspace(3; codim = 1, affine = false)
-        S = solutions(solve(F, L₁; show_progress = false))
+        S = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
         for kw in (NamedTuple(), (; intrinsic = true), (; intrinsic = false))
-            res = solve(F, S, L₁, L₂; show_progress = false, kw...)
+            res = solve(F, S, L₁, L₂, Continuation(; kw..., show_progress = false))
             @test nsolutions(res) == 2
             for s in solutions(res)
                 scale = norm(s, Inf)
@@ -81,7 +83,9 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
                 @test norm(extrinsic(L₂).A * s, Inf) < 1.0e-10 * scale
             end
         end
-        cache = CommonSolve.init(F, S, L₁, L₂, Serial(); intrinsic = false)
+        cache = CommonSolve.init(
+            F, S, L₁, L₂, Continuation(; intrinsic = false), Serial(),
+        )
         @test cache.worker isa
             AmbientWorkerState{AffineChartHomotopy{ExtrinsicSubspaceHomotopy}}
     end
@@ -91,11 +95,11 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         F = System([x^2 + y^2 - a]; variables = [x, y], parameters = [a])
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
-        S = solutions(solve(fix_parameters(F, [5.0]), L₁; show_progress = false))
-        res = solve(fix_parameters(F, [5.0]), S, L₁, L₂; show_progress = false)
+        S = solutions(solve(fix_parameters(F, [5.0]), L₁, TotalDegree(; show_progress = false)))
+        res = solve(fix_parameters(F, [5.0]), S, L₁, L₂, Continuation(; show_progress = false))
         @test nsolutions(res) == 2
         @test maximum(s -> abs(s[1]^2 + s[2]^2 - 5), solutions(res)) < 1.0e-10
-        @test_throws ArgumentError solve(F, S, L₁, L₂; show_progress = false)
+        @test_throws ArgumentError solve(F, S, L₁, L₂, Continuation(; show_progress = false))
     end
 
     @testset "executors agree" begin
@@ -103,15 +107,27 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         F = System([x^2 + y^2 - 5]; variables = [x, y])
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
-        S = solutions(solve(F, L₁; show_progress = false))
+        S = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
         for intrinsic in (true, false)
             serial = solve(
-                F, S, L₁, L₂, Serial();
-                intrinsic = intrinsic, seed = UInt32(7), show_progress = false,
+                F,
+                S,
+                L₁,
+                L₂,
+                Continuation(;
+                    intrinsic = intrinsic, seed = UInt32(7), show_progress = false,
+                ),
+                Serial(),
             )
             threaded = solve(
-                F, S, L₁, L₂, Threaded();
-                intrinsic = intrinsic, seed = UInt32(7), show_progress = false,
+                F,
+                S,
+                L₁,
+                L₂,
+                Continuation(;
+                    intrinsic = intrinsic, seed = UInt32(7), show_progress = false,
+                ),
+                Threaded(),
             )
             @test nsolutions(serial) == nsolutions(threaded) == 2
             sa = sort(solutions(serial); by = real ∘ first)
@@ -129,12 +145,20 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         full = HomotopyContinuationNext._full_subspace(2)
         for intrinsic in (true, false)
             @test_throws ArgumentError solve(
-                F, starts, L, full; intrinsic = intrinsic, show_progress = false,
+                F,
+                starts,
+                L,
+                full,
+                Continuation(; intrinsic = intrinsic, show_progress = false),
             )
         end
         # different ambient dimension
         @test_throws ArgumentError solve(
-            F, starts, L, rand_subspace(3; codim = 2); show_progress = false,
+            F,
+            starts,
+            L,
+            rand_subspace(3; codim = 2),
+            Continuation(; show_progress = false),
         )
     end
 
@@ -143,8 +167,10 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         F = System([x^2 + y^2 - 5]; variables = [x, y])
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
-        S = solutions(solve(F, L₁; show_progress = false))
-        cache = CommonSolve.init(F, S, L₁, L₂, Serial(); show_progress = false)
+        S = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
+        cache = CommonSolve.init(
+            F, S, L₁, L₂, Continuation(; show_progress = false), Serial(),
+        )
         res = CommonSolve.solve!(cache)
         for (k, pr) in enumerate(path_results(res))
             @test start_solution(pr) == cache.start_solutions[k]
@@ -158,9 +184,7 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         F = System([x^2 + y^2 + z^2 - 1]; variables = [x, y, z])
         L = rand_subspace(3; codim = 1)
         starts = [[1.0 + 0im, 0.0 + 0im, 0.0 + 0im]]
-        @test_throws ArgumentError solve(
-            F, starts, L, L; intrinsic = false, show_progress = false,
-        )
+        @test_throws ArgumentError solve(F, starts, L, L, Continuation(; intrinsic = false, show_progress = false))
     end
 
     @testset "intrinsic results are ambient, diagnostics are not converted" begin
@@ -168,8 +192,8 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         F = System([x^2 + y^2 - 5]; variables = [x, y])
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
-        S = solutions(solve(F, L₁; show_progress = false))
-        res = solve(F, S, L₁, L₂; intrinsic = true, show_progress = false)
+        S = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
+        res = solve(F, S, L₁, L₂, Continuation(; intrinsic = true, show_progress = false))
         for pr in path_results(res)
             @test length(solution(pr)) == 2            # ambient
             @test length(start_solution(pr)) == 2      # the caller's ambient point

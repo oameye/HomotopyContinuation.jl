@@ -227,7 +227,7 @@ function _init_parameter_sweep(
     np = nparameters(F)
     np > 0 || throw(
         ArgumentError(
-            "`solve_targets` over parameters requires a parametric system, but the " *
+            "a parameter sweep requires a parametric system, but the " *
                 "system has no parameters.",
         ),
     )
@@ -249,25 +249,15 @@ function _init_parameter_sweep(
 end
 
 """
-    solve_targets(F::System, starts, p_start, targets::AbstractVector, exec = Threaded();
-                  transform_result = tuple, transform_parameters = identity,
-                  flatten = false, options...)
-    solve_targets(F::System, starts, L_start::LinearSubspace,
-                  targets::AbstractVector{<:LinearSubspace}, exec = Threaded();
-                  intrinsic, options...)
+    solve(F::System, starts, p_start, targets::AbstractVector, alg::Sweep, exec = Threaded())
+    solve(F::System, starts, L_start::LinearSubspace,
+          targets::AbstractVector{<:LinearSubspace}, alg::Sweep, exec = Threaded())
 
 Track `starts` from one start end to every target in `targets`, retargeting a
-single homotopy per target. Unlike [`solve`](@ref), which returns one
-[`Result`](@ref), this returns a `Vector` with one entry per target.
+single homotopy per target. Unlike a single-target [`solve`](@ref), which returns
+one [`Result`](@ref), this returns a `Vector` with one entry per target.
 
-By default each entry is a `(result, target)` tuple. `transform_result(result,
-target)` replaces it, and `flatten = true` concatenates the (array-valued)
-entries into a single vector. `transform_parameters(target)` maps each element of
-`targets` to the actual target, so `targets` may hold indices or other metadata;
-the untransformed element is what `transform_result` receives.
-
-For subspace targets, start points and solutions are ambient; see [`solve`](@ref)
-with a single target subspace for the meaning of `intrinsic`.
+See [`Sweep`](@ref) for how each entry is built and how `targets` is read.
 
 # Example
 ```julia
@@ -276,20 +266,22 @@ F = System([x^2 + y^2 - 1, a * x + b * y + c]; variables = [x, y], parameters = 
 p₀ = randn(ComplexF64, 3)
 S₀ = solutions(solve(fix_parameters(F, p₀)))
 targets = [rand(3) for _ in 1:100]
-solve_targets(F, S₀, p₀, targets; transform_result = (r, p) -> real_solutions(r))
+solve(F, S₀, p₀, targets, Sweep(; transform_result = (r, p) -> real_solutions(r)))
 ```
 """
-function solve_targets(
-        F::System, starts, p_start::AbstractVector{<:Number}, targets::AbstractVector,
-        exec::AbstractExecutor = Threaded();
-        transform_result = tuple,
-        transform_parameters = identity,
-        flatten::Bool = false,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
+function solve(
+        F::System, starts::StartsLike, p_start::AbstractVector{<:Number},
+        targets::AbstractVector,
+        alg::Sweep,
+        exec::AbstractExecutor = Threaded(),
     )
+    transform_result = alg.transform_result
+    transform_parameters = alg.transform_parameters
+    flatten = alg.flatten
+    seed = _seed(alg)
+    tracker_options = _tracker_options(alg)
+    endgame_options = _endgame_options(alg)
+    show_progress = _show_progress(alg)
     isempty(targets) && throw(ArgumentError("No targets given."))
     q_first = transform_parameters(first(targets))
     cache = _init_parameter_sweep(
@@ -304,19 +296,20 @@ end
 
 # ── Subspace sweep ─────────────────────────────────────────────────────────
 
-function solve_targets(
-        F::System, starts, L_start::LinearSubspace,
-        targets::AbstractVector{<:LinearSubspace},
-        exec::AbstractExecutor = Threaded();
-        intrinsic::Bool = _default_intrinsic(L_start),
-        transform_result = tuple,
-        transform_parameters = identity,
-        flatten::Bool = false,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
+function solve(
+        F::System, starts::StartsLike, L_start::LinearSubspace,
+        targets::AbstractVector,
+        alg::Sweep,
+        exec::AbstractExecutor = Threaded(),
     )
+    intrinsic = alg.intrinsic === nothing ? _default_intrinsic(L_start) : alg.intrinsic
+    transform_result = alg.transform_result
+    transform_parameters = alg.transform_parameters
+    flatten = alg.flatten
+    seed = _seed(alg)
+    tracker_options = _tracker_options(alg)
+    endgame_options = _endgame_options(alg)
+    show_progress = _show_progress(alg)
     isempty(targets) && throw(ArgumentError("No targets given."))
     L_first = transform_parameters(first(targets))
     G, points, chart, gamma = _subspace_solve_setup(
@@ -338,3 +331,15 @@ function solve_targets(
         flatten, show_progress,
     )
 end
+
+# Keywords are declared only so a bad `starts` reports itself rather than tripping
+# an "unsupported keyword" MethodError first. Nothing is forwarded.
+solve(
+    ::System, starts, ::AbstractVector{<:Number}, ::AbstractVector, ::Sweep,
+    ::AbstractExecutor = Threaded(),
+) = _bad_starts(starts)
+
+solve(
+    ::System, starts, ::LinearSubspace, ::AbstractVector, ::Sweep,
+    ::AbstractExecutor = Threaded(),
+) = _bad_starts(starts)

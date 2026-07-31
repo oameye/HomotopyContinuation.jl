@@ -12,6 +12,34 @@
     TERMINATED_STEP_SIZE_TOO_SMALL
 end
 
+"""
+    TrackerOptions(; options...)
+
+Settings of the adaptive predictor-corrector path tracker, accepted by every
+algorithm as `tracker_options`.
+
+## Options
+
+* `max_steps = 10_000`: steps a single path may take before it is declared failed.
+* `max_step_size = Inf`, `max_initial_step_size = Inf`: caps on the step length,
+  the second only on the first step of a path.
+* `extended_precision = true`: refine in double-double precision when double
+  precision no longer resolves the path.
+* `min_step_size = 1e-48`: below this the path is declared failed.
+* `terminate_cond = 1e13`: condition-number estimate above which the path is
+  declared ill-conditioned.
+* `a = 0.125`: target accuracy of the Newton corrector; a smaller value corrects
+  harder per step.
+* `β_a = 1.0`, `β_ω = 3.0`, `β_τ = 0.4`: safety factors trimming the step length
+  proposed by, respectively, the corrector accuracy, the Newton contraction
+  estimate `ω`, and the distance-to-singularity estimate `τ`. Smaller means
+  shorter, safer steps.
+* `strict_β_τ = 0.3`: the `β_τ` used near the target and after a path-jumping
+  suspicion; must not exceed `β_τ`.
+
+See [`DEFAULT_TRACKER_OPTIONS`](@ref), [`FAST_TRACKER_OPTIONS`](@ref) and
+[`CONSERVATIVE_TRACKER_OPTIONS`](@ref) for ready-made sets.
+"""
 @kwdef struct TrackerOptions
     max_steps::Int = 10_000
     max_step_size::Float64 = Inf

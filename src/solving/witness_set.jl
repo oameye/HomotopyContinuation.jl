@@ -21,7 +21,7 @@
 
 Whether a [`WitnessSet`](@ref) has been shown to be irreducible:
 `Irreducibility.IRREDUCIBLE`, `Irreducibility.REDUCIBLE`, or
-`Irreducibility.UNKNOWN` before [`decompose`](@ref) has decided.
+`Irreducibility.UNKNOWN` before [`Decomposition`](@ref) has decided.
 """
 @enumx Irreducibility::Int8 begin
     UNKNOWN
@@ -36,7 +36,7 @@ Store the points `points` of `V(F) ∩ L` as a witness set. `F` is the system,
 `L` the (affine) linear subspace, and `points` the witness points (only the
 nonsingular solutions are kept).
 """
-struct WitnessSet{S <: System}
+struct WitnessSet{S <: System} <: AbstractResult
     F::S
     L::LinearSubspace{ComplexF64}
     # only non-singular witness points
@@ -117,7 +117,7 @@ codim(W::WitnessSet)::Int = dim(W.L)
 
 `Irreducibility.IRREDUCIBLE` if `W` was computed to be irreducible,
 `Irreducibility.REDUCIBLE` if reducible, and `Irreducibility.UNKNOWN` if
-[`decompose`](@ref) has not decided.
+[`Decomposition`](@ref) has not decided.
 """
 is_irreducible(W::WitnessSet)::Irreducibility.T = W.irreducibility
 
@@ -153,6 +153,74 @@ bound on the dimension of `V(F)`.
 corank(F::System; rng::Random.AbstractRNG = Random.default_rng())::Int =
     nvariables(F) - LA.rank(F; rng = rng)
 
+"""
+    Witness(; dim, codim, solver, options...)
+
+Compute a [`WitnessSet`](@ref) for a system by intersecting it with a random
+linear subspace of complementary dimension, or move an existing witness set to a
+new subspace.
+
+`dim` (or `codim`) is the dimension of the component of interest; without either,
+the dimension is estimated from the rank of the system. `solver` is the algorithm
+used for the underlying intersection, [`TotalDegree`](@ref) by default; the
+remaining options configure it, and a `solver` given explicitly carries its own.
+"""
+struct Witness{S <: Union{TotalDegree, Polyhedral}} <: AbstractAlgorithm
+    common::CommonOptions
+    dim::Union{Nothing, Int}
+    codim::Union{Nothing, Int}
+    solver::S
+end
+
+function Witness(;
+        dim::Union{Nothing, Int} = nothing,
+        codim::Union{Nothing, Int} = nothing,
+        solver::Union{Nothing, TotalDegree, Polyhedral} = nothing,
+        tracker_options::TrackerOptions = TrackerOptions(),
+        endgame_options::EndgameOptions = EndgameOptions(),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        show_progress::Bool = true,
+    )
+    inner = solver === nothing ?
+        TotalDegree(;
+            tracker_options = tracker_options, endgame_options = endgame_options,
+            seed = seed, show_progress = show_progress,
+        ) : solver
+    return Witness(
+        CommonOptions(tracker_options, endgame_options, seed, show_progress),
+        dim, codim, inner,
+    )
+end
+
+_reseed(alg::Witness, seed::UInt32) =
+    Witness(_with_seed(alg.common, seed), alg.dim, alg.codim, alg.solver)
+
+"""
+    Membership(; options...)
+
+Decide whether a point lies on the variety a [`WitnessSet`](@ref) describes, by
+moving the witness points to a subspace through the query point.
+
+The default endgame caps its step counts, so a witness move that degenerates
+(the query point is not on the component) fails fast instead of grinding through
+the full endgame.
+"""
+struct Membership <: AbstractAlgorithm
+    common::CommonOptions
+end
+
+Membership(;
+    tracker_options::TrackerOptions = TrackerOptions(),
+    endgame_options::EndgameOptions = EndgameOptions(;
+        max_endgame_steps = 100, max_endgame_extended_steps = 100,
+        sing_cond = 1.0e12,
+    ),
+    seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+    show_progress::Bool = true,
+) = Membership(
+    CommonOptions(tracker_options, endgame_options, seed, show_progress),
+)
+
 # ── Internal primitives ──────────────────────────────────────────────────────
 
 @noinline _solve_witness_cache(cache)::Result = CommonSolve.solve!(cache)
@@ -164,25 +232,31 @@ corank(F::System; rng::Random.AbstractRNG = Random.default_rng())::Int =
 function _witness_init(
         F::System,
         L::LinearSubspace,
-        rng::Random.MersenneTwister;
+        rng::Random.MersenneTwister,
+        alg::Witness,
+        exec::AbstractExecutor;
         projective::Bool = is_linear(L) && is_homogeneous(F),
-        show_progress::Bool = false,
-        threading::Bool = Threads.nthreads() > 1,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
     )::Vector{Vector{ComplexF64}}
     chart = projective ? _affine_chart(rng, F) : ComplexF64[]
-    alg = TotalDegree(;
-        seed = rand(rng, UInt32),
-        tracker_options = tracker_options,
-        endgame_options = endgame_options,
-    )
-    executor = threading ? Threaded() : Serial()
-    res = _solve_witness_cache(
-        _init_sliced_total_degree(F, L, chart, alg, executor, show_progress),
-    )
+    # The inner seed descends from `rng`, so one `Witness` seed reproduces the
+    # subspace and the solve together.
+    reseeded = _reseed(alg.solver, rand(rng, UInt32))
+    solver = _show_progress(alg) ? reseeded : _quiet(reseeded)
+    res = _solve_witness_cache(_init_witness_slice(F, L, chart, solver, exec))
     return [solution(pr) for pr in results(res; only_nonsingular = true)]
 end
+
+_init_witness_slice(
+    F::System, L::LinearSubspace, chart::Vector{ComplexF64},
+    solver::TotalDegree, exec::AbstractExecutor,
+) = _init_sliced_total_degree(F, L, chart, solver, exec)
+
+# The polyhedral route rebuilds the sliced system and redraws its own chart, so
+# the chart above is unused there.
+_init_witness_slice(
+    F::System, L::LinearSubspace, ::Vector{ComplexF64},
+    solver::Polyhedral, exec::AbstractExecutor,
+) = CommonSolve.init(F, L, solver, exec)
 
 # Move a set of witness points from the subspace `L_start` to `L_target`, in
 # ambient coordinates, via `ExtrinsicSubspaceHomotopy`. Returns the nonsingular
@@ -232,50 +306,45 @@ end
 # ── Constructing witness sets ────────────────────────────────────────────────
 
 """
-    witness_set(F::System; dim = nothing, codim = nothing, options...)
+    solve(F, alg::Witness, exec = Threaded())
 
-Compute a [`WitnessSet`](@ref) for `F` in the given dimension (resp.
-codimension) by sampling a random affine linear subspace and solving
+Compute a [`WitnessSet`](@ref) for `F` in the dimension (resp. codimension) the
+algorithm names, by sampling a random affine linear subspace `L` and solving
 `V(F) ∩ L`.
 
-    witness_set(F::System, L::LinearSubspace; options...)
+    solve(F, L::LinearSubspace, alg::Witness, exec = Threaded())
 
-Compute a [`WitnessSet`](@ref) for `F` and the given (affine) linear subspace
-`L`.
+Compute a [`WitnessSet`](@ref) for `F` and the given (affine) linear subspace `L`.
 
-    witness_set(W::WitnessSet, L::LinearSubspace; options...)
+    solve(W::WitnessSet, L::LinearSubspace, alg = Witness())
 
 Move the witness set `W` to the new linear subspace `L`.
 
-`F` may also be given as a single polynomial or a vector of polynomials.
+`F` may be a [`System`](@ref), a single polynomial or a vector of polynomials, and
+must be parameter-free; fix the values first with [`fix_parameters`](@ref): the
+parameters are substituted into `F` and the returned witness set stores the
+resulting parameter-free system.
 
-`F` must be parameter-free; fix the values first with [`fix_parameters`](@ref):
-the parameters are substituted into `F` and the returned witness set stores
-the resulting parameter-free system.
-
-Every random choice descends from `seed`, so passing the same `seed` reproduces
-the same witness set regardless of the state of the global random number
-generator.
+Every random choice descends from the algorithm's `seed`, so passing the same
+`seed` reproduces the same witness set regardless of the state of the global
+random number generator.
 
 # Example
 ```julia
 @polyvar x y
 F = System([x^2 + y^2 - 5])
-W = witness_set(F)   # Witness set for dimension 1 of degree 2
+W = solve(F, Witness())   # Witness set for dimension 1 of degree 2
 ```
 """
-function witness_set(
-        F::System;
-        dim::Union{Nothing, Int} = nothing,
-        codim::Union{Nothing, Int} = nothing,
-        show_progress::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-    )
-    _check_parameter_free(F, "`witness_set`")
-    rng = Random.MersenneTwister(seed)
+function solve(
+        F::Union{System, PolynomialInput},
+        alg::Witness,
+        exec::AbstractExecutor = Threaded(),
+    )::WitnessSet
+    F = _as_system(F)
+    _check_parameter_free(F, "`Witness`")
+    dim, codim = alg.dim, alg.codim
+    rng = Random.MersenneTwister(_seed(alg))
     n = nvariables(F)
     projective = is_homogeneous(F)
     if dim === nothing && codim === nothing
@@ -296,121 +365,33 @@ function witness_set(
         rand_subspace(rng, n; codim = variety_dim, affine = !projective)
     # `rng` and not a fresh one from `seed`: the chart drawn downstream must be
     # independent of the `L` just drawn from the same stream.
-    return _witness_set(
-        F, L, rng, show_progress, threading, tracker_options, endgame_options,
-    )
+    return _witness_set(F, L, rng, alg, exec)
 end
 
-function witness_set(
-        F::System,
-        L::LinearSubspace;
-        show_progress::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-    )
-    _check_parameter_free(F, "`witness_set`")
-    return _witness_set(
-        F, L, Random.MersenneTwister(seed),
-        show_progress, threading, tracker_options, endgame_options,
-    )
+function solve(
+        F::Union{System, PolynomialInput},
+        L::LinearSubspace,
+        alg::Witness,
+        exec::AbstractExecutor = Threaded(),
+    )::WitnessSet
+    F = _as_system(F)
+    _check_parameter_free(F, "`Witness`")
+    return _witness_set(F, L, Random.MersenneTwister(_seed(alg)), alg, exec)
 end
 
 function _witness_set(
         F::System, L::LinearSubspace, rng::Random.MersenneTwister,
-        show_progress::Bool, threading::Bool,
-        tracker_options::TrackerOptions, endgame_options::EndgameOptions,
+        alg::Witness, exec::AbstractExecutor,
     )::WitnessSet
-    R = _witness_init(
-        F, L, rng;
-        show_progress = show_progress, threading = threading,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-    )
-    return WitnessSet(F, L, R)
+    return WitnessSet(F, L, _witness_init(F, L, rng, alg, exec))
 end
 
-# Polynomial input forms: a single polynomial or a vector of polynomials,
-# with or without an explicit subspace.
-function witness_set(
-        F::AbstractVector{<:MP.AbstractPolynomialLike};
-        dim::Union{Nothing, Int} = nothing,
-        codim::Union{Nothing, Int} = nothing,
-        show_progress::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-    )
-    return witness_set(
-        System(collect(F));
-        dim = dim, codim = codim,
-        show_progress = show_progress, threading = threading,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        seed = seed,
-    )
-end
-
-function witness_set(
-        F::AbstractVector{<:MP.AbstractPolynomialLike},
-        L::LinearSubspace;
-        show_progress::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-    )
-    return witness_set(
-        System(collect(F)), L;
-        show_progress = show_progress, threading = threading,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        seed = seed,
-    )
-end
-
-function witness_set(
-        f::MP.AbstractPolynomialLike;
-        dim::Union{Nothing, Int} = nothing,
-        codim::Union{Nothing, Int} = nothing,
-        show_progress::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-    )
-    return witness_set(
-        [f];
-        dim = dim, codim = codim,
-        show_progress = show_progress, threading = threading,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        seed = seed,
-    )
-end
-
-function witness_set(
-        f::MP.AbstractPolynomialLike,
-        L::LinearSubspace;
-        show_progress::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-    )
-    return witness_set(
-        [f], L;
-        show_progress = show_progress, threading = threading,
-        tracker_options = tracker_options, endgame_options = endgame_options,
-        seed = seed,
-    )
-end
-
-function witness_set(
+function solve(
         W::WitnessSet,
-        L::LinearSubspace;
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-    )
+        L::LinearSubspace,
+        alg::Witness = Witness(),
+        ::AbstractExecutor = Threaded(),
+    )::WitnessSet
     if W.projective && !is_linear(L)
         error(
             "The given space is an affine linear subspace (b ≠ 0). Expected a " *
@@ -418,9 +399,10 @@ function witness_set(
         )
     end
     R = _move_witness_points(
-        W.F, W.R, W.L, L, Random.MersenneTwister(seed);
+        W.F, W.R, W.L, L, Random.MersenneTwister(_seed(alg));
         projective = W.projective,
-        tracker_options = tracker_options, endgame_options = endgame_options,
+        tracker_options = _tracker_options(alg),
+        endgame_options = _endgame_options(alg),
     )
     return WitnessSet(
         W.F, convert(LinearSubspace{ComplexF64}, L), R;
@@ -505,45 +487,28 @@ end
 # ── Membership ───────────────────────────────────────────────────────────────
 
 """
-    membership(p, W::WitnessSet; options...)
-    membership(P::AbstractVector{<:AbstractVector}, W::WitnessSet; options...)
+    membership(p, W::WitnessSet, alg = Membership(), exec = Threaded(); atol, rtol)
+    membership(P::AbstractVector{<:AbstractVector}, W::WitnessSet, alg = Membership(),
+               exec = Threaded(); atol, rtol)
 
 Test whether the point `p` (resp. each point in `P`) lies on the algebraic set
 encoded by the witness set `W`. Returns a `Bool` (resp. a `Vector{Bool}`).
 For a projective witness set the query points are projective representatives
 (any scaling).
 
-# Options
-* `atol = 1e-14`, `rtol = sqrt(eps())`: a point `y` equals `x` when their
-  distance is below `max(atol, norm(x, Inf) * rtol)`.
-* `endgame_options = EndgameOptions(; max_endgame_steps = 100,
-  max_endgame_extended_steps = 100, sing_cond = 1e12)`: capped so witness
-  moves that degenerate (the query point is not on the component) fail fast
-  instead of grinding through the full endgame.
-* `show_progress = true`: display a progress bar.
-* `threading = Threads.nthreads() > 1`: query the points in parallel.
-* `seed`: every random choice descends from it, so the same `seed` gives the
-  same answers regardless of the state of the global random number generator.
+`atol = 1e-14` and `rtol = sqrt(eps())` set the tolerance: a point `y` equals `x`
+when their distance is below `max(atol, norm(x, Inf) * rtol)`. See
+[`Membership`](@ref) for the rest.
 """
 function membership(
-        p::AbstractVector{<:Number}, W::WitnessSet;
+        p::AbstractVector{<:Number}, W::WitnessSet,
+        alg::Membership = Membership(), exec::AbstractExecutor = Threaded();
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(;
-            max_endgame_steps = 100, max_endgame_extended_steps = 100,
-            sing_cond = 1.0e12,
-        ),
-        show_progress::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )::Bool
     return first(
         membership(
-            [Vector{ComplexF64}(p)], W;
-            atol = atol, rtol = rtol,
-            tracker_options = tracker_options, endgame_options = endgame_options,
-            show_progress = show_progress, threading = threading, seed = seed,
+            [Vector{ComplexF64}(p)], W, alg, exec; atol = atol, rtol = rtol,
         ),
     )
 end
@@ -664,19 +629,16 @@ end
 
 function membership(
         P::AbstractVector{<:AbstractVector},
-        W::WitnessSet{S};
+        W::WitnessSet{S},
+        alg::Membership = Membership(),
+        exec::AbstractExecutor = Threaded();
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(;
-            max_endgame_steps = 100, max_endgame_extended_steps = 100,
-            sing_cond = 1.0e12,
-        ),
-        show_progress::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     )::Vector{Bool} where {S <: System}
-    rng = Random.MersenneTwister(seed)
+    tracker_options = _tracker_options(alg)
+    endgame_options = _endgame_options(alg)
+    show_progress = _show_progress(alg)
+    rng = Random.MersenneTwister(_seed(alg))
     F = W.F
     n = size(F)[2]
     # A single chart shared by all queries so the compared representatives are
@@ -696,8 +658,8 @@ function membership(
     progress = make_progress(
         length(P), show_progress; desc = "Testing membership: ",
     )
-    if threading && length(P) > 1
-        nt = Threads.nthreads()
+    if exec isa Threaded && length(P) > 1
+        nt = exec.ntasks
         plock = ReentrantLock()
         @tasks for i in eachindex(P)
             @set ntasks = nt

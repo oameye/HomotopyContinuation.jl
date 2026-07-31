@@ -3,7 +3,7 @@ import HomotopyContinuationNext as HC
 using HomotopyContinuationNext: System, RandomizedSystem, SystemEvaluator,
     evaluate!, evaluate_and_jacobian!, taylor!, nparameters,
     TaylorVector, TruncatedTaylorSeries, ComplexDF64,
-    solve, TotalDegree, Polyhedral, Serial, Threaded,
+    solve, TotalDegree, Polyhedral, Continuation, Serial, Threaded,
     nsolutions, solutions, real_solutions, nresults, results, nsingular,
     nexcess_solutions, nat_infinity, is_excess_solution, is_success,
     ExcessSolutionChecker, check_excess_solution
@@ -117,7 +117,7 @@ include("minors_polys.jl")
         p = FSVec{ComplexF64}(ComplexF64[])
 
         # Locate an excess solution of G, then refine it with Newton in BigFloat.
-        r = solve(F, TotalDegree(; seed = UInt32(7)), Serial(); show_progress = false)
+        r = solve(F, TotalDegree(; seed = UInt32(7), show_progress = false), Serial())
         excess = filter(is_excess_solution, r.path_results)
         @test !isempty(excess)
         setprecision(BigFloat, 512) do
@@ -164,7 +164,7 @@ include("minors_polys.jl")
     @testset "solve overdetermined: total degree ($(nameof(typeof(exec))))" for exec in (Serial(), Threaded())
         @polyvar x y
         F = System([x^2 - 1, y^2 - 1, x * y - 1])
-        result = solve(F, TotalDegree(; seed = UInt32(0x42)), exec; show_progress = false)
+        result = solve(F, TotalDegree(; seed = UInt32(0x42), show_progress = false), exec)
         @test result.tracked_paths == 4
         @test nsolutions(result) == 2
         for s in solutions(result)
@@ -186,7 +186,7 @@ include("minors_polys.jl")
     @testset "solve overdetermined: polyhedral ($(nameof(typeof(exec))))" for exec in (Serial(), Threaded())
         @polyvar x y
         F = System([x^2 - 1, y^2 - 1, x * y - 1])
-        result = solve(F, Polyhedral(; seed = UInt32(0x42)), exec; show_progress = false)
+        result = solve(F, Polyhedral(; seed = UInt32(0x42), show_progress = false), exec)
         @test nsolutions(result) == 2
         for s in solutions(result)
             @test abs(s[1]^2 - 1) < 1.0e-8
@@ -199,8 +199,8 @@ include("minors_polys.jl")
     @testset "solve overdetermined: seed reproducibility" begin
         @polyvar x y
         F = System([x^2 - 1, y^2 - 1, x * y - 1])
-        r1 = solve(F, TotalDegree(; seed = UInt32(7)), Serial(); show_progress = false)
-        r2 = solve(F, TotalDegree(; seed = UInt32(7)), Serial(); show_progress = false)
+        r1 = solve(F, TotalDegree(; seed = UInt32(7), show_progress = false), Serial())
+        r2 = solve(F, TotalDegree(; seed = UInt32(7), show_progress = false), Serial())
         @test sort(map(first, solutions(r1)); by = real) ≈
             sort(map(first, solutions(r2)); by = real)
         @test nexcess_solutions(r1) == nexcess_solutions(r2)
@@ -211,7 +211,7 @@ include("minors_polys.jl")
         # drops rank at x=1.
         @polyvar x y
         F = System([(x - 1)^2, y - 1, (x - 1) * y])
-        result = solve(F, TotalDegree(; seed = UInt32(3)), Serial(); show_progress = false)
+        result = solve(F, TotalDegree(; seed = UInt32(3), show_progress = false), Serial())
         @test nresults(result) >= 1
         found = any(results(result)) do r
             abs(r.solution[1] - 1) < 1.0e-4 && abs(r.solution[2] - 1) < 1.0e-4
@@ -222,8 +222,8 @@ include("minors_polys.jl")
     @testset "underdetermined systems throw" begin
         @polyvar x y
         F = System([x * y - 1])
-        @test_throws ArgumentError solve(F, TotalDegree(; seed = UInt32(1)), Serial(); show_progress = false)
-        @test_throws ArgumentError solve(F, Polyhedral(; seed = UInt32(1)), Serial(); show_progress = false)
+        @test_throws ArgumentError solve(F, TotalDegree(; seed = UInt32(1), show_progress = false), Serial())
+        @test_throws ArgumentError solve(F, Polyhedral(; seed = UInt32(1), show_progress = false), Serial())
     end
 
     # 10 equations of degree 6 in 3 variables. The squared-up system tracks
@@ -232,7 +232,7 @@ include("minors_polys.jl")
     @testset "3 by 5 minors" begin
         F = System(minors_polys())
         @test size(F.evaluator) == (10, 3)
-        result = solve(F, TotalDegree(; seed = UInt32(0x1234)), Threaded(); show_progress = false)
+        result = solve(F, TotalDegree(; seed = UInt32(0x1234), show_progress = false), Threaded())
         @test result.tracked_paths == 216
         @test count(is_success, result.path_results) == 80
         @test nexcess_solutions(result) == 136
@@ -243,15 +243,19 @@ include("minors_polys.jl")
     @testset "underdetermined throws" begin
         @polyvar x y z
         affine_under = System([2.3 * x^2 + 1.2 * y^2 + 3 * x - 2 * y + 3])
-        @test_throws ArgumentError solve(affine_under, TotalDegree(; seed = UInt32(2)), Serial(); show_progress = false)
-        @test_throws ArgumentError solve(affine_under, Polyhedral(; seed = UInt32(2)), Serial(); show_progress = false)
+        @test_throws ArgumentError solve(
+            affine_under,
+            TotalDegree(; seed = UInt32(2), show_progress = false),
+            Serial(),
+        )
+        @test_throws ArgumentError solve(affine_under, Polyhedral(; seed = UInt32(2), show_progress = false), Serial())
 
         # Homogeneous input is counted after the chart row, so the message names it.
         proj_under = System([2.3 * x^2 + 1.2 * y^2 + 3 * x * z])
-        @test_throws ArgumentError solve(proj_under, TotalDegree(; seed = UInt32(2)), Serial(); show_progress = false)
-        @test_throws "affine chart" solve(proj_under, TotalDegree(; seed = UInt32(2)), Serial(); show_progress = false)
-        @test_throws ArgumentError solve(proj_under, Polyhedral(; seed = UInt32(2)), Serial(); show_progress = false)
-        @test_throws "affine chart" solve(proj_under, Polyhedral(; seed = UInt32(2)), Serial(); show_progress = false)
+        @test_throws ArgumentError solve(proj_under, TotalDegree(; seed = UInt32(2), show_progress = false), Serial())
+        @test_throws "affine chart" solve(proj_under, TotalDegree(; seed = UInt32(2), show_progress = false), Serial())
+        @test_throws ArgumentError solve(proj_under, Polyhedral(; seed = UInt32(2), show_progress = false), Serial())
+        @test_throws "affine chart" solve(proj_under, Polyhedral(; seed = UInt32(2), show_progress = false), Serial())
     end
 
     # Parameter homotopy: underdetermined systems throw, affine and
@@ -260,12 +264,22 @@ include("minors_polys.jl")
         @polyvar x y z a b
         F = System([x^2 - a]; variables = [x, y], parameters = [a, b])
         @test_throws ArgumentError solve(
-            F, [[1.0, 1.0]], [1, 0], [2, 4], Serial(); show_progress = false,
+            F,
+            [[1.0, 1.0]],
+            [1, 0],
+            [2, 4],
+            Continuation(; show_progress = false),
+            Serial(),
         )
 
         F_proj = System([x * y + (b - a) * z^2]; variables = [x, y, z], parameters = [a, b])
         @test_throws ArgumentError solve(
-            F_proj, [[1.0, 1.0, 1.0]], [1, 0], [2, 4], Serial(); show_progress = false,
+            F_proj,
+            [[1.0, 1.0, 1.0]],
+            [1, 0],
+            [2, 4],
+            Continuation(; show_progress = false),
+            Serial(),
         )
     end
 
@@ -348,7 +362,7 @@ include("minors_polys.jl")
     @testset "square systems unaffected" begin
         @polyvar x y
         F = System([x^2 - 1, y^2 - 4])
-        result = solve(F, TotalDegree(; seed = UInt32(11)), Serial(); show_progress = false)
+        result = solve(F, TotalDegree(; seed = UInt32(11), show_progress = false), Serial())
         @test nsolutions(result) == 4
         @test nexcess_solutions(result) == 0
     end

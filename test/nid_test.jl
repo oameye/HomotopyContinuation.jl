@@ -1,6 +1,6 @@
 using Test, Random
 using HomotopyContinuationNext
-using HomotopyContinuationNext: TrackerOptions
+using HomotopyContinuationNext: TrackerOptions, MonodromyOptions
 using DynamicPolynomials: @polyvar
 import MultivariatePolynomials as MP
 
@@ -21,71 +21,76 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             p * (z - 3) * (z - 5),
         ]
 
-        W = regeneration(F)
+        W = solve(F, Regeneration())
         @test sort(degree.(W); rev = true) == [8, 8, 2]
         @test isconcretetype(eltype(W))
 
-        dec = decompose(W)
+        dec = solve(W, Decomposition())
         @test all(W -> is_irreducible(W) == Irreducibility.IRREDUCIBLE, dec)
         @test eltype(dec) === eltype(W)
 
         # sorting
-        W = regeneration(F; sorted = false, show_progress = false)
+        W = solve(F, Regeneration(; sorted = false, show_progress = false))
         @test sort(degree.(W); rev = true) == [8, 8, 2]
 
         # limited codimension
-        W = regeneration(F; max_codim = 2, show_progress = false)
+        W = solve(F, Regeneration(; max_codim = 2, show_progress = false))
         @test sort(degree.(W); rev = true) == [8, 2]
 
         # no threading
-        N = nid(F; threading = false, show_progress = false)
+        N = solve(F, Decomposition(; show_progress = false), Serial())
         @test isa(N, NumericalIrreducibleDecomposition)
 
         # seed
         s = 0x42c9d504
-        N = nid(F; seed = s, show_progress = false)
+        N = solve(F, Decomposition(; seed = s, show_progress = false))
         @test seed(N) == s
         @test isconcretetype(typeof(N))
 
         # Without an explicit seed a random one is drawn and recorded, so the
         # result always carries a seed that reproduces it.
-        N = nid(F; show_progress = false)
+        N = solve(F, Decomposition(; show_progress = false))
         @test seed(N) isa UInt32
 
         # seed roundtrip / stability
-        N = nid(F; seed = 0xc770fa47, show_progress = false)
+        N = solve(F, Decomposition(; seed = 0xc770fa47, show_progress = false))
         degs = degrees(N)
         @test degs[2] == [2]
         @test sort(degs[1]) == [4, 4]
 
-        N = nid(F; show_monodromy_progress = true, show_progress = false)
+        N = solve(F, Decomposition(; show_progress = false))
         @test isa(N, NumericalIrreducibleDecomposition)
 
-        N = nid(F; warning = false, show_progress = false)
+        N = solve(F, Decomposition(; warning = false, show_progress = false))
         @test isa(N, NumericalIrreducibleDecomposition)
 
         # options
-        N_fails = nid(
-            F;
-            endgame_options = EndgameOptions(; max_endgame_steps = 0),
-            show_progress = false,
+        N_fails = solve(
+            F,
+            Decomposition(;
+                endgame_options = EndgameOptions(; max_endgame_steps = 0),
+                show_progress = false,
+            ),
         )
         @test isempty(witness_sets(N_fails))
 
-        N2 = nid(
-            F;
-            tracker_options = TrackerOptions(; extended_precision = false),
-            show_progress = false,
+        N2 = solve(
+            F,
+            Decomposition(;
+                tracker_options = TrackerOptions(; extended_precision = false),
+                show_progress = false,
+            ),
         )
         @test isa(N2, NumericalIrreducibleDecomposition)
 
         # Seeded: unseeded, the monodromy decomposition occasionally finds only one
         # of the two 1-dimensional components counted below.
-        N3 = nid(
-            F;
-            monodromy_options = MonodromyOptions(; trace_test_tol = 1.0e-5),
-            seed = UInt32(0x1234),
-            show_progress = false,
+        N3 = solve(
+            F,
+            Decomposition(;
+                monodromy = MonodromyOptions(; trace_test_tol = 1.0e-5),
+                seed = UInt32(0x1234), show_progress = false,
+            ),
         )
         @test isa(N3, NumericalIrreducibleDecomposition)
 
@@ -126,14 +131,16 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test n_components(N3, 1) == 2
 
         # max_codim = 1
-        N4 = nid(F; max_codim = 1, show_progress = false)
+        N4 = solve(
+            F, Decomposition(; max_codim = 1, show_progress = false),
+        )
         @test isa(N4, NumericalIrreducibleDecomposition)
     end
 
     @testset "rational systems" begin
         @var x y z
         g = System([x^2 + y^2 - z, x / (y - 1) + y + z - 1]; variables = [x, y, z])
-        N = nid(g; show_progress = false)
+        N = solve(g, Decomposition(; show_progress = false))
         @test ncomponents(N) == 1
         W = first(witness_sets(N)[1])
         @test degree(W) == 4
@@ -149,7 +156,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         # variety, so it must not enter the witness superset.
         @var r s
         H = System([(r^2 - 1) / (r - 1) + s, r * s - 2]; variables = [r, s])
-        R = regeneration(H; show_progress = false)
+        R = solve(H, Regeneration(; show_progress = false))
         @test degree.(R) == [2]
         @test all(pt -> abs(pt[1] * pt[2] - 2) < 1.0e-8, solutions(first(R)))
         @test all(pt -> abs(pt[1] + 1 + pt[2]) < 1.0e-8, solutions(first(R)))
@@ -158,13 +165,13 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         # `r = ε`, a full `ε` away from the denominator variety.
         for ε in (1.0e-2, 1.0e-4, 1.0e-6, 1.0e-8)
             Hε = System([(r - ε) / r]; variables = [r, s])
-            @test degree.(regeneration(Hε; show_progress = false)) == [1]
+            @test degree.(solve(Hε, Regeneration(; show_progress = false))) == [1]
         end
         # A shared zero leaves nothing behind: only `r = -1` survives here.
         @test degree.(
-            regeneration(
-                System([(r^2 - 1) / (r - 1)]; variables = [r, s]);
-                show_progress = false
+            solve(
+                System([(r^2 - 1) / (r - 1)]; variables = [r, s]),
+                Regeneration(; show_progress = false),
             )
         ) == [1]
 
@@ -174,16 +181,16 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             Hk = System(
                 [k * ((r^2 - 1) / (r - 1) + s), r * s - 2]; variables = [r, s]
             )
-            @test degree.(regeneration(Hk; show_progress = false)) == [2]
+            @test degree.(solve(Hk, Regeneration(; show_progress = false))) == [2]
             Hd = System(
                 [(r^2 - 1) / (k * (r - 1)) + s, r * s - 2]; variables = [r, s]
             )
-            @test degree.(regeneration(Hd; show_progress = false)) == [2]
+            @test degree.(solve(Hd, Regeneration(; show_progress = false))) == [2]
         end
 
         # Mixing the two input front-ends in one `intersect` is rejected.
         @polyvar a b
-        Wp = witness_set(System([a^2 + b^2 - 1]); show_progress = false)
+        Wp = solve(System([a^2 + b^2 - 1]), Witness(; show_progress = false))
         @test_throws ArgumentError intersect(Wp, x + y)
     end
 
@@ -194,14 +201,15 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @var p q
         for k in (1.0e-8, 1.0e-4, 1.0, 1.0e4, 1.0e12)
             @test degree.(
-                regeneration(
-                    System([k * (u + 1 + v), u * v - 2]); show_progress = false,
+                solve(
+                    System([k * (u + 1 + v), u * v - 2]),
+                    Regeneration(; show_progress = false),
                 )
             ) == [2]
             @test degree.(
-                regeneration(
-                    System([k * (p + 1 + q), p * q - 2]; variables = [p, q]);
-                    show_progress = false,
+                solve(
+                    System([k * (p + 1 + q), p * q - 2]; variables = [p, q]),
+                    Regeneration(; show_progress = false),
                 )
             ) == [2]
         end
@@ -211,20 +219,20 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         # The hypersurface lives in the ambient space of the witness set and may leave
         # variables out. A homogeneous one is sliced affinely like any other.
         @polyvar x1 x2 x3 x4
-        Wp = witness_set(System([x1^2 + x2^2 + x3^2 - 4]); show_progress = false)
-        @test degree(intersect(Wp, x1^2 - x2^2 - 1; show_progress = false)) == 4
-        @test degree(intersect(Wp, x1^2 - x2^2; show_progress = false)) == 4
-        @test_throws ArgumentError intersect(Wp, x1^2 - x4^2; show_progress = false)
+        Wp = solve(System([x1^2 + x2^2 + x3^2 - 4]), Witness(; show_progress = false))
+        @test degree(intersect(Wp, x1^2 - x2^2 - 1, Intersection(; show_progress = false))) == 4
+        @test degree(intersect(Wp, x1^2 - x2^2, Intersection(; show_progress = false))) == 4
+        @test_throws ArgumentError intersect(Wp, x1^2 - x4^2, Intersection(; show_progress = false))
 
         @var y1 y2 y3
-        We = witness_set(
-            System([y1^2 + y2^2 + y3^2 - 4]; variables = [y1, y2, y3]);
-            show_progress = false,
+        We = solve(
+            System([y1^2 + y2^2 + y3^2 - 4]; variables = [y1, y2, y3]),
+            Witness(; show_progress = false),
         )
-        @test degree(intersect(We, y1^2 - y2^2 - 1; show_progress = false)) == 4
-        @test degree(intersect(We, y1^2 - y2^2; show_progress = false)) == 4
+        @test degree(intersect(We, y1^2 - y2^2 - 1, Intersection(; show_progress = false))) == 4
+        @test degree(intersect(We, y1^2 - y2^2, Intersection(; show_progress = false))) == 4
         @test degree(
-            intersect(We, (y1^2 - y2^2) / (y1 - y2); show_progress = false)
+            intersect(We, (y1^2 - y2^2) / (y1 - y2), Intersection(; show_progress = false))
         ) == 2
     end
 
@@ -233,7 +241,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         f = rand_poly(ComplexF64, x, 5)
         Hyp = System([f]; variables = x)
 
-        N_Hyp = numerical_irreducible_decomposition(Hyp; show_progress = false)
+        N_Hyp = solve(Hyp, Decomposition(; show_progress = false))
         @test degrees(N_Hyp) == Dict(3 => [5])
         @test ncomponents(N_Hyp) == 1
     end
@@ -244,7 +252,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         g = rand_poly(ComplexF64, x, 3)
         Curve = System([f, g]; variables = x)
 
-        N_Curve = nid(Curve; show_progress = false)
+        N_Curve = solve(Curve, Decomposition(; show_progress = false))
         @test degrees(N_Curve) == Dict(1 => [6])
         @test ncomponents(N_Curve) == 1
     end
@@ -254,7 +262,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         TwistedCubicSphere =
             [x * z - y^2, y - z^2, x - y * z, rand_poly(ComplexF64, [x, y, z], 1)]
 
-        N_TwistedCubicSphere = nid(TwistedCubicSphere)
+        N_TwistedCubicSphere = solve(TwistedCubicSphere, Decomposition())
         @test degrees(N_TwistedCubicSphere) == Dict(0 => [1, 1, 1])
         @test ncomponents(N_TwistedCubicSphere) == 3
     end
@@ -265,7 +273,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         g = y * z + x
         ThreeLines = System([f, g]; variables = [x, y, z])
 
-        N_ThreeLines = nid(ThreeLines; show_progress = false)
+        N_ThreeLines = solve(ThreeLines, Decomposition(; show_progress = false))
         @test degrees(N_ThreeLines) == Dict(1 => [1, 1, 1])
         @test ncomponents(N_ThreeLines) == 3
     end
@@ -336,11 +344,13 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             variables = [z2x, z2y, z2z, z3x, z3y, z3z, z4x, z4y, z4z, z5x, z5y, z5z],
         )
 
-        N_Bricard6R = nid(Bricard6R; show_progress = false)
+        N_Bricard6R = solve(Bricard6R, Decomposition(; show_progress = false))
         @test degrees(N_Bricard6R) == Dict(1 => [8])
         @test ncomponents(N_Bricard6R) == 1
 
-        N_Bricard6R_c4 = nid(Bricard6R; max_codim = 4, show_progress = false)
+        N_Bricard6R_c4 = solve(
+            Bricard6R, Decomposition(; max_codim = 4, show_progress = false),
+        )
         @test ncomponents(N_Bricard6R_c4) == 0
     end
 
@@ -377,7 +387,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         # assertion on an unseeded run is flaky. Seed for a deterministic
         # check; reproducibility relies on regeneration/decompose drawing
         # their randomness from the (seeded) global RNG.
-        N_ACR = nid(F_ACR; seed = UInt32(0x1234), show_progress = false)
+        N_ACR = solve(F_ACR, Decomposition(; seed = UInt32(0x1234), show_progress = false))
         @test degrees(N_ACR) == Dict(4 => [7])
     end
 
@@ -390,7 +400,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
 
         F = System([s * l * p for s in S for l in L for p in P])
 
-        NID = numerical_irreducible_decomposition(F; seed = 0x7a4845b9, show_progress = false)
+        NID = solve(F, Decomposition(; seed = 0x7a4845b9, show_progress = false))
 
         @test ncomponents(NID, 0) == 1
         @test degrees(NID)[0] == [1]
@@ -420,20 +430,18 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             return a != rand()
         end
 
-        reg = () -> regeneration(
-            F; seed = s, show_progress = false, threading = false,
-        )
+        reg = () -> solve(F, Regeneration(; seed = s, show_progress = false), Serial())
         R1, R2 = from_two_states(reg)
         @test degree.(R1) == degree.(R2)
         @test !advances_ambient(reg)
 
-        dec = () -> nid(F; seed = s, show_progress = false, threading = false)
+        dec = () -> solve(F, Decomposition(; seed = s, show_progress = false), Serial())
         N1, N2 = from_two_states(dec)
         @test degrees(N1) == degrees(N2)
         @test !advances_ambient(dec)
 
-        W = witness_set(System([x^2 + y^2 - 5]); seed = s, show_progress = false)
-        cut = () -> intersect(W, x - y; seed = s)
+        W = solve(System([x^2 + y^2 - 5]), Witness(; seed = s, show_progress = false))
+        cut = () -> intersect(W, x - y, Intersection(; seed = s))
         I1, I2 = from_two_states(cut)
         @test degree(I1) == degree(I2)
         @test !advances_ambient(cut)
@@ -443,9 +451,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             [x^2 + y^2 - 1, a * x + b * y + c];
             variables = [x, y], parameters = [a, b, c],
         )
-        mono = () -> monodromy_solve(
-            Fp; seed = s, show_progress = false, threading = false,
-        )
+        mono = () -> solve(Fp, Monodromy(; seed = s, show_progress = false), Serial())
         M1, M2 = from_two_states(mono)
         by = t -> (round(real(t[1]); digits = 8), round(imag(t[1]); digits = 8))
         @test sort(solutions(M1); by = by) ≈ sort(solutions(M2); by = by)

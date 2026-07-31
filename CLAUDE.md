@@ -82,9 +82,13 @@ minutes. A failure whose name and stacktrace went into a lossy pipe cannot be di
 paying for another run, and an intermittent one may not come back at all. `make test` and
 `make test-serial` already `tee` to `test-run.log` (and `test-cert.log`), so read the log with
 `grep -E "Test Failed|Error During Test" -A8 test-run.log` instead of re-running. When invoking the
-runner directly, `tee` it yourself. Iterate on a subset rather than the whole suite:
-`test/runtests.jl [TESTS...]` filters by name, `--list` shows the names, `--quickfail` stops at the
-first error.
+runner directly, `tee` it yourself.
+
+**Run the affected test files, not the whole suite.** Iterate with
+`julia --project=test -t 8 test/runtests.jl NAME...`, which filters by name; `--list` shows the
+names and `--quickfail` stops at the first error. Pick the files the change touches plus the quality
+gates (`aqua`, `jet`, `explicit_imports`, `concrete_structs`). Use plenty of threads and jobs
+(`-t 8`, `JOBS=10`); the machine can take it. Reserve one full `make test` for the end.
 
 ### Quick debugging with Julia MCP
 

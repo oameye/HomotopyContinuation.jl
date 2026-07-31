@@ -2,9 +2,9 @@ using Test
 import HomotopyContinuationNext as HCN
 using HomotopyContinuationNext:
     @polyvar, @var, System, solve, solutions, is_real, path_results,
-    monodromy_solve, nsolutions, Expression, differentiate
+    nsolutions, Expression, differentiate, TotalDegree, Monodromy, Serial
 using HomotopyContinuationNextCertification:
-    certify, certificates, is_certified, is_complex, is_positive, ncertified,
+    Certification, certify, certificates, is_certified, is_complex, is_positive, ncertified,
     nreal_certified, ncomplex_certified, ndistinct_certified,
     ndistinct_real_certified, ndistinct_complex_certified,
     certified_solution_interval, solution_candidate, solution_approximation,
@@ -71,9 +71,9 @@ end
         f₁ = (x^4 + y^4 - 1) * (x^2 + y^2 - 2) + x^5 * y
         f₂ = x^2 + 2x * y^2 - 2y^2 - 1 // 2
         F = System([f₁, f₂])
-        result = solve(F; show_progress = false)
+        result = solve(F, TotalDegree(; show_progress = false))
 
-        cert = certify(F, result; show_progress = false)
+        cert = certify(F, result, Certification(; show_progress = false))
         @test cert isa CertificationResult
         @test ncertified(cert) == 18
         @test ndistinct_certified(cert) == 18
@@ -87,13 +87,18 @@ end
         save(fn, cert)
         @test !isempty(read(fn, String))
 
-        # threading = false path
-        cert_nothread = certify(F, result; show_progress = false, threading = false)
+        # serial path
+        cert_nothread = certify(
+            F, result, nothing, Certification(; show_progress = false), Serial(),
+        )
         @test ncertified(cert_nothread) == 18
 
         # Double solutions: each true solution appears twice, grouped as duplicates
         S = solutions(result)
-        cert2 = certify(F, [S; S]; extended_certificate = true, show_progress = false)
+        cert2 = certify(
+            F, [S; S], nothing,
+            Certification(; extended_certificate = true, show_progress = false),
+        )
         @test ncertified(cert2) == 36
         @test ndistinct_certified(cert2) == 18
         @test nreal_certified(cert2) == 8
@@ -103,8 +108,8 @@ end
     @testset "circle ∩ line (2 real)" begin
         @polyvar x y
         F = System([x^2 + y^2 - 1, x - y])
-        res = solve(F; show_progress = false)
-        cert = certify(F, res; show_progress = false)
+        res = solve(F, TotalDegree(; show_progress = false))
+        cert = certify(F, res, Certification(; show_progress = false))
         @test cert isa CertificationResult
         @test ncertified(cert) == 2
         @test nreal_certified(cert) == 2
@@ -128,11 +133,11 @@ end
         x0 = [1.0]
         # a solution just off the real axis is not certified real
         F = System([x - 1 + 1.0e-16 * im])
-        certF = certify(F, [x0]; show_progress = false)
+        certF = certify(F, [x0], Certification(; show_progress = false))
         @test is_real(certificates(certF)[1]) == false
         # a genuinely real solution is certified real
         G = System([x - 1])
-        certG = certify(G, [x0]; show_progress = false)
+        certG = certify(G, [x0], Certification(; show_progress = false))
         @test is_real(certificates(certG)[1]) == true
     end
 
@@ -147,12 +152,15 @@ end
 
         # Solve with u₀ substituted, then certify against the parametric system.
         eqs_sub = [DP.subs(e, u[1] => u₀[1], u[2] => u₀[2]) for e in eqs]
-        res = solve(System(eqs_sub; variables = [x, y, λ[1]]); show_progress = false)
+        res = solve(
+            System(eqs_sub; variables = [x, y, λ[1]]),
+            TotalDegree(; show_progress = false),
+        )
         cands = solutions(res)
         @test length(cands) == 36
 
         # certify against the parametric system at those parameter values
-        cert = certify(C, cands, u₀; show_progress = false)
+        cert = certify(C, cands, u₀, Certification(; show_progress = false))
         @test ncertified(cert) == 36
         @test ndistinct_certified(cert) == 36
         @test nreal_certified(cert) == 8
@@ -160,15 +168,15 @@ end
 
         # invalid solutions: random points certify (almost) none
         invalid = [100 .* randn(ComplexF64, 3) for _ in 1:10]
-        cert_bad = certify(C, invalid, u₀; show_progress = false)
+        cert_bad = certify(C, invalid, u₀, Certification(; show_progress = false))
         @test ncertified(cert_bad) < 10
     end
 
     @testset "positive" begin
         @polyvar x y
         F = System([x^2 + y^2 - 1, x - y])
-        res = solve(F; show_progress = false)
-        cert = certify(F, res; show_progress = false)
+        res = solve(F, TotalDegree(; show_progress = false))
+        cert = certify(F, res, Certification(; show_progress = false))
         # exactly one of ±(√½, √½) is positive in every coordinate
         @test count(is_positive, certificates(cert)) == 1
         @test count(s -> is_positive(s, 1), certificates(cert)) == 1
@@ -212,12 +220,16 @@ end
         real_sols = read_solutions_txt(joinpath(@__DIR__, "data", "3264_real_sols.txt"))
         @test length(real_sols) == 3264
 
-        cert = certify(F, real_sols, real_conics; show_progress = false)
+        cert = certify(
+            F, real_sols, real_conics, Certification(; show_progress = false),
+        )
         @test ncertified(cert) == 3264
         @test ndistinct_real_certified(cert) == 3264
 
         # certifying a parametric system without parameters is an error
-        @test_throws ArgumentError certify(F, real_sols; show_progress = false)
+        @test_throws ArgumentError certify(
+            F, real_sols, nothing, Certification(; show_progress = false),
+        )
 
         # streaming accumulator: add solutions one by one, keep only distinct
         dcs = DistinctCertifiedSolutions(F, real_conics)
@@ -228,8 +240,8 @@ end
 
         # and the batch entry point deduplicates repeated inputs
         dcs2 = distinct_certified_solutions(
-            F, [real_sols; real_sols[1:100]], real_conics;
-            threading = true, show_progress = false,
+            F, [real_sols; real_sols[1:100]], real_conics,
+            Certification(; show_progress = false),
         )
         @test length(solutions(dcs2)) == 3264
     end
@@ -237,8 +249,8 @@ end
     @testset "duplicate detection" begin
         @polyvar x y
         F = System([x^2 + y^2 - 1, x - y])
-        s = solutions(solve(F; show_progress = false))[1]
-        cert = certify(F, [s, s, s]; show_progress = false)
+        s = solutions(solve(F, TotalDegree(; show_progress = false)))[1]
+        cert = certify(F, [s, s, s], Certification(; show_progress = false))
         @test ncertified(cert) == 3
         @test ndistinct_certified(cert) == 1
         @test length(distinct_certificates(cert)) == 1
@@ -250,22 +262,25 @@ end
     @testset "single solution and PathResult inputs" begin
         @polyvar x y
         F = System([x^2 + y^2 - 1, x - y])
-        res = solve(F; show_progress = false)
+        res = solve(F, TotalDegree(; show_progress = false))
         s = solutions(res)[1]
-        cert = certify(F, s; show_progress = false)
+        cert = certify(F, s, Certification(; show_progress = false))
         @test ncertified(cert) == 1
         @test certificate_index(certificates(cert)[1]) == 1
 
         pr = path_results(res)[1]
-        certpr = certify(F, pr; show_progress = false)
+        certpr = certify(F, pr, Certification(; show_progress = false))
         @test ncertified(certpr) == 1
     end
 
     @testset "extended certificate" begin
         @polyvar x y
         F = System([x^2 + y^2 - 1, x - y])
-        res = solve(F; show_progress = false)
-        cert = certify(F, res; extended_certificate = true, show_progress = false)
+        res = solve(F, TotalDegree(; show_progress = false))
+        cert = certify(
+            F, res, nothing,
+            Certification(; extended_certificate = true, show_progress = false),
+        )
         @test ncertified(cert) == 2
         for c in certificates(cert)
             @test c isa ExtendedSolutionCertificate
@@ -281,9 +296,11 @@ end
             [y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]];
             variables = y, parameters = p,
         )
-        monres = monodromy_solve(F; seed = UInt32(4242), threading = false, show_progress = false)
+        monres = solve(
+            F, Monodromy(; seed = UInt32(4242), show_progress = false), Serial(),
+        )
         @test nsolutions(monres) == 2
-        cert = certify(F, monres; show_progress = false)
+        cert = certify(F, monres, Certification(; show_progress = false))
         @test ndistinct_certified(cert) >= 1
         @test ncertified(cert) == nsolutions(monres)
     end
@@ -368,7 +385,10 @@ end
         @var x y a b
 
         Fr = System([x / y - 2, x^2 + y^2 - 5])
-        cr = certify(Fr, [ComplexF64[2, 1], ComplexF64[-2, -1]]; show_progress = false)
+        cr = certify(
+            Fr, [ComplexF64[2, 1], ComplexF64[-2, -1]], nothing,
+            Certification(; show_progress = false),
+        )
         @test ncertified(cr) == 2
         @test nreal_certified(cr) == 2
 
@@ -377,15 +397,17 @@ end
         s5 = sqrt(5.0)
         xs = [(-1 + sqrt(1 + 4s5)) / (2s5), (-1 - sqrt(1 + 4s5)) / (2s5)]
         cq = certify(
-            Fq, [ComplexF64[xi, 1 - xi] for xi in xs], ComplexF64[2.0, 3.0];
-            show_progress = false,
+            Fq, [ComplexF64[xi, 1 - xi] for xi in xs], ComplexF64[2.0, 3.0],
+            Certification(; show_progress = false),
         )
         @test ncertified(cq) == 2
         @test nreal_certified(cq) == 2
         @test all(c -> precision(c) == 53, certificates(cq))
 
         Ft = System([sin(x) + y, cos(x) - y - 1]; variables = [x, y])
-        ct = certify(Ft, [ComplexF64[0, 0]]; show_progress = false)
+        ct = certify(
+            Ft, [ComplexF64[0, 0]], nothing, Certification(; show_progress = false),
+        )
         @test ncertified(ct) == 1
         @test precision(only(certificates(ct))) == 53
 
@@ -519,7 +541,7 @@ end
         -0.42153938328192286 + 0.13323037611055516im,
     ]
 
-    r = certify(F, [sol], p; show_progress = false)
+    r = certify(F, [sol], p, Certification(; show_progress = false))
     @test ncertified(r) == 1
     cert = only(certificates(r))
     @test is_certified(cert)

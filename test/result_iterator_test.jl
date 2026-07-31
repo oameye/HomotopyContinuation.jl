@@ -23,7 +23,7 @@ using LinearAlgebra: norm
         @test length(prs) == 4
         # tracking is lazy: one path at a time
         @test first(ri) isa PathResult
-        eager = solve(F, alg, Serial(); show_progress = false)
+        eager = solve(F, alg, Serial())
         @test seed(ri) == seed(eager) == UInt32(5)
         @test nsolutions(Result(ri)) == nsolutions(eager)
     end
@@ -35,7 +35,7 @@ using LinearAlgebra: norm
         @test !isempty(prs)
         @test all(pr -> pr isa PathResult, prs)
         @test nsolutions(Result(ri)) ==
-            nsolutions(solve(F, Polyhedral(), Serial(); show_progress = false))
+            nsolutions(solve(F, Polyhedral(; show_progress = false), Serial()))
     end
 
     @testset "sliced" begin
@@ -60,8 +60,8 @@ using LinearAlgebra: norm
         E = extrinsic(l₂)
         @test maximum(pr -> maximum(abs, E.A * solution(pr) - E.b), w₂) < 1.0e-10
         # also usable as start solutions for an eager solve and a sweep
-        @test nsolutions(solve(F, r₁, l₁, l₂; show_progress = false)) == 2
-        sweep = solve_targets(F, r₁, l₁, [l₂], Serial(); show_progress = false)
+        @test nsolutions(solve(F, r₁, l₁, l₂, Continuation(; show_progress = false))) == 2
+        sweep = solve(F, r₁, l₁, [l₂], Sweep(; show_progress = false), Serial())
         @test nsolutions(first(only(sweep))) == 2
     end
 
@@ -69,7 +69,7 @@ using LinearAlgebra: norm
         @polyvar p
         F = System([x^2 + y^2 - p, x - y]; variables = [x, y], parameters = [p])
         G = System([x^2 + y^2 - 2.0, x - y]; variables = [x, y])
-        S = solutions(solve(G, Serial(); show_progress = false))
+        S = solutions(solve(G, TotalDegree(; show_progress = false), Serial()))
         ri = result_iterator(F, S, [2.0], [8.0])
         @test length(collect(ri)) == length(S)
         for s in solutions(Result(ri))
@@ -98,7 +98,9 @@ using LinearAlgebra: norm
 
     @testset "explicit mask selects a subset of the paths up front" begin
         F = System([x^2 - 1, y^2 - 4]; variables = [x, y])
-        cache = CommonSolve.init(F, TotalDegree(; seed = UInt32(3)), Serial(); show_progress = false)
+        cache = CommonSolve.init(
+            F, TotalDegree(; seed = UInt32(3), show_progress = false), Serial(),
+        )
         mask = BitVector([true, false, false, true])
         ri = ResultIterator(cache, mask)
         @test length(ri) == 2
@@ -118,7 +120,7 @@ using LinearAlgebra: norm
         ri = result_iterator(F)
         res = Result(ri)
         @test nexcess_solutions(res) ==
-            nexcess_solutions(solve(F, Serial(); show_progress = false))
+            nexcess_solutions(solve(F, TotalDegree(; show_progress = false), Serial()))
     end
 
     @testset "show" begin

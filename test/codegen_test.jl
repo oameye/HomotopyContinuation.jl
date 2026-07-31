@@ -148,7 +148,7 @@ _rgf(expr) = RuntimeGeneratedFunctions.RuntimeGeneratedFunction(HC, HC, expr)
     @testset "System(compile=COMPILED) solves correctly" begin
         @polyvar x y
         F = System([x^2 + y - 1, x * y - 2]; compile = CompileMode.COMPILED)
-        result = HC.solve(F; show_progress = false)
+        result = HC.solve(F, HC.TotalDegree(; show_progress = false))
         @test HC.nsolutions(result) >= 2
         for sol in HC.solutions(result)
             res = abs(sol[1]^2 + sol[2] - 1) + abs(sol[1] * sol[2] - 2)
@@ -382,7 +382,7 @@ _rgf(expr) = RuntimeGeneratedFunctions.RuntimeGeneratedFunction(HC, HC, expr)
     @testset "System(compile=COMPILED_ALL) solves correctly: residual check" begin
         @polyvar x y
         F = System([x^2 + y - 1, x * y - 2]; compile = CompileMode.COMPILED_ALL)
-        result = HC.solve(F; show_progress = false)
+        result = HC.solve(F, HC.TotalDegree(; show_progress = false))
         @test HC.nsolutions(result) >= 2
         for sol in HC.solutions(result)
             res = abs(sol[1]^2 + sol[2] - 1) + abs(sol[1] * sol[2] - 2)
@@ -398,8 +398,14 @@ _rgf(expr) = RuntimeGeneratedFunctions.RuntimeGeneratedFunction(HC, HC, expr)
             2x0 * x1 + 2x1 * x2 + 2x2 * x3 - x1,
             x1^2 + 2x0 * x2 + 2x1 * x3 - x2,
         ]
-        r_i = HC.solve(System(F_polys; compile = CompileMode.INTERPRETED); show_progress = false)
-        r_c = HC.solve(System(F_polys; compile = CompileMode.COMPILED_ALL); show_progress = false)
+        r_i = HC.solve(
+            System(F_polys; compile = CompileMode.INTERPRETED),
+            HC.TotalDegree(; show_progress = false),
+        )
+        r_c = HC.solve(
+            System(F_polys; compile = CompileMode.COMPILED_ALL),
+            HC.TotalDegree(; show_progress = false),
+        )
         @test HC.nsolutions(r_i) == HC.nsolutions(r_c)
 
         # Compare solution sets via nearest-neighbor matching
@@ -420,10 +426,10 @@ _rgf(expr) = RuntimeGeneratedFunctions.RuntimeGeneratedFunction(HC, HC, expr)
         F_c = System([x^2 - a, y^2 - a]; parameters = [a], compile = CompileMode.COMPILED_ALL)
 
         F_start = System([x^2 - 1, y^2 - 1]; compile = CompileMode.INTERPRETED)
-        starts = HC.solutions(HC.solve(F_start; show_progress = false))
+        starts = HC.solutions(HC.solve(F_start, HC.TotalDegree(; show_progress = false)))
 
-        r_i = HC.solve(F_i, starts, [1.0], [4.0]; show_progress = false)
-        r_c = HC.solve(F_c, starts, [1.0], [4.0]; show_progress = false)
+        r_i = HC.solve(F_i, starts, [1.0], [4.0], HC.Continuation(; show_progress = false))
+        r_c = HC.solve(F_c, starts, [1.0], [4.0], HC.Continuation(; show_progress = false))
         @test HC.nresults(r_i) == HC.nresults(r_c)
 
         sols_i = sort(HC.real_solutions(r_i); by = s -> (s[1], s[2]))

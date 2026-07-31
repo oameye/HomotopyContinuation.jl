@@ -78,11 +78,11 @@ for n in [3, 5, 7, 9]
     sys_c = System(F; compile = CompileMode.COMPILED)
     sys_a = System(F; compile = CompileMode.COMPILED_ALL)
     for s in (sys_i, sys_c, sys_a)
-        solve(s, TotalDegree(), Serial(); show_progress = false)
+        solve(s, TotalDegree(; show_progress = false), Serial())
     end
-    t_i = @belapsed solve($sys_i, TotalDegree(), Serial(); show_progress = false)
-    t_c = @belapsed solve($sys_c, TotalDegree(), Serial(); show_progress = false)
-    t_a = @belapsed solve($sys_a, TotalDegree(), Serial(); show_progress = false)
+    t_i = @belapsed solve($sys_i, TotalDegree(; show_progress = false), Serial())
+    t_c = @belapsed solve($sys_c, TotalDegree(; show_progress = false), Serial())
+    t_a = @belapsed solve($sys_a, TotalDegree(; show_progress = false), Serial())
     println(
         "  katsura-$n: interp=", round(t_i * 1.0e3; digits = 2),
         "ms  compiled=", round(t_c * 1.0e3; digits = 2),

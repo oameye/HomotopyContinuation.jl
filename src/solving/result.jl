@@ -182,7 +182,23 @@ end
 # Result
 # ---------------------------------------------------------------------------
 
-struct Result
+"""
+    AbstractResult
+
+Supertype of what a [`solve`](@ref) route returns.
+"""
+abstract type AbstractResult end
+
+"""
+    AbstractSolutionResult
+
+Supertype of the results that hold a set of solution points, each backed by a
+[`PathResult`](@ref). `solutions`, `nsolutions`, `results`, `nresults` and
+`real_solutions` are defined once for all of them against `path_results`.
+"""
+abstract type AbstractSolutionResult <: AbstractResult end
+
+struct Result <: AbstractSolutionResult
     path_results::Vector{PathResult}
     tracked_paths::Int
     seed::UInt32
@@ -256,6 +272,21 @@ excess solutions. Use this for path-level diagnostics; `results(r)` returns
 only the deduplicated successful solutions.
 """
 path_results(r::Result)::Vector{PathResult} = r.path_results
+
+# Index of one representative path per distinct solution. `Result` clusters a
+# fixed path set afterwards, so several paths share one entry.
+_solution_indices(r::Result) = (first(c) for c in r.clusters)
+
+# One filter, so the four accessors above cannot drift apart.
+@inline function _passes(
+        pr::PathResult, only_real::Bool, only_nonsingular::Bool,
+        only_singular::Bool, real_tol::Float64,
+    )::Bool
+    only_nonsingular && pr.singular && return false
+    only_singular && !pr.singular && return false
+    only_real && !is_real(pr; tol = real_tol) && return false
+    return true
+end
 
 """
     seed(r::Result)
@@ -396,38 +427,45 @@ Number of unique solutions (deduplicated by proximity). This is the primary
 solution count.
 """
 function nresults(
-        r::Result;
+        r::AbstractSolutionResult;
         only_real::Bool = false,
         only_nonsingular::Bool = false,
         only_singular::Bool = false,
         real_tol::Float64 = DEFAULT_REAL_TOL,
     )::Int
+    prs = path_results(r)
     n = 0
-    for cluster in r.clusters
-        rep = r.path_results[first(cluster)]
-        if only_nonsingular && rep.singular
-            continue
-        end
-        if only_singular && !rep.singular
-            continue
-        end
-        if only_real && !is_real(rep; tol = real_tol)
-            continue
-        end
-        n += 1
+    for i in _solution_indices(r)
+        _passes(
+            prs[i], only_real, only_nonsingular, only_singular, real_tol,
+        ) && (n += 1)
     end
     return n
+end
+
+# An early stop leaves the tracked paths a subsequence of `1:n`, so a path number
+# is no longer its position. Contiguous numbering hits the first branch; results
+# whose paths carry no number (0) can only be addressed positionally.
+function _path_position(r::Result, i::Int)::Int
+    prs = r.path_results
+    checkbounds(Bool, prs, i) && path_number(prs[i]) == i && return i
+    if isempty(prs) || path_number(first(prs)) == 0
+        checkbounds(prs, i)
+        return i
+    end
+    j = findfirst(pr -> path_number(pr) == i, prs)
+    j === nothing && throw(BoundsError(prs, i))
+    return j
 end
 
 """
     multiplicity(r, i) -> Int
 
-Multiplicity of the i-th path result: the number of paths that converged to the
-same point. Returns 0 for non-success paths. Unaffected by an orbit merge, so it
-reports the multiplicity of the solution even after [`recluster`](@ref) with a
-group action.
+Multiplicity of path `i`: the number of paths that converged to the same point.
+Returns 0 for non-success paths. Unaffected by an orbit merge, so it reports the
+multiplicity of the solution even after [`recluster`](@ref) with a group action.
 """
-multiplicity(r::Result, i::Int)::Int = r.multiplicity[i]
+multiplicity(r::Result, i::Int)::Int = r.multiplicity[_path_position(r, i)]
 
 """
     clusters(r::Result) -> Vector{Vector{PathResult}}
@@ -453,9 +491,9 @@ After [`recluster`](@ref) with a group action this is the orbit of solution `i`,
 so `cluster_of(r, path_number(pr))` gets the symmetric partners of `pr`.
 """
 function cluster_of(r::Result, i::Int)::Vector{PathResult}
-    checkbounds(r.path_results, i)
+    pos = _path_position(r, i)
     for cl in r.clusters
-        if i in cl
+        if pos in cl
             return PathResult[r.path_results[j] for j in cl]
         end
     end
@@ -469,30 +507,21 @@ Return path results, optionally filtered. By default returns one representative 
 unique solution cluster (`multiple_results=false`).
 """
 function results(
-        r::Result;
+        r::AbstractSolutionResult;
         only_real::Bool = false,
         only_nonsingular::Bool = false,
         only_singular::Bool = false,
         multiple_results::Bool = false,
         real_tol::Float64 = DEFAULT_REAL_TOL,
     )::Vector{PathResult}
+    prs = path_results(r)
     out = PathResult[]
-    if multiple_results
-        for pr in r.path_results
-            is_success(pr) || continue
-            only_nonsingular && pr.singular && continue
-            only_singular && !pr.singular && continue
-            only_real && !is_real(pr; tol = real_tol) && continue
+    idxs = multiple_results ? eachindex(prs) : _solution_indices(r)
+    for i in idxs
+        pr = prs[i]
+        multiple_results && !is_success(pr) && continue
+        _passes(pr, only_real, only_nonsingular, only_singular, real_tol) &&
             push!(out, pr)
-        end
-    else
-        for cluster in r.clusters
-            rep = r.path_results[first(cluster)]
-            only_nonsingular && rep.singular && continue
-            only_singular && !rep.singular && continue
-            only_real && !is_real(rep; tol = real_tol) && continue
-            push!(out, rep)
-        end
     end
     return out
 end
@@ -503,15 +532,17 @@ end
 Return nonsingular solutions (deduplicated). Singular solutions are excluded by
 default — use `results(r; only_singular=true)` to access them.
 """
-function solutions(r::Result; only_real::Bool = false, real_tol::Float64 = DEFAULT_REAL_TOL)::Vector{Vector{ComplexF64}}
+function solutions(
+        r::AbstractSolutionResult;
+        only_real::Bool = false, real_tol::Float64 = DEFAULT_REAL_TOL,
+    )::Vector{Vector{ComplexF64}}
+    prs = path_results(r)
     out = Vector{ComplexF64}[]
-    for cluster in r.clusters
-        rep = r.path_results[first(cluster)]
-        rep.singular && continue
-        if only_real && !is_real(rep; tol = real_tol)
-            continue
-        end
-        push!(out, rep.solution)
+    for i in _solution_indices(r)
+        pr = prs[i]
+        pr.singular && continue
+        only_real && !is_real(pr; tol = real_tol) && continue
+        push!(out, pr.solution)
     end
     return out
 end
@@ -521,28 +552,31 @@ end
 
 Return real nonsingular solutions (deduplicated).
 """
-function real_solutions(r::Result; tol::Float64 = DEFAULT_REAL_TOL)::Vector{Vector{Float64}}
+function real_solutions(
+        r::AbstractSolutionResult; tol::Float64 = DEFAULT_REAL_TOL,
+    )::Vector{Vector{Float64}}
+    prs = path_results(r)
     out = Vector{Float64}[]
-    for cluster in r.clusters
-        rep = r.path_results[first(cluster)]
-        rep.singular && continue
-        if is_real(rep; tol = tol)
-            push!(out, Float64.(real.(rep.solution)))
-        end
+    for i in _solution_indices(r)
+        pr = prs[i]
+        pr.singular && continue
+        is_real(pr; tol = tol) && push!(out, Float64.(real.(pr.solution)))
     end
     return out
 end
 
 # Unique solution counts (deduplicated)
 # nsolutions: nonsingular only. Use nresults for all (singular + nonsingular).
-nsolutions(r::Result)::Int = nnonsingular(r)
+nsolutions(r::AbstractSolutionResult)::Int = nnonsingular(r)
 
-function nsingular(r::Result)::Int
-    return count(c -> r.path_results[first(c)].singular, r.clusters)
+function nsingular(r::AbstractSolutionResult)::Int
+    prs = path_results(r)
+    return count(i -> prs[i].singular, _solution_indices(r))
 end
 
-function nnonsingular(r::Result)::Int
-    return count(c -> !r.path_results[first(c)].singular, r.clusters)
+function nnonsingular(r::AbstractSolutionResult)::Int
+    prs = path_results(r)
+    return count(i -> !prs[i].singular, _solution_indices(r))
 end
 
 nat_infinity(r::Result)::Int = count(is_at_infinity, r.path_results)
@@ -556,17 +590,26 @@ the original overdetermined system. Always 0 for square systems.
 nexcess_solutions(r::Result)::Int = count(is_excess_solution, r.path_results)
 
 # nreal: nonsingular real solutions only
-nreal(r::Result; tol::Float64 = DEFAULT_REAL_TOL)::Int =
-    count(c -> !r.path_results[first(c)].singular && is_real(r.path_results[first(c)]; tol = tol), r.clusters)
+function nreal(
+        r::AbstractSolutionResult; tol::Float64 = DEFAULT_REAL_TOL,
+    )::Int
+    prs = path_results(r)
+    return count(_solution_indices(r)) do i
+        !prs[i].singular && is_real(prs[i]; tol = tol)
+    end
+end
 
 # Points are owned copies, never aliases.
 _start_points(
     starts::AbstractVector{<:AbstractVector{<:Number}},
 )::Vector{Vector{ComplexF64}} = [Vector{ComplexF64}(ComplexF64.(s)) for s in starts]
 _start_points(r::Result)::Vector{Vector{ComplexF64}} = [copy(s) for s in solutions(r)]
-_start_points(x) = throw(
-    ArgumentError(
-        "start solutions must be a vector of solution vectors, a `Result`, or a " *
-            "`ResultIterator`, got $(typeof(x)).",
-    ),
-)
+_start_points(x) = _bad_starts(x)
+
+# A solve stopped early leaves holes: `@tasks` cannot break, so its iterations skip
+# instead and those slots stay undefined. Dropping them keeps the path numbers
+# ascending but no longer equal to the position, which `_path_position` resolves.
+function _assigned_results(results::Vector{PathResult})::Vector{PathResult}
+    all(i -> isassigned(results, i), eachindex(results)) && return results
+    return PathResult[results[i] for i in eachindex(results) if isassigned(results, i)]
+end

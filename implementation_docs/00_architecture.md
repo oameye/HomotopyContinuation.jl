@@ -53,7 +53,7 @@
    Result{Vector{PathResult}} + clustering
 
    Parameter families (optional):
-   monodromy_solve(F; ...) → MonodromyLoop (ParameterHomotopy round trips)
+   solve(F, Monodromy(), exec) → MonodromyLoop (ParameterHomotopy round trips)
          │  serial loop, Channel-based threaded coordinator, or driver-held
          │  queue over RemoteChannels (DistributedExecutor)
          ▼
@@ -124,7 +124,8 @@ src/                                         ~17,450 lines total
     ├── voronoi_tree.jl              (275)   VoronoiTree nearest-point search structure
     ├── unique_points.jl             (205)   UniquePoints, multiplicities, unique_points
     ├── group_actions.jl             (116)   GroupActions, SymmetricGroup
-    ├── monodromy.jl                 (2335)  monodromy_solve, trace test, verify_solution_completeness
+    ├── algorithm.jl                 (200)   AbstractAlgorithm, CommonOptions, Continuation, Sweep
+    ├── monodromy.jl                 (2335)  Monodromy, trace test, verify_solution_completeness
     └── support.jl                   (191)   Extract support/coefficients from MP or Expression
 ```
 
@@ -231,7 +232,7 @@ an inner stage as a map, so the fold multiplies each inner stage's
 `equation_scales` back into its output.
 
 `SystemLike = Union{System, CompositionSystem}` marks the routes that never
-rebuild equations: parameter homotopies, `monodromy_solve`, `newton`, and total
+rebuild equations: parameter homotopies, `Monodromy`, `newton`, and total
 degree, which needs only the folded degrees, the evaluator and the clone.
 Polyhedral and witness sets need the composed monomials and reach them through
 `System(C::CompositionSystem)`, which substitutes the stages into each other
@@ -328,7 +329,7 @@ Jacobians come from `differentiate` on the tree (product, power, quotient and ch
 not `MP.differentiate`.
 
 `System` records a degree of `-1` for an equation that is not polynomial in the variables;
-`TotalDegree` and `Polyhedral` reject such systems, while parameter homotopies, `monodromy_solve`
+`TotalDegree` and `Polyhedral` reject such systems, while parameter homotopies, `Monodromy`
 and `certify` accept them.
 
 ### Tracker Stack
@@ -472,7 +473,7 @@ Ported from v2 (`HomotopyContinuation/src/monodromy.jl`) at full parity. See
 and documented divergences.
 
 ```julia
-monodromy_solve(F; parameter_sampler, group_actions, ...)  # or (F, sols, p₀)
+solve(F, Monodromy(; parameter_sampler, group_actions, ...))  # or (F, sols, p₀, alg)
   ├── find_start_pair(F)          # Newton from a random point if no seed pair given
   ├── MonodromyLoop               # p₀ → p₁ → p₂ → p₀ round trip
   │     └── ParameterHomotopy     # reused across legs via start/target_parameters!
@@ -482,14 +483,12 @@ monodromy_solve(F; parameter_sampler, group_actions, ...)  # or (F, sols, p₀)
   └── MonodromyResult             # solutions, permutations, trace, statistics
 ```
 
-Serial execution runs loops in a plain while loop. Threaded execution
-(`threading = true`, default when `Threads.nthreads() > 1`) uses a
+`Serial()` runs loops in a plain while loop. `Threaded()` (the default) uses a
 Channel-based job queue rather than the OhMyThreads executor because the
 workload is dynamic: finished loops enqueue new loops and workers share
-statistics mid-flight (see `01_decisions.md`). A trailing executor argument
-(`monodromy_solve(F, sols, p, DistributedExecutor())`) overrides `threading` and
-selects the multi-process scheduler instead, which keeps every shared structure
-on the calling process.
+statistics mid-flight (see `01_decisions.md`). `DistributedExecutor()` selects the
+multi-process scheduler, which keeps every shared structure on the calling
+process.
 
 `verify_solution_completeness` implements the trace test (del Campo/Rodriguez
 2017, Leykin/Rodriguez/Sottile 2018): it builds the augmented system
@@ -499,9 +498,43 @@ matrix via singular values.
 
 `LinearSubspace` (intrinsic + extrinsic descriptions, Grassmannian geodesics,
 `rand_subspace`, `geodesic_distance`) supports monodromy on positive-dimensional
-solution sets: `monodromy_solve` accepts a `LinearSubspace` in place of the
+solution sets: `Monodromy` accepts a `LinearSubspace` in place of the
 parameter vector and moves it via `linear_subspace_homotopy`
 (IntrinsicSubspaceHomotopy by default).
+
+## The solving API
+
+Every entry point is `solve(problem..., algorithm, executor)`, split by two rules:
+
+1. **The executor carries where the work runs** and nothing else: `ntasks`, `pids`,
+   `tasks_per_process`, `batch_size`. There is no `threading::Bool` anywhere.
+2. **The algorithm carries everything else**, reporting included: `seed`,
+   `tracker_options`, `endgame_options`, algorithm parameters, `show_progress`,
+   `warning`, `catch_interrupt`. `solve` takes no keyword arguments.
+
+The last two positional arguments are `(algorithm, executor)`; `executor` is always
+defaulted. **`algorithm` may be defaulted on at most one route per problem-arity
+class**, and only that route owns the `solve(problem..., exec::AbstractExecutor)`
+forwarder. Defaulting it on every route whose problem shape is `(F::System)` would
+generate several identical `solve(F::System)` methods, and Julia silently overwrites
+them — `solve(F)` would resolve to whichever file was included last.
+
+| problem shape | defaults `algorithm` | must pass it positionally |
+|---|---|---|
+| `(F,)` | `TotalDegree` | `Polyhedral`, `Witness`, `Regeneration`, `Decomposition`, `Monodromy` |
+| `(F, L)` | `TotalDegree` | `Polyhedral` |
+| `(F, S, p₀, p₁)` | `Continuation` | `Sweep` (its targets slot is an `AbstractVector` of anything) |
+| `(F, S, p)` | — | `Monodromy` only |
+| `(W,)` | `Decomposition` | |
+| `(G, F, S)`, `(H, S)` | `Continuation` | |
+
+`solve(F, S, p)` is deliberately *not* a monodromy call: it would make
+`solve(F, S, p_start, p_target)` with the last argument dropped silently run
+monodromy, and `solve(F, r, p)` would mean opposite things depending on whether `r`
+is a `Result` or a `MonodromyResult`.
+
+`Continuation` is the algorithm for the routes where nothing is constructed — the
+homotopy is already determined by the argument list.
 
 ## Interface Contracts
 
@@ -534,7 +567,7 @@ Optional: `set_solution!(x, y, t)`, `get_solution!(out, x, t)`, `start_parameter
 |------|---------|---------|
 | StraightLineHomotopy | H(x,t) = γ·t·G(x) + (1-t)·F(x) | TotalDegree |
 | CoefficientHomotopy | H(x,t) = F(x; t·start + (1-t)·target) | Polyhedral phase 2 |
-| ParameterHomotopy | H(x,t) = F(x; t·p₁ + (1-t)·p₀), retargetable via start/target_parameters! | Parameter solve, `solve_targets`, monodromy loops |
+| ParameterHomotopy | H(x,t) = F(x; t·p₁ + (1-t)·p₀), retargetable via start/target_parameters! | Parameter solve, `Sweep`, monodromy loops |
 | ToricHomotopy | H(x,t) = F(x; c_j·t^{w_j}) | Polyhedral phase 1 |
 | IntrinsicSubspaceHomotopy | F restricted to a moving subspace, intrinsic coords (Grassmannian geodesic) | linear_subspace_homotopy (default) |
 | ExtrinsicSubspaceHomotopy | [F; interpolated extrinsic equations] | linear_subspace_homotopy (fallback) |

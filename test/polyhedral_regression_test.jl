@@ -367,7 +367,7 @@ using Random: MersenneTwister
                 c1 * c2 * c3 * c4 - 1,
             ]
         )
-        r = solve(F, Polyhedral(; seed = UInt32(42)); show_progress = false)
+        r = solve(F, Polyhedral(; seed = UInt32(42), show_progress = false))
         @test r.tracked_paths == 16  # mixed volume of cyclic-4
         n_success = count(
             p -> p.return_code == PathResultCode.PATH_SUCCESS, r.path_results,
@@ -381,7 +381,7 @@ using Random: MersenneTwister
     @testset "Polyhedral: PathResult includes toric phase steps" begin
         @polyvar sx sy
         F = System([sx^2 + sy - 1, sx * sy - 2])
-        r = solve(F, Polyhedral(; seed = UInt32(123)); show_progress = false)
+        r = solve(F, Polyhedral(; seed = UInt32(123), show_progress = false))
 
         for p in r.path_results
             if p.return_code == PathResultCode.PATH_SUCCESS
@@ -395,7 +395,7 @@ using Random: MersenneTwister
         @test total_steps > 0
 
         # Second solve with same System + seed should also find solutions
-        r2 = solve(F, Polyhedral(; seed = UInt32(123)); show_progress = false)
+        r2 = solve(F, Polyhedral(; seed = UInt32(123), show_progress = false))
         @test nsolutions(r2) == nsolutions(r)
         # Step counts should also include toric phase
         for p in r2.path_results
@@ -412,7 +412,7 @@ using Random: MersenneTwister
         # The combined PathResult should reflect both.
         @polyvar qx qy
         F = System([qx^2 + qy - 1, qx * qy - 2])
-        r = solve(F, Polyhedral(; seed = UInt32(456)); show_progress = false)
+        r = solve(F, Polyhedral(; seed = UInt32(456), show_progress = false))
 
         # Every successful path should have more than ~5 steps (even a single phase
         # needs several). With two phases combined, expect at least 10.

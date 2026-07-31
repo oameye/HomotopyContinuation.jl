@@ -36,7 +36,7 @@ normal distribution by calling `randn(rng, ComplexF64)`.
 
 Creates a random linear subspace by calling [`rand_subspace`](@ref).
 
-Usable as the `parameter_sampler` of [`monodromy_solve`](@ref), whose contract
+Usable as the `parameter_sampler` of [`Monodromy`](@ref), whose contract
 is `sampler(rng, p)`.
 """
 independent_normal(rng::Random.AbstractRNG, p::AbstractVector)::Vector{ComplexF64} =
@@ -59,10 +59,10 @@ Sample a linear subspace `A x = a` where the entries of `A` and `a` are drawn
 from the complex normal distribution with variances `|B[i,j]|^2` and `|b[i]|^2`,
 where `L = {B x = b}`. Unlike [`independent_normal`](@ref), this preserves the
 zero structure of `L` (entries where `B`/`b` vanish stay zero), which is
-essential for the structured flag subspaces used in [`regeneration`](@ref) and
-[`decompose`](@ref).
+essential for the structured flag subspaces used in [`Regeneration`](@ref) and
+[`Decomposition`](@ref).
 
-Usable as the `parameter_sampler` of [`monodromy_solve`](@ref), whose contract
+Usable as the `parameter_sampler` of [`Monodromy`](@ref), whose contract
 is `sampler(rng, p)`.
 """
 weighted_normal(rng::Random.AbstractRNG, p::AbstractVector)::Vector{ComplexF64} =
@@ -84,7 +84,7 @@ end
 """
     MonodromyOptions(; options...)
 
-Options for [`monodromy_solve`](@ref). `group_actions` accepts a `Function`,
+Options for [`Monodromy`](@ref). `group_actions` accepts a `Function`,
 `Tuple`, `AbstractVector` or [`GroupActions`](@ref); `reuse_loops` accepts
 `:all`, `:random`, `:none` or a `ReuseLoops` enum value.
 """
@@ -163,6 +163,118 @@ function MonodromyOptions(;
         single_loop_per_start_solution,
     )
 end
+
+# A loop returns to the base parameters, where the solutions are regular, so this
+# route runs no endgame. Fixed rather than exposed: there is nothing to tune.
+const _MONODROMY_ENDGAME = EndgameOptions(; endgame_start = 0.0)
+
+"""
+    Monodromy(; variables, parameters, dim, codim, intrinsic, catch_interrupt, warning, options...)
+
+Find solutions of `F(x; p)` by tracking loops in the parameter space of `F`.
+
+Pass start data positionally: `solve(F, sols, p, Monodromy())` bases the loops at
+the parameters `p`, and `solve(F, sols, L, Monodromy())` intersects with a
+[`LinearSubspace`](@ref). With no start data, `solve(F, Monodromy())` computes a
+start pair itself, which needs the parameters to occur linearly in `F`; for a
+subspace intersection it needs `dim` or `codim`, the expected (co)dimension of a
+component of `V(F)`.
+
+`variables` and `parameters` split the symbols of a polynomial `F`, exactly as
+they do in [`System`](@ref); they are ignored when `F` is already a `System`.
+
+Accepts every [`MonodromyOptions`](@ref) keyword, or a pre-built `options` object.
+There is no `endgame_options`: this route runs no endgame.
+"""
+struct Monodromy{
+        MO <: MonodromyOptions,
+        V <: Union{Nothing, AbstractVector},
+        P <: Union{Nothing, AbstractVector},
+    } <: AbstractAlgorithm
+    common::CommonOptions
+    options::MO
+    variables::V
+    parameters::P
+    dim::Union{Nothing, Int}
+    codim::Union{Nothing, Int}
+    intrinsic::Union{Nothing, Bool}
+    catch_interrupt::Bool
+    warning::Bool
+end
+
+# The one place monodromy's keyword surface is declared.
+function Monodromy(;
+        options::Union{Nothing, MonodromyOptions} = nothing,
+        variables::Union{Nothing, AbstractVector} = nothing,
+        parameters::Union{Nothing, AbstractVector} = nothing,
+        dim::Union{Nothing, Int} = nothing,
+        codim::Union{Nothing, Int} = nothing,
+        intrinsic::Union{Nothing, Bool} = nothing,
+        catch_interrupt::Bool = true,
+        warning::Bool = true,
+        tracker_options::TrackerOptions = TrackerOptions(),
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        show_progress::Bool = true,
+        check_startsolutions::Bool = true,
+        group_action = nothing,
+        group_actions = group_action === nothing ? nothing : GroupActions(group_action),
+        loop_finished_callback = always_false,
+        parameter_sampler = independent_normal,
+        equivalence_classes::Union{Nothing, Bool} = nothing,
+        trace_test::Bool = true,
+        trace_test_tol::Float64 = 1.0e-6,
+        target_solutions_count::Union{Nothing, Int} = nothing,
+        timeout::Union{Nothing, Real} = nothing,
+        min_solutions::Union{Nothing, Int} = nothing,
+        max_loops_no_progress::Int = 5,
+        reuse_loops::Union{Symbol, ReuseLoops.T} = ReuseLoops.ALL,
+        permutations::Bool = false,
+        distance = InfNorm(),
+        triangle_inequality::Bool = satisfies_triangle_inequality(distance),
+        unique_points_atol::Float64 = 1.0e-14,
+        unique_points_rtol::Union{Nothing, Float64} = nothing,
+        single_loop_per_start_solution::Bool = false,
+    )
+    opts = if options !== nothing
+        options
+    else
+        MonodromyOptions(;
+            check_startsolutions = check_startsolutions,
+            group_actions = group_actions,
+            loop_finished_callback = loop_finished_callback,
+            parameter_sampler = parameter_sampler,
+            equivalence_classes = something(
+                equivalence_classes, group_actions !== nothing,
+            ),
+            trace_test = trace_test,
+            trace_test_tol = trace_test_tol,
+            target_solutions_count = target_solutions_count,
+            timeout = timeout,
+            min_solutions = min_solutions,
+            max_loops_no_progress = max_loops_no_progress,
+            reuse_loops = reuse_loops,
+            permutations = permutations,
+            distance = distance,
+            triangle_inequality = triangle_inequality,
+            unique_points_atol = unique_points_atol,
+            unique_points_rtol = unique_points_rtol,
+            single_loop_per_start_solution = single_loop_per_start_solution,
+        )
+    end
+    return Monodromy(
+        CommonOptions(tracker_options, _MONODROMY_ENDGAME, seed, show_progress),
+        opts, variables, parameters, dim, codim, intrinsic, catch_interrupt, warning,
+    )
+end
+
+# The polynomial input forms need the variable/parameter split, which the shared
+# `_as_system` cannot know. Unannotated on purpose: an annotation would assert the
+# UnionAll and lose the concrete `System` parameters.
+_monodromy_system(F::SystemLike, ::Monodromy) = F
+_monodromy_system(F::AbstractVector{<:MP.AbstractPolynomialLike}, alg::Monodromy) =
+    System(F; variables = alg.variables, parameters = alg.parameters)
+_monodromy_system(f::MP.AbstractPolynomialLike, alg::Monodromy) =
+    _monodromy_system([f], alg)
 
 #######################
 # Loop data structure #
@@ -330,9 +442,9 @@ end
 """
     MonodromyResult
 
-Contains the result of a [`monodromy_solve`](@ref) computation.
+Contains the result of a [`Monodromy`](@ref) computation.
 """
-struct MonodromyResult{P, LP}
+struct MonodromyResult{P, LP} <: AbstractSolutionResult
     returncode::MonodromyCode.T
     results::Vector{PathResult}
     parameters::P
@@ -376,33 +488,15 @@ is_heuristic_stop(result::MonodromyResult)::Bool =
     result.returncode == MonodromyCode.HEURISTIC_STOP
 
 """
-    solutions(result::MonodromyResult)
+    path_results(result::MonodromyResult)
 
-Return all solutions.
+Returns the computed [`PathResult`](@ref)s, one per distinct solution.
 """
-solutions(r::MonodromyResult)::Vector{Vector{ComplexF64}} =
-    [solution(pr) for pr in r.results]
+path_results(r::MonodromyResult)::Vector{PathResult} = r.results
 
-"""
-    nsolutions(result::MonodromyResult)
-
-Returns the number of solutions of the `result`.
-"""
-nsolutions(r::MonodromyResult)::Int = length(r.results)
-
-"""
-    results(result::MonodromyResult)
-
-Returns the computed [`PathResult`](@ref)s.
-"""
-results(r::MonodromyResult)::Vector{PathResult} = r.results
-
-"""
-    nresults(result::MonodromyResult)
-
-Returns the number of results computed.
-"""
-nresults(r::MonodromyResult)::Int = length(r.results)
+# Monodromy dedups during the run through `UniquePoints`, so `results` already
+# holds one entry per distinct solution and every index is a representative.
+_solution_indices(r::MonodromyResult) = eachindex(r.results)
 
 """
     parameters(result::MonodromyResult)
@@ -1447,7 +1541,7 @@ end
 ## Entrypoint ##
 ################
 
-# The last two default to what monodromy-as-a-subroutine wants; `monodromy_solve`
+# The last two default to what monodromy-as-a-subroutine wants; `Monodromy`
 # passes both, since there they are the user's to set.
 function _monodromy_solve!(
         MS::MonodromySolver{H, P},
@@ -1511,377 +1605,27 @@ end
 end
 
 
-function _run_monodromy_loop!(
-        ::Serial, MS::MonodromySolver, results::Vector{PathResult},
-        seed::UInt32, progress,
-    )::MonodromyCode.T
-    return serial_monodromy_solve!(MS, results, seed, progress)
-end
-
-function _run_monodromy_loop!(
-        ::Threaded, MS::MonodromySolver, results::Vector{PathResult},
-        seed::UInt32, progress,
-    )::MonodromyCode.T
-    return threaded_monodromy_solve!(MS, results, seed, progress)
-end
-
-function _run_monodromy_loop!(
-        executor::DistributedExecutor, MS::MonodromySolver,
-        results::Vector{PathResult}, seed::UInt32, progress,
-    )::MonodromyCode.T
-    return _distributed_monodromy_solve!(executor, MS, results, seed, progress)
-end
-
-function _monodromy_solve_body!(
-        MS::MonodromySolver{H, P},
-        X::AbstractVector{<:AbstractVector},
-        p::P,
-        seed::UInt32,
-        progress,
-        executor::AbstractExecutor,
-        catch_interrupt::Bool,
-        warning::Bool,
-    )::MonodromyResult{P, P} where {H, P}
-    MS.statistics = MonodromyStatistics()
-    empty!(MS.unique_points)
-    reset_trace!(MS)
-    reset_loops!(MS)
-    results = check_start_solutions!(MS, X)
-    retcode = MonodromyCode.IN_PROGRESS
-    if isempty(results)
-        if warning
-            @warn "None of the provided solutions is a valid start solution (Newton's method did not converge)."
-        end
-        retcode = MonodromyCode.INVALID_STARTVALUE
-    else
-        try
-            retcode = _run_monodromy_loop!(executor, MS, results, seed, progress)
-        catch e
-            if !catch_interrupt || !(
-                    isa(e, InterruptException) ||
-                        (isa(e, TaskFailedException) && isa(e.task.exception, InterruptException))
-                )
-                rethrow(e)
-            end
-            retcode = MonodromyCode.INTERRUPTED
-        end
-    end
-
-    return MonodromyResult(
-        retcode,
-        results,
-        p,
-        MS.loops,
-        MS.statistics,
-        MS.options.equivalence_classes,
-        seed,
-        p isa LinearSubspace ? trace_colinearity(MS) : nothing,
-    )
-end
-
-# The executor may trail the positional arguments: `monodromy_solve(F, exec)` or
-# `monodromy_solve(F, sols, p, exec)`. Without one, `threading` picks between
-# `Serial()` and `Threaded()`.
-function _split_monodromy_executor(args::Tuple)
-    (isempty(args) || !(last(args) isa AbstractExecutor)) && return nothing, args
-    return last(args), Base.front(args)
-end
-
 """
-    monodromy_solve(F, [sols, p], [executor]; options...)
+    threaded_monodromy_solve!(MS, results, seed, progress, ntasks)
 
-Solve a polynomial system `F(x; p)` with specified parameters and initial
-solutions `sols` by monodromy techniques. This makes loops in the parameter
-space of `F` to find new solutions. If the parameters occur only *linearly* in
-`F`, a start pair `(x₀, p₀)` can be computed automatically; in this case `sols`
-and `p` can be omitted and the generated parameters can be obtained with
-[`parameters`](@ref) from the [`MonodromyResult`](@ref).
-
-    monodromy_solve(F, [sols, L], [executor]; dim, codim, intrinsic = nothing, options...)
-
-Solve the system `[F(x); L(x)] = 0` where `L` is a [`LinearSubspace`](@ref).
-If `sols` and `L` are not provided it is necessary to provide `dim` or `codim`,
-the expected (co)dimension of a component of `V(F)`. See also
-[`linear_subspace_homotopy`](@ref) for the `intrinsic` option.
-
-`executor` is [`Serial`](@ref), [`Threaded`](@ref) or
-[`DistributedExecutor`](@ref) and overrides the `threading` option. Only the loop
-tracking is handed out; loop generation, deduplication and the trace test always
-run in the calling process. [`Threaded`](@ref) is the default and the faster of
-the two on one machine, since a loop costs about as much to hand to another
-process as to track.
-
-## Options
-
-* `catch_interrupt = true`: If true catches interruptions (e.g. issued by
-  pressing Ctrl-C) and returns the partial result.
-* `check_startsolutions = true`: If `true`, track each entry of `sols` at the
-  base parameters and sort out any that fail to converge. If `false`, the
-  provided solutions are refined but trusted (non-converged points are kept).
-* `distance = InfNorm()`: The distance function used for [`UniquePoints`](@ref).
-* `loop_finished_callback = always_false`: A callback called with all current
-  [`PathResult`](@ref)s after a loop is exhausted. Return `true` to stop.
-* `equivalence_classes = true`: Only applies with group actions: consider two
-  solutions equivalent when one maps to the other under the actions, and only
-  track one solution per equivalence class.
-* `group_action = nothing`: A function taking one solution and returning other
-  solutions obtainable constructively (e.g. by symmetry).
-* `group_actions = nothing`: Several group actions chained via
-  [`GroupActions`](@ref).
-* `max_loops_no_progress = 5`: Maximal number of loop generations without any
-  progress.
-* `min_solutions`: Minimal number of solutions before a stopping heuristic
-  applies.
-* `parameter_sampler = independent_normal`: A function `sampler(rng, p)` taking
-  a random number generator and the parameter `p`, and returning a new random
-  parameter `q`. Drawing from the given `rng` is what makes `seed` determine the
-  result.
-* `permutations = false`: Whether to keep track of the permutations induced by
-  the loops.
-* `reuse_loops = :all`: Strategy to reuse other loops for newly found
-  solutions: `:all`, `:random` or `:none`.
-* `seed`: Every random choice descends from it, so the same `seed` gives the
-  same loops regardless of the state of the global random number generator.
-* `target_solutions_count`: Stop once this number of solutions is reached.
-* `threading = Threads.nthreads() > 1`: Enable multithreaded path tracking. Ignored
-  when an `executor` is given.
-* `timeout`: Maximal number of seconds the computation is allowed to run.
-* `trace_test = true`: Perform a trace test to check completeness (only for
-  linear-subspace monodromy).
-* `trace_test_tol = 1e-6`: Tolerance for the trace test.
-* `unique_points_atol` / `unique_points_rtol`: tolerances for the solution
-  deduplication.
-"""
-function monodromy_solve(
-        F::SystemLike,
-        args...;
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        show_progress::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        catch_interrupt::Bool = true,
-        dim::Union{Nothing, Int} = nothing,
-        codim::Union{Nothing, Int} = nothing,
-        intrinsic::Union{Nothing, Bool} = nothing,
-        warning::Bool = true,
-        # monodromy options
-        check_startsolutions::Bool = true,
-        group_action = nothing,
-        group_actions = group_action === nothing ? nothing : GroupActions(group_action),
-        loop_finished_callback = always_false,
-        parameter_sampler = independent_normal,
-        equivalence_classes::Union{Nothing, Bool} = nothing,
-        trace_test::Bool = true,
-        trace_test_tol::Float64 = 1.0e-6,
-        target_solutions_count::Union{Nothing, Int} = nothing,
-        timeout::Union{Nothing, Real} = nothing,
-        min_solutions::Union{Nothing, Int} = nothing,
-        max_loops_no_progress::Int = 5,
-        reuse_loops::Union{Symbol, ReuseLoops.T} = ReuseLoops.ALL,
-        permutations::Bool = false,
-        distance = InfNorm(),
-        triangle_inequality::Bool = satisfies_triangle_inequality(distance),
-        unique_points_atol::Float64 = 1.0e-14,
-        unique_points_rtol::Union{Nothing, Float64} = nothing,
-        single_loop_per_start_solution::Bool = false,
-    )::MonodromyResult
-    if group_actions !== nothing && !(group_actions isa GroupActions)
-        group_actions = GroupActions(group_actions)
-    end
-    options = MonodromyOptions(;
-        check_startsolutions = check_startsolutions,
-        group_actions = group_actions,
-        loop_finished_callback = loop_finished_callback,
-        parameter_sampler = parameter_sampler,
-        equivalence_classes = something(equivalence_classes, group_actions !== nothing),
-        trace_test = trace_test,
-        trace_test_tol = trace_test_tol,
-        target_solutions_count = target_solutions_count,
-        timeout = timeout,
-        min_solutions = min_solutions,
-        max_loops_no_progress = max_loops_no_progress,
-        reuse_loops = reuse_loops,
-        permutations = permutations,
-        distance = distance,
-        triangle_inequality = triangle_inequality,
-        unique_points_atol = unique_points_atol,
-        unique_points_rtol = unique_points_rtol,
-        single_loop_per_start_solution = single_loop_per_start_solution,
-    )
-
-    # `_monodromy_solve!` seeds its loop generation from `seed` directly, so the
-    # setup draws below take a tagged stream to keep the two uncorrelated.
-    rng = _tagged_rng(seed, 0x0000_0001)
-
-    exec, args = _split_monodromy_executor(args)
-    executor = exec === nothing ? (threading ? Threaded() : Serial()) : exec
-
-    local S, p
-    if length(args) == 0
-        start_pair = find_start_pair(F; rng = rng)
-        if start_pair === nothing
-            error(
-                "Cannot compute a start pair (x, p) using `find_start_pair(F)`." *
-                    " You need to explicitly pass a start pair.",
-            )
-        end
-        x, p0 = start_pair
-        S = [x]
-        if p0 === nothing
-            # No parameters: intersect with a linear subspace. We need the
-            # intended (co)dimension; we don't guess `dim` to catch the case
-            # that the user just forgot to pass parameters.
-            if dim === nothing && codim === nothing
-                error(
-                    "Given system doesn't have any parameters. If you intended to intersect " *
-                        "with a linear subspace it is necessary to provide a " *
-                        "dimension (`dim`) or codimension (`codim`) of the component of interest.",
-                )
-            end
-            projective = is_homogeneous(F)
-            codim_c = codim === nothing ? nothing : codim + Int(projective)
-            # NOTE the swap: the `dim`/`codim` kwargs are COMPONENT dimensions;
-            # the subspace has complementary dimensions.
-            p = rand_subspace(
-                rng, x; dim = codim_c, codim = dim, affine = !projective,
-            )
-        else
-            p = p0
-        end
-    elseif length(args) == 2
-        sols, p_arg = args
-        S = sols isa AbstractVector{<:Number} ? [sols] : sols
-        p = p_arg
-    else
-        throw(
-            ArgumentError(
-                "Expected `monodromy_solve(F, [executor])` or " *
-                    "`monodromy_solve(F, sols, p, [executor])`.",
-            ),
-        )
-    end
-
-    if p isa LinearSubspace
-        cp = convert(LinearSubspace{ComplexF64}, p)
-        MS = MonodromySolver(
-            F, cp;
-            options = options, tracker_options = tracker_options,
-            intrinsic = intrinsic === nothing ? _default_intrinsic(cp) : intrinsic,
-            rng = rng,
-        )
-        mH, nH = size(MS.workers[1].homotopy)
-        if mH < nH
-            throw(
-                ArgumentError(
-                    "The homotopy for the subspace intersection is underdetermined " *
-                        "($mH equations for $nH unknowns). The provided component dimension " *
-                        "(dim = $dim, codim = $codim) is likely overstated for this system.",
-                ),
-            )
-        end
-        return _monodromy_solve!(
-            MS, S, cp, seed, show_progress, executor, catch_interrupt, warning,
-        )
-    else
-        cp = convert(Vector{ComplexF64}, p)
-        MS = MonodromySolver(
-            F, cp;
-            options = options, tracker_options = tracker_options, rng = rng,
-        )
-        return _monodromy_solve!(
-            MS, S, cp, seed, show_progress, executor, catch_interrupt, warning,
-        )
-    end
-end
-
-function monodromy_solve(
-        F::AbstractVector{<:MP.AbstractPolynomialLike},
-        args...;
-        parameters = nothing,
-        variables = nothing,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        show_progress::Bool = true,
-        threading::Bool = Threads.nthreads() > 1,
-        catch_interrupt::Bool = true,
-        dim::Union{Nothing, Int} = nothing,
-        codim::Union{Nothing, Int} = nothing,
-        intrinsic::Union{Nothing, Bool} = nothing,
-        warning::Bool = true,
-        check_startsolutions::Bool = true,
-        group_action = nothing,
-        group_actions = group_action === nothing ? nothing : GroupActions(group_action),
-        loop_finished_callback = always_false,
-        parameter_sampler = independent_normal,
-        equivalence_classes::Union{Nothing, Bool} = nothing,
-        trace_test::Bool = true,
-        trace_test_tol::Float64 = 1.0e-6,
-        target_solutions_count::Union{Nothing, Int} = nothing,
-        timeout::Union{Nothing, Real} = nothing,
-        min_solutions::Union{Nothing, Int} = nothing,
-        max_loops_no_progress::Int = 5,
-        reuse_loops::Union{Symbol, ReuseLoops.T} = ReuseLoops.ALL,
-        permutations::Bool = false,
-        distance = InfNorm(),
-        triangle_inequality::Bool = satisfies_triangle_inequality(distance),
-        unique_points_atol::Float64 = 1.0e-14,
-        unique_points_rtol::Union{Nothing, Float64} = nothing,
-        single_loop_per_start_solution::Bool = false,
-    )::MonodromyResult
-    sys = System(F; parameters = parameters, variables = variables)
-    return monodromy_solve(
-        sys, args...;
-        seed = seed,
-        tracker_options = tracker_options,
-        show_progress = show_progress,
-        threading = threading,
-        catch_interrupt = catch_interrupt,
-        dim = dim,
-        codim = codim,
-        intrinsic = intrinsic,
-        warning = warning,
-        check_startsolutions = check_startsolutions,
-        group_actions = group_actions,
-        loop_finished_callback = loop_finished_callback,
-        parameter_sampler = parameter_sampler,
-        equivalence_classes = equivalence_classes,
-        trace_test = trace_test,
-        trace_test_tol = trace_test_tol,
-        target_solutions_count = target_solutions_count,
-        timeout = timeout,
-        min_solutions = min_solutions,
-        max_loops_no_progress = max_loops_no_progress,
-        reuse_loops = reuse_loops,
-        permutations = permutations,
-        distance = distance,
-        triangle_inequality = triangle_inequality,
-        unique_points_atol = unique_points_atol,
-        unique_points_rtol = unique_points_rtol,
-        single_loop_per_start_solution = single_loop_per_start_solution,
-    )
-end
-
-"""
-    threaded_monodromy_solve!(MS, results, seed, progress)
-
-Multithreaded variant of [`serial_monodromy_solve!`](@ref): one long-lived
-worker task per thread consuming a job channel, plus a coordinator task that
-generates loop generations and waits for quiescence (all workers idle,
-channel empty, no job in flight).
+Multithreaded variant of [`serial_monodromy_solve!`](@ref): `ntasks` long-lived
+worker tasks consuming a job channel, plus a coordinator task that generates loop
+generations and waits for quiescence (all workers idle, channel empty, no job in
+flight).
 """
 function threaded_monodromy_solve!(
         MS::MonodromySolver,
         results::Vector{PathResult},
         seed::UInt32,
         progress::Union{Nothing, ProgressMeter.ProgressUnknown},
+        nthr::Int = Threads.nthreads(),
     )::MonodromyCode.T
     # `MersenneTwister` is not thread-safe, so the loop-generating coordinator and
     # every worker task get their own stream, all derived from `seed`.
     loop_rng = Random.MersenneTwister(seed)
     queue = Channel{LoopTrackingJob}(Inf)
 
-    # Grow the worker states to one per thread via the builder (never deepcopy).
-    nthr = Threads.nthreads()
+    # Grow the worker states to one per task via the builder (never deepcopy).
     while length(MS.workers) < nthr
         push!(MS.workers, MS.builder())
     end
@@ -2113,48 +1857,269 @@ function threaded_monodromy_solve!(
     return retcode[]
 end
 
+function _run_monodromy_loop!(
+        ::Serial, MS::MonodromySolver, results::Vector{PathResult},
+        seed::UInt32, progress,
+    )::MonodromyCode.T
+    return serial_monodromy_solve!(MS, results, seed, progress)
+end
+
+function _run_monodromy_loop!(
+        exec::Threaded, MS::MonodromySolver, results::Vector{PathResult},
+        seed::UInt32, progress,
+    )::MonodromyCode.T
+    return threaded_monodromy_solve!(MS, results, seed, progress, exec.ntasks)
+end
+
+function _run_monodromy_loop!(
+        executor::DistributedExecutor, MS::MonodromySolver,
+        results::Vector{PathResult}, seed::UInt32, progress,
+    )::MonodromyCode.T
+    return _distributed_monodromy_solve!(executor, MS, results, seed, progress)
+end
+
+function _monodromy_solve_body!(
+        MS::MonodromySolver{H, P},
+        X::AbstractVector{<:AbstractVector},
+        p::P,
+        seed::UInt32,
+        progress,
+        executor::AbstractExecutor,
+        catch_interrupt::Bool,
+        warning::Bool,
+    )::MonodromyResult{P, P} where {H, P}
+    MS.statistics = MonodromyStatistics()
+    empty!(MS.unique_points)
+    reset_trace!(MS)
+    reset_loops!(MS)
+    results = check_start_solutions!(MS, X)
+    retcode = MonodromyCode.IN_PROGRESS
+    if isempty(results)
+        if warning
+            @warn "None of the provided solutions is a valid start solution (Newton's method did not converge)."
+        end
+        retcode = MonodromyCode.INVALID_STARTVALUE
+    else
+        try
+            retcode = _run_monodromy_loop!(executor, MS, results, seed, progress)
+        catch e
+            if !catch_interrupt || !(
+                    isa(e, InterruptException) ||
+                        (isa(e, TaskFailedException) && isa(e.task.exception, InterruptException))
+                )
+                rethrow(e)
+            end
+            retcode = MonodromyCode.INTERRUPTED
+        end
+    end
+
+    return MonodromyResult(
+        retcode,
+        results,
+        p,
+        MS.loops,
+        MS.statistics,
+        MS.options.equivalence_classes,
+        seed,
+        p isa LinearSubspace ? trace_colinearity(MS) : nothing,
+    )
+end
+
+
 """
-    solve(F::SystemLike, R::MonodromyResult, p_target, exec = Threaded(); options...)
+    solve(F, alg::Monodromy, exec = Threaded())
+    solve(F, sols, p, alg::Monodromy, exec = Threaded())
+    solve(F, sols, L::LinearSubspace, alg::Monodromy, exec = Threaded())
+
+Solve a polynomial system `F(x; p)` with specified parameters and initial
+solutions `sols` by monodromy techniques. This makes loops in the parameter
+space of `F` to find new solutions. If the parameters occur only *linearly* in
+`F`, a start pair `(x₀, p₀)` can be computed automatically; in this case `sols`
+and `p` can be omitted and the generated parameters can be obtained with
+[`parameters`](@ref) from the [`MonodromyResult`](@ref).
+
+With a [`LinearSubspace`](@ref) in place of `p` the system `[F(x); L(x)] = 0` is
+solved instead. If `sols` and `L` are not provided it is necessary to give
+`Monodromy`'s `dim` or `codim`, the expected (co)dimension of a component of
+`V(F)`. See also [`linear_subspace_homotopy`](@ref) for the `intrinsic` option.
+
+`exec` is [`Serial`](@ref), [`Threaded`](@ref) or [`DistributedExecutor`](@ref).
+Only the loop tracking is handed out; loop generation, deduplication and the
+trace test always run in the calling process. [`Threaded`](@ref) is the default
+and the faster of the two on one machine, since a loop costs about as much to
+hand to another process as to track.
+
+## Options
+
+* `catch_interrupt = true`: If true catches interruptions (e.g. issued by
+  pressing Ctrl-C) and returns the partial result.
+* `check_startsolutions = true`: If `true`, track each entry of `sols` at the
+  base parameters and sort out any that fail to converge. If `false`, the
+  provided solutions are refined but trusted (non-converged points are kept).
+* `distance = InfNorm()`: The distance function used for [`UniquePoints`](@ref).
+* `loop_finished_callback = always_false`: A callback called with all current
+  [`PathResult`](@ref)s after a loop is exhausted. Return `true` to stop.
+* `equivalence_classes = true`: Only applies with group actions: consider two
+  solutions equivalent when one maps to the other under the actions, and only
+  track one solution per equivalence class.
+* `group_action = nothing`: A function taking one solution and returning other
+  solutions obtainable constructively (e.g. by symmetry).
+* `group_actions = nothing`: Several group actions chained via
+  [`GroupActions`](@ref).
+* `max_loops_no_progress = 5`: Maximal number of loop generations without any
+  progress.
+* `min_solutions`: Minimal number of solutions before a stopping heuristic
+  applies.
+* `parameter_sampler = independent_normal`: A function `sampler(rng, p)` taking
+  a random number generator and the parameter `p`, and returning a new random
+  parameter `q`. Drawing from the given `rng` is what makes `seed` determine the
+  result.
+* `variables`, `parameters`: split the symbols of a polynomial `F`, as in
+  [`System`](@ref). Ignored when `F` is already a `System`.
+* `permutations = false`: Whether to keep track of the permutations induced by
+  the loops.
+* `reuse_loops = :all`: Strategy to reuse other loops for newly found
+  solutions: `:all`, `:random` or `:none`.
+* `seed`: Every random choice descends from it, so the same `seed` gives the
+  same loops regardless of the state of the global random number generator.
+* `target_solutions_count`: Stop once this number of solutions is reached.
+* `timeout`: Maximal number of seconds the computation is allowed to run.
+* `trace_test = true`: Perform a trace test to check completeness (only for
+  linear-subspace monodromy).
+* `trace_test_tol = 1e-6`: Tolerance for the trace test.
+* `unique_points_atol` / `unique_points_rtol`: tolerances for the solution
+  deduplication.
+"""
+# The three start-data shapes, by dispatch.
+function solve(
+        F::Union{SystemLike, PolynomialInput},
+        alg::Monodromy,
+        exec::AbstractExecutor = Threaded(),
+    )::MonodromyResult
+    G = _monodromy_system(F, alg)
+    # A tagged stream: `_monodromy_solve!` seeds loop generation from `seed`
+    # directly, so the setup draws here must stay uncorrelated with it.
+    rng = _tagged_rng(_seed(alg), 0x0000_0001)
+    start_pair = find_start_pair(G; rng = rng)
+    start_pair === nothing && error(
+        "Cannot compute a start pair (x, p) using `find_start_pair(F)`." *
+            " You need to explicitly pass a start pair.",
+    )
+    x, p0 = start_pair
+    if p0 === nothing
+        # No parameters: intersect with a linear subspace. The intended
+        # (co)dimension is required rather than guessed, so a forgotten
+        # parameter argument is caught instead of silently reinterpreted.
+        (alg.dim === nothing && alg.codim === nothing) && error(
+            "Given system doesn't have any parameters. If you intended to intersect " *
+                "with a linear subspace it is necessary to provide a " *
+                "dimension (`dim`) or codimension (`codim`) of the component of interest.",
+        )
+        projective = is_homogeneous(G)
+        codim_c = alg.codim === nothing ? nothing : alg.codim + Int(projective)
+        # NOTE the swap: `dim`/`codim` are COMPONENT dimensions, so the subspace
+        # takes the complementary ones.
+        L = rand_subspace(
+            rng, x; dim = codim_c, codim = alg.dim, affine = !projective,
+        )
+        return _monodromy_subspace(G, [x], L, alg, exec, rng)
+    end
+    return _monodromy_parameters(G, [x], p0, alg, exec, rng)
+end
+
+function solve(
+        F::Union{SystemLike, PolynomialInput},
+        sols::SolutionsLike,
+        p::AbstractVector{<:Number},
+        alg::Monodromy,
+        exec::AbstractExecutor = Threaded(),
+    )::MonodromyResult
+    G = _monodromy_system(F, alg)
+    return _monodromy_parameters(
+        G, _monodromy_starts(sols), p, alg, exec,
+        _tagged_rng(_seed(alg), 0x0000_0001),
+    )
+end
+
+function solve(
+        F::Union{SystemLike, PolynomialInput},
+        sols::SolutionsLike,
+        L::LinearSubspace,
+        alg::Monodromy,
+        exec::AbstractExecutor = Threaded(),
+    )::MonodromyResult
+    G = _monodromy_system(F, alg)
+    return _monodromy_subspace(
+        G, _monodromy_starts(sols), L, alg, exec,
+        _tagged_rng(_seed(alg), 0x0000_0001),
+    )
+end
+
+# A single solution is accepted as itself, not as a list of coordinates.
+_monodromy_starts(sols::AbstractVector{<:Number}) = [sols]
+_monodromy_starts(sols) = sols
+
+"""
+    solve(F::System, R::MonodromyResult, p_target, alg = Continuation(), exec = Threaded())
 
 Track the solutions of the monodromy result `R` from its parameters to `p_target`
 via a parameter homotopy. `R` supplies both the start solutions and the start
 parameters, so only the target end is given.
 """
-function solve(
-        F::SystemLike,
-        R::MonodromyResult,
-        p_target::AbstractVector{<:Number},
-        exec::AbstractExecutor = Threaded();
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
-    )::Result
-    return solve(
-        F, solutions(R), parameters(R), p_target, exec;
-        seed = seed,
-        tracker_options = tracker_options,
-        endgame_options = endgame_options,
-        show_progress = show_progress,
+solve(
+    F::SystemLike, R::MonodromyResult, p_target::AbstractVector{<:Number},
+    alg::Continuation = Continuation(), exec::AbstractExecutor = Threaded(),
+)::Result = solve(F, solutions(R), Vector(parameters(R)), p_target, alg, exec)
+
+solve(
+    F::SystemLike, R::MonodromyResult, p_target::AbstractVector{<:Number},
+    exec::AbstractExecutor,
+)::Result = solve(F, R, p_target, Continuation(), exec)
+
+function _monodromy_parameters(
+        F::SystemLike, S, p, alg::Monodromy, exec::AbstractExecutor,
+        rng::Random.AbstractRNG,
+    )::MonodromyResult
+    cp = convert(Vector{ComplexF64}, p)
+    MS = MonodromySolver(
+        F, cp;
+        options = alg.options, tracker_options = _tracker_options(alg), rng = rng,
+    )
+    return _monodromy_solve!(
+        MS, S, cp, _seed(alg), _show_progress(alg), exec,
+        alg.catch_interrupt, alg.warning,
+    )
+end
+
+function _monodromy_subspace(
+        F::SystemLike, S, L, alg::Monodromy, exec::AbstractExecutor,
+        rng::Random.AbstractRNG,
+    )::MonodromyResult
+    cp = convert(LinearSubspace{ComplexF64}, L)
+    MS = MonodromySolver(
+        F, cp;
+        options = alg.options, tracker_options = _tracker_options(alg),
+        intrinsic = alg.intrinsic === nothing ? _default_intrinsic(cp) : alg.intrinsic,
+        rng = rng,
+    )
+    mH, nH = size(MS.workers[1].homotopy)
+    mH < nH && throw(
+        ArgumentError(
+            "The homotopy for the subspace intersection is underdetermined " *
+                "($mH equations for $nH unknowns). The provided component dimension " *
+                "(dim = $(alg.dim), codim = $(alg.codim)) is likely overstated for " *
+                "this system.",
+        ),
+    )
+    return _monodromy_solve!(
+        MS, S, cp, _seed(alg), _show_progress(alg), exec,
+        alg.catch_interrupt, alg.warning,
     )
 end
 
 ## ── verify_solution_completeness ─────────────────────────────────────────────
 # Trace test (del Campo & Rodriguez 2017; Leykin, Rodriguez & Sottile 2018).
 # Cold diagnostic path.
-
-# Parameter sampler for the auxiliary monodromy computation: keeps the first
-# parameter (the trace variable t) fixed at zero. The LinearSubspace method
-# exists only to keep the sampler total over both MonodromyLoop branches; the
-# auxiliary system always has vector parameters, so it is unreachable.
-function _zero_first_parameter_sampler(
-        rng::Random.AbstractRNG, pp::AbstractVector,
-    )::Vector{ComplexF64}
-    return [0.0 + 0.0im; randn(rng, ComplexF64, length(pp) - 1)]
-end
-function _zero_first_parameter_sampler(::Random.AbstractRNG, ::LinearSubspace)
-    throw(ArgumentError("the completeness verification sampler only supports vector parameters"))
-end
 
 # Augmented system `[F(x, p + λv); (Σᵢ aᵢxᵢ - 1)λ + t]` used by the trace test.
 # DynamicPolynomials variables are identity distinct, so the fresh variables
@@ -2195,9 +2160,23 @@ function _build_verification_system(
     )
 end
 
+# Parameter sampler for the auxiliary monodromy computation: keeps the first
+# parameter (the trace variable t) fixed at zero. The LinearSubspace method
+# exists only to keep the sampler total over both MonodromyLoop branches; the
+# auxiliary system always has vector parameters, so it is unreachable.
+function _zero_first_parameter_sampler(
+        rng::Random.AbstractRNG, pp::AbstractVector,
+    )::Vector{ComplexF64}
+    return [0.0 + 0.0im; randn(rng, ComplexF64, length(pp) - 1)]
+end
+
+function _zero_first_parameter_sampler(::Random.AbstractRNG, ::LinearSubspace)
+    throw(ArgumentError("the completeness verification sampler only supports vector parameters"))
+end
+
 """
-    verify_solution_completeness(F::System, R::MonodromyResult; kwargs...)
-    verify_solution_completeness(F::System, sols, p; trace_tol = 1e-14, kwargs...)
+    verify_solution_completeness(F::System, R::MonodromyResult, alg = Monodromy(), exec = Threaded(); options...)
+    verify_solution_completeness(F::System, sols, p, alg = Monodromy(), exec = Threaded(); options...)
 
 Verify that a monodromy computation found all solutions of the polynomial
 system `F(x; p) = 0` on the fiber over the parameters `p` using the trace
@@ -2217,50 +2196,40 @@ compared against `trace_tol`.
 Returns `true` (complete), `false` (incomplete), or `nothing` when a
 parameter homotopy lost solutions so no verdict is possible.
 
+`alg` supplies the seed, the tracker options, the progress setting and
+`max_loops_no_progress` for the auxiliary monodromy computation.
+
 ## Options
 
 * `trace_tol = 1e-14`: tolerance for the trace colinearity test.
-* `show_progress = true`: print progress information.
-* `seed`: seed for the auxiliary monodromy computation.
-* `threading`: use multiple threads for the auxiliary monodromy computation.
-* `tracker_options`, `endgame_options`: forwarded to the auxiliary solves.
-* `max_loops_no_progress = 5`: forwarded to the auxiliary monodromy solve.
+* `endgame_options`: forwarded to the two trace parameter homotopies.
 """
 function verify_solution_completeness(
         F::System,
-        mres::MonodromyResult;
+        mres::MonodromyResult,
+        alg::Monodromy = Monodromy(),
+        exec::AbstractExecutor = Threaded();
         trace_tol::Float64 = 1.0e-14,
-        show_progress::Bool = true,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        threading::Bool = Threads.nthreads() > 1,
-        tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
-        max_loops_no_progress::Int = 5,
     )::Union{Nothing, Bool}
     return verify_solution_completeness(
-        F, solutions(mres), Vector(parameters(mres));
-        trace_tol = trace_tol,
-        show_progress = show_progress,
-        seed = seed,
-        threading = threading,
-        tracker_options = tracker_options,
-        endgame_options = endgame_options,
-        max_loops_no_progress = max_loops_no_progress,
+        F, solutions(mres), Vector(parameters(mres)), alg, exec;
+        trace_tol = trace_tol, endgame_options = endgame_options,
     )
 end
 
 function verify_solution_completeness(
         F::System,
         sols::AbstractVector{<:AbstractVector},
-        q::AbstractVector;
+        q::AbstractVector,
+        alg::Monodromy = Monodromy(),
+        exec::AbstractExecutor = Threaded();
         trace_tol::Float64 = 1.0e-14,
-        show_progress::Bool = true,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        threading::Bool = Threads.nthreads() > 1,
-        tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
-        max_loops_no_progress::Int = 5,
     )::Union{Nothing, Bool}
+    show_progress = _show_progress(alg)
+    seed = _seed(alg)
+    tracker_options = _tracker_options(alg)
     n = nvariables(F)
     m = nparameters(F)
 
@@ -2284,24 +2253,26 @@ function verify_solution_completeness(
     # the linear space a⋅x - 1 = 0.
     qq = randn(rng, ComplexF64, m)
     qq_res = solve(
-        F, sols[1:min(n, length(sols))], q0, qq, Serial();
-        seed = rand(rng, UInt32),
-        tracker_options = tracker_options,
-        endgame_options = endgame_options,
-        show_progress = show_progress,
+        F, sols[1:min(n, length(sols))], q0, qq,
+        Continuation(;
+            seed = rand(rng, UInt32), tracker_options = tracker_options,
+            endgame_options = endgame_options, show_progress = show_progress,
+        ),
+        Serial(),
     )
     a0 = reduce(vcat, transpose.(solutions(qq_res))) \ ones(nsolutions(qq_res))
     Y = map(s -> [s; 1], solutions(qq_res))
     base_params = [q0; qq .- q0; a0]
 
-    additional_mres = monodromy_solve(
-        verify_system, Y, [0.0; base_params];
-        parameter_sampler = _zero_first_parameter_sampler,
-        seed = rand(rng, UInt32),
-        threading = threading,
-        show_progress = show_progress,
-        tracker_options = tracker_options,
-        max_loops_no_progress = max_loops_no_progress,
+    additional_mres = solve(
+        verify_system, Y, [0.0; base_params],
+        Monodromy(;
+            parameter_sampler = _zero_first_parameter_sampler,
+            seed = rand(rng, UInt32), show_progress = show_progress,
+            tracker_options = tracker_options,
+            max_loops_no_progress = alg.options.max_loops_no_progress,
+        ),
+        exec,
     )
     additional_sols = solutions(additional_mres)
     if show_progress
@@ -2314,11 +2285,12 @@ function verify_solution_completeness(
     S = [map(s -> [s; 0], sols); additional_sols]
     γ = randn(rng, ComplexF64)
     res1 = solve(
-        verify_system, S, [0.0; base_params], [0.5 * γ; base_params], Serial();
-        seed = rand(rng, UInt32),
-        tracker_options = tracker_options,
-        endgame_options = endgame_options,
-        show_progress = show_progress,
+        verify_system, S, [0.0; base_params], [0.5 * γ; base_params],
+        Continuation(;
+            seed = rand(rng, UInt32), tracker_options = tracker_options,
+            endgame_options = endgame_options, show_progress = show_progress,
+        ),
+        Serial(),
     )
     S1 = solutions(res1)
     if length(S1) != length(S)
@@ -2329,11 +2301,12 @@ function verify_solution_completeness(
     end
 
     res2 = solve(
-        verify_system, S1, [0.5 * γ; base_params], [1.0 * γ; base_params], Serial();
-        seed = rand(rng, UInt32),
-        tracker_options = tracker_options,
-        endgame_options = endgame_options,
-        show_progress = show_progress,
+        verify_system, S1, [0.5 * γ; base_params], [1.0 * γ; base_params],
+        Continuation(;
+            seed = rand(rng, UInt32), tracker_options = tracker_options,
+            endgame_options = endgame_options, show_progress = show_progress,
+        ),
+        Serial(),
     )
     S2 = solutions(res2)
     if length(S2) != length(S)

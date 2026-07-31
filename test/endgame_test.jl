@@ -464,7 +464,10 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         @testset "d=2" begin
             @polyvar x
             # Use a fixed seed for reproducibility
-            result = solve(System([(x - 10)^2]), TotalDegree(; seed = UInt32(0xabcd)); show_progress = false)
+            result = solve(
+                System([(x - 10)^2]),
+                TotalDegree(; seed = UInt32(0xabcd), show_progress = false),
+            )
             # 1 unique singular solution with multiplicity 2
             @test nresults(result) == 1
             @test nsingular(result) == 1
@@ -475,7 +478,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
         @testset "d=6" begin
             @polyvar x
-            result = solve(System([(x - 10)^6]); show_progress = false)
+            result = solve(System([(x - 10)^6]), TotalDegree(; show_progress = false))
             # Most paths detect winding number 6
             @test count(r -> r.winding_number == 6, result.path_results) >= 4
             # Convergence at multiplicity 6 is hard; 0 solutions is expected here
@@ -489,8 +492,8 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         # 2 finite solutions, 2 paths diverge to infinity
         @polyvar x y
         result = solve(
-            System([2.3x^2 + 1.2y^2 + 3x - 2y + 3, 2.3x^2 + 1.2y^2 + 5x + 2y - 5]);
-            show_progress = false,
+            System([2.3x^2 + 1.2y^2 + 3x - 2y + 3, 2.3x^2 + 1.2y^2 + 5x + 2y - 5]),
+            TotalDegree(; show_progress = false),
         )
         @test count(HC.is_success, result.path_results) == 2
         @test nat_infinity(result) == 2
@@ -505,7 +508,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
                 a = [0.257, -0.139, -1.73, -0.199, 1.79, -1.32]
                 f1 = (a[1] * x^d + a[2] * y) * (a[3] * x + a[4] * y) + 1
                 f2 = (a[1] * x^d + a[2] * y) * (a[5] * x + a[6] * y) + 1
-                result = solve(System([f1, f2]); show_progress = false)
+                result = solve(System([f1, f2]), TotalDegree(; show_progress = false))
                 @test count(HC.is_success, result.path_results) == d + 1
             end
         end
@@ -524,7 +527,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
                 10x^2 * z + 10y^2 * z - 6z^3,
             ]
         )
-        result = solve(F, TotalDegree(; seed = UInt32(1)); show_progress = false)
+        result = solve(F, TotalDegree(; seed = UInt32(1), show_progress = false))
         # A dead path keeps its last winding number estimate, so the count below alone
         # does not catch one.
         @test count(HC.is_success, result.path_results) == 12
@@ -547,7 +550,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
                 (18 + 3im) * x * y + 7im * y^2 - (3 - 18im) * x * z - 14y * z - 7im * z^2,
             ]
         )
-        result = solve(F, TotalDegree(; seed = UInt32(12345)); show_progress = false)
+        result = solve(F, TotalDegree(; seed = UInt32(12345), show_progress = false))
         @test nresults(result) == 2
         @test nsingular(result) == 1
         @test nnonsingular(result) == 1

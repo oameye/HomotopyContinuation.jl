@@ -60,7 +60,7 @@ end
         @polyvar x y
         F = System([x^2 + y^2 - 5]; variables = [x, y])
         L = rand_subspace(2; codim = 1)
-        res = solve(F, L; show_progress = false)
+        res = solve(F, L, TotalDegree(; show_progress = false))
         @test nsolutions(res) == 2
         for s in solutions(res)
             @test length(s) == 2
@@ -73,7 +73,7 @@ end
         @polyvar x y z
         F = System([x^2 + y^2 - 5, x * y + 1]; variables = [x, y, z])
         L = rand_subspace(3; codim = 1)
-        res = solve(F, L; show_progress = false)
+        res = solve(F, L, TotalDegree(; show_progress = false))
         @test nsolutions(res) == 4
         for s in solutions(res)
             @test subspace_residual(L, s) < 1.0e-10
@@ -85,7 +85,7 @@ end
         F = System([x^2 + y^2 - z^2]; variables = [x, y, z])
         @test is_homogeneous(F)
         L = rand_subspace(3; codim = 1, affine = false)
-        res = solve(F, L; show_progress = false)
+        res = solve(F, L, TotalDegree(; show_progress = false))
         @test nsolutions(res) == 2
         for s in solutions(res)
             @test abs(s[1]^2 + s[2]^2 - s[3]^2) < 1.0e-10 * norm(s, Inf)^2
@@ -97,12 +97,12 @@ end
         @polyvar x y a
         F = System([x^2 + y^2 - a]; variables = [x, y], parameters = [a])
         L = rand_subspace(2; codim = 1)
-        res = solve(fix_parameters(F, [5.0]), L; show_progress = false)
+        res = solve(fix_parameters(F, [5.0]), L, TotalDegree(; show_progress = false))
         @test nsolutions(res) == 2
         for s in solutions(res)
             @test abs(s[1]^2 + s[2]^2 - 5) < 1.0e-10
         end
-        @test_throws ArgumentError solve(F, L; show_progress = false)
+        @test_throws ArgumentError solve(F, L, TotalDegree(; show_progress = false))
     end
 
     @testset "solve(F, L): fixing parameters of a parameter-free system" begin
@@ -116,7 +116,7 @@ end
         # The four points of V(F) do not lie on a generic line, so every
         # endpoint of the (overdetermined) sliced system is an excess solution.
         F = System([x^2 + y^2 - 5, x * y - 1]; variables = [x, y])
-        res = solve(F, rand_subspace(2; codim = 1); show_progress = false)
+        res = solve(F, rand_subspace(2; codim = 1), TotalDegree(; show_progress = false))
         @test nsolutions(res) == 0
         @test nexcess_solutions(res) > 0
     end
@@ -125,7 +125,7 @@ end
         @polyvar x y z
         F = System([x^2 + y^2 - 5, x * y + 1]; variables = [x, y, z])
         L = rand_subspace(3; codim = 1)
-        res = solve(F, L, Polyhedral(); show_progress = false)
+        res = solve(F, L, Polyhedral(; show_progress = false))
         @test nsolutions(res) == 4
         for s in solutions(res)
             @test subspace_residual(L, s) < 1.0e-10
@@ -136,12 +136,12 @@ end
         @polyvar x y
         F = System([x^2 + y^2 - 5]; variables = [x, y])
         L = rand_subspace(2; codim = 1)
-        alg = TotalDegree(; seed = UInt32(0x1234))
-        serial = solve(F, L, alg, Serial(); show_progress = false)
-        threaded = solve(F, L, alg, Threaded(); show_progress = false)
+        alg = TotalDegree(; seed = UInt32(0x1234), show_progress = false)
+        serial = solve(F, L, alg, Serial())
+        threaded = solve(F, L, alg, Threaded())
         @test nsolutions(serial) == nsolutions(threaded) == 2
         @test seed(serial) == seed(threaded) == UInt32(0x1234)
-        @test nsolutions(solve(F, L, Serial(); show_progress = false)) == 2
+        @test nsolutions(solve(F, L, TotalDegree(; show_progress = false), Serial())) == 2
     end
 
     @testset "solve(F, L): reproducible chart in the projective case" begin
@@ -158,8 +158,8 @@ end
         @polyvar x y z
         F = System([x^3 + y^2 * z - 2 * z^3, x * y - z^2]; variables = [x, y, z])
         L = rand_subspace(3; codim = 1)
-        alg = TotalDegree(; seed = UInt32(11))
-        G, chart = _sliced_solve_setup(F, L, alg.seed)
+        alg = TotalDegree(; seed = UInt32(11), show_progress = false)
+        G, chart = _sliced_solve_setup(F, L, seed(alg))
         wrapped = _sliced_evaluator(
             G.evaluator, convert(LinearSubspace{ComplexF64}, L), chart,
         )
@@ -202,14 +202,14 @@ end
         @polyvar x y z
         F = System([x^3 + y^2 * z - 2 * z^3, x * y - z^2]; variables = [x, y, z])
         L = rand_subspace(3; codim = 1)
-        alg = TotalDegree(; seed = UInt32(11))
-        G, chart = _sliced_solve_setup(F, L, alg.seed)
+        alg = TotalDegree(; seed = UInt32(11), show_progress = false)
+        G, chart = _sliced_solve_setup(F, L, seed(alg))
         wrapped = CommonSolve.solve!(
-            _init_sliced_total_degree(G, L, chart, alg, Serial(), false),
+            _init_sliced_total_degree(G, L, chart, alg, Serial()),
         )
         rebuilt = CommonSolve.solve!(
             CommonSolve.init(
-                _rebuild_sliced(G, L, chart), alg, Serial(); show_progress = false,
+                _rebuild_sliced(G, L, chart), alg, Serial(),
             ),
         )
         @test nsolutions(wrapped) == nsolutions(rebuilt)
@@ -240,7 +240,9 @@ end
         @polyvar x y
         F = System([x^2 + y^2 - 5]; variables = [x, y])
         L = rand_subspace(2; codim = 1)
-        cache = CommonSolve.init(F, L, TotalDegree(), Serial(); show_progress = false)
+        cache = CommonSolve.init(
+            F, L, TotalDegree(; show_progress = false), Serial(),
+        )
         res = CommonSolve.solve!(cache)
         @test res isa Result
         @test nsolutions(res) == 2

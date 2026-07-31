@@ -254,7 +254,7 @@ end
 
 The composition `G(F(x; p); p)` of two systems, built by [`compose`](@ref) or
 the infix operator `∘`. Accepted wherever a system is only evaluated: parameter
-homotopies ([`solve`](@ref) with start solutions), [`monodromy_solve`](@ref) and
+homotopies ([`solve`](@ref) with start solutions), [`Monodromy`](@ref) and
 [`newton`](@ref). `solve(C)` works too, since the total-degree start system
 needs only the folded degrees. Routes that need the composed monomials or
 equations (polyhedral, witness sets) go through `System(C)`, which substitutes

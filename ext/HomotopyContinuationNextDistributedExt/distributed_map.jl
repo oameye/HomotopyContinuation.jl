@@ -119,13 +119,16 @@ end
 function _run_batches(
         work::W, jobs::Distributed.RemoteChannel,
         out::Distributed.RemoteChannel, tasks_per_process::Int,
+        stopflag::Distributed.RemoteChannel,
     )::Nothing where {W}
     nt = tasks_per_process < 1 ? Threads.nthreads() : tasks_per_process
     batch = take!(jobs)
     # A stop token first: the queue was emptied elsewhere, so build nothing.
     isempty(batch) && return nothing
     states = [work.builder()]
-    while !isempty(batch)
+    # `isready` never blocks, so an early stop costs one poll per batch and the
+    # loop exits normally rather than through a closed channel.
+    while !isempty(batch) && !isready(stopflag)
         _grow_states!(states, work.builder, min(nt, length(batch)))
         _run_batch!(work, states, batch, out)
         batch = take!(jobs)
@@ -135,8 +138,20 @@ end
 
 # ── Driver ──────────────────────────────────────────────────────────────────
 
+# Driver-side, so a user callback never has to cross to a worker process.
+# Granularity is one batch.
+function _batch_trips_stop(
+        early_stop::HCN.EarlyStop, prs::Vector{HCN.PathResult},
+    )::Bool
+    for pr in prs
+        HCN.is_success(pr) && early_stop(pr) && return true
+    end
+    return false
+end
+
 function _distributed_map(
         exec::HCN.DistributedExecutor, work::W, n_paths::Int, report::R,
+        early_stop::HCN.EarlyStop = HCN.NEVER_STOP,
     )::Vector{HCN.PathResult} where {W, R}
     results = Vector{HCN.PathResult}(undef, n_paths)
     n_paths == 0 && return results
@@ -151,6 +166,7 @@ function _distributed_map(
 
     jobs = _transport_channel(UnitRange{Int}, n_batches + length(pids))
     out = _transport_channel(BatchResult, n_batches)
+    stopflag = _transport_channel(Bool, 1)
     try
         for batch in batches
             put!(jobs, batch)
@@ -163,7 +179,9 @@ function _distributed_map(
         tracking = @async begin
             try
                 @sync for pid in pids
-                    @async _transport_run(_run_batches, pid, work, jobs, out, ntasks)
+                    @async _transport_run(
+                        _run_batches, pid, work, jobs, out, ntasks, stopflag,
+                    )
                 end
             finally
                 # Finished or failed, unblock the collector below.
@@ -172,12 +190,19 @@ function _distributed_map(
         end
 
         received = 0
+        stopped = false
         try
             while received < n_batches
                 batch, prs = take!(out)
                 copyto!(results, first(batch), prs, 1, length(prs))
                 received += 1
                 report(batch, prs)
+                if _batch_trips_stop(early_stop, prs)
+                    # Tell the workers before leaving, or they block on `out`.
+                    stopped = true
+                    put!(stopflag, true)
+                    break
+                end
             end
         catch e
             e isa InvalidStateException || rethrow()
@@ -189,7 +214,7 @@ function _distributed_map(
         catch e
             throw(_root_cause(e))
         end
-        received == n_batches || error(
+        stopped || received == n_batches || error(
             "distributed tracking returned $received of $n_batches batches",
         )
     finally

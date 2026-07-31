@@ -137,10 +137,11 @@ end
     @testset "total degree matches the substituted system path for path" begin
         seed = UInt32(99)
         r = solve(
-            fix_parameters(F, [2, 4]), TotalDegree(; seed = seed), Serial();
-            show_progress = false,
+            fix_parameters(F, [2, 4]),
+            TotalDegree(; seed = seed, show_progress = false),
+            Serial(),
         )
-        ref = solve(G, TotalDegree(; seed = seed), Serial(); show_progress = false)
+        ref = solve(G, TotalDegree(; seed = seed, show_progress = false), Serial())
         @test nsolutions(r) == nsolutions(ref) == 2
         @test _key(r) ≈ _key(ref)
         @test sort(steps.(path_results(r))) == sort(steps.(path_results(ref)))
@@ -149,18 +150,20 @@ end
     @testset "polyhedral matches the substituted system" begin
         seed = UInt32(99)
         r = solve(
-            fix_parameters(F, [2, 4]), Polyhedral(; seed = seed), Serial();
-            show_progress = false,
+            fix_parameters(F, [2, 4]),
+            Polyhedral(; seed = seed, show_progress = false),
+            Serial(),
         )
-        ref = solve(G, Polyhedral(; seed = seed), Serial(); show_progress = false)
+        ref = solve(G, Polyhedral(; seed = seed, show_progress = false), Serial())
         @test nsolutions(r) == nsolutions(ref) == 2
         @test _key(r) ≈ _key(ref)
     end
 
     @testset "solutions solve the system at those parameter values" begin
         r = solve(
-            fix_parameters(F, [2, 4]), TotalDegree(; seed = UInt32(5)), Serial();
-            show_progress = false,
+            fix_parameters(F, [2, 4]),
+            TotalDegree(; seed = UInt32(5), show_progress = false),
+            Serial(),
         )
         for s in solutions(r)
             @test abs(s[1]^2 - 2) < 1.0e-10
@@ -170,14 +173,16 @@ end
 
     @testset "$(nameof(typeof(exec))) executor" for exec in (Serial(), Threaded())
         r = solve(
-            fix_parameters(F, [2, 4]), TotalDegree(; seed = UInt32(17)), exec;
-            show_progress = false,
+            fix_parameters(F, [2, 4]),
+            TotalDegree(; seed = UInt32(17), show_progress = false),
+            exec,
         )
         @test nsolutions(r) == 2
         @test _key(r) ≈ _key(
             solve(
-                fix_parameters(F, [2, 4]), TotalDegree(; seed = UInt32(17)), Serial();
-                show_progress = false,
+                fix_parameters(F, [2, 4]),
+                TotalDegree(; seed = UInt32(17), show_progress = false),
+                Serial(),
             ),
         )
     end
@@ -186,14 +191,14 @@ end
     # since the route sees an ordinary parameter-free `System`.
     @testset "the substituted route reuses the parameter-free cache type" begin
         cache = CommonSolve.init(
-            fix_parameters(F, [2, 4]), TotalDegree(; seed = UInt32(41)), Serial();
-            show_progress = false,
+            fix_parameters(F, [2, 4]),
+            TotalDegree(; seed = UInt32(41), show_progress = false), Serial(),
         )
         @test cache.builder.target_system isa System
         @test typeof(cache) === typeof(
             CommonSolve.init(
                 Next.fix_parameters(F, ComplexF64[2, 4]),
-                TotalDegree(; seed = UInt32(41)), Serial(); show_progress = false,
+                TotalDegree(; seed = UInt32(41), show_progress = false), Serial(),
             ),
         )
     end
@@ -205,8 +210,9 @@ end
             variables = [x, y], parameters = [a, b], compile = mode,
         )
         r = solve(
-            fix_parameters(Fm, [2, 4]), TotalDegree(; seed = UInt32(23)), Serial();
-            show_progress = false,
+            fix_parameters(Fm, [2, 4]),
+            TotalDegree(; seed = UInt32(23), show_progress = false),
+            Serial(),
         )
         @test nsolutions(r) == 2
         @test all(s -> abs(s[1]^2 - 2) < 1.0e-10, solutions(r))
@@ -221,9 +227,12 @@ end
         Go = System(
             [u^2 + v^2 - 5, u * v - 2, (u^2 + v^2 - 5) * (u - v)]; variables = [u, v],
         )
-        for alg in (TotalDegree(; seed = UInt32(7)), Polyhedral(; seed = UInt32(7)))
-            r = solve(fix_parameters(Fo, [5, 2]), alg, Serial(); show_progress = false)
-            ref = solve(Go, alg, Serial(); show_progress = false)
+        for alg in (
+                TotalDegree(; seed = UInt32(7), show_progress = false),
+                Polyhedral(; seed = UInt32(7), show_progress = false),
+            )
+            r = solve(fix_parameters(Fo, [5, 2]), alg, Serial())
+            ref = solve(Go, alg, Serial())
             @test nsolutions(r) == nsolutions(ref)
             @test nexcess_solutions(r) == nexcess_solutions(ref)
             @test _key(r) ≈ _key(ref)
@@ -235,17 +244,18 @@ end
         C = compose(System([x + y, x - y]; variables = [x, y]), F)
         Cref = compose(System([x + y, x - y]; variables = [x, y]), G)
         r = solve(
-            fix_parameters(C, [2, 4]), TotalDegree(; seed = UInt32(3)), Serial();
-            show_progress = false,
+            fix_parameters(C, [2, 4]),
+            TotalDegree(; seed = UInt32(3), show_progress = false),
+            Serial(),
         )
-        ref = solve(Cref, TotalDegree(; seed = UInt32(3)), Serial(); show_progress = false)
+        ref = solve(Cref, TotalDegree(; seed = UInt32(3), show_progress = false), Serial())
         @test nsolutions(r) == nsolutions(ref)
         @test _key(r) ≈ _key(ref)
     end
 
     @testset "a parametric system is rejected by name" begin
         for alg in (TotalDegree(), Polyhedral())
-            @test_throws ArgumentError solve(F, alg, Serial(); show_progress = false)
+            @test_throws ArgumentError solve(F, alg, Serial())
         end
     end
 end

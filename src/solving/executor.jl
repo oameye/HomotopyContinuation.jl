@@ -43,6 +43,18 @@ struct Threaded <: AbstractExecutor
 end
 Threaded() = Threaded(Threads.nthreads())
 
+# Whether an executor asks for more than one task. Used where a route chooses
+# between a task fan-out and a plain loop, so `Threaded(1)` takes the plain one.
+_wants_tasks(::Serial)::Bool = false
+_wants_tasks(exec::Threaded)::Bool = exec.ntasks > 1
+_wants_tasks(::AbstractExecutor)::Bool = true
+
+# Tasks a fan-out inside the calling process should use. Only `Threaded` states a
+# count; any other executor distributes elsewhere and leaves the local pool.
+_local_ntasks(::Serial)::Int = 1
+_local_ntasks(exec::Threaded)::Int = exec.ntasks
+_local_ntasks(::AbstractExecutor)::Int = Threads.nthreads()
+
 """
     DistributedExecutor(; pids = Int[], tasks_per_process = 0, batch_size = 0)
 
@@ -73,7 +85,7 @@ global path index, so the returned [`Result`](@ref) is identical to the one
 - `batch_size`: paths per batch. `0` picks a size from the path count, the
   process count and the task count.
 
-[`monodromy_solve`](@ref) is scheduled differently, since its work is generated as
+[`Monodromy`](@ref) is scheduled differently, since its work is generated as
 solutions are found: the calling process keeps the job queue, the deduplication
 and the trace test, and hands out loops. There `batch_size` is loops per message
 (`0` means 8) and two batches per task are in flight, which also bounds how many

@@ -204,8 +204,9 @@ function _check_multi_determined(F::System, N::Int, M::Int)::Nothing
 end
 
 function _init_multi_homogeneous(
-        F::System, alg::TotalDegree, exec::AbstractExecutor, show_progress::Bool,
+        F::System, alg::TotalDegree, exec::AbstractExecutor,
     )
+    show_progress = _show_progress(alg)
     groups = variable_groups(F)
     homogeneous = is_homogeneous(F)
     k = _group_dims(groups, homogeneous)
@@ -218,7 +219,7 @@ function _init_multi_homogeneous(
         _check_square_or_overdetermined(F)
     end
 
-    rng = Random.MersenneTwister(alg.seed)
+    rng = Random.MersenneTwister(_seed(alg))
     γ = _random_gamma(rng)
 
     D = multi_degrees(F)
@@ -245,7 +246,10 @@ function _init_multi_homogeneous(
         D, k, groups, C, homogeneous, n, _bezout_assignments(D, k),
     )
     builder = MultiHomogeneousBuilder(
-        start, F, A, perm, L, γ, alg.tracker_options, alg.endgame_options,
+        start, F, A, perm, L, γ, _tracker_options(alg), _endgame_options(alg),
     )
-    return _solve_cache(exec, builder, starts, alg.seed, checker, show_progress)
+    return _solve_cache(
+        exec, builder, starts, _seed(alg), checker, show_progress,
+        early_stop_callback(alg),
+    )
 end

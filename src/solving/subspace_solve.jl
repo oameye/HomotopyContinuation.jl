@@ -25,7 +25,13 @@ struct WorkerSolveCache{E <: AbstractExecutor, W, B}
     start_solutions::Vector{Vector{ComplexF64}}
     seed::UInt32
     show_progress::Bool
+    early_stop::EarlyStop
 end
+
+WorkerSolveCache(
+    exec::AbstractExecutor, builder, worker,
+    starts::Vector{Vector{ComplexF64}}, seed::UInt32, show_progress::Bool,
+) = WorkerSolveCache(exec, builder, worker, starts, seed, show_progress, NEVER_STOP)
 
 # ── One path ───────────────────────────────────────────────────────────────
 
@@ -51,41 +57,50 @@ end
 
 function _track_all_serial(
         ws::RetargetWorkerState, starts::Vector{Vector{ComplexF64}},
-        seed::UInt32, progress,
+        seed::UInt32, progress, stop::EarlyStop = NEVER_STOP,
     )::Result
-    n_paths = length(starts)
     path_results = PathResult[]
-    sizehint!(path_results, n_paths)
+    sizehint!(path_results, length(starts))
     stats = ProgressStats()
     for (k, x₀) in enumerate(starts)
         pr = _track_path!(ws, x₀, k)
         push!(path_results, pr)
         update_progress!(progress, k, stats, pr)
+        is_success(pr) && stop(pr) && break
     end
-    return _finalize_result(path_results, n_paths, seed, nothing)
+    # `tracked_paths` is what ran, which is what `nfailed` is derived from.
+    return _finalize_result(path_results, length(path_results), seed, nothing)
 end
 
 function _track_all_threaded(cache::WorkerSolveCache{Threaded}, progress)::Result
     nt = cache.executor.ntasks
     starts = cache.start_solutions
-    n_paths = length(starts)
-    results = Vector{PathResult}(undef, n_paths)
+    stop = cache.early_stop
+    results = Vector{PathResult}(undef, length(starts))
 
     stats = ProgressStats()
     counter = Threads.Atomic{Int}(0)
+    stopped = Threads.Atomic{Bool}(false)
     plock = ReentrantLock()
 
+    # `@tasks` cannot `break`, so a stopped run skips the remaining iterations and
+    # leaves their slots unassigned.
     @tasks for i in eachindex(starts)
         @set ntasks = nt
         @local ws = cache.builder()
-        results[i] = _track_path!(ws, starts[i], i)
-        if progress !== nothing
-            k = Threads.atomic_add!(counter, 1) + 1
-            @lock plock update_progress!(progress, k, stats, results[i])
+        if !stopped[]
+            pr = _track_path!(ws, starts[i], i)
+            results[i] = pr
+            if progress !== nothing
+                k = Threads.atomic_add!(counter, 1) + 1
+                @lock plock update_progress!(progress, k, stats, pr)
+            end
+            is_success(pr) && stop(pr) && (stopped[] = true)
         end
     end
 
-    return _finalize_result(results, n_paths, cache.seed, nothing)
+    tracked = _assigned_results(results)
+    return _finalize_result(tracked, length(tracked), cache.seed, nothing)
 end
 
 # ── CommonSolve.solve! ─────────────────────────────────────────────────────
@@ -99,11 +114,13 @@ function CommonSolve.solve!(cache::WorkerSolveCache{Serial})::Result
 end
 
 @noinline _solve_worker_serial_without_progress(cache::WorkerSolveCache{Serial}) =
-    _track_all_serial(cache.worker, cache.start_solutions, cache.seed, nothing)
+    _track_all_serial(
+    cache.worker, cache.start_solutions, cache.seed, nothing, cache.early_stop,
+)
 @noinline _solve_worker_serial_with_progress(cache::WorkerSolveCache{Serial}) =
     _track_all_serial(
     cache.worker, cache.start_solutions, cache.seed,
-    make_progress(length(cache.start_solutions), true),
+    make_progress(length(cache.start_solutions), true), cache.early_stop,
 )
 
 function CommonSolve.solve!(cache::WorkerSolveCache{Threaded})::Result
@@ -165,6 +182,7 @@ function _init_intrinsic_subspace(
         chart::Vector{ComplexF64}, gamma::ComplexF64,
         exec::E, seed::UInt32, tracker_options::TrackerOptions,
         endgame_options::EndgameOptions, show_progress::Bool,
+        early_stop::EarlyStop = NEVER_STOP,
     ) where {E <: AbstractExecutor}
     builder = IntrinsicSubspaceBuilder(
         G, convert(LinearSubspace{ComplexF64}, L_start),
@@ -173,7 +191,9 @@ function _init_intrinsic_subspace(
     )
     worker = builder()
     _check_subspace_square(worker.homotopy, "intrinsic")
-    return WorkerSolveCache(exec, builder, worker, starts, seed, show_progress)
+    return WorkerSolveCache(
+        exec, builder, worker, starts, seed, show_progress, early_stop,
+    )
 end
 
 function _init_extrinsic_subspace(
@@ -182,6 +202,7 @@ function _init_extrinsic_subspace(
         chart::Vector{ComplexF64}, gamma::ComplexF64,
         exec::E, seed::UInt32, tracker_options::TrackerOptions,
         endgame_options::EndgameOptions, show_progress::Bool,
+        early_stop::EarlyStop = NEVER_STOP,
     ) where {E <: AbstractExecutor}
     V = convert(LinearSubspace{ComplexF64}, L_start)
     W = convert(LinearSubspace{ComplexF64}, L_target)
@@ -191,7 +212,9 @@ function _init_extrinsic_subspace(
         )
         worker = builder()
         _check_subspace_square(worker.homotopy, "extrinsic")
-        return WorkerSolveCache(exec, builder, worker, starts, seed, show_progress)
+        return WorkerSolveCache(
+            exec, builder, worker, starts, seed, show_progress, early_stop,
+        )
     end
     chart_builder = ChartExtrinsicSubspaceBuilder(
         G, V, W, chart, gamma, tracker_options, endgame_options,
@@ -199,7 +222,7 @@ function _init_extrinsic_subspace(
     chart_worker = chart_builder()
     _check_subspace_square(chart_worker.homotopy, "extrinsic")
     return WorkerSolveCache(
-        exec, chart_builder, chart_worker, starts, seed, show_progress,
+        exec, chart_builder, chart_worker, starts, seed, show_progress, early_stop,
     )
 end
 
@@ -207,7 +230,7 @@ end
 # the problem is projective (the chart row is part of the tracked system, so a
 # projective representative off the chart is not a solution of it).
 function _subspace_solve_setup(
-        F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace,
+        F::System, starts::StartsLike, L_start::LinearSubspace, L_target::LinearSubspace,
         seed::UInt32,
     )
     _check_parameter_free(F, "`solve(F, starts, L_start, L_target)`")
@@ -227,40 +250,45 @@ function _subspace_solve_setup(
 end
 
 function CommonSolve.init(
-        F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace,
-        exec::AbstractExecutor = Threaded();
-        intrinsic::Bool = _default_intrinsic(L_start),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
+        F::System, starts::StartsLike, L_start::LinearSubspace, L_target::LinearSubspace,
+        alg::Continuation = Continuation(),
+        exec::AbstractExecutor = Threaded(),
     )
+    seed = _seed(alg)
+    intrinsic = alg.intrinsic === nothing ? _default_intrinsic(L_start) : alg.intrinsic
     G, points, chart, gamma = _subspace_solve_setup(
         F, starts, L_start, L_target, seed,
     )
     return if intrinsic
         _init_intrinsic_subspace(
             G, points, L_start, L_target, chart, gamma, exec, seed,
-            tracker_options, endgame_options, show_progress,
+            _tracker_options(alg), _endgame_options(alg), _show_progress(alg),
+            early_stop_callback(alg),
         )
     else
         _init_extrinsic_subspace(
             G, points, L_start, L_target, chart, gamma, exec, seed,
-            tracker_options, endgame_options, show_progress,
+            _tracker_options(alg), _endgame_options(alg), _show_progress(alg),
+            early_stop_callback(alg),
         )
     end
 end
 
+CommonSolve.init(
+    F::System, starts::StartsLike, L_start::LinearSubspace,
+    L_target::LinearSubspace, exec::AbstractExecutor,
+) = CommonSolve.init(F, starts, L_start, L_target, Continuation(), exec)
+
 """
     solve(F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace,
-          exec = Threaded(); intrinsic, options...)
+          alg = Continuation(), exec = Threaded())
 
 Track the solutions `starts` of `V(F) ∩ L_start` to `V(F) ∩ L_target`. The start
 points and the returned solutions are ambient, i.e. in the coordinates of `F`.
 
-`intrinsic` chooses the tracking coordinates: `true` tracks inside the subspace
-(`F(A(t)v + a(t))`), `false` in ambient space (`[F(x); A(t)x - a(t)]`). It
-defaults to `dim(L_start) <= codim(L_start)`.
+The algorithm's `intrinsic` option chooses the tracking coordinates: `true` tracks
+inside the subspace (`F(A(t)v + a(t))`), `false` in ambient space
+(`[F(x); A(t)x - a(t)]`). It defaults to `dim(L_start) <= codim(L_start)`.
 
 `F` must be parameter-free; fix the values first with [`fix_parameters`](@ref).
 
@@ -274,21 +302,28 @@ S₁ = solutions(solve(F, L₁))
 result = solve(F, S₁, L₁, L₂)
 ```
 """
-function solve(
-        F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace,
-        exec::AbstractExecutor = Threaded();
-        intrinsic::Bool = _default_intrinsic(L_start),
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
-        show_progress::Bool = true,
-    )::Result
-    return CommonSolve.solve!(
-        CommonSolve.init(
-            F, starts, L_start, L_target, exec;
-            intrinsic = intrinsic,
-            seed = seed, tracker_options = tracker_options,
-            endgame_options = endgame_options, show_progress = show_progress,
-        ),
-    )
+solve(
+    F::System, starts::StartsLike, L_start::LinearSubspace,
+    L_target::LinearSubspace, alg::Continuation = Continuation(),
+    exec::AbstractExecutor = Threaded(),
+)::Result = CommonSolve.solve!(
+    CommonSolve.init(F, starts, L_start, L_target, alg, exec),
+)
+
+solve(
+    F::System, starts::StartsLike, L_start::LinearSubspace,
+    L_target::LinearSubspace, exec::AbstractExecutor,
+)::Result = solve(F, starts, L_start, L_target, Continuation(), exec)
+
+for f in (:(solve), :(CommonSolve.init))
+    @eval begin
+        $f(
+            ::System, starts, ::LinearSubspace, ::LinearSubspace,
+            ::Continuation = Continuation(), ::AbstractExecutor = Threaded(),
+        ) = _bad_starts(starts)
+        $f(
+            ::System, starts, ::LinearSubspace, ::LinearSubspace,
+            ::AbstractExecutor,
+        ) = _bad_starts(starts)
+    end
 end

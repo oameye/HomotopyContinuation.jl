@@ -24,7 +24,7 @@ RuntimeGeneratedFunctions.init(@__MODULE__)
     COMPILED_ALL
 end
 
-export @polyvar, solve, solve_targets, System
+export @polyvar, solve, System
 export CompositionSystem, compose
 export FixedParameterSystem, fix_parameters
 export @var, @unique_var, Expression, differentiate, subs, num_den
@@ -34,14 +34,18 @@ export nexcess_solutions, nfailed
 export nresults, results, multiplicity
 export is_success, is_singular, is_nonsingular, is_at_infinity, is_real, is_excess_solution
 export is_failed, is_finite
+export AbstractResult, AbstractSolutionResult
 export TotalDegree, Polyhedral, Result, PathResult, paths_to_track
+export Continuation, Sweep, Monodromy, Witness, Membership
+export Regeneration, Intersection, Decomposition
+export CommonOptions, early_stop_callback
 export path_results, seed, ntracked, failed, at_infinity, nonsingular, singular
 export recluster, clusters, cluster_of
 export statistics, ResultStatistics
 export solution, accuracy, residual, steps, accepted_steps, rejected_steps
 export winding_number, condition_jacobian, last_path_point
 export path_number, start_solution, valuation
-export EndgameOptions, EndgameTracker
+export TrackerOptions, EndgameOptions, EndgameTracker
 export ParameterHomotopy
 export GroupActions, SymmetricGroup
 export UniquePoints, search_in_radius, add!, multiplicities, unique_points
@@ -51,17 +55,17 @@ export intrinsic, extrinsic, is_linear, dim, codim, ambient_dim
 export rand_subspace, translate, geodesic, geodesic_distance, coord_change
 export IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy, set_subspaces!
 export AffineChartHomotopy, on_affine_chart, linear_subspace_homotopy
-export find_start_pair, monodromy_solve, verify_solution_completeness
+export find_start_pair, verify_solution_completeness
 export MonodromyOptions, MonodromyResult, is_heuristic_stop, permutations, trace
 export independent_normal, weighted_normal
 # Witness sets / numerical irreducible decomposition
 export slice
 export ResultIterator, result_iterator, bitmask, bitmask_filter, start_solutions
-export WitnessSet, witness_set, trace_test, membership
+export WitnessSet, trace_test, membership
 export system, linear_subspace, is_irreducible, Irreducibility, degree, points
-export WitnessPoints, regeneration
-export NumericalIrreducibleDecomposition, numerical_irreducible_decomposition, nid
-export decompose, ncomponents, n_components, witness_sets, degrees
+export WitnessPoints
+export NumericalIrreducibleDecomposition
+export ncomponents, n_components, witness_sets, degrees
 export newton, NewtonResult, NewtonCache, NewtonReturnCode
 export Serial, Threaded, DistributedExecutor
 # Certification (certify, SolutionCertificate, …) lives in the
@@ -135,10 +139,12 @@ include("solving/binomial_system.jl")
 include("solving/path_result.jl")
 include("solving/progress.jl")
 include("solving/excess_solution.jl")
+include("solving/algorithm.jl")
 include("solving/total_degree.jl")
 include("solving/builder.jl")
 include("solving/polyhedral.jl")
 include("solving/result.jl")
+include("solving/starts.jl")
 include("solving/solve.jl")
 include("solving/homotopy_solve.jl")
 include("solving/slice.jl")

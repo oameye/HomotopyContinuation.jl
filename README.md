@@ -35,7 +35,9 @@ real_solutions(result)
 ```
 
 - Total degree and polyhedral (BKK-optimal) start systems
-- Parameter homotopy: `solve(F, starts, p₁, p₀)`, many targets: `solve_targets(F, starts, p₁, targets)`
+- Parameter homotopy: `solve(F, starts, p₁, p₀)`, many targets: `solve(F, starts, p₁, targets, Sweep())`
+- One verb, one shape: `solve(problem..., algorithm, executor)`. The executor says where the work
+  runs, the algorithm carries every other option, and `solve` takes no keyword arguments
 - Parameter values are always positional; `fix_parameters(F, p)` makes a parametric system parameter-free
 - Predictor-corrector tracker with adaptive stepping and DoubleF64 refinement
 - Straight-line homotopy Taylor formulas fixed for coupled `x,t` variation

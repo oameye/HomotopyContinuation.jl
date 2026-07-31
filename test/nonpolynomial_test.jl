@@ -2,8 +2,9 @@ using Test
 using Random: Random, MersenneTwister, randn, rand
 import HomotopyContinuationNext as Next
 using HomotopyContinuationNext: Expression, System, CompileMode, @var, @polyvar,
-    differentiate, solve, solutions, nsolutions, monodromy_solve,
+    differentiate, solve, solutions, nsolutions,
     verify_solution_completeness, Serial, TotalDegree, Polyhedral,
+    Continuation, Monodromy, Witness, Regeneration, Decomposition, Intersection,
     TaylorVector, ComplexDF64, HomotopyEvaluator, StraightLineHomotopy,
     Interpreter, execute!,
     fix_parameters
@@ -330,8 +331,12 @@ end
         roots(s) = [(-1 + sign * sqrt(1 + 4s)) / (2s) for sign in (1, -1)]
         starts = [ComplexF64[xi, 1 - xi] for xi in roots(2.0)]   # sqrt(4) = 2
         res = solve(
-            F, starts, ComplexF64[4.0], ComplexF64[9.0], Serial();
-            show_progress = false,
+            F,
+            starts,
+            ComplexF64[4.0],
+            ComplexF64[9.0],
+            Continuation(; show_progress = false),
+            Serial(),
         )
         @test nsolutions(res) == 2
         got = sort(real.(first.(solutions(res))))
@@ -345,9 +350,13 @@ end
                 [u[1] / x^2 + u[2], u[3] / y^2 + u[4]];
                 variables = [x, y], parameters = u, compile = mode,
             )
-            res = monodromy_solve(
-                F; target_solutions_count = 4, max_loops_no_progress = 100,
-                threading = false, show_progress = false,
+            res = solve(
+                F,
+                Monodromy(;
+                    target_solutions_count = 4, max_loops_no_progress = 100,
+                    show_progress = false,
+                ),
+                Serial(),
             )
             return nsolutions(res)
         end
@@ -364,9 +373,13 @@ end
             differentiate(f, x);
             variables = x, parameters = [u1; u2; vec(A1); vec(A2)],
         )
-        res = monodromy_solve(
-            F; max_loops_no_progress = 100, target_solutions_count = 6,
-            threading = false, show_progress = false,
+        res = solve(
+            F,
+            Monodromy(;
+                max_loops_no_progress = 100, target_solutions_count = 6,
+                show_progress = false,
+            ),
+            Serial(),
         )
         @test nsolutions(res) == 6
     end
@@ -379,8 +392,8 @@ end
             ComplexF64[-0.6 - 0.8im, -1.2 + 0.4im],
             ComplexF64[-0.6 + 0.8im, -1.2 - 0.4im],
         ]
-        @test verify_solution_completeness(F, sols, q; show_progress = false) == true
-        @test verify_solution_completeness(F, sols[1:1], q; show_progress = false) == false
+        @test verify_solution_completeness(F, sols, q, Monodromy(; show_progress = false)) == true
+        @test verify_solution_completeness(F, sols[1:1], q, Monodromy(; show_progress = false)) == false
     end
 
     @testset "MP rational input builds the same system" begin
@@ -402,12 +415,13 @@ end
     @testset "start systems reject non-polynomial input" begin
         @var x y
         F = System([x / y - 2, x^2 + y^2 - 5])
-        @test_throws ArgumentError solve(F, TotalDegree(), Serial(); show_progress = false)
-        @test_throws ArgumentError solve(F, Polyhedral(), Serial(); show_progress = false)
+        @test_throws ArgumentError solve(F, TotalDegree(; show_progress = false), Serial())
+        @test_throws ArgumentError solve(F, Polyhedral(; show_progress = false), Serial())
         L = Next.LinearSubspace(ComplexF64[1.0 1.0], ComplexF64[1.0])
-        @test_throws ArgumentError solve(F, L, TotalDegree(), Serial(); show_progress = false)
-        @test_throws ArgumentError Next.witness_set(
-            System([x / y - 1]; variables = [x, y]); show_progress = false,
+        @test_throws ArgumentError solve(F, L, TotalDegree(; show_progress = false), Serial())
+        @test_throws ArgumentError Next.solve(
+            System([x / y - 1]; variables = [x, y]),
+            Next.Witness(; show_progress = false),
         )
     end
 
@@ -432,21 +446,21 @@ end
         @testset "dense system" begin
             F = System([x^2 + y - 1, x + y^2 - 1]; variables = [x, y])
             G = System([u^2 + v - 1, u + v^2 - 1])
-            @test sols(solve(F, Polyhedral(), Serial(); show_progress = false)) ==
-                sols(solve(G, Polyhedral(), Serial(); show_progress = false))
+            @test sols(solve(F, Polyhedral(; show_progress = false), Serial())) ==
+                sols(solve(G, Polyhedral(; show_progress = false), Serial()))
         end
 
         # Sparse enough that the BKK bound is below the Bezout number.
         @testset "sparse system" begin
             F = System([x^3 * y^2 - 3, x^2 * y^3 - 5]; variables = [x, y])
-            r = solve(F, Polyhedral(), Serial(); show_progress = false)
+            r = solve(F, Polyhedral(; show_progress = false), Serial())
             @test nsolutions(r) == 5
-            @test sols(r) == sols(solve(F, TotalDegree(), Serial(); show_progress = false))
+            @test sols(r) == sols(solve(F, TotalDegree(; show_progress = false), Serial()))
         end
 
         @testset "overdetermined system is squared up" begin
             F = System([x^2 + y^2 - 1, x - y, x^3 - y^3]; variables = [x, y])
-            @test sols(solve(F, Polyhedral(), Serial(); show_progress = false)) ==
+            @test sols(solve(F, Polyhedral(; show_progress = false), Serial())) ==
                 [(-0.707107, -0.0), (0.707107, -0.0)]
         end
 
@@ -469,8 +483,8 @@ end
         )
         F = System([a * x^2 + y^2 - 1]; variables = [x, y], parameters = [a])
         G = System([b * u^2 + v^2 - 1]; variables = [u, v], parameters = [b])
-        @test sols(solve(fix_parameters(F, [2.0]), L; show_progress = false)) ==
-            sols(solve(fix_parameters(G, [2.0]), L; show_progress = false))
+        @test sols(solve(fix_parameters(F, [2.0]), L, TotalDegree(; show_progress = false))) ==
+            sols(solve(fix_parameters(G, [2.0]), L, TotalDegree(; show_progress = false)))
 
         # Substitution has to reach a non-polynomial equation too.
         H = System([a / x + y - 2]; variables = [x, y], parameters = [a])
@@ -482,15 +496,15 @@ end
         @var x y z
         # Polynomial, but built through the expression front-end.
         F = System([x^2 + y^2 - z, x + y + z - 1]; variables = [x, y, z])
-        @test Next.degree.(Next.regeneration(F; show_progress = false)) == [2]
-        @test Next.ncomponents(Next.nid(F; show_progress = false)) == 1
-        W = Next.witness_set(F; show_progress = false)
+        @test Next.degree.(Next.solve(F, Next.Regeneration(; show_progress = false))) == [2]
+        @test Next.ncomponents(Next.solve(F, Next.Decomposition(; show_progress = false))) == 1
+        W = Next.solve(F, Next.Witness(; show_progress = false))
         @test Next.degree(W) == 2
 
         # Rational: the u-homotopy carries the denominator, and the hypersurface
         # witness sets come from the numerators.
         G = System([x^2 + y^2 - z, x / (y - 1) + y + z - 1]; variables = [x, y, z])
-        WG = Next.regeneration(G; show_progress = false)
+        WG = Next.solve(G, Next.Regeneration(; show_progress = false))
         @test Next.degree.(WG) == [4]
 
         # Rebuilding equations cannot take `sqrt` of a variable, in a denominator just
@@ -500,15 +514,13 @@ end
                 1 / sin(x) + y - 1,
             )
             H = System([f, x * y - z]; variables = [x, y, z])
-            @test_throws ArgumentError Next.regeneration(H; show_progress = false)
-            @test_throws ArgumentError Next.nid(H; show_progress = false)
+            @test_throws ArgumentError Next.solve(H, Next.Regeneration(; show_progress = false))
+            @test_throws ArgumentError Next.solve(H, Next.Decomposition(; show_progress = false))
         end
 
         # `intersect` gates its hypersurface argument the same way.
-        WF = first(Next.regeneration(F; show_progress = false))
-        @test_throws ArgumentError intersect(WF, 1 / sqrt(x); show_progress = false)
-        @test_throws ArgumentError intersect(
-            WF, x / (1 + sqrt(y)); show_progress = false
-        )
+        WF = first(Next.solve(F, Next.Regeneration(; show_progress = false)))
+        @test_throws ArgumentError intersect(WF, 1 / sqrt(x), Intersection(; show_progress = false))
+        @test_throws ArgumentError intersect(WF, x / (1 + sqrt(y)), Intersection(; show_progress = false))
     end
 end
