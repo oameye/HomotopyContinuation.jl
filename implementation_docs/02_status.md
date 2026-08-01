@@ -711,14 +711,23 @@ Closed by this audit:
     `eachindex(u)`, the caller's buffer, while indexing their own `m`-row scratch. Wrapped in
     an `AffineChartHomotopy` the buffer is one row longer, so they read the scratch out of
     bounds under `@inbounds`. They now loop over the scratch.
-- [ ] **Mohab's at-infinity count is seed-dependent.** A few divergent paths reach
-  `max_steps` before the at-infinity criterion fires, so the 207 non-solutions split between
+- [x] **Mohab's at-infinity count is seed-dependent.** A few divergent paths reached
+  `max_steps` before the at-infinity criterion fired, so the 207 non-solutions split between
   `PATH_AT_INFINITY` and `PATH_TERMINATED_MAX_STEPS` differently from seed to seed: over 25
   runs, 207 on 19 and 195-205 on the rest. `tracked_paths = 900` and the 693 nonsingular
-  solutions never move. Pre-existing and not specific to mohab: the same at-infinity /
-  max-steps drift is what the `skeel_row_scaling!` entry above reports for two paths over
-  `TEST_SYSTEM_COLLECTION`. `v2_parity_test.jl` pins `seed = 1` so the assertion is
-  deterministic; the criterion itself is what wants fixing.
+  solutions never moved. Now 207 on 30 of 30 seeds.
+
+  The confirmation stage wants the coordinate to grow by a factor of 20 since it was marked,
+  and with `val_x = -1` that is a demand for `t` to fall by 20. On these paths it does not:
+  the endgame spends its whole 2000-step budget moving `t` from 9.7e-3 to 1.3e-3 while
+  `val_x` sits at `-1.000` with `ε∞ ≈ 1.4e-3`, `|x|` climbs 57 → 435 and the scaled condition
+  number climbs 5.7e9 → 3.3e11. How far a path gets before the budget runs out is what the
+  seed moves. `check_at_infinity!` now takes a `relaxed` flag that drops the growth demand to
+  "grew at all", keeping the gate (a standing candidate, so `val_x + ε∞ < -val_finite_tol`
+  with `ε∞ < val_at_infinity_tol`) and the condition-growth requirement, and the four
+  give-up sites consult it before reporting out-of-steps. It cannot reclassify a path that
+  terminates any other way, and a singular finite endpoint has `val_x = 0`, so it is not a
+  candidate at all. v2 has the same criterion and the same drift.
 - [x] **The splitting stage's trace test on a projective witness set.** Splitting the
   projective quartic of `nid_test.jl` "Homogeneous systems" dropped the surface on 2 of 30
   seeds, reporting degree 1 or nothing and warning that the trace test failed. Both causes are

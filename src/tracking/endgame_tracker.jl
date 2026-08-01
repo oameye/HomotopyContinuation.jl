@@ -299,6 +299,10 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
         end
     end
 
+    if ts.code == TrackerCode.TERMINATED_MAX_STEPS && check_at_infinity_at_giveup!(eg)
+        return nothing
+    end
+
     state.code = _tracker_code_to_endgame_code(ts.code)
     return nothing
 end
@@ -434,6 +438,17 @@ end
     end
 end
 
+# A path that exhausts its step budget still holds a valuation. If a coordinate
+# is a standing at-infinity candidate there, its divergence is what stopped the
+# path, and the only thing missing is the coordinate growth the step budget ran
+# out before reaching. How far a path gets before the budget runs out varies with
+# the seed, so without this the same divergent path is reported at-infinity on
+# one seed and out-of-steps on another.
+function check_at_infinity_at_giveup!(eg::EndgameTracker)::Bool
+    (eg.options.at_infinity_check && eg.val.samples >= 2) || return false
+    return check_at_infinity!(eg, true)
+end
+
 @inline function _clear_at_infinity_candidate!(state::EndgameState, i::Int)::Nothing
     state.at_inf_active[i] = false
     state.at_inf_starts[i] = NaN
@@ -464,7 +479,7 @@ function step!(eg::EndgameTracker)::Nothing
     if state.in_endgame && state.steps_eg >= opts.max_endgame_steps
         if !isnan(state.accuracy) && state.accuracy < opts.singular_min_accuracy
             state.code = EndgameCode.SUCCESS
-        else
+        elseif !check_at_infinity_at_giveup!(eg)
             state.code = EndgameCode.TERMINATED_MAX_STEPS
         end
         return nothing
@@ -475,7 +490,7 @@ function step!(eg::EndgameTracker)::Nothing
         if eg_ext_steps >= opts.max_endgame_extended_steps
             if !isnan(state.accuracy) && state.accuracy < opts.singular_min_accuracy
                 state.code = EndgameCode.SUCCESS
-            else
+            elseif !check_at_infinity_at_giveup!(eg)
                 state.code = EndgameCode.TERMINATED_MAX_EXTENDED_STEPS
             end
             return nothing
@@ -691,7 +706,7 @@ end
 # check_at_infinity!
 # ---------------------------------------------------------------------------
 
-function check_at_infinity!(eg::EndgameTracker)::Bool
+function check_at_infinity!(eg::EndgameTracker, relaxed::Bool = false)::Bool
     state = eg.state
     val = eg.val
     opts = eg.options
@@ -751,7 +766,8 @@ function check_at_infinity!(eg::EndgameTracker)::Bool
             end
 
             cond_growth = κ / state.at_inf_conds[i]
-            min_growth = clamp(0.25^(4.0 * abs(v)), 20.0, opts.min_coord_growth)
+            min_growth = relaxed ? 1.0 :
+                clamp(0.25^(4.0 * abs(v)), 20.0, opts.min_coord_growth)
 
             if coord_growth > min_growth &&
                     (cond_growth > opts.min_cond_growth || κ > max(1.0e8, opts.min_cond))
@@ -969,7 +985,7 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
                 state.code = EndgameCode.SUCCESS
             elseif state.singular_steps >= 2
                 _predict_and_finalize!(eg, true)
-            else
+            elseif !check_at_infinity_at_giveup!(eg)
                 state.code = EndgameCode.TERMINATED_MAX_STEPS
             end
             return nothing
