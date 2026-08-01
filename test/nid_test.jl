@@ -272,9 +272,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         # in P³. Homogeneous input is regenerated projectively, so the witness
         # sets are cut by linear (not affine) subspaces.
         G = System([a * c, b * c]; variables = x)
-        # Seeded: the splitting stage's trace test on a projective witness set
-        # fails on a minority of seeds and drops the surface (02_status.md).
-        N = solve(G, Decomposition(; seed = UInt32(3), show_progress = false))
+        N = solve(G, Decomposition(; show_progress = false))
         @test degrees(N) == Dict(2 => [4], 1 => [6])
         @test ncomponents(N) == 2
 

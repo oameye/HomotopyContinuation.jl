@@ -965,7 +965,7 @@ function _monodromy_with_options(
     MS = MonodromySolver(
         F, cp;
         options = opts, tracker_options = tracker_options,
-        rng = _tagged_rng(seed, 0x0000_0001),
+        rng = _tagged_rng(seed, 0x0000_0001), start_solutions = X,
     )
     return _monodromy_solve!(MS, X, cp, seed, show_progress, exec)
 end

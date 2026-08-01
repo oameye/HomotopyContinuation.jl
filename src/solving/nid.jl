@@ -233,6 +233,7 @@ function _decompose_with_monodromy(
     cp = convert(LinearSubspace{ComplexF64}, L)
     MS = MonodromySolver(
         G, cp; options = options, tracker_options = tracker_options, rng = rng,
+        start_solutions = P,
     )
 
     res = _monodromy_solve!(
@@ -240,9 +241,17 @@ function _decompose_with_monodromy(
     )
 
     if warning && (something(trace(res), Inf) > options.trace_test_tol)
-        @warn "Trying to decompose a non-complete set of witness points for " *
-            "codimension $(dim(L)) (trace test failed). Output contains all " *
-            "components for which the trace test succeeded."
+        if trace_complete(MS)
+            @warn "Trying to decompose a non-complete set of witness points for " *
+                "codimension $(dim(L)) (trace test failed). Output contains all " *
+                "components for which the trace test succeeded."
+        else
+            @warn "The trace test for codimension $(dim(L)) is inconclusive: " *
+                "$(MS.trace_dropped) of $(MS.trace_dropped + MS.trace_paths) paths " *
+                "failed to track around the trace loop, so the trace is summed over " *
+                "fewer points than the witness set holds. Output contains all " *
+                "components for which the trace test succeeded."
+        end
     end
 
     # Accumulate orbit connectivity across iterations: a single loop fragments a
@@ -257,6 +266,7 @@ function _decompose_with_monodromy(
     d = length(master)                            # running total degree
 
     iter = 0
+    inconclusive = 0
     while any(!, done)
         iter += 1
         iter > max_iters && break
@@ -285,7 +295,13 @@ function _decompose_with_monodromy(
             res_orbit = _monodromy_solve!(
                 MS, P_orbit, cp, rand(rng, UInt32), show_monodromy_progress, exec,
             )
-            something(trace(res_orbit), Inf) < options.trace_test_tol || continue
+            if something(trace(res_orbit), Inf) >= options.trace_test_tol
+                # A dropped column is why the trace failed here; the orbit is
+                # retried on the next iteration and only silently lost if the
+                # iterations run out.
+                trace_complete(MS) || (inconclusive += 1)
+                continue
+            end
 
             # Singleton gate: a point of a degree > 1 component often passes the
             # trace test alone before accumulation connects it to its siblings,
@@ -306,6 +322,14 @@ function _decompose_with_monodromy(
         if sum(degree, decomposition; init = 0) == d
             break
         end
+    end
+
+    if warning && inconclusive > 0 && sum(degree, decomposition; init = 0) < d
+        @warn "Codimension $(dim(L)) is missing " *
+            "$(d - sum(degree, decomposition; init = 0)) of its $d witness points, " *
+            "and $inconclusive orbit trace tests were inconclusive because paths " *
+            "failed to track around the trace loop. The components below are the " *
+            "ones the trace test could confirm."
     end
 
     return decomposition

@@ -297,6 +297,7 @@ end
 
 function MonodromyLoop(
         base::AbstractVector, parameter_sampler::PS, rng::Random.AbstractRNG,
+        ::Float64 = 0.0,
     ) where {PS}
     p = convert(Vector{ComplexF64}, base)
     p₁ = convert(Vector{ComplexF64}, parameter_sampler(rng, p))
@@ -309,19 +310,40 @@ end
 
 function MonodromyLoop(
         base::LinearSubspace, parameter_sampler::PS, rng::Random.AbstractRNG,
+        step::Float64 = _trace_step(base, PathResult[]),
     ) where {PS}
     L = convert(LinearSubspace{ComplexF64}, base)
     # The second linear space is just a translation in order to perform a
-    # trace test. To still find new solutions quickly we translate the linear
-    # space by a larger distance.
-    # EQUAL SPACING of L, L₀₁, L₁ is load-bearing for the trace test:
+    # trace test. EQUAL SPACING of L, L₀₁, L₁ is load-bearing for it:
     # L₀₁ - L == L₁ - L₀₁ == v.
-    v = LA.rmul!(LA.normalize!(randn(rng, ComplexF64, codim(L))), 5)
+    v = LA.rmul!(LA.normalize!(randn(rng, ComplexF64, codim(L))), step)
     L₀₁ = translate(L, v, Extrinsic)
     L₁ = translate(L₀₁, v, Extrinsic)
     L₂ = convert(LinearSubspace{ComplexF64}, parameter_sampler(rng, L))
 
     return MonodromyLoop(L, L₀₁, L₁, L₂)
+end
+
+# Step between the three trace slices, in the extrinsic coordinates whose rows
+# are normalized. Affinely the base carries the ambient scale, and a wide step
+# also finds new solutions quickly. A linear base is the projective regime: the
+# solutions are chart representatives and `A x = v` forces ‖x‖ ≳ ‖v‖, so a step
+# wider than the points inflates them until the equations lose accuracy at their
+# degree, while a narrower one stops separating the three slices. Both ends want
+# the step at the scale of the points themselves, which is what the median is.
+_trace_step(::Vector{ComplexF64}, ::Vector{PathResult})::Float64 = 0.0
+
+function _trace_step(L::LinearSubspace, results::Vector{PathResult})::Float64
+    is_linear(L) || return 5.0
+    norms = Float64[]
+    for r in results
+        ν = LA.norm(solution(r))
+        (isfinite(ν) && ν > 0) && push!(norms, ν)
+    end
+    isempty(norms) && return 1.0
+    sort!(norms)
+    n = length(norms)
+    return isodd(n) ? norms[(n + 1) ÷ 2] : 0.5 * (norms[n ÷ 2] + norms[n ÷ 2 + 1])
 end
 
 # A `LoopTrackingJob` made self-contained: everything a consumer needs beyond its
@@ -984,8 +1006,8 @@ list, the deduplication structure with its lock, options, statistics and the
 trace matrix for the trace test.
 """
 mutable struct MonodromySolver{H, P, B, UP <: UniquePoints, MO <: MonodromyOptions}
-    # Mutable: `loops` and `statistics` are reset between solves; all other
-    # fields are const.
+    # Mutable: `loops`, `statistics` and the two trace counters are reset
+    # between solves; all other fields are const.
     const workers::Vector{MonodromyWorkerState{H, P}}
     const builder::B                                  # callable () -> MonodromyWorkerState{H, P}
     loops::Vector{MonodromyLoop{P}}
@@ -997,6 +1019,12 @@ mutable struct MonodromySolver{H, P, B, UP <: UniquePoints, MO <: MonodromyOptio
     # to check whether the trace is colinear. The sums are augmented by 1 to
     # make this work for the one/two variable cases: an (n + 1) × 3 matrix.
     const trace::Matrix{ComplexF64}
+    # Paths that reached the halfway subspace and summed into `trace`, and paths
+    # that were asked to but lost a segment on the way. Both are written under
+    # `trace_lock`. A nonzero `trace_dropped` makes the trace a statement about
+    # the tracking rather than about the witness set.
+    trace_paths::Int
+    trace_dropped::Int
     const trace_lock::ReentrantLock
 end
 
@@ -1024,6 +1052,8 @@ function _monodromy_solver_from_builder(
         options,
         MonodromyStatistics(),
         trace,
+        0,
+        0,
         ReentrantLock(),
     )
 end
@@ -1085,18 +1115,57 @@ function (builder::ChartParameterMonodromyBuilder)()
     )
 end
 
+# Smallest normalized alignment |v'x| / (‖v‖‖x‖) over the start solutions.
+function _chart_alignment(
+        v::Vector{ComplexF64}, S::AbstractVector{<:AbstractVector},
+    )::Float64
+    q = Inf
+    nv = LA.norm(v)
+    for x in S
+        length(x) == length(v) || continue
+        nx = LA.norm(x)
+        iszero(nx) && continue
+        λ = zero(ComplexF64)
+        for i in eachindex(v)
+            λ += v[i] * x[i]
+        end
+        q = min(q, abs(λ) / (nv * nx))
+    end
+    return q
+end
+
+# `on_chart!` divides by v'x, so a chart normal near-orthogonal to a start
+# solution inflates that representative by 1/|v'x| and costs the tracker the
+# digits the trace test needs. Keep the best of a few draws.
+function _conditioned_chart(
+        rng::Random.AbstractRNG, n::Int, S::AbstractVector{<:AbstractVector},
+    )::Vector{ComplexF64}
+    chart = randn(rng, ComplexF64, n)
+    q = _chart_alignment(chart, S)
+    for _ in 2:16
+        q >= 0.2 && break
+        v = randn(rng, ComplexF64, n)
+        qv = _chart_alignment(v, S)
+        if qv > q
+            chart, q = v, qv
+        end
+    end
+    return chart
+end
+
 function MonodromySolver(
         F::SystemLike, p::Vector{ComplexF64};
         options::MonodromyOptions = MonodromyOptions(),
         tracker_options::TrackerOptions = TrackerOptions(),
         rng::Random.AbstractRNG = Random.default_rng(),
+        start_solutions::AbstractVector{<:AbstractVector} = Vector{ComplexF64}[],
     )
     n = nvariables(F)
     if is_homogeneous(F)
         # Homogeneous system: solutions are projective, put the problem on a
         # random affine chart. All workers must share the SAME chart so
         # deduplication is consistent.
-        chart = randn(rng, ComplexF64, n)
+        chart = _conditioned_chart(rng, n, start_solutions)
         chart_builder = ChartParameterMonodromyBuilder(
             F, p, chart, n, tracker_options,
         )
@@ -1170,11 +1239,14 @@ function MonodromySolver(
         tracker_options::TrackerOptions = TrackerOptions(),
         intrinsic::Bool = _default_intrinsic(L),
         rng::Random.AbstractRNG = Random.default_rng(),
+        start_solutions::AbstractVector{<:AbstractVector} = Vector{ComplexF64}[],
     )
     n = nvariables(F)
     projective = is_linear(L) && is_homogeneous(F)
-    # All workers must share the SAME chart so deduplication is consistent.
-    chart = randn(rng, ComplexF64, n)
+    # All workers must share the SAME chart so deduplication is consistent. It
+    # is unused affinely, where the draw only keeps the random stream in step.
+    chart = projective ? _conditioned_chart(rng, n, start_solutions) :
+        randn(rng, ComplexF64, n)
     builder = SubspaceMonodromyBuilder(
         F, L, chart, n, tracker_options, intrinsic, projective,
         _random_gamma(rng),
@@ -1185,9 +1257,17 @@ function MonodromySolver(
     )
 end
 
-function add_loop!(MS::MonodromySolver{H, P}, rng::Random.AbstractRNG) where {H, P}
+function add_loop!(
+        MS::MonodromySolver{H, P}, rng::Random.AbstractRNG,
+        results::Vector{PathResult},
+    ) where {H, P}
     base = MS.workers[1].base
-    push!(MS.loops, MonodromyLoop(base, MS.options.parameter_sampler, rng))
+    push!(
+        MS.loops,
+        MonodromyLoop(
+            base, MS.options.parameter_sampler, rng, _trace_step(base, results),
+        ),
+    )
     Threads.atomic_add!(MS.statistics.generated_loops, 1)
     if MS.options.permutations
         push!(MS.statistics.permutations, zeros(Int, length(MS.unique_points)))
@@ -1205,8 +1285,16 @@ end
 function reset_trace!(MS::MonodromySolver)::Nothing
     MS.trace .= 0
     MS.trace[end, :] .= 1
+    MS.trace_paths = 0
+    MS.trace_dropped = 0
     return nothing
 end
+
+# A trace summed over fewer paths than were sent around the loop says nothing
+# about the witness set: it is short by whatever the lost paths would have
+# contributed. Callers acting on `trace_colinearity` must attribute a failure
+# through this first.
+trace_complete(MS::MonodromySolver)::Bool = MS.trace_dropped == 0
 
 # Colinearity measure of the three accumulated trace columns: σ₃/σ₁ of the
 # singular values. Near zero iff the columns are (affinely) colinear.
@@ -1246,9 +1334,20 @@ function _accumulate_trace!(
             MS.trace[i, 2] += x₀₁[i]
             MS.trace[i, 3] += x₁[i]
         end
+        MS.trace_paths += 1
     end
     return nothing
 end
+
+# A path asked for trace columns that never reached the halfway subspace.
+function _trace_dropped!(MS::MonodromySolver)::Nothing
+    Base.@lock MS.trace_lock (MS.trace_dropped += 1)
+    return nothing
+end
+
+# The driver counts for a `TraceColumns` sink: the worker returning it is a
+# separate process and holds no solver.
+_trace_dropped!(::TraceColumns)::Nothing = nothing
 
 function _accumulate_trace!(
         sink::TraceColumns, x₀::Vector{ComplexF64}, x₀₁::Vector{ComplexF64},
@@ -1264,6 +1363,7 @@ function _accumulate_trace!(MS::MonodromySolver, columns::Matrix{ComplexF64})::N
         for j in 1:3, i in axes(columns, 1)
             MS.trace[i, j] += columns[i, j]
         end
+        MS.trace_paths += 1
     end
     return nothing
 end
@@ -1303,11 +1403,12 @@ function track_loop!(
     if P === LinearSubspace{ComplexF64} && collect_trace
         x₀ = copy(x)
         set_loop_segment!(ws, loop, 1)   # p → p₀₁
-        _track_middle_segment!(ws, ω, μ, extended_precision) || return nothing
+        _track_middle_segment!(ws, ω, μ, extended_precision) ||
+            return _trace_dropped!(trace_sink)
         x₀₁ = copy(x)
         set_loop_segment!(ws, loop, 2)   # p₀₁ → p₁
         _track_middle_segment!(ws, tr.state.ω, tr.state.μ, tr.state.extended_prec) ||
-            return nothing
+            return _trace_dropped!(trace_sink)
         x₁ = copy(x)
         _accumulate_trace!(trace_sink, x₀, x₀₁, x₁)
     else
@@ -1457,7 +1558,7 @@ function serial_monodromy_solve!(
             break
         end
 
-        add_loop!(MS, rng)
+        add_loop!(MS, rng, results)
         reset_trace!(MS)
         # schedule all jobs on the fresh loop
         new_loop_id = nloops(MS)
@@ -1821,7 +1922,7 @@ function threaded_monodromy_solve!(
                         break
                     end
 
-                    add_loop!(MS, loop_rng)
+                    add_loop!(MS, loop_rng, results)
                     reset_trace!(MS)
                     # schedule all jobs
                     new_loop_id = nloops(MS)
@@ -2056,8 +2157,9 @@ function solve(
 end
 
 # A single solution is accepted as itself, not as a list of coordinates.
-_monodromy_starts(sols::AbstractVector{<:Number}) = [sols]
-_monodromy_starts(sols) = sols
+_monodromy_starts(sols::AbstractVector{<:Number})::Vector{Vector{ComplexF64}} =
+    [Vector{ComplexF64}(ComplexF64.(sols))]
+_monodromy_starts(sols::StartsLike)::Vector{Vector{ComplexF64}} = _start_points(sols)
 
 """
     solve(F::System, R::MonodromyResult, p_target, alg = Continuation(), exec = Threaded())
@@ -2077,13 +2179,14 @@ solve(
 )::Result = solve(F, R, p_target, Continuation(), exec)
 
 function _monodromy_parameters(
-        F::SystemLike, S, p, alg::Monodromy, exec::AbstractExecutor,
-        rng::Random.AbstractRNG,
+        F::SystemLike, S::AbstractVector{<:AbstractVector}, p, alg::Monodromy,
+        exec::AbstractExecutor, rng::Random.AbstractRNG,
     )::MonodromyResult
     cp = convert(Vector{ComplexF64}, p)
     MS = MonodromySolver(
         F, cp;
         options = alg.options, tracker_options = _tracker_options(alg), rng = rng,
+        start_solutions = S,
     )
     return _monodromy_solve!(
         MS, S, cp, _seed(alg), _show_progress(alg), exec,
@@ -2092,15 +2195,15 @@ function _monodromy_parameters(
 end
 
 function _monodromy_subspace(
-        F::SystemLike, S, L, alg::Monodromy, exec::AbstractExecutor,
-        rng::Random.AbstractRNG,
+        F::SystemLike, S::AbstractVector{<:AbstractVector}, L, alg::Monodromy,
+        exec::AbstractExecutor, rng::Random.AbstractRNG,
     )::MonodromyResult
     cp = convert(LinearSubspace{ComplexF64}, L)
     MS = MonodromySolver(
         F, cp;
         options = alg.options, tracker_options = _tracker_options(alg),
         intrinsic = alg.intrinsic === nothing ? _default_intrinsic(cp) : alg.intrinsic,
-        rng = rng,
+        rng = rng, start_solutions = S,
     )
     mH, nH = size(MS.workers[1].homotopy)
     mH < nH && throw(

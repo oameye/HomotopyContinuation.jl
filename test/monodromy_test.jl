@@ -4,6 +4,15 @@ using HomotopyContinuationNext
 using HomotopyContinuationNext: find_start_pair
 using DynamicPolynomials: @polyvar, subs
 
+using HomotopyContinuationNext: _trace_step, _with_solution, _conditioned_chart,
+    _chart_alignment, _monodromy_starts, PathResult, solution
+
+using HomotopyContinuationNext: MonodromySolver, MonodromyWorkerState, track_loop!,
+    track_start!, set_loop_segment!, reset_trace!, trace_colinearity, trace_complete,
+    is_success
+using HomotopyContinuationNext: verify_solution_completeness, parameters
+using HomotopyContinuationNext: _accumulate_trace!, _trace_dropped!
+
 @testset "find_start_pair" begin
     Random.seed!(0xf00d)
     # linear in parameters
@@ -57,6 +66,20 @@ using HomotopyContinuationNext: MonodromyOptions, MonodromyLoop, MonodromyStatis
     d2 = extrinsic(loopL.p₁).b .- extrinsic(loopL.p₀₁).b
     @test d1 ≈ d2 atol = 1.0e-12
 
+    # A linear base is the projective regime, where the step follows the points
+    # instead of sweeping wide. Equal spacing holds either way.
+    Llin = rand_subspace(3; dim = 1, affine = false)
+    loopLin = MonodromyLoop(Llin, independent_normal, Random.MersenneTwister(0x2718))
+    e1 = extrinsic(loopLin.p₀₁).b .- extrinsic(loopLin.p).b
+    e2 = extrinsic(loopLin.p₁).b .- extrinsic(loopLin.p₀₁).b
+    @test e1 ≈ e2 atol = 1.0e-12
+    @test norm(d1) ≈ 5
+    @test norm(e1) ≈ 1
+
+    # An explicit step is what the translation uses.
+    loopStep = MonodromyLoop(Llin, independent_normal, Random.MersenneTwister(0x2718), 3.0)
+    @test norm(extrinsic(loopStep.p₀₁).b .- extrinsic(loopStep.p).b) ≈ 3
+
     stats = MonodromyStatistics()
     loop_finished!(stats, 2)
     loop_finished!(stats, 2)
@@ -65,9 +88,60 @@ using HomotopyContinuationNext: MonodromyOptions, MonodromyLoop, MonodromyStatis
     @test loops_no_change(stats, 3) == 1
 end
 
-using HomotopyContinuationNext: MonodromySolver, MonodromyWorkerState, track_loop!,
-    track_start!, set_loop_segment!, reset_trace!, trace_colinearity, PathResult,
-    is_success, solution
+@testset "trace slice step" begin
+    @polyvar w[1:2]
+    r = solve(
+        System([w[1]^2 + w[2]^2 - 4, w[1] - w[2]^2]),
+        TotalDegree(; seed = UInt32(11), show_progress = false),
+    )
+    rs = path_results(r)
+    @test !isempty(rs)
+
+    Laff = rand_subspace(2; dim = 1)
+    Llin = rand_subspace(2; dim = 1, affine = false)
+    # Affine: a fixed wide sweep, whatever scale the solutions sit at.
+    @test _trace_step(Laff, rs) == 5.0
+    # Linear (projective): the scale of the solutions themselves.
+    scaled = [_with_solution(pr, 10 .* solution(pr)) for pr in rs]
+    @test _trace_step(Llin, scaled) ≈ 10 * _trace_step(Llin, rs)
+    @test _trace_step(Laff, scaled) == 5.0
+    @test _trace_step(Llin, PathResult[]) == 1.0
+end
+
+@testset "affine chart conditioning" begin
+    seed = 0x00c0ffee
+    n = 4
+    first_draw = randn(Random.MersenneTwister(seed), ComplexF64, n)
+    # `on_chart!` divides by v'x, so a start solution orthogonal to the draw
+    # cannot be placed on it at all.
+    x = LinearAlgebra.nullspace(transpose(first_draw))[:, 1]
+    @test _chart_alignment(first_draw, [x]) < 1.0e-12
+    chart = _conditioned_chart(Random.MersenneTwister(seed), n, [x])
+    @test _chart_alignment(chart, [x]) >= 0.2
+    # Nothing to condition on leaves the draw alone.
+    @test _conditioned_chart(Random.MersenneTwister(seed), n, Vector{ComplexF64}[]) ==
+        first_draw
+end
+
+@testset "monodromy start solutions" begin
+    @polyvar y[1:2] p[1:2]
+    F = System([y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]]; variables = y, parameters = p)
+    p0 = [3.0 + 0im, 1.0 + 0im]
+    r = solve(
+        System([y[1]^2 + y[2]^2 - 3, y[1] + y[2] - 1]; variables = y),
+        TotalDegree(; seed = UInt32(5), show_progress = false),
+    )
+    @test nsolutions(r) == 2
+
+    # A `Result` and a single solution are both accepted as start solutions.
+    @test _monodromy_starts(r) == solutions(r)
+    s = solutions(r)[1]
+    @test _monodromy_starts(s) == [s]
+
+    mr = solve(F, r, p0, Monodromy(; seed = UInt32(5), show_progress = false), Serial())
+    @test nsolutions(mr) == 2
+end
+
 
 @testset "worker state loop tracking (vector parameters)" begin
     Random.seed!(31)
@@ -161,6 +235,26 @@ end
     @test_throws ArgumentError solve(Q, Monodromy(; dim = 1, seed = UInt32(99), show_progress = false), Serial())
 end
 
+@testset "trace completeness" begin
+    @polyvar y[1:2] p[1:2]
+    F = System([y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]]; variables = y, parameters = p)
+    MS = MonodromySolver(F, ComplexF64[3, 1])
+    reset_trace!(MS)
+    @test trace_complete(MS) && MS.trace_paths == 0
+
+    x = ComplexF64[1, 1]
+    _accumulate_trace!(MS, x, x, x)
+    @test MS.trace_paths == 1 && trace_complete(MS)
+
+    # A path that never reached the halfway subspace leaves the trace short, so
+    # its value says nothing about the witness set.
+    _trace_dropped!(MS)
+    @test MS.trace_dropped == 1 && !trace_complete(MS)
+
+    reset_trace!(MS)
+    @test MS.trace_paths == 0 && MS.trace_dropped == 0 && trace_complete(MS)
+end
+
 @testset "threaded == serial on solution sets" begin
     # nonlinear-in-p system with 4 solutions. target_solutions_count makes the
     # run deterministic (the heuristic stop can fire early on some seeds).
@@ -193,7 +287,6 @@ end
     end
 end
 
-using HomotopyContinuationNext: verify_solution_completeness, parameters
 
 @testset "verify_solution_completeness" begin
     @polyvar y[1:2] p[1:2]

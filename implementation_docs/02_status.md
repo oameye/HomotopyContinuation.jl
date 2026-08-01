@@ -719,20 +719,38 @@ Closed by this audit:
   max-steps drift is what the `skeel_row_scaling!` entry above reports for two paths over
   `TEST_SYSTEM_COLLECTION`. `v2_parity_test.jl` pins `seed = 1` so the assertion is
   deterministic; the criterion itself is what wants fixing.
-- [ ] **The splitting stage's trace test on a projective witness set is flaky.** Reachable
-  only now that `Regeneration` produces projective witness sets. Splitting the projective
-  quartic of `nid_test.jl` "Homogeneous systems" on its own over 30 seeds (single-threaded,
-  as `make test` runs its workers) drops the surface on 2 of them, reporting degree 1 or
-  nothing and warning that the trace test failed; the same-degree, same-dimension affine
-  witness set is 0 of 30. The regeneration stage is correct on every seed tried; only the
-  split fails, so `nid_test.jl` "Homogeneous systems" pins a seed.
+- [x] **The splitting stage's trace test on a projective witness set.** Splitting the
+  projective quartic of `nid_test.jl` "Homogeneous systems" dropped the surface on 2 of 30
+  seeds, reporting degree 1 or nothing and warning that the trace test failed. Both causes are
+  the affine chart the projective regime tracks on, and both are fixed; the test no longer
+  pins a seed, and the split is now clean over 60 seeds isolated and 40 through the full
+  `Decomposition`, warnings included.
+  - The chart normal was drawn at random, independent of the points it had to normalize.
+    `on_chart!` divides by `v'x`, so a normal near-orthogonal to one witness point inflated
+    that representative by `1/|v'x|` (observed: 123 against ~1 for its siblings) and the loop
+    lost the path. The two failing seeds were exactly the two whose worst normalized alignment
+    `|v'x| / (‖v‖‖x‖)` fell below 0.03. `MonodromySolver` now takes the start solutions and
+    keeps the best of up to 16 draws, stopping at an alignment of 0.2.
+  - The trace loop translates the base subspace by `‖v‖ = 5` twice, which is calibrated for an
+    affine base with `‖b‖ ~ 1`. A linear base has no scale of its own: the points are held on
+    the chart at `‖x‖ ~ 1` while `A x = t v` forces `‖x‖ ≳ ‖t v‖`, so the two constraints pull
+    apart and the equations, of degree 6 and 7 here, lose the digits the `1.0e-10`
+    `trace_test_tol` needs. `_trace_step` now takes the step from the median solution norm
+    when the base is linear, which is what both ends want: the trace test has to resolve the
+    three slices apart (separation `‖v‖ / ‖x‖`) and the tracker has to hold accuracy through
+    the growth `(‖x‖ + ‖v‖)^deg`. Affinely the fixed wide step stands, as in v2. `add_loop!`
+    carries the current results in to compute it.
 
-  Not yet root-caused. The asymmetry worth checking first: `MonodromySolver` fixes
-  `projective = is_linear(L) && is_homogeneous(F)` once from the base subspace, and every
-  worker homotopy carries the chart from then on, while `MonodromyLoop` translates the base
-  into subspaces that are no longer linear. v2 builds its loop homotopy the same way, so this
-  is not a plain v2/v3 divergence, and the tight `trace_test_tol = 1.0e-10` of
-  `_decompose_stage_monodromy` may simply be what makes it visible here.
+  A failed path is what made this silent rather than loud: it contributes no trace column, so
+  the trace test reads the remaining points as a non-complete witness set, which is a statement
+  about the geometry rather than about the tracking. `MonodromySolver` now counts both what
+  summed into the trace and what was asked to and lost a segment (`trace_paths`,
+  `trace_dropped`, `trace_complete`), and `_decompose_with_monodromy` attributes its warning
+  through them: a short trace reports the failed paths, and orbits skipped for that reason are
+  reported at the end rather than dropped in silence. The counts do not gate the stopping rule;
+  whether a short trace should refuse to declare `SUCCESS` is a separate behavioural change.
+
+  v2 draws its chart and its translation the same way, so neither is a v2/v3 divergence.
 - [x] **`EquationSorting.RANDOMIZED`** on `Regeneration` and `Decomposition`: sort by
   decreasing degree, then replace the equations by a random upper-triangular combination, which
   leaves every `V(eqs[i:end])` unchanged while giving each equation the top degree. Rejected for

@@ -189,7 +189,7 @@ function _drive_monodromy!(
             break
         end
 
-        HCN.add_loop!(MS, rng)
+        HCN.add_loop!(MS, rng, results)
         HCN.reset_trace!(MS)
         # schedule all jobs on the fresh loop
         new_loop_id = HCN.nloops(MS)
@@ -245,9 +245,16 @@ function _handle_monodromy_result!(
     opts = MS.options
     stats = MS.statistics
     # Independent of success: the trace sums over the first two segments, which
-    # can land while a later one fails.
+    # can land while a later one fails. The worker holds no solver, so the
+    # missing columns of a job that asked for them are counted here.
     columns = r.trace
-    columns === nothing || HCN._accumulate_trace!(MS, columns)
+    if columns === nothing
+        collect_trace = opts.trace_test && HCN.nloops(MS) == r.loop_id &&
+            MS.workers[1].base isa HCN.LinearSubspace
+        collect_trace && HCN._trace_dropped!(MS)
+    else
+        HCN._accumulate_trace!(MS, columns)
+    end
 
     res = r.result
     if res === nothing
