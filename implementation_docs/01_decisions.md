@@ -343,6 +343,34 @@ The accessor reads a private `_support_input` snapshot rather than the exposed `
 
 `MatrixWorkspace <: AbstractMatrix{ComplexF64}`, so passing a workspace to `skeel_row_scaling!(d, A::AbstractMatrix{ComplexF64}, c)` type-checked and compiled the scaling body a second time, reading through `getindex(::MatrixWorkspace, i, j)` at runtime. The two endgame call sites pass `ws.A`, collapsing 112ms of duplicate specialization to 57ms.
 
+### Row scaling serves the solve; the endgame reads the column-scaled condition number (MEASURED)
+
+`skeel_row_scaling!` scales each row by the reciprocal of its weighted sum, rounded to a power
+of 2, except that a row more than 2^30 below the largest one is scaled by that bound instead, so
+a near-zero row is never amplified. The factors therefore depend only on the ratios between the
+row sums. The earlier form compared a binary exponent against a raw row sum
+(`s = scaling_threshold + maximum(d)`, v2's spelling as well), which left every row at 1.0 once
+the sums passed roughly 2^30, and gave a row below the cut the raw magnitude of the others.
+
+Row scaling is what `LA.ldiv!(x, J, b, w)` applies before the LU, and correcting it changes the
+Newton solves on systems whose Jacobian is far from unit scale. It must not reach a condition
+number the endgame acts on: normalizing the rows removes the spread between the row norms, and
+that spread is the whole divergence signal at a point running to infinity. Measured on
+six_revolute, at an endpoint with `|x| ~ 1e5` and a valuation of -1 in six coordinates, the
+column-scaled Jacobian has condition 1.3e12 and the row-and-column-scaled one 3.1e2, so
+`check_at_infinity!` (which confirms a candidate on `κ > 1e8` or a 1e4 growth) stopped confirming
+and 27 paths ran to `max_endgame_steps` instead. Junk removal in u-regeneration rejects on the
+same evidence through `is_nonsingular`, and lost it the same way: `intersect` on the
+`witness_set_test` triple returned an extra point in 7 runs out of 8.
+
+All four endgame measurements (`tracking_stopped!`, both `check_at_infinity!` sites,
+`add_sample!`, and `J0_norm` in the singular acceptance test) therefore pass `state.unit_scaling`,
+an all-ones vector, as the row scaling. `EndgameState` no longer carries a row scaling at all.
+Against the earlier behaviour this is a no-op wherever the rows were commensurate, which is why
+the five worst conics of the 3264 instance still measure 1.03e14-1.51e14; over the systems of
+`TEST_SYSTEM_COLLECTION` plus mohab, ~9000 paths, two paths change classification, both between
+at-infinity and max-steps.
+
 ### The QR path is erased behind a shape-chosen FunctionWrapper
 
 `factorize!` and `LA.ldiv!` branch on `m == n`, so every square route compiled `qr!`, `qr_ldiv!`, `reflector!`, `ldiv_upper!` for a branch it never takes (156ms exclusive on `total_degree_interpreted_serial`). A bare `Base.inferencebarrier` recovers it but puts a dynamic dispatch on the tracker hot path, which `test/alloc_check_test.jl` rejects.
@@ -434,7 +462,7 @@ ill-conditioned, and at or above it no computation at that precision can separat
 a singular one. The scaling matters here, because it is what makes the distinction
 visible at all: the five worst conics of the 3264-at-five-real-conics instance have
 unscaled condition number 1.9e18-2.9e18, which is past the line, but 1.03e14-1.51e14
-after Skeel row and column scaling, which is not, and Krawczyk certifies all five as
+after column scaling, which is not, and Krawczyk certifies all five as
 regular. The excess endpoints the same solve produces sit at 1.1e17-4.6e18 scaled and
 stay excluded. Lowering the default to catch those five's neighbourhood costs genuine
 solutions out of `nsolutions`, which is the worse error of the two: a root wrongly called

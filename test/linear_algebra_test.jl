@@ -66,6 +66,27 @@ end
     skeel_row_scaling!(WS, FSVec{Float64}(ones(n)))
     @test all(WS.row_scaling .> 0.0)
     @test all(isfinite.(WS.row_scaling))
+
+    # The factors depend only on the ratios between the weighted row sums, so a
+    # Jacobian whose entries are O(10^12) is scaled exactly like an O(1) one.
+    M = ComplexF64[1 2 3; 4 5 6; 7 8 10]
+    c = FSVec{Float64}(ones(3))
+    d1 = FSVec{Float64}(zeros(3))
+    skeel_row_scaling!(d1, FSMat{ComplexF64}(M), c)
+    for σ in (exp2(-40.0), exp2(20.0), exp2(60.0))
+        d = FSVec{Float64}(zeros(3))
+        skeel_row_scaling!(d, FSMat{ComplexF64}(σ .* M), c)
+        @test collect(d) == collect(d1) ./ σ
+    end
+
+    # A row far below the largest one is scaled by the threshold bound, never
+    # amplified to the scale of the others and never left at raw magnitude.
+    A = FSMat{ComplexF64}(ComplexF64[exp2(-50.0) .* M[1, :]'; M[2:3, :]])
+    d = FSVec{Float64}(zeros(3))
+    skeel_row_scaling!(d, A, c)
+    sums = [sum(abs, Matrix(A)[i, :]) * d[i] for i in 1:3]
+    @test sums[1] < exp2(-19.0)
+    @test all(0.5 .<= sums[2:3] .<= 1.0)
 end
 
 @testset "Scaled condition number" begin

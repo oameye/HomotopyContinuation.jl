@@ -432,8 +432,10 @@ end
 Compute optimal scaling factors `d` for the matrix `A` following Skeel (1979)
 if `c` is approximately of the order of the solution of the linear system
 of interest. The scaling factors are rounded to powers of 2.
-Row scaling is only applied to rows where the log-scale condition
-`e - m ≥ scaling_threshold` holds, to prevent scaling near-zero rows.
+A row whose weighted sum is more than `-scaling_threshold` binary orders below
+the largest one is scaled by that bound rather than by its own sum, so a
+near-zero row is never amplified. The result depends only on the ratios between
+the row sums, not on the overall magnitude of `A`.
 """
 function skeel_row_scaling!(
         d::AbstractVector{Float64},
@@ -450,15 +452,10 @@ function skeel_row_scaling!(
         end
     end
 
-    m = maximum(d)
-    s = scaling_threshold + m
+    # Exponents on both sides: `maximum(d)` is a row sum, not a binary order.
+    s = scaling_threshold + last(frexp(maximum(d)))
     @inbounds for i in 1:n
-        e = last(frexp(d[i]))
-        if e < s
-            d[i] = 1.0
-        else
-            d[i] = exp2(-e)
-        end
+        d[i] = exp2(-max(Float64(last(frexp(d[i]))), s))
     end
 
     return d

@@ -95,6 +95,7 @@ _perturbed_set(x, y, ε::Float64, solver) = algebraicset(
             solver = SemialgebraicSetsHCSolver(;
                 algorithm = TotalDegree(;
                     show_progress = false, excess_residual_tol = atol,
+                    seed = UInt32(0x5eed),
                 ),
                 real_tol = atol,
             )

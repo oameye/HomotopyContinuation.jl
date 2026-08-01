@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-07-31.
+Last updated: 2026-08-01.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
@@ -654,6 +654,15 @@ Closed by this audit:
   split (8 paths → 6 solutions, 3 → 3, matching `polyhedral_test.jl` "affine + torus
   solutions"), and `paths_to_track` / `mixed_volume` (16 / 8 / 3 / 3). v3 already matched v2
   on all of these; only the assertions were loose.
+- [x] **`skeel_row_scaling!` stops scaling once the Jacobian is large.** Fixed: the factors now
+  depend only on the ratios between the weighted row sums, and a row below the threshold is
+  scaled by the threshold bound rather than left at raw magnitude. The condition numbers the
+  endgame acts on moved to the column-scaled Jacobian in the same pass, because normalizing the
+  rows destroys the divergence signal at-infinity detection and u-regeneration junk removal both
+  read (`01_decisions.md`, "Row scaling serves the solve"). Counts over
+  `TEST_SYSTEM_COLLECTION` plus mohab, ~9000 paths: two paths change classification, both
+  between at-infinity and max-steps; solution counts, the 3264 instance and the Fano quintic are
+  unchanged.
 - [x] **Mohab reaches v2's 693.** Two independent causes, both fixed on 2026-08-01.
   `tracking_stopped!` rejected an endpoint on an absolute `‖H(x,0)‖ > 1e-3`, which on a system
   whose terms reach 10^44 at the endpoint threw away two converged solutions; the check is now
@@ -686,13 +695,6 @@ Open, ordered by consequence:
   `OP_POW_INT` and `OP_SQRT` only, so `(x+1)^(3//2)` cannot be expressed. Same reach as the
   entry above. Blocks `slp_test.jl` "fractional powers" and "Evaluation of Acb with fractional
   powers", and the `OP_POW` branch of `operations_test.jl`.
-- [ ] **`skeel_row_scaling!` stops scaling once the Jacobian is large.** Faithful to v2, and
-  wrong in both: `s = scaling_threshold + maximum(d)` adds a threshold meant for a binary
-  exponent to a raw row sum, then compares it against `exponent(d[i])`. Any system whose scaled
-  Jacobian row sums exceed roughly 2^30 leaves every row unscaled, so the row scaling and every
-  condition number derived from it silently degrade. Intended reading is
-  `scaling_threshold + exponent(maximum(d))`. Left alone because it moves `cond` on every solve
-  and so the singular/nonsingular split everywhere; wants its own pass with the counts measured.
 - [ ] **BSP certification of a `ResultIterator`.** v2.22 certifies lazily by partitioning the
   solution candidates along one coordinate (`IteratorCertificationResult`, `BSPPartition`, `bsp`,
   `npaths`, `start_iterator_length`, `target_iterator_length`, `nnotcertified`, `nleaves`,

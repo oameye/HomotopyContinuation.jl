@@ -347,7 +347,7 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
             expected = HC._scaled_cond(
                 eg.tracker.state.jacobian.workspace,
-                eg.state.row_scaling,
+                eg.state.unit_scaling,
                 eg.state.col_scaling,
             )
             @test eg.state.sample_conds[1] ≈ expected

@@ -80,9 +80,13 @@ mutable struct EndgameState
     const best_singular::FSVec{ComplexF64}
     best_singular_accuracy::Float64
     best_singular_winding::Int
-    # Scaling for condition number
-    const row_scaling::FSVec{Float64}
+    # Scaling for condition number. Every endgame decision reads the condition
+    # number of the column-scaled Jacobian; `unit_scaling` is the all-ones row
+    # scaling that says so. Skeel row scaling normalizes away the spread between
+    # the row norms, which is the divergence signal a path running to infinity
+    # leaves behind.
     const col_scaling::FSVec{Float64}
+    const unit_scaling::FSVec{Float64}
 end
 
 function EndgameState(n::Int)
@@ -106,8 +110,8 @@ function EndgameState(n::Int)
         Inf,                                              # prev_accuracy
         FSVec{ComplexF64}(zeros(ComplexF64, n)),          # best_singular
         Inf, 0,                                           # best_singular_accuracy, _winding
-        FSVec{Float64}(ones(n)),                          # row_scaling
         FSVec{Float64}(zeros(n)),                         # col_scaling
+        FSVec{Float64}(ones(n)),                          # unit_scaling
     )
 end
 
@@ -168,7 +172,6 @@ function _reset_state!(state::EndgameState)::Nothing
     fill!(state.best_singular, zero(ComplexF64))
     state.best_singular_accuracy = Inf
     state.best_singular_winding = 0
-    fill!(state.row_scaling, 1.0)
     fill!(state.col_scaling, 0.0)
     return nothing
 end
@@ -289,9 +292,8 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
         end
 
         updated!(ws)
-        skeel_row_scaling!(state.row_scaling, ws.A, state.col_scaling)
         factorize!(ws)
-        state.cond = _scaled_cond(ws, state.row_scaling, state.col_scaling)
+        state.cond = _scaled_cond(ws, state.unit_scaling, state.col_scaling)
         if state.cond > opts.sing_cond || state.accuracy > opts.sing_accuracy
             state.singular = true
         end
@@ -445,11 +447,6 @@ function _ensure_endgame_scaling!(state::EndgameState, tracker::Tracker)::Nothin
         @inbounds for i in eachindex(state.col_scaling)
             state.col_scaling[i] = tracker.state.norm.weights[i]
         end
-        skeel_row_scaling!(
-            state.row_scaling,
-            tracker.state.jacobian.workspace.A,
-            state.col_scaling,
-        )
     end
     return nothing
 end
@@ -719,7 +716,7 @@ function check_at_infinity!(eg::EndgameTracker)::Bool
                 if isnan(κ)
                     κ = _scaled_cond(
                         tracker.state.jacobian.workspace,
-                        state.row_scaling,
+                        state.unit_scaling,
                         state.col_scaling,
                     )
                 end
@@ -738,7 +735,7 @@ function check_at_infinity!(eg::EndgameTracker)::Bool
             if isnan(κ)
                 κ = _scaled_cond(
                     tracker.state.jacobian.workspace,
-                    state.row_scaling,
+                    state.unit_scaling,
                     state.col_scaling,
                 )
             end
@@ -809,7 +806,7 @@ function add_sample!(eg::EndgameTracker, idx::Int)::Nothing
     state.sample_times[slot] = s
     state.sample_conds[slot] = _scaled_cond(
         tracker.state.jacobian.workspace,
-        state.row_scaling,
+        state.unit_scaling,
         state.col_scaling,
     )
     return nothing
@@ -907,8 +904,8 @@ function _predict_and_finalize!(eg::EndgameTracker, max_steps::Bool)::Nothing
         state.solution, complex(0.0),
     )
     updated!(ws)
-    κ_0 = _scaled_cond(ws, state.row_scaling, state.col_scaling)
-    J0_norm = _row_scaled_inf_norm_matrix(ws, state.row_scaling)
+    κ_0 = _scaled_cond(ws, state.unit_scaling, state.col_scaling)
+    J0_norm = _row_scaled_inf_norm_matrix(ws, state.unit_scaling)
 
     # Acceptance criteria for singular endpoint prediction
     accepted = state.accuracy < opts.singular_min_accuracy && (
