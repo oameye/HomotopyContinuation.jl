@@ -22,10 +22,12 @@ RuntimeGeneratedFunctions = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
 
 [weakdeps]
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+SemialgebraicSets = "8e049039-38e8-557d-ae3a-bc521ccf6204"
 Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 
 [extensions]
 HomotopyContinuationNextDistributedExt = ["Distributed", "Serialization"]
+HomotopyContinuationNextSemialgebraicSetsExt = "SemialgebraicSets"
 
 [compat]
 CommonSolve = "0.2.6"
@@ -44,6 +46,7 @@ Printf = "1"
 ProgressMeter = "1.7"
 Random = "1"
 RuntimeGeneratedFunctions = "0.5.17"
+SemialgebraicSets = "0.3"
 Serialization = "1"
 Test = "1"
 julia = "1.11"

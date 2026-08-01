@@ -126,6 +126,12 @@ const _EMPTY_SEXPR_VEC = SExprT[]
 
 @inline sexpr_storage(expr::SExprT) = variant_storage(expr)
 
+# A self-referential `@data` field is widened to `Any`; without the assertion every
+# recursive walk dispatches dynamically and boxes its result.
+@inline storage_args(s::Union{SAddStorage, SMulStorage, SFuncSymStorage}) = s.args::Vector{SExprT}
+@inline storage_base(s::SPowStorage) = s.base::SExprT
+@inline storage_arg(s::Union{SNegStorage, SUnaryStorage}) = s.arg::SExprT
+
 ## ── Hashing (matches old symbol-seeded hash for CSE ordering stability) ──
 
 function _fold_hash(seed, args)::UInt
@@ -147,17 +153,17 @@ function Base.hash(e::SExprT, h::UInt)::UInt
     elseif storage isa STmpStorage
         return hash(storage.id, hash(:STmp, h))
     elseif storage isa SAddStorage
-        return hash(_fold_hash(:SAdd, storage.args), h)
+        return hash(_fold_hash(:SAdd, storage_args(storage)), h)
     elseif storage isa SMulStorage
-        return hash(_fold_hash(:SMul, storage.args), h)
+        return hash(_fold_hash(:SMul, storage_args(storage)), h)
     elseif storage isa SPowStorage
-        return hash(hash(storage.exp, hash(storage.base, hash(:SPow, zero(UInt)))), h)
+        return hash(hash(storage.exp, hash(storage_base(storage), hash(:SPow, zero(UInt)))), h)
     elseif storage isa SNegStorage
-        return hash(storage.arg, hash(:SNeg, h))
+        return hash(storage_arg(storage), hash(:SNeg, h))
     elseif storage isa SUnaryStorage
-        return hash(storage.arg, hash(storage.kind, hash(:SUnary, h)))
+        return hash(storage_arg(storage), hash(storage.kind, hash(:SUnary, h)))
     else # SFuncSymStorage
-        return hash(_fold_hash((:SFuncSym, storage.kind), storage.args), h)
+        return hash(_fold_hash((:SFuncSym, storage.kind), storage_args(storage)), h)
     end
 end
 
@@ -170,12 +176,12 @@ end
 """Get the arguments (children) of a compound expression."""
 @inline _get_args_storage(storage::Union{SConstStorage, SVarStorage, SParamStorage, STmpStorage}) =
     _EMPTY_SEXPR_VEC
-@inline _get_args_storage(storage::SAddStorage) = storage.args
-@inline _get_args_storage(storage::SMulStorage) = storage.args
-@inline _get_args_storage(storage::SPowStorage) = SExprT[storage.base]
-@inline _get_args_storage(storage::SNegStorage) = SExprT[storage.arg]
-@inline _get_args_storage(storage::SUnaryStorage) = SExprT[storage.arg]
-@inline _get_args_storage(storage::SFuncSymStorage) = storage.args
+@inline _get_args_storage(storage::SAddStorage) = storage_args(storage)
+@inline _get_args_storage(storage::SMulStorage) = storage_args(storage)
+@inline _get_args_storage(storage::SPowStorage) = SExprT[storage_base(storage)]
+@inline _get_args_storage(storage::SNegStorage) = SExprT[storage_arg(storage)]
+@inline _get_args_storage(storage::SUnaryStorage) = SExprT[storage_arg(storage)]
+@inline _get_args_storage(storage::SFuncSymStorage) = storage_args(storage)
 @inline _get_args(e::SExprT)::Vector{SExprT} = _get_args_storage(sexpr_storage(e))
 
 @inline _rebuild_expr_storage(storage::SAddStorage, args::Vector{SExprT})::SExprT =
@@ -257,31 +263,31 @@ function _sexpr_struct_lt(a::SExprT, b::SExprT)::Bool
         return a_storage.id < b_storage_typed.id
     elseif a_storage isa SAddStorage
         b_storage_typed = b_storage::SAddStorage
-        return _sexpr_args_lt(a_storage.args, b_storage_typed.args)
+        return _sexpr_args_lt(storage_args(a_storage), storage_args(b_storage_typed))
     elseif a_storage isa SMulStorage
         b_storage_typed = b_storage::SMulStorage
-        return _sexpr_args_lt(a_storage.args, b_storage_typed.args)
+        return _sexpr_args_lt(storage_args(a_storage), storage_args(b_storage_typed))
     elseif a_storage isa SPowStorage
         b_storage_typed = b_storage::SPowStorage
-        if a_storage.base == b_storage_typed.base
+        if storage_base(a_storage) == storage_base(b_storage_typed)
             return a_storage.exp < b_storage_typed.exp
         end
-        return _sexpr_struct_lt(a_storage.base, b_storage_typed.base)
+        return _sexpr_struct_lt(storage_base(a_storage), storage_base(b_storage_typed))
     elseif a_storage isa SNegStorage
         b_storage_typed = b_storage::SNegStorage
-        return _sexpr_struct_lt(a_storage.arg, b_storage_typed.arg)
+        return _sexpr_struct_lt(storage_arg(a_storage), storage_arg(b_storage_typed))
     elseif a_storage isa SUnaryStorage
         b_storage_typed = b_storage::SUnaryStorage
         if a_storage.kind != b_storage_typed.kind
             return _sexpr_kind_lt(a_storage.kind, b_storage_typed.kind)
         end
-        return _sexpr_struct_lt(a_storage.arg, b_storage_typed.arg)
+        return _sexpr_struct_lt(storage_arg(a_storage), storage_arg(b_storage_typed))
     elseif a_storage isa SFuncSymStorage
         b_storage_typed = b_storage::SFuncSymStorage
         if a_storage.kind != b_storage_typed.kind
             return _sexpr_kind_lt(a_storage.kind, b_storage_typed.kind)
         end
-        return _sexpr_args_lt(a_storage.args, b_storage_typed.args)
+        return _sexpr_args_lt(storage_args(a_storage), storage_args(b_storage_typed))
     else
         error("Unhandled SExpr storage in _sexpr_struct_lt: $(typeof(a_storage))")
     end
@@ -303,7 +309,7 @@ Extract the "base expression" of an Add term, stripping the leading coefficient.
 function _add_term_base(e::SExprT)::SExprT
     storage = sexpr_storage(e)
     if storage isa SMulStorage
-        args = storage.args
+        args = storage_args(storage)
         if !isempty(args)
             first_storage = sexpr_storage(args[1])
             if first_storage isa SConstStorage
@@ -322,7 +328,7 @@ function _flatten_add_arg!(
     )::Nothing
     storage = sexpr_storage(arg)
     if storage isa SAddStorage
-        for child in storage.args
+        for child in storage_args(storage)
             _flatten_add_arg!(flat_args, const_sum, child)
         end
     elseif storage isa SConstStorage
@@ -351,14 +357,14 @@ function _flatten_mul_arg!(
     )::Nothing
     storage = sexpr_storage(arg)
     if storage isa SMulStorage
-        for child in storage.args
+        for child in storage_args(storage)
             _flatten_mul_arg!(flat_args, coeff, child)
         end
     elseif storage isa SConstStorage
         coeff[] *= storage.val
     elseif storage isa SNegStorage
         coeff[] = -coeff[]
-        _flatten_mul_arg!(flat_args, coeff, storage.arg)
+        _flatten_mul_arg!(flat_args, coeff, storage_arg(storage))
     else
         push!(flat_args, arg)
     end

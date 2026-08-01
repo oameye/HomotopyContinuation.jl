@@ -9,6 +9,7 @@ using EnumX: @enumx
 using Moshi.Data: @data, variant_storage, variant_storage_type
 using Moshi.Derive: @derive
 using MultivariatePolynomials: MultivariatePolynomials
+import MultivariatePolynomials: coefficients, degree, differentiate, monomials
 using DynamicPolynomials: DynamicPolynomials, @polyvar
 using FixedSizeArrays: FixedSizeArray
 import FunctionWrappers: FunctionWrapper
@@ -28,6 +29,10 @@ export @polyvar, solve, System
 export CompositionSystem, compose
 export FixedParameterSystem, fix_parameters
 export @var, @unique_var, Expression, differentiate, subs, num_den
+export expand, to_dict, horner, monomials, dense_poly, rand_poly
+export coefficients, coeffs_as_dense_poly
+export exponents_coefficients, poly_from_exponents_coefficients
+export to_number, evaluate, jacobian
 export CompileMode
 export solutions, real_solutions, nsolutions, nreal, nsingular, nnonsingular, nat_infinity
 export nexcess_solutions, nfailed
@@ -35,10 +40,10 @@ export nresults, results, multiplicity
 export is_success, is_singular, is_nonsingular, is_at_infinity, is_real, is_excess_solution
 export is_failed, is_finite
 export AbstractResult, AbstractSolutionResult
-export TotalDegree, Polyhedral, Result, PathResult, paths_to_track
+export TotalDegree, Polyhedral, Result, PathResult, paths_to_track, mixed_volume
 export Continuation, Sweep, Monodromy, Witness, Membership
 export Regeneration, Intersection, Decomposition
-export CommonOptions, early_stop_callback
+export CommonOptions, early_stop_callback, excess_residual_tol
 export path_results, seed, ntracked, failed, at_infinity, nonsingular, singular
 export recluster, clusters, cluster_of
 export statistics, ResultStatistics
@@ -46,7 +51,8 @@ export solution, accuracy, residual, steps, accepted_steps, rejected_steps
 export winding_number, condition_jacobian, last_path_point
 export path_number, start_solution, valuation
 export TrackerOptions, EndgameOptions, EndgameTracker
-export ParameterHomotopy
+export iterator, path_info, PathInfo, PathStep, path_table
+export ParameterHomotopy, Homotopy, expressions, equation_scales
 export GroupActions, SymmetricGroup
 export UniquePoints, search_in_radius, add!, multiplicities, unique_points
 export satisfies_triangle_inequality
@@ -60,7 +66,8 @@ export MonodromyOptions, MonodromyResult, is_heuristic_stop, permutations, trace
 export independent_normal, weighted_normal
 # Witness sets / numerical irreducible decomposition
 export slice
-export ResultIterator, result_iterator, bitmask, bitmask_filter, start_solutions
+export ResultIterator, result_iterator, selection, restrict, start_solutions
+export total_degree_start_solutions
 export WitnessSet, trace_test, membership
 export system, linear_subspace, is_irreducible, Irreducibility, degree, points
 export WitnessPoints
@@ -68,6 +75,8 @@ export NumericalIrreducibleDecomposition
 export ncomponents, n_components, witness_sets, degrees
 export newton, NewtonResult, NewtonCache, NewtonReturnCode
 export Serial, Threaded, DistributedExecutor
+export SemialgebraicSetsHCSolver
+export write_solutions, read_solutions, write_parameters, read_parameters
 # Certification (certify, SolutionCertificate, …) lives in the
 # HomotopyContinuationNextCertification subpackage (lib/), which depends on
 # Arblib. Keeping Arblib out of this core package is what makes core TTFX
@@ -93,6 +102,7 @@ include("model_kit/sexpr.jl")
 
 # model_kit/expression.jl — user-facing symbolic Expression frontend
 include("model_kit/expression.jl")
+include("model_kit/symbolic_utils.jl")
 
 # model_kit/cse.jl — SymEngine-style CSE algorithm (opt_cse + tree_cse)
 include("model_kit/cse.jl")
@@ -122,12 +132,15 @@ include("core/subspace_homotopies.jl")
 include("core/affine_chart.jl")
 include("core/sliced_system.jl")
 include("core/fixed_parameter_system.jl")
+include("core/system_evaluate.jl")
+include("core/symbolic_homotopy.jl")
 include("core/toric_homotopy.jl")
 
 include("tracking/newton_corrector.jl")
 include("tracking/newton.jl")
 include("tracking/predictor.jl")
 include("tracking/tracker.jl")
+include("tracking/path_info.jl")
 include("tracking/valuation.jl")
 include("tracking/endgame_tracker.jl")
 include("solving/group_actions.jl")
@@ -144,6 +157,7 @@ include("solving/total_degree.jl")
 include("solving/builder.jl")
 include("solving/polyhedral.jl")
 include("solving/result.jl")
+include("solving/solution_files.jl")
 include("solving/starts.jl")
 include("solving/solve.jl")
 include("solving/homotopy_solve.jl")

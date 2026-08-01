@@ -16,7 +16,7 @@ using LinearAlgebra: LinearAlgebra as LA
     min_cond::Float64 = 1.0e6
     min_cond_growth::Float64 = 1.0e4
     min_coord_growth::Float64 = 100.0
-    sing_cond::Float64 = 1.0e14
+    sing_cond::Float64 = inv(eps(Float64))
     sing_accuracy::Float64 = 1.0e-12
     scaling_threshold::Float64 = -30.0
     max_residual::Float64 = 1.0e-3

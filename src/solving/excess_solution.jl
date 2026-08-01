@@ -19,10 +19,12 @@ struct ExcessSolutionChecker
     r_rand::FSVec{ComplexF64}        # n-dim residual of G
     Δx::FSVec{ComplexF64}
     p::FSVec{ComplexF64}             # empty parameter vector
+    residual_tol::Float64            # readmission bound on ‖F(x)‖, on the normalized equations
 end
 
 function ExcessSolutionChecker(
         system::SystemEvaluator, A::FSMat{ComplexF64}, perm::Vector{Int},
+        residual_tol::Float64,
     )::ExcessSolutionChecker
     m, n = size(system)
     return ExcessSolutionChecker(
@@ -34,6 +36,7 @@ function ExcessSolutionChecker(
         FSVec{ComplexF64}(zeros(ComplexF64, n)),
         FSVec{ComplexF64}(zeros(ComplexF64, n)),
         FSVec{ComplexF64}(ComplexF64[]),
+        residual_tol,
     )
 end
 
@@ -43,8 +46,8 @@ _randomization_permutation(degrees::Vector{Int})::Vector{Int} =
     sortperm(degrees; rev = true)
 
 """
-    _square_up(rng, F) -> (A, perm, checker)
-    _square_up(rng, evaluator, degrees) -> (A, perm, checker)
+    _square_up(rng, F, residual_tol) -> (A, perm, checker)
+    _square_up(rng, evaluator, degrees, residual_tol) -> (A, perm, checker)
 
 Randomization data for squaring up an overdetermined system: the random fold
 block `A`, the descending-degree equation permutation, and the excess-solution
@@ -53,17 +56,18 @@ through this single helper so the RNG draw and the square-up construction
 cannot drift apart.
 """
 _square_up(
-    rng::Random.MersenneTwister, F::CloneableSystem,
+    rng::Random.MersenneTwister, F::CloneableSystem, residual_tol::Float64,
 )::Tuple{FSMat{ComplexF64}, Vector{Int}, ExcessSolutionChecker} =
-    _square_up(rng, F.evaluator, degrees(F))
+    _square_up(rng, F.evaluator, degrees(F), residual_tol)
 
 function _square_up(
         rng::Random.MersenneTwister, evaluator::SystemEvaluator, degs::Vector{Int},
+        residual_tol::Float64,
     )::Tuple{FSMat{ComplexF64}, Vector{Int}, ExcessSolutionChecker}
     m, n = size(evaluator)
     perm = _randomization_permutation(degs)
     A = FSMat{ComplexF64}(randn(rng, ComplexF64, n, m - n))
-    return A, perm, ExcessSolutionChecker(evaluator, A, perm)
+    return A, perm, ExcessSolutionChecker(evaluator, A, perm, residual_tol)
 end
 
 const EXCESS_NEWTON_MAX_ITERS = 10
@@ -133,6 +137,23 @@ function _residual_comparable(
 end
 
 """
+    _residual_within_tol(c, solution) -> Bool
+
+`true` if the residual of the original system at the endpoint is at most
+`c.residual_tol`, both on the normalized equations, as `residual(::PathResult)`
+is. Both branches of the strict test clobber the scratch buffers, so the residual
+is recomputed here rather than read back.
+"""
+function _residual_within_tol(
+        c::ExcessSolutionChecker, solution::Vector{ComplexF64},
+    )::Bool
+    c.residual_tol > 0 || return false
+    copyto!(c.x, solution)
+    evaluate!(c.r, c.system, c.x, c.p)
+    return inf_norm(c.r) <= c.residual_tol
+end
+
+"""
     check_excess_solution(c, r::PathResult) -> PathResult
 
 Reclassify a successful path result as `PATH_EXCESS_SOLUTION` if its endpoint
@@ -140,12 +161,12 @@ does not solve the original overdetermined system.
 """
 function check_excess_solution(c::ExcessSolutionChecker, r::PathResult)::PathResult
     is_success(r) || return r
-    genuine = if r.singular
+    genuine = if _singular(r)
         _residual_comparable(c, r.solution)
     else
         _newton_refines(c, r.solution, r.accuracy)
     end
-    genuine && return r
+    (genuine || _residual_within_tol(c, r.solution)) && return r
     return _with_return_code(r, PathResultCode.PATH_EXCESS_SOLUTION)
 end
 

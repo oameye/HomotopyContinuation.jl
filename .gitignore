@@ -16,3 +16,4 @@ ttfx_output.json
 *.codex
 test-run.log
 test-cert.log
+test-extensive.log

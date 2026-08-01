@@ -516,7 +516,7 @@ end
 function CertificationParameters(p::AbstractVector; prec::Int = 256)
     arb_ip = AcbRefVector(length(p); prec = prec)
     for (i, pᵢ) in enumerate(p)
-        arb_ip[i][] = ComplexF64(pᵢ)
+        arb_ip[i][] = pᵢ
     end
     return CertificationParameters(
         convert(Vector{ComplexF64}, p),
@@ -943,27 +943,6 @@ function certify_solution(
     )
 end
 
-# Whether every coefficient of every equation of `F` is real.
-_is_real_system(F::System)::Bool = _has_real_coefficients(polynomials(F))
-
-function _has_real_coefficients(
-        polys::AbstractVector{<:MP.AbstractPolynomialLike},
-    )::Bool
-    for p in polys
-        for c in MP.coefficients(p)
-            iszero(imag(ComplexF64(c))) || return false
-        end
-    end
-    return true
-end
-
-function _has_real_coefficients(exprs::AbstractVector{Expression})::Bool
-    for e in exprs
-        has_real_coefficients(e) || return false
-    end
-    return true
-end
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Driver
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1002,7 +981,7 @@ function _certify_impl(
     end
 
     N = length(solution_candidates)
-    is_real_system = _is_real_system(F)
+    is_real_system = is_real(F)
     certs = Vector{CertT}(undef, N)
 
     progress = make_progress(N, show_progress; desc = "Certifying $N solutions... ")
@@ -1229,7 +1208,7 @@ function DistinctCertifiedSolutions(
         F,
         cert_params,
         CertificationCache(F),
-        _is_real_system(F),
+        is_real(F),
         ReentrantLock(),
         distinct,
     )

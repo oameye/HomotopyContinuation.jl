@@ -27,9 +27,7 @@ using HomotopyContinuationNext:
     HomotopyContinuationNext,
     # systems / evaluators
     System, SystemEvaluator, FSVec,
-    polynomials, nparameters, parameters,
-    # symbolic expression front-end
-    Expression, has_real_coefficients,
+    nparameters, parameters, is_real,
     # tape interpreter + ADT internals (for the Acb interpreter)
     Interpreter, InstructionSequence, ExecInstruction, ExecInstructionT,
     OpType, op_call, arity, should_use_index_not_reference,

@@ -6,7 +6,7 @@ using HomotopyContinuationNext: Expression, System, CompileMode, @var, @polyvar,
     verify_solution_completeness, Serial, TotalDegree, Polyhedral,
     Continuation, Monodromy, Witness, Regeneration, Decomposition, Intersection,
     TaylorVector, ComplexDF64, HomotopyEvaluator, StraightLineHomotopy,
-    Interpreter, execute!,
+    Interpreter, execute!, expand,
     fix_parameters
 using FixedSizeArrays: FixedSizeArray
 
@@ -84,12 +84,14 @@ const MODES = (CompileMode.INTERPRETED, CompileMode.COMPILED, CompileMode.COMPIL
         w -> ref(w[1:n], w[(n + 1):(n + r)]), [coeffs; pcoeffs]; K = 3, r = 0.05,
     )
 
+    # Commutative operands come back in a different order and a constant factor can
+    # end up folded into a sum, so the roundtrip is exact only after `expand`.
     @testset "symbolic tape roundtrip" begin
         F = System(exprs; variables = vars, parameters = params)
         I = Interpreter(Vector{Expression}, F._interp_f64.sequence)
         out = Vector{Expression}(undef, m)
         execute!(out, I, collect(vars), collect(params))
-        @test out == collect(exprs)
+        @test expand.(out) == expand.(collect(exprs))
     end
 
     @testset "$mode" for mode in MODES

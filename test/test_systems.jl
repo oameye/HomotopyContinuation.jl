@@ -2,7 +2,9 @@
 # tracker regression cases. Each entry returns `(polys, variables, parameters)`.
 using DynamicPolynomials: @polyvar, subs, monomials
 using DynamicPolynomials: differentiate as mp_differentiate
-using HomotopyContinuationNext: @var
+using HomotopyContinuationNext: @var, dense_poly, to_dict, horner, differentiate
+using HomotopyContinuationNext: subs as hc_subs
+using MultivariatePolynomials: variables as mp_variables
 
 # Cyclic roots: n sparse equations of degree n in n variables.
 function cyclic_system(n::Int)
@@ -246,18 +248,43 @@ function tritangents_system()
     return ([P_x; P_y; P_z], [h; x; y; z], collect(c))
 end
 
-# (name, polys, variables, parameters)
+# The maximal minors of a 3 by 5 matrix: overdetermined, 10 by 3. Variables come off
+# the equations; a fresh `@polyvar x y z` would declare new ones that only print the same.
+function minors_system()
+    polys = minors_polys()
+    vars = collect(mp_variables(polys[1]))
+    return (polys, vars, eltype(vars)[])
+end
+
+# (name, builder), the builder returning `(polys, variables, parameters)`. Lazy, so a
+# file including this one for a single system does not build the rest.
 const TEST_SYSTEM_COLLECTION = [
-    ("cyclic5", cyclic_system(5)...),
-    ("cyclic7", cyclic_system(7)...),
-    ("bacillus", bacillus_system()...),
-    ("cyclo", cyclo_system()...),
-    ("moments3", moments3_system()...),
-    ("six_revolute", six_revolute_system()...),
-    ("steiner", steiner_system()...),
-    ("four_bar", four_bar_system()...),
-    ("tritangents", tritangents_system()...),
+    ("cyclic5", () -> cyclic_system(5)),
+    ("cyclic7", () -> cyclic_system(7)),
+    ("minors", minors_system),
+    ("bacillus", bacillus_system),
+    ("cyclo", cyclo_system),
+    ("moments3", moments3_system),
+    ("six_revolute", six_revolute_system),
+    ("steiner", steiner_system),
+    ("four_bar", four_bar_system),
+    ("tritangents", tritangents_system),
 ]
+
+## ── Systems built through the `Expression` front end ────────────────────────
+
+# Lines on a quintic surface in 3-space: a dense quintic in 4 variables restricted to
+# `x = [a; 1]·t + [b; 0]`, one equation per power of `t`. 6 equations of degree 5 in
+# `[a; b]`, one parameter per quintic coefficient bar the constant, fixed to 1.
+function fano_quintic_system()
+    @var x[1:4]
+    F, q = dense_poly(x, 5; coeff_name = :q)
+    F = hc_subs(F, q[end] => 1)
+    q = q[1:(end - 1)]
+    @var a[1:3] b[1:3] t
+    coeffs_in_t = to_dict(hc_subs(F, x => [a; 1] .* t + [b; 0]), [t])
+    return (horner.([coeffs_in_t[[k]] for k in 0:5]), [a; b], q)
+end
 
 ## ── Non-polynomial systems ──────────────────────────────────────────────────
 #
@@ -301,9 +328,57 @@ function trig_system()
     return (exprs, [x, y], [a], ref)
 end
 
+# ∇_w Σ_k Σ_j (meas_j - ŵ_j/ŵ_3)² with ŵ = A[:,:,k] * [w; 1], the gradient
+# `rigid_multiview_system` builds symbolically.
+function reprojection_gradient(A, w, meas)
+    T = promote_type(eltype(A), eltype(w), eltype(meas))
+    g = zeros(T, 3)
+    for k in axes(A, 3)
+        ŵ = A[:, :, k] * [w; 1]
+        for j in 1:2
+            q = ŵ[j] / ŵ[3]
+            c = -2 * (meas[j] - q) / ŵ[3]
+            for m in 1:3
+                g[m] += c * (A[j, m, k] - q * A[3, m, k])
+            end
+        end
+    end
+    return g
+end
+
+function rigid_multiview_ref(z, p)
+    x, y, λ = z[1:3], z[4:6], z[7]
+    A = reshape(p[6:29], 3, 4, 2)
+    d = x .- y
+    return [
+        reprojection_gradient(A, x, p[1:2]) .+ 2λ .* d;
+        reprojection_gradient(A, y, p[3:4]) .- 2λ .* d;
+        sum(d .^ 2) - p[5]
+    ]
+end
+
+# Two views of a rigid point pair: the gradient of the reprojection error of both
+# points, with the squared distance between them constrained to δ. 7 rational
+# equations in `[x; y; λ]`; the parameters are the two image points, δ and the two
+# 3 by 4 cameras.
+function rigid_multiview_system()
+    @var A[1:3, 1:4, 1:2] x[1:3] y[1:3] u[1:2] v[1:2] δ λ
+    x̃ = [A[:, :, k] * [x; 1] for k in 1:2]
+    ỹ = [A[:, :, k] * [y; 1] for k in 1:2]
+    r = sum((x .- y) .^ 2) - δ
+    L = sum(sum((u .- z[1:2] ./ z[3]) .^ 2) for z in x̃) +
+        sum(sum((v .- z[1:2] ./ z[3]) .^ 2) for z in ỹ) +
+        λ * r
+    return (
+        [differentiate(L, [x; y]); r], [x; y; λ], [u; v; δ; vec(A)],
+        rigid_multiview_ref,
+    )
+end
+
 # (name, expressions, variables, parameters, reference implementation)
 const NONPOLYNOMIAL_SYSTEM_COLLECTION = [
     ("small_rational", small_rational_system()...),
     ("sqrt_parameters", sqrt_parameters_system()...),
     ("trig", trig_system()...),
+    ("rigid_multiview", rigid_multiview_system()...),
 ]

@@ -136,7 +136,7 @@ function _init_sliced_total_degree(
         degs, G, subspace, chart, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, _total_degree_solutions(degs), _seed(alg), nothing,
+        exec, builder, total_degree_start_solutions(degs), _seed(alg), nothing,
         _show_progress(alg), early_stop_callback(alg),
     )
 end

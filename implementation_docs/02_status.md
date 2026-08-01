@@ -1,12 +1,12 @@
 # Status
 
-Last updated: 2026-07-30.
+Last updated: 2026-07-31.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
 - `make compare` — v3/v2 ratios
 - `julia --project=benchmark benchmark/compare/tracking.jl` — end-to-end solve comparison
-- `make test` runs the core suite (54 files, parallel via ParallelTestRunner) then the certification subpackage; `make test-cert` runs only the latter
+- `make test` runs the core suite (61 files, parallel via ParallelTestRunner) then the certification subpackage; `make test-cert` runs only the latter
 
 ## Summary
 
@@ -25,8 +25,11 @@ No remaining gaps against v2 on the executor axis: `Serial`, `Threaded` and
 
 A testset-by-testset comparison against v2's suite on 2026-07-29 found 11 v2 test files
 that were not fully ported, all because the feature behind them did not exist yet. They are
-listed under "v2 parity gaps" below, the closed ones marked as such, and the rest are the
-remaining work toward full parity.
+listed under "v2 parity gaps" below, the closed ones marked as such.
+
+As of 2026-07-31 every feature gap on that list is closed. What is left there is not a feature:
+the public interface surface (declaring which names downstream code may depend on) and two
+entries in the evaluation sweep's system collection, both recorded with their reasons.
 
 ## Feature Checklist
 
@@ -234,10 +237,15 @@ remaining work toward full parity.
     indistinguishable from one multi-value target, and v2's runtime `isa(…, Number)` branch would
     make the return type value-dependent.
   - `result_iterator(...)` → `ResultIterator`, the typed replacement for v2's `iterator_only`
-    kwarg: lazy per-path tracking for the total-degree, polyhedral, sliced, parameter and
-    subspace routes (serial), `bitmask` / `bitmask_filter`, and `Result(ri)` for clustering and
-    excess reclassification. A `ResultIterator` may be passed as the start solutions of another
-    solve.
+    kwarg: lazy per-path tracking for the total-degree, polyhedral, sliced, parameter, subspace
+    and explicit-homotopy routes (serial), and `Result(ri)` for clustering and excess
+    reclassification. A `ResultIterator` may be passed as the start solutions of another solve.
+    Selection is one index domain, over the start solutions: `selection(ri)` is the current
+    mask, `selection(f, ri)` tracks once and records `f` at the selected positions, and
+    `restrict(ri, mask)` narrows (never widens) without tracking. `filter(f, ri)` keeps the
+    results instead of a mask, `Iterators.filter` keeps that lazy, and `ri[k]` tracks the `k`-th
+    selected path alone. Iteration goes through the cache's single tracker, so one pass at a
+    time.
   - Tests: `test/{sliced_solve,subspace_solve,many_targets,result_iterator}_test.jl`
 - [x] **Witness sets and numerical irreducible decomposition (NID)** for affine systems, in core
   (`src/solving/{witness_set,regeneration,nid}.jl`). Provides `Witness` (dim/codim, explicit
@@ -389,7 +397,9 @@ remaining work toward full parity.
 ### v2 parity gaps
 
 Found by comparing every v2 `@testset` against the v3 suite on 2026-07-29. Each entry names
-the v2 test that stays unported until the feature lands. Ordered by consequence.
+the v2 test that was unported until the feature landed. Ordered by consequence. Every feature
+entry is closed as of 2026-07-31; the two open ones are the public interface surface and two
+sweep-collection systems.
 
 - [x] **Multi-homogeneous (variable-group) total degree.** `System(polys; variable_groups)`
   stores the groups as index vectors and `is_homogeneous` becomes per-group, which is strictly
@@ -464,36 +474,128 @@ the v2 test that stays unported until the feature lands. Ordered by consequence.
   executors (driver-side at `batch_size` granularity under `DistributedExecutor`). v2 spells it
   `stop_early_cb`. `tracked_paths` now means the number of paths that actually ran, so `nfailed`
   stays 0 when a callback stops a run early; see `01_decisions.md`.
-- [ ] **SemialgebraicSets.jl integration**: `SemialgebraicSetsHCSolver` with
-  `excess_residual_tol`, `real_atol`, `real_rtol`, `compile`, and its `show`. Unports all of
-  `semialgebraic_sets_test.jl`.
-- [ ] **Solution and parameter file I/O**: `write_solutions`, `read_solutions`,
-  `write_parameters`, `read_parameters`. Unports `utils_test.jl` "writing and reading".
-- [ ] **`path_info`**: the per-step tracking table and its `show`. Unports `tracker_test.jl`
-  "path info".
-- [ ] **Tracker path iterator** `iterator(tracker, x, t₁, t₀)` yielding `(x, t)` per accepted
-  step. `ResultIterator` is a different thing (lazy per-path at solve level). Unports
-  `tracker_test.jl` "iterator".
-- [ ] **`mixed_volume`**, the `Polyhedral` method of `paths_to_track`, and the polyhedral
-  `only_torus` / `only_non_zero` options. `paths_to_track(F, TotalDegree())` is done and
-  exported; it counts `init`'s start solutions rather than deriving the number a second time,
-  so it agrees with `Result.tracked_paths` on every route (grouped, projective, squared-up,
-  sliced) whenever no `early_stop_callback` fires — `tracked_paths` counts paths that ran. It therefore materializes them, where v2 counts a lazy iterator; the fix if that
-  ever costs, for a Bezout number large enough to matter, is lazy start solutions rather than
-  a second derivation of the count. Unports `polyhedral_test.jl` "only torus".
-- [ ] **Symbolic `Homotopy` type** (`Homotopy(h, vars, t; parameters)`) for user-defined
-  homotopies, with `nvariables`/`variables`/`parameters`/`show`. v3 has only the built-in
-  concrete homotopies. Unports `symbolic_test.jl` "Homotopy".
-- [ ] **Symbolic utilities on `Expression`**: `expand`, `to_dict`, `horner`, `monomials`,
-  `dense_poly`, `rand_poly`, `coefficients(f, vars)`, `coeffs_as_dense_poly`,
-  `exponents_coefficients` and `poly_from_exponents_coefficients` (the per-equation form of
-  the internal `support_coefficients`), `multi_degrees`, `to_number` /
-  `convert(Int, ::Expression)`, `evaluate(exprs, ::Dict)`, and calling a system as a function
-  (`F(x)`, `F(x, p)`). Unports `symbolic_test.jl` "Expand", "to_dict", "Horner",
-  "Rand / dense poly", "Polynomial to exponents_coefficients and back", "Convert",
-  "evaluate - Issue #500" and "evaluate - Issue #511".
-- [ ] **`is_real` on a system** (real-coefficient check). `has_real_coefficients` covers a
-  single `Expression` only. Unports `systems_test.jl` "is_real".
+- [x] **SemialgebraicSets.jl integration**: `SemialgebraicSetsHCSolver`, in the
+  `HomotopyContinuationNextSemialgebraicSetsExt` package extension. The solver type subtypes
+  `SemialgebraicSets.AbstractAlgebraicSolver`, so it can only be *defined* where that package
+  is loaded, and an extension cannot export a name; core therefore declares the constructor
+  `function SemialgebraicSetsHCSolver end` and exports that, and the extension adds the method
+  returning its own concrete type. Nothing else needs the type by name (`@set` takes an
+  instance, and the one type-dispatched method, `promote_for`, is defined inside the
+  extension), so this stays an extension where certification needed a subpackage.
+  The solver holds an `algorithm`/`executor` pair instead of v2's `options::Any` kwargs bag,
+  with `compile` forwarded to `System`; `algorithm` is restricted to
+  `Union{TotalDegree, Polyhedral}`, the algorithms that build their own start system.
+  `real_atol`/`real_rtol` are applied in the extension
+  (`abs(imag(z)) <= atol + rtol * abs(z)`), since `is_real(::PathResult)` takes one combined
+  `tol`.
+
+  Four departures from the v2 design:
+  - `excess_residual_tol` is an option of `TotalDegree`/`Polyhedral`, not of the solver, so
+    the readmission happens in the excess check that already runs before clustering. v2 (and
+    the first v3 port) flipped return codes afterwards and rebuilt the `Result`, clustering
+    every solution twice and re-evaluating the system through the allocating `evaluate`. The
+    solver keyword remains, forwarded to the algorithm, and `0.0` rather than `NaN` means off.
+  - Variables come from `MP.variables(equalities(V))`, so a point's coordinates are ordered as
+    `SemialgebraicSets` itself indexes them, and a set with a variable in no equation is
+    reported positive-dimensional instead of being solved in fewer unknowns.
+  - `promote_for` is `Float64`, not `float(T)`: tracking is done in `Float64` whatever the
+    coefficients are, so `eltype(V)` now states the type a point is actually returned in and
+    no conversion happens on the way into `V.elements`.
+  - `solve(V, alg, exec)` returns the full `Result` and `real_solutions(V, solver)` returns the
+    points, both beyond v2, which exposed only `SemialgebraicSets.solve`.
+
+  Closes `semialgebraic_sets_test.jl`. Tests: `test/semialgebraic_sets_test.jl`.
+- [x] **Solution and parameter file I/O**: `write_solutions`, `read_solutions`,
+  `write_parameters`, `read_parameters` in `src/utils.jl`, hand-rolled rather than through
+  DelimitedFiles (the format is two floats per line). Bertini-compatible and byte-identical to
+  v2's writer; the reader additionally checks the declared count and rejects a line with more
+  than two fields. Closes `utils_test.jl` "writing and reading".
+- [x] **`path_info`** and the **tracker path iterator**, both in `src/tracking/path_info.jl`.
+  `path_info(tracker, x₀, t₁, t₀)` returns a `PathInfo <: AbstractVector{PathStep}`, one
+  `PathStep` per attempted step (arc length and step size, `ω`, `μ`, accuracy, trust region,
+  condition estimate, first Newton update, predictor local error, predicted-to-corrected
+  distance, `‖x‖∞`, accepted, extended precision), so the per-step invariant is structural
+  where v2 keeps 12 parallel vectors, and `filter`/`map`/`count` work on it. Three-argument
+  `show` prints a hand-rolled unicode table (no PrettyTables dependency) and elides the middle
+  rows when `io` limits its height; two-argument `show` stays one line, and `path_table` prints
+  every row. The condition column is the one v2 collects and never displays.
+  `iterator(tracker, x₀, t₁, t₀)` is the stateful iterator over accepted steps yielding
+  `(x, t)`; `t`'s type comes from dispatch on `t₁`/`t₀` (`PathIterator{Float64}` for a real
+  pair), so `eltype` is concrete instead of v2's `Union` from a runtime flag, and a failed path
+  stops the iteration rather than repeating its last point. `ResultIterator` remains a
+  different thing (lazy per-path at solve level).
+  Closes `tracker_test.jl` "path info" and "iterator". Tests: `test/path_info_test.jl`.
+- [x] **`mixed_volume`**, the `Polyhedral` method of `paths_to_track`, and the polyhedral
+  `only_torus` option. `paths_to_track(F, TotalDegree())` counts `init`'s start solutions
+  rather than deriving the number a second time, so it agrees with `Result.tracked_paths` on
+  every route (grouped, projective, squared-up, sliced) whenever no `early_stop_callback`
+  fires, `tracked_paths` being the number of paths that ran. It therefore materializes them,
+  where v2 counts a lazy iterator; the fix if that ever costs, for a Bezout number large
+  enough to matter, is lazy start solutions rather than a second derivation of the count. The
+  `Polyhedral` method and `mixed_volume(F)` follow the same rule, `mixed_volume(F)` being
+  exactly `paths_to_track(F, Polyhedral(; only_torus = true))`, which is v2's definition and
+  is correct for projective and overdetermined input without duplicating the support logic.
+  `only_torus` divides each equation by its lowest monomial (`A .- minimum(A; dims = 2)`)
+  instead of padding every support with the zero exponent vector, so it finds only the
+  solutions with no zero coordinate. v3 exposes the one knob; v2 spells it as the pair
+  `only_torus` / `only_non_zero`, where the second defaults to the first and nothing else
+  distinguishes them. Closes `polyhedral_test.jl` "only torus" (92 and 54 paths, matching v2).
+  Tests: `test/solve_test.jl` "Polyhedral: only_torus".
+- [x] **Symbolic `Homotopy` type** (`Homotopy(h, vars, t; parameters, compile)`) for
+  user-defined homotopies, in `src/core/symbolic_homotopy.jl`, with
+  `size`/`length`/`nvariables`/`nparameters`/`variables`/`parameters`/`expressions`/`==`/`show`,
+  callable evaluation `H(x, t[, p])` and `evaluate`/`jacobian`. `h` may be `Expression`s or MP
+  polynomials. `solve(H, starts, alg, exec)` accepts it on every executor.
+  `Homotopy` is to `AbstractHomotopy` what `System` is to `AbstractSystem`: a concrete
+  symbolic front-end holding one `SystemEvaluator`, with no type parameter, so nothing
+  downstream specializes on the input's polynomial type or compile mode. The equations compile
+  to a system in `x` with parameters `[t; parameters]`, and `fix_parameters(H, p) -> Homotopy`
+  substitutes the values into them exactly as `fix_parameters(::System, p)` does; a parametric
+  `Homotopy` is rejected until then, the rule every other route follows. The tracked tape
+  therefore has `t` as its only parameter, and the private
+  `_PathParameterHomotopy <: AbstractHomotopy` writes one value per call: `dt/dt = 1`, the
+  vanishing higher orders of `t` and the constant rows of the order-1 `x` series are written
+  once, at construction. All Taylor orders come from the interpreter's parameter convolution,
+  exact for arbitrary dependence on `t`. Against routing the same equations through a
+  `ParameterHomotopy` interpolating `[1; p]` to `[0; p]`, which is what this replaced: 10-16%
+  per call on a 4-variable, 5-parameter homotopy (~8% from the parameter handling, the rest
+  from the shorter substituted tape), and the fixed parameters no longer move with `t` in the
+  last bit. Closes `symbolic_test.jl` "Homotopy"; the `show` layout matches, and term order
+  within an equation is v3's canonical one.
+  Tests: `test/symbolic_homotopy_test.jl`.
+- [x] **Symbolic utilities on `Expression`** (`src/model_kit/symbolic_utils.jl`): `expand`,
+  `to_dict`, `horner`, `monomials`, `dense_poly`, `rand_poly`, `coefficients(f, vars)`,
+  `coeffs_as_dense_poly`, `exponents_coefficients`, `poly_from_exponents_coefficients`,
+  `to_number`, `convert(T, ::Expression)` for any `T <: Number`, `evaluate(exprs, subs...)`
+  and calling an `Expression` on substitutions. `multi_degrees(F::System)` already existed.
+  Everything that needs one term per monomial goes through `_expr_terms`, which expands into
+  `exponent vector in vars => coefficient expression`; variables outside `vars` land in the
+  coefficient, which is what lets `to_dict` report a coefficient such as `a + 1`.
+  - `coefficients` and `exponents_coefficients` return `Vector{ComplexF64}` and throw for a
+    symbolic coefficient, pointing at `to_dict`. v2 returns whichever of the two the values
+    happen to be, from one function; v3 keeps the return type fixed and puts the symbolic case
+    behind its own name. No capability is lost: `to_dict` is what v2's own `horner` and
+    `coeffs_as_dense_poly` use internally.
+  - `evaluate` narrows to a real result when every value is real, which is the point of v2's
+    issues #500 and #511: a real-coefficient system must evaluate to `Vector{Float64}`, not to
+    complex numbers with vanishing imaginary parts. This is the one place in v3 where a return
+    type is value-dependent, and it is confined to the API boundary; nothing internal calls it.
+    Unlike v2 it does not fall back to returning the expression when a variable is left
+    unsubstituted; that is an `ArgumentError` naming the leftover.
+  - `rand_poly` additionally takes an `rng` first argument, so a caller can reproduce it.
+  - Calling a system as a function: `F(x)`, `F(x, p)` and `evaluate`/`jacobian` on any system,
+    in `src/core/system_evaluate.jl`. These build the `FSVec` buffers the in-place `evaluate!`
+    needs, so the tracker's zero-allocation path is untouched. A `System` evaluates the
+    equations `polynomials(F)` reports, i.e. the normalized ones (`equation_scales` records the
+    factors); that keeps `F(x)` consistent with everything else v3 computes, where v2 never
+    normalizes.
+  Closes `symbolic_test.jl` "Expand", "to_dict", "Horner", "Rand / dense poly", "Polynomial to
+  exponents_coefficients and back", "Convert", "evaluate - Issue #500" and
+  "evaluate - Issue #511". Tests: `test/symbolic_utils_test.jl`.
+- [x] **`is_real` on a system** (`src/core/system_evaluate.jl`): evaluates at one random real
+  point and checks the imaginary parts, correct with probability one, as in v2. Extends the
+  `is_real` already defined for a `PathResult`, since v3 is one flat module where v2 has a
+  `ModelKit` submodule. Closes `systems_test.jl` "is_real".
 - [ ] **Public interface surface.** 22 of v2's 53 exports resolve to existing v3 internals
   that are not exported: `variables`, `parameters`, `nvariables`, `nparameters`,
   `variable_groups`, `is_homogeneous`, `is_polynomial`, `degree`, `polynomials` (v2's
@@ -501,15 +603,65 @@ the v2 test that stays unported until the feature lands. Ordered by consequence.
   `AbstractSystem`, `AbstractHomotopy`, `TaylorVector`, `TruncatedTaylorSeries`,
   `Interpreter`. Implementing a custom `AbstractSystem` currently needs qualified access to
   the interface functions.
-- [ ] **Ported features whose v2 test is missing:** cyclic-7 (924 solutions) on total degree
-  and polyhedral, in the benchmarks but not the suite (`endgame_test.jl` "Cyclic 7",
-  `polyhedral_test.jl` "cyclic"); `result_test.jl` "Compression", which needs
-  `total_degree_start_solutions` exposed (the `bitmask` half exists);
-  `extensive/extensive_test.jl` "Lines on a quintic surface" (2875 solutions plus certify).
-- [ ] **Sweep collection.** `TEST_SYSTEM_COLLECTION` holds 9 of v2's 14 systems.
-  `fano_quintic` and `RigidMultiView` do not exist in v3 at all; `minors` exists
-  (`test/minors_polys.jl`) but is not in the sweep. v2's `small_rational` and
-  `sqrt_parameters` are covered by `NONPOLYNOMIAL_SYSTEM_COLLECTION`.
+- [x] **Ported features whose v2 test was missing:** cyclic-7 (924 solutions on both total
+  degree, 5040 paths, and polyhedral, 924 paths) in `test/endgame_test.jl`; the compression
+  round trip in `test/result_iterator_test.jl`, for which `total_degree_start_solutions` is now
+  exported and `result_iterator` gained a `(G, F, starts)` method. The compression test records its mask from the forward run rather
+  than from a track back to the start system, as v2 does: v3's start-to-target homotopy draws
+  its `γ` from the algorithm's seed, so `solve(F, G, R)` and `solve(G, F, S)` are not the same
+  path family and the backward track does not invert the forward one. Recording the mask
+  forwards makes the round trip exact, and is what a caller would do anyway.
+- [x] **Sweep collection.** All 14 of v2's systems exist in v3. `TEST_SYSTEM_COLLECTION` holds
+  10 of them, `minors` having been added; `NONPOLYNOMIAL_SYSTEM_COLLECTION` holds
+  `small_rational`, `sqrt_parameters` and `rigid_multiview`, whose ground truth is a
+  plain-Julia `ref` rather than the `MP.differentiate` / `MP.coefficient` one the polynomial
+  sweep uses.
+  - `rigid_multiview` is the gradient of the two-view reprojection error of a rigid point
+    pair, so its `ref` spells the chain rule out in `reprojection_gradient`. That is what the
+    Jacobian and Taylor checks compare against, on top of the central differences and the
+    Cauchy-integral oracle they already run.
+  - `fano_quintic` is built through the `Expression` front end exactly as in v2 (`dense_poly`,
+    `subs`, `to_dict`, `horner`) and stays outside both collections: its six equations are the
+    coefficients of a dense quintic restricted to a line, which no `ref` can state more
+    directly than the builder already does. `test/fano_quintic_test.jl` checks its shape and
+    that its equations agree with the quintic restricted to the line; the 15625-path solve
+    confirming the count of 2875 lives in the extensive suite (below), since it takes ~4
+    minutes in a single-threaded worker against ~3 minutes for the whole suite.
+  - The sweep's tape roundtrip compares `expand` of both sides. Re-executing a tape over
+    `Expression` values reorders commutative operands and can fold a constant factor into a
+    sum, so the reconstruction is the same function but not the same tree.
+
+### Extensive suite (`make test-extensive`)
+
+`test/extensive/` holds the two large solves, ported from v2's `test/extensive/extensive_test.jl`
+(which v2's own `runtests.jl` has commented out, so those expectations were never verified). It has
+its own environment because it certifies, and a plain `runtests.jl` rather than ParallelTestRunner,
+whose workers are single-threaded while these solves want every core. `test/runtests.jl` filters the
+directory out of discovery, so `make test` does not run it. Takes ~4 minutes.
+
+- **Lines on a quintic surface.** Total degree, 15625 paths, 2875 solutions, all 2875 distinct
+  certified; polyhedral, 6725 paths, 2875. The parameter draw is pinned: one draw in five gives
+  2874 across every `γ` and both start systems, and no 2875th root is recoverable by Newton from
+  any discarded endpoint, so that count is a property of the instance rather than of the tracking.
+- **3264 conics tangent to five conics.** Polyhedral at a generic target, 27072 paths, 3264
+  solutions, all 3264 distinct certified. At five real conics both routes also reach all 3264, and
+  certification is what shows it: tracking the generic solutions there gives 3264 successful
+  endpoints in bijection with the known real solution set (no collision, nothing spurious), all
+  3264 certified distinct and real. The direct polyhedral solve returns those 3264 plus 14
+  endpoints at condition number 1e17-4.6e18 that are not solutions, and certification rejects
+  exactly those 14.
+
+  `nsolutions` reported 3259 until `sing_cond` was corrected. Five of the 3264 conics have a
+  scaled Jacobian condition number between 1.03e14 and 1.51e14, which the old `1e14` default
+  (v2's, still) put on the singular side, and `nsolutions` is nonsingular-only. All five are
+  regular: multiplicity 1, no winding number estimated, accuracy ~1e-16, and Krawczyk certifies
+  them. Both routes flag the same five roots along disjoint sets of paths, so the conditioning
+  belongs to the instance rather than to the tracking. The default is now `inv(eps(Float64))`,
+  derived from the working precision rather than fitted (see `01_decisions.md`), and both routes
+  report 3264 with the 14 excess endpoints still excluded. This is a deliberate deviation from v2,
+  which reports ~3259 here; the four `nsingular` parity assertions in
+  `compare_v2_solve_counts_test.jl` are unaffected, because every multiple root in them is found
+  by winding number at condition numbers orders of magnitude below either threshold.
 
 Deliberately not ported, since they are v2 architecture rather than features: `MixedSystem`
 and `MixedHomotopy`, `CompiledSystem`/`InterpretedSystem` as user-facing types,

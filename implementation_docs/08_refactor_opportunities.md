@@ -145,7 +145,7 @@ Items 1 and 2 are pure deletions with no design decision in them.
 
 Item 4 is item 1 of `07_executor_fanout_debt.md` seen from the other side. Worth recording
 there: the per-cache hooks it needs already exist. `_path_result(cache, i)` and
-`_excess_checker(cache)` (`result_iterator.jl:13-30`, `:124-126`) already cover all three cache
+`_excess_checker(cache)` (`result_iterator.jl`, the per-cache-kind sections) already cover all three cache
 types with the right semantics, but are used only for lazy iteration, not by `solve!`. The
 three serial loops (`solve.jl:277-295`, `polyhedral.jl:729-751`, `subspace_solve.jl:58-73`) and
 three threaded loops (`solve.jl:312-340`, `polyhedral.jl:768-802`, `subspace_solve.jl:75-104`)

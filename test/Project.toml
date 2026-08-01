@@ -16,6 +16,7 @@ MultivariatePolynomials = "102ac46a-7ee4-5c85-9060-abc95bfdeaa3"
 ParallelTestRunner = "d3525ed8-44d0-4b2c-a655-542cee43accc"
 RuntimeGeneratedFunctions = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SemialgebraicSets = "8e049039-38e8-557d-ae3a-bc521ccf6204"
 Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 

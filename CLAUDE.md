@@ -56,6 +56,7 @@ All common tasks go through the Makefile:
 ```sh
 make test          # run core tests in parallel (ParallelTestRunner, 10 jobs), then the certification subpackage
 make test-cert     # run only the certification subpackage suite (threaded)
+make test-extensive # run the large solves (~4 min, not part of `make test`)
 make test-serial   # run all tests serially (for debugging)
 make benchmark     # run TTFX + steady-state benchmarks
 make compare       # compare primitives against HomotopyContinuation v2
@@ -76,6 +77,10 @@ Tests run via ParallelTestRunner — each file is self-contained and runs in its
 `test/test_systems.jl` and `test/minors_polys.jl` hold shared polynomial system data; they define no
 tests and are `include`d by the files that need them. Add new systems to `TEST_SYSTEM_COLLECTION` to
 get them covered by the evaluation sweep in `test/system_sweep_test.jl`.
+
+`test/extensive/` holds solves that take minutes each (the 15625-path Fano quintic, the 27072-path
+3264 problem). It has its own environment because it certifies, runs threaded through a plain
+`runtests.jl`, and is filtered out of `make test` discovery: `make test-extensive`.
 
 **Never pipe a suite run through `tail`/`head`/`grep` as its only sink.** A full run takes ~3
 minutes. A failure whose name and stacktrace went into a lossy pipe cannot be diagnosed without

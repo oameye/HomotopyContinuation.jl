@@ -122,6 +122,25 @@ their own report a callback that stops nothing.
 """
 early_stop_callback(alg::AbstractAlgorithm)::EarlyStop = NEVER_STOP
 
+# ── Excess-solution tolerance ───────────────────────────────────────────────
+
+"""
+    excess_residual_tol(alg) -> Float64
+
+The residual on the original system at which an endpoint that solves only the
+squared-up system is still reported as a solution, read on the same scale as
+[`residual`](@ref). `0.0` for a strict check, and for every algorithm that does
+not square a system up.
+"""
+excess_residual_tol(::AbstractAlgorithm)::Float64 = 0.0
+
+function _checked_excess_residual_tol(tol::Float64)::Float64
+    tol >= 0 || throw(
+        ArgumentError("`excess_residual_tol` must be non-negative, got $tol"),
+    )
+    return tol
+end
+
 # ── Continuation: the homotopy is already determined by the arguments ────────
 
 """

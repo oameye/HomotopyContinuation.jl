@@ -305,14 +305,14 @@ function _opts_cse_visit!(
 
     if storage isa SAddStorage
         # bvisit(const Add &x)
-        for a in storage.args
+        for a in storage_args(storage)
             _opts_cse_visit!(a, adds, muls, opt_subs, seen)
         end
         push!(adds, expr)
 
     elseif storage isa SMulStorage
         # bvisit(const Mul &x)
-        for a in storage.args
+        for a in storage_args(storage)
             _opts_cse_visit!(a, adds, muls, opt_subs, seen)
         end
         # Check for negative coefficient
@@ -320,7 +320,7 @@ function _opts_cse_visit!(
         # IMPORTANT: SymEngine's is_negative() returns true ONLY for real negative
         # numbers (Integer, Rational, RealDouble), NEVER for Complex.
         # So we must check: imaginary part is zero AND real part is negative.
-        args = storage.args
+        args = storage_args(storage)
         if !isempty(args)
             first_storage = sexpr_storage(args[1])
             if first_storage isa SConstStorage &&
@@ -366,26 +366,26 @@ function _opts_cse_visit!(
 
     elseif storage isa SPowStorage
         # bvisit(const Pow &x)
-        _opts_cse_visit!(storage.base, adds, muls, opt_subs, seen)
+        _opts_cse_visit!(storage_base(storage), adds, muls, opt_subs, seen)
         # SymEngine: check if exponent is negative
         if storage.exp < 0
             # pow(base, -n) → FuncSym("pow", [pow(base, n), -1])
             opt_subs[expr] = SExpr.SFuncSym(
                 SFuncKind.SFUNC_POW,
-                SExprT[SExpr.SPow(storage.base, -storage.exp), SExpr.SConst(ComplexF64(-1))],
+                SExprT[SExpr.SPow(storage_base(storage), -storage.exp), SExpr.SConst(ComplexF64(-1))],
             )
         end
 
     elseif storage isa SNegStorage
         # SNeg is our representation for SymEngine's Mul(-1, x) where neg simplifies to atom
-        _opts_cse_visit!(storage.arg, adds, muls, opt_subs, seen)
+        _opts_cse_visit!(storage_arg(storage), adds, muls, opt_subs, seen)
 
     elseif storage isa SUnaryStorage
-        _opts_cse_visit!(storage.arg, adds, muls, opt_subs, seen)
+        _opts_cse_visit!(storage_arg(storage), adds, muls, opt_subs, seen)
 
     elseif storage isa SFuncSymStorage
         # bvisit(const Basic &x) — generic case for compound expressions
-        for a in storage.args
+        for a in storage_args(storage)
             _opts_cse_visit!(a, adds, muls, opt_subs, seen)
         end
     end

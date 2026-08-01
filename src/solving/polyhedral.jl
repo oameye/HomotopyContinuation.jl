@@ -5,19 +5,37 @@
 #   Phase 2 (coefficient): Track from generic system to target through CoefficientHomotopy (t: 1 -> 0)
 
 """
-    Polyhedral(; early_stop_callback, tracker_options, endgame_options, seed, show_progress)
+    Polyhedral(; only_torus, early_stop_callback, excess_residual_tol,
+                 tracker_options, endgame_options, seed, show_progress)
 
 Algorithm that constructs a polyhedral (BKK-optimal) start system using mixed subdivisions.
 The number of paths tracked equals the mixed volume, which is at most the Bezout bound.
+
+`only_torus = true` computes only the solutions with all coordinates non-zero.
+That start system tracks [`mixed_volume`](@ref) paths, fewer than the default,
+which pads every support with the zero exponent vector so that the solutions on
+the coordinate hyperplanes are found as well.
 
 `early_stop_callback` is called with each successful [`PathResult`](@ref); return
 `true` to stop. Paths already running still finish, so which extra results appear
 is not reproducible under [`Threaded`](@ref) or [`DistributedExecutor`](@ref).
 
+For an overdetermined system, an endpoint solving the squared-up system but not
+the original one is reported as an excess solution. A positive
+`excess_residual_tol` instead keeps such an endpoint when its residual on the
+original system is at most that value, which is what a system consistent only up
+to a measurement error needs. It is compared against the same quantity
+[`residual`](@ref) reports, so it is read on the equations [`evaluate`](@ref)
+gives; divide by [`equation_scales`](@ref) to state it in the units of a system
+whose coefficients were normalized. Must be non-negative.
+
 # Examples
 ```julia
 @polyvar x y
 result = solve(System([x^2 + y - 1, x*y - 2]), Polyhedral())
+
+# Only the solutions in the torus
+result = solve(F, Polyhedral(; only_torus = true))
 
 # Tune tracker options
 result = solve(F, Polyhedral(; tracker_options = TrackerOptions(; max_steps = 500)))
@@ -26,10 +44,14 @@ result = solve(F, Polyhedral(; tracker_options = TrackerOptions(; max_steps = 50
 struct Polyhedral <: AbstractAlgorithm
     common::CommonOptions
     early_stop::EarlyStop
+    only_torus::Bool
+    excess_residual_tol::Float64
 end
 
 Polyhedral(;
+    only_torus::Bool = false,
     early_stop_callback = _never_stop,
+    excess_residual_tol::Float64 = 0.0,
     tracker_options::TrackerOptions = TrackerOptions(),
     endgame_options::EndgameOptions = EndgameOptions(),
     seed::UInt32 = rand(Random.RandomDevice(), UInt32),
@@ -37,17 +59,25 @@ Polyhedral(;
 ) = Polyhedral(
     CommonOptions(tracker_options, endgame_options, seed, show_progress),
     _early_stop(early_stop_callback),
+    only_torus,
+    _checked_excess_residual_tol(excess_residual_tol),
 )
 
 early_stop_callback(alg::Polyhedral)::EarlyStop = alg.early_stop
 
+excess_residual_tol(alg::Polyhedral)::Float64 = alg.excess_residual_tol
+
+# Every option but `common` survives, so a new field reaches `_reseed`/`_quiet` here.
+_with_common(alg::Polyhedral, common::CommonOptions)::Polyhedral = Polyhedral(
+    common, alg.early_stop, alg.only_torus, alg.excess_residual_tol,
+)
+
 # A parent derives its children's seeds from its own, so one top-level seed
 # reproduces every stage.
 _reseed(alg::Polyhedral, seed::UInt32)::Polyhedral =
-    Polyhedral(_with_seed(alg.common, seed), alg.early_stop)
+    _with_common(alg, _with_seed(alg.common, seed))
 
-_quiet(alg::Polyhedral)::Polyhedral =
-    Polyhedral(_quiet(alg.common), alg.early_stop)
+_quiet(alg::Polyhedral)::Polyhedral = _with_common(alg, _quiet(alg.common))
 
 """
     PolyhedralSolveCache
@@ -74,6 +104,11 @@ struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S, C}
     show_progress::Bool
     early_stop::EarlyStop
 end
+
+# This cache pairs every start point with the mixed cell it belongs to.
+_start_points(
+    starts::Vector{Tuple{MixedSubdivisions.MixedCell, Vector{ComplexF64}}},
+)::Vector{Vector{ComplexF64}} = [copy(x) for (_, x) in starts]
 
 # ── Helper: randomize support/coefficients for overdetermined systems ───────
 
@@ -332,7 +367,7 @@ _clone_system_evaluator(system::_SupportSystem)::SystemEvaluator =
 # ── CommonSolve.init: polys + Polyhedral ────────────────────────────────────
 
 function _polyhedral_source_data(
-        ::SquareShape, ::Random.MersenneTwister, F::System,
+        ::SquareShape, ::Random.MersenneTwister, F::System, ::Float64,
     )
     source_support, source_coeffs = support_coefficients(F)
     return source_support, source_coeffs, nothing
@@ -340,9 +375,10 @@ end
 
 function _polyhedral_source_data(
         ::OverdeterminedShape, rng::Random.MersenneTwister, F::System,
+        excess_residual_tol::Float64,
     )
     source_support, source_coeffs = support_coefficients(F)
-    A, perm, checker = _square_up(rng, F)
+    A, perm, checker = _square_up(rng, F, excess_residual_tol)
     randomized_support, randomized_coeffs =
         _randomize_support(source_support, source_coeffs, A, perm)
     return randomized_support, randomized_coeffs, checker
@@ -415,9 +451,9 @@ function _fine_mixed_cells_canonical(
         lifting_sampler;
         max_tries::Int = 10,
     )::Tuple{Vector{MixedSubdivisions.MixedCell}, Vector{Vector{Int32}}}
+    lifting = Vector{Int32}[Int32[] for _ in support]
     try
         for attempt in 1:max_tries
-            lifting = Vector{Vector{Int32}}(undef, length(support))
             for i in eachindex(support)
                 lifting[i] = lifting_sampler(size(support[i], 2), attempt)::Vector{Int32}
             end
@@ -434,33 +470,86 @@ function _fine_mixed_cells_canonical(
             all_valid && return cells, lifting
         end
     catch err
+        if !(err isa InexactError || err isa LinearAlgebra.SingularException)
+            rethrow()
+        end
+    end
+    _has_zero_mixed_volume(support) && return MixedSubdivisions.MixedCell[], lifting
+    return _fine_mixed_cells_failure()
+end
+
+# The mixed cells of `support` sum to this, so it is also the number of paths the
+# polyhedral start system tracks. A one-column support is a point: mixed volume 0 by
+# multilinearity, but MixedSubdivisions cannot process it.
+function _mixed_volume(support::Vector{Matrix{Int32}})::Int
+    any(A -> size(A, 2) < 2, support) && return 0
+    return Int(MixedSubdivisions.mixed_volume(support))
+end
+
+# A numeric failure is not zero volume.
+function _has_zero_mixed_volume(support::Vector{Matrix{Int32}})::Bool
+    try
+        return iszero(_mixed_volume(support))
+    catch err
         if err isa InexactError || err isa LinearAlgebra.SingularException
-            return _fine_mixed_cells_failure()
+            return false
         end
         rethrow()
     end
-    return _fine_mixed_cells_failure()
 end
 
 @noinline _fine_mixed_cells_failure() =
     error("MixedSubdivisions could not compute fine mixed cells")
 
+"""
+    _polyhedral_system(F, alg) -> System
+
+The system `_init_polyhedral` runs on, with every route's preparation applied: a
+homogeneous system is put on an affine chart, a composition is substituted out.
+Reading the support off this is what keeps `paths_to_track` from drifting away
+from the paths a solve actually tracks.
+"""
+function _polyhedral_system(F::System, alg::Polyhedral)::System
+    _check_parameter_free(F, "`Polyhedral`")
+    _check_polynomial(F, "`Polyhedral`")
+    if is_homogeneous(F)
+        _check_single_group(F)
+        _check_projective_determined(F, "`Polyhedral`")
+        G = _polynomial_system(F)
+        return _polyhedral_system(
+            _sliced_solve_system(G, _full_subspace(nvariables(G)), _seed(alg)), alg,
+        )
+    end
+    _check_square_or_overdetermined(F)
+    return F
+end
+
+_polyhedral_system(C::CompositionSystem, alg::Polyhedral)::System =
+    _polyhedral_system(System(C), alg)
+
+# The support the mixed cells are computed from: squared up when the system is
+# overdetermined, then padded unless only the torus solutions are wanted.
+function _polyhedral_support(F::System, alg::Polyhedral)::Vector{Matrix{Int32}}
+    rng = Random.MersenneTwister(_seed(alg))
+    source_support, _, _ =
+        _polyhedral_source_data(system_shape(F), rng, F, alg.excess_residual_tol)
+    return Matrix{Int32}[_padded_support(A, alg.only_torus) for A in source_support]
+end
+
+# `only_torus` divides each equation by its lowest monomial; otherwise the zero exponent
+# vector is added so the solutions on the coordinate hyperplanes are found too.
+_padded_support(A::Matrix{Int32}, only_torus::Bool)::Matrix{Int32} =
+    only_torus ? A .- minimum(A; dims = 2) :
+    has_zero_column(A) ? A : hcat(A, zeros(Int32, size(A, 1)))
+
 function CommonSolve.init(
         F::System, alg::Polyhedral,
         exec::AbstractExecutor = Threaded(),
     )::PolyhedralSolveCache
-    _check_parameter_free(F, "`Polyhedral`")
-    _check_polynomial(F, "`Polyhedral`")
-    if is_homogeneous(F)
-        return Base.inferencebarrier(_init_projective)(
-            F, alg, exec, "`Polyhedral`",
-        )::PolyhedralSolveCache
-    end
-    _check_square_or_overdetermined(F)
     # Dynamic call: specializes the body on the concrete `System` so that
     # `system_shape(F)` resolves statically instead of union-splitting.
     initializer = Base.inferencebarrier(_init_polyhedral)
-    return initializer(F, alg, exec)::PolyhedralSolveCache
+    return initializer(_polyhedral_system(F, alg), alg, exec)::PolyhedralSolveCache
 end
 
 function _init_polyhedral(
@@ -478,7 +567,7 @@ function _init_polyhedral(
     #    (mixed cells, parametric system, both homotopy phases) then operates on
     #    the support of G = [I A]·(F∘perm) and never sees the original system.
     source_support, source_coeffs, excess_checker =
-        _polyhedral_source_data(system_shape(F), rng, F)
+        _polyhedral_source_data(system_shape(F), rng, F, alg.excess_residual_tol)
 
     # 2. Generate start coefficients for ORIGINAL support FIRST.
     #    Coefficients must be generated before zero column addition so the RNG
@@ -497,19 +586,17 @@ function _init_polyhedral(
 
     # 3. Add zero columns to support and extend coefficients.
     #    Zero-column extensions use randn(ComplexF64) for start, 0.0 for target.
+    #    `only_torus` instead divides each equation by its lowest monomial.
     support = Vector{Matrix{Int32}}(undef, length(source_support))
     target_coeffs = Vector{Vector{ComplexF64}}(undef, length(source_coeffs))
     start_coeffs = Vector{Vector{ComplexF64}}(undef, length(source_coeffs))
     for (i, A) in enumerate(source_support)
-        if has_zero_column(A)
-            support[i] = A
-            target_coeffs[i] = source_coeffs[i]
-            start_coeffs[i] = start_coeffs_orig[i]
-        else
-            support[i] = hcat(A, zeros(Int32, size(A, 1)))
-            target_coeffs[i] = push!(copy(source_coeffs[i]), zero(ComplexF64))
-            start_coeffs[i] = vcat(start_coeffs_orig[i], randn(rng, ComplexF64))
-        end
+        pad = !alg.only_torus && !has_zero_column(A)
+        support[i] = _padded_support(A, alg.only_torus)
+        target_coeffs[i] = pad ?
+            push!(copy(source_coeffs[i]), zero(ComplexF64)) : source_coeffs[i]
+        start_coeffs[i] = pad ?
+            vcat(start_coeffs_orig[i], randn(rng, ComplexF64)) : start_coeffs_orig[i]
     end
 
     # 4. Compute mixed cells via MixedSubdivisions
@@ -518,12 +605,9 @@ function _init_polyhedral(
         rand(rng, Int32(-2^(10 + attempt)):Int32(2^(10 + attempt)), nterms)
     mixed_cells, lifting = _fine_mixed_cells_canonical(support, _lifting_sampler)
 
-    if isempty(mixed_cells)
-        error("No mixed cells found — the system may have no isolated solutions")
-    end
-
-    # 5. Solve binomial systems for each mixed cell
-    max_d_hat = maximum(c.volume for c in mixed_cells)
+    # 5. Solve binomial systems for each mixed cell. No cell means mixed volume 0, so
+    #    there is no path to track and the cache is built empty.
+    max_d_hat = isempty(mixed_cells) ? 1 : maximum(c.volume for c in mixed_cells)
     BSS = BinomialSystemSolver(n; max_d_hat = max_d_hat)
     X = Matrix{ComplexF64}(undef, n, max_d_hat)
 

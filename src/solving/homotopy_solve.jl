@@ -245,6 +245,13 @@ end
 for f in (:(solve), :(CommonSolve.init))
     @eval begin
         $f(
+            H::Homotopy, starts::StartsLike, alg::Continuation = Continuation(),
+            exec::AbstractExecutor = Serial(),
+        ) = $f(_as_homotopy(H), starts, alg, exec)
+        $f(H::Homotopy, starts::StartsLike, exec::AbstractExecutor) =
+            $f(_as_homotopy(H), starts, Continuation(), exec)
+
+        $f(
             ::CloneableSystem, ::CloneableSystem, starts,
             ::Continuation = Continuation(), ::AbstractExecutor = Threaded(),
         ) = _bad_starts(starts)
@@ -257,6 +264,12 @@ for f in (:(solve), :(CommonSolve.init))
             ::AbstractExecutor = Serial(),
         ) = _bad_starts(starts)
         $f(::AbstractHomotopy, starts, ::AbstractExecutor) = _bad_starts(starts)
+
+        $f(
+            ::Homotopy, starts, ::Continuation = Continuation(),
+            ::AbstractExecutor = Serial(),
+        ) = _bad_starts(starts)
+        $f(::Homotopy, starts, ::AbstractExecutor) = _bad_starts(starts)
 
         $f(::Function, starts, ::Continuation, ::AbstractExecutor) =
             _bad_starts(starts)

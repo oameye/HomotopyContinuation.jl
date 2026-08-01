@@ -56,15 +56,19 @@ const EFnStorage = variant_storage_type(SymExpr.EFn)
 
 @inline expr_storage(e::Expression) = variant_storage(e)
 
-@inline _owned_expr_args(args::AbstractVector{<:Expression})::Vector{Expression} =
-    collect(Expression, args)
+# A self-referential `@data` field is widened to `Any`; without the assertion every
+# recursive walk dispatches dynamically and boxes its result.
+@inline storage_args(s::Union{EAddStorage, EMulStorage}) = s.args::Vector{Expression}
+@inline storage_base(s::EPowStorage) = s.base::Expression
+@inline storage_arg(s::EFnStorage) = s.arg::Expression
 
-# Compound nodes are hashed structurally and used as Dict keys, so they must own
-# their child storage rather than alias a caller vector.
-@inline SymExpr.EAdd(args::AbstractVector{<:Expression}) =
-    invoke(SymExpr.EAdd, Tuple{Any}, _owned_expr_args(args))
-@inline SymExpr.EMul(args::AbstractVector{<:Expression}) =
-    invoke(SymExpr.EMul, Tuple{Any}, _owned_expr_args(args))
+# Compound nodes are hashed structurally and used as Dict keys, so they must own their
+# child storage rather than alias a caller vector: these take ownership of `args`, and
+# the caller must not touch it again.
+@inline _eadd_owned(args::Vector{Expression})::Expression =
+    invoke(SymExpr.EAdd, Tuple{Any}, args)
+@inline _emul_owned(args::Vector{Expression})::Expression =
+    invoke(SymExpr.EMul, Tuple{Any}, args)
 
 ## ── Hashing and ordering ────────────────────────────────────────────────────
 
@@ -83,13 +87,13 @@ function Base.hash(e::Expression, h::UInt)::UInt
     elseif storage isa EVarStorage
         return hash(storage.name, hash(:EVar, h))
     elseif storage isa EAddStorage
-        return hash(_fold_expr_hash(:EAdd, storage.args), h)
+        return hash(_fold_expr_hash(:EAdd, storage_args(storage)), h)
     elseif storage isa EMulStorage
-        return hash(_fold_expr_hash(:EMul, storage.args), h)
+        return hash(_fold_expr_hash(:EMul, storage_args(storage)), h)
     elseif storage isa EPowStorage
-        return hash(storage.exp, hash(storage.base, hash(:EPow, h)))
+        return hash(storage.exp, hash(storage_base(storage), hash(:EPow, h)))
     else # EFnStorage
-        return hash(storage.arg, hash(storage.kind, hash(:EFn, h)))
+        return hash(storage_arg(storage), hash(storage.kind, hash(:EFn, h)))
     end
 end
 
@@ -133,13 +137,13 @@ function Base.conj(e::Expression)::Expression
     elseif storage isa EVarStorage
         return e
     elseif storage isa EAddStorage
-        return _eadd(Expression[conj(a) for a in storage.args])
+        return _eadd(Expression[conj(a) for a in storage_args(storage)])
     elseif storage isa EMulStorage
-        return _emul(Expression[conj(a) for a in storage.args])
+        return _emul(Expression[conj(a) for a in storage_args(storage)])
     elseif storage isa EPowStorage
-        return _epow(conj(storage.base), storage.exp)
+        return _epow(conj(storage_base(storage)), storage.exp)
     else # EFnStorage
-        return _efn(storage.kind, conj(storage.arg))
+        return _efn(storage.kind, conj(storage_arg(storage)))
     end
 end
 
@@ -160,62 +164,81 @@ Expression(x::Base.TwicePrecision)::Expression = SymExpr.ENum(ComplexF64(x))
 
 ## ── Canonical constructors ──────────────────────────────────────────────────
 
+# Beyond this many distinct keys a linear scan stops beating a hash lookup.
+const _LINEAR_SCAN_MAX = 8
+
+@inline function _find_expr(keys::Vector{Expression}, e::Expression)::Int
+    for i in eachindex(keys)
+        @inbounds keys[i] == e && return i
+    end
+    return 0
+end
+
 function _flatten_eadd!(
-        terms::Vector{Expression}, const_sum::Base.RefValue{ComplexF64}, e::Expression,
-    )::Nothing
+        terms::Vector{Expression}, const_sum::ComplexF64, e::Expression,
+    )::ComplexF64
     storage = expr_storage(e)
     if storage isa EAddStorage
-        for child in storage.args
-            _flatten_eadd!(terms, const_sum, child)
+        for child in storage_args(storage)
+            const_sum = _flatten_eadd!(terms, const_sum, child)
         end
     elseif storage isa ENumStorage
-        const_sum[] += storage.val
+        const_sum += storage.val
     else
         push!(terms, e)
+    end
+    return const_sum
+end
+
+# `split` maps a term to the key it is tallied under and the value added to it.
+function _tally!(
+        split::F, bases::Vector{Expression}, vals::Vector{T},
+        terms::Vector{Expression},
+    )::Nothing where {F, T}
+    index = length(terms) > _LINEAR_SCAN_MAX ? Dict{Expression, Int}() : nothing
+    for t in terms
+        (base, v) = split(t)
+        k = index === nothing ? _find_expr(bases, base) : get(index, base, 0)
+        if k == 0
+            push!(bases, base)
+            push!(vals, v)
+            index === nothing || (index[base] = length(bases))
+        else
+            @inbounds vals[k] += v
+        end
     end
     return nothing
 end
 
-"""Split a product into its leading numeric coefficient and the rest."""
-function _split_coefficient(e::Expression)::Tuple{ComplexF64, Expression}
+"""Split a product into the rest of it and its leading numeric coefficient."""
+function _split_coefficient(e::Expression)::Tuple{Expression, ComplexF64}
     storage = expr_storage(e)
     if storage isa EMulStorage
-        args = storage.args
+        args = storage_args(storage)
         head = expr_storage(args[1])
         if head isa ENumStorage
             rest = args[2:end]
-            return head.val, (length(rest) == 1 ? rest[1] : SymExpr.EMul(rest))
+            return (length(rest) == 1 ? rest[1] : _emul_owned(rest)), head.val
         end
     end
-    return one(ComplexF64), e
+    return e, one(ComplexF64)
 end
 
 function _eadd(args::Vector{Expression})::Expression
     terms = Expression[]
-    const_sum = Ref(zero(ComplexF64))
+    const_sum = zero(ComplexF64)
     for a in args
-        _flatten_eadd!(terms, const_sum, a)
+        const_sum = _flatten_eadd!(terms, const_sum, a)
     end
 
-    # Collect like terms: coefficients of structurally identical bases add up.
     bases = Expression[]
     coeffs = ComplexF64[]
-    index = Dict{Expression, Int}()
-    for t in terms
-        (c, base) = _split_coefficient(t)
-        k = get(index, base, 0)
-        if k == 0
-            push!(bases, base)
-            push!(coeffs, c)
-            index[base] = length(bases)
-        else
-            coeffs[k] += c
-        end
-    end
+    _tally!(_split_coefficient, bases, coeffs, terms)
 
     collected = Expression[]
     nested = false
-    for (base, c) in zip(bases, coeffs)
+    for i in eachindex(bases)
+        @inbounds (base, c) = (bases[i], coeffs[i])
         iszero(c) && continue
         if isone(c)
             # `base` can be a sum (`2 * (x + y)` splits to `x + y`), which has to
@@ -227,87 +250,72 @@ function _eadd(args::Vector{Expression})::Expression
         end
     end
     if nested
-        !iszero(const_sum[]) && push!(collected, SymExpr.ENum(const_sum[]))
+        !iszero(const_sum) && push!(collected, SymExpr.ENum(const_sum))
         return _eadd(collected)
     end
 
     sort!(collected; lt = _expr_lt)
-    !iszero(const_sum[]) && pushfirst!(collected, SymExpr.ENum(const_sum[]))
+    !iszero(const_sum) && pushfirst!(collected, SymExpr.ENum(const_sum))
     isempty(collected) && return zero(Expression)
-    length(collected) == 1 && return collected[1]
-    return SymExpr.EAdd(collected)
+    length(collected) == 1 && return @inbounds collected[1]
+    return _eadd_owned(collected)
 end
 
 function _flatten_emul!(
-        factors::Vector{Expression}, coeff::Base.RefValue{ComplexF64}, e::Expression,
-    )::Nothing
+        factors::Vector{Expression}, coeff::ComplexF64, e::Expression,
+    )::ComplexF64
     storage = expr_storage(e)
     if storage isa EMulStorage
-        for child in storage.args
-            _flatten_emul!(factors, coeff, child)
+        for child in storage_args(storage)
+            coeff = _flatten_emul!(factors, coeff, child)
         end
     elseif storage isa ENumStorage
-        coeff[] *= storage.val
+        coeff *= storage.val
     else
         push!(factors, e)
     end
-    return nothing
+    return coeff
 end
 
 """Split a factor into its base and integer exponent."""
 @inline function _split_power(e::Expression)::Tuple{Expression, Int}
     storage = expr_storage(e)
-    storage isa EPowStorage && return (storage.base, storage.exp)
+    storage isa EPowStorage && return (storage_base(storage), storage.exp)
     return (e, 1)
 end
 
 function _emul(args::Vector{Expression})::Expression
     factors = Expression[]
-    coeff = Ref(one(ComplexF64))
+    coeff = one(ComplexF64)
     for a in args
-        _flatten_emul!(factors, coeff, a)
+        coeff = _flatten_emul!(factors, coeff, a)
     end
-    iszero(coeff[]) && return zero(Expression)
+    iszero(coeff) && return zero(Expression)
 
-    # Collect powers: repeated bases have their exponents added.
     bases = Expression[]
     exps = Int[]
-    index = Dict{Expression, Int}()
-    for f in factors
-        (base, k) = _split_power(f)
-        j = get(index, base, 0)
-        if j == 0
-            push!(bases, base)
-            push!(exps, k)
-            index[base] = length(bases)
-        else
-            exps[j] += k
-        end
-    end
-
-    collected = Expression[]
-    for (base, k) in zip(bases, exps)
-        k == 0 && continue
-        push!(collected, _epow(base, k))
-    end
+    _tally!(_split_power, bases, exps, factors)
 
     # `_epow` can fold a base to a literal (e.g. (1/2)^-1), so re-absorb them.
     kept = Expression[]
-    for c in collected
-        v = expr_number(c)
+    for i in eachindex(bases)
+        @inbounds k = exps[i]
+        k == 0 && continue
+        @inbounds p = _epow(bases[i], k)
+        v = expr_number(p)
         if v === nothing
-            push!(kept, c)
+            push!(kept, p)
         else
-            coeff[] *= v
+            coeff *= v
         end
     end
-    iszero(coeff[]) && return zero(Expression)
+    iszero(coeff) && return zero(Expression)
 
     sort!(kept; lt = _expr_lt)
-    isone(coeff[]) || pushfirst!(kept, SymExpr.ENum(coeff[]))
+    isone(coeff) || pushfirst!(kept, SymExpr.ENum(coeff))
     isempty(kept) && return one(Expression)
-    length(kept) == 1 && return kept[1]
-    return SymExpr.EMul(kept)
+    length(kept) == 1 && return @inbounds kept[1]
+    return _emul_owned(kept)
 end
 
 function _epow(base::Expression, k::Int)::Expression
@@ -317,10 +325,10 @@ function _epow(base::Expression, k::Int)::Expression
     if storage isa ENumStorage
         return SymExpr.ENum(op_pow_int(storage.val, k))
     elseif storage isa EPowStorage
-        return _epow(storage.base, storage.exp * k)
+        return _epow(storage_base(storage), storage.exp * k)
     elseif storage isa EMulStorage
         # (a*b)^k = a^k * b^k keeps powers next to their base for CSE.
-        return _emul(Expression[_epow(a, k) for a in storage.args])
+        return _emul(Expression[_epow(a, k) for a in storage_args(storage)])
     end
     return SymExpr.EPow(base, k)
 end
@@ -523,17 +531,17 @@ function _collect_expr_variables!(
             push!(acc, e)
         end
     elseif storage isa EAddStorage
-        for a in storage.args
+        for a in storage_args(storage)
             _collect_expr_variables!(acc, seen, a)
         end
     elseif storage isa EMulStorage
-        for a in storage.args
+        for a in storage_args(storage)
             _collect_expr_variables!(acc, seen, a)
         end
     elseif storage isa EPowStorage
-        _collect_expr_variables!(acc, seen, storage.base)
+        _collect_expr_variables!(acc, seen, storage_base(storage))
     elseif storage isa EFnStorage
-        _collect_expr_variables!(acc, seen, storage.arg)
+        _collect_expr_variables!(acc, seen, storage_arg(storage))
     end
     return nothing
 end
@@ -583,9 +591,9 @@ function _differentiate(e::Expression, v::Symbol)::Expression
     elseif storage isa EVarStorage
         return storage.name === v ? one(Expression) : zero(Expression)
     elseif storage isa EAddStorage
-        return _eadd(Expression[_differentiate(a, v) for a in storage.args])
+        return _eadd(Expression[_differentiate(a, v) for a in storage_args(storage)])
     elseif storage isa EMulStorage
-        args = storage.args
+        args = storage_args(storage)
         terms = Expression[]
         for i in eachindex(args)
             da = _differentiate(args[i], v)
@@ -599,14 +607,14 @@ function _differentiate(e::Expression, v::Symbol)::Expression
         end
         return _eadd(terms)
     elseif storage isa EPowStorage
-        db = _differentiate(storage.base, v)
+        db = _differentiate(storage_base(storage), v)
         iszero(db) && return zero(Expression)
         k = storage.exp
         return _emul(
-            Expression[SymExpr.ENum(ComplexF64(k)), _epow(storage.base, k - 1), db],
+            Expression[SymExpr.ENum(ComplexF64(k)), _epow(storage_base(storage), k - 1), db],
         )
     else # EFnStorage
-        da = _differentiate(storage.arg, v)
+        da = _differentiate(storage_arg(storage), v)
         iszero(da) && return zero(Expression)
         kind = storage.kind
         if kind == SUnaryKind.UNARY_SQRT
@@ -614,17 +622,17 @@ function _differentiate(e::Expression, v::Symbol)::Expression
             return _emul(
                 Expression[
                     SymExpr.ENum(ComplexF64(0.5)),
-                    _epow(_efn(SUnaryKind.UNARY_SQRT, storage.arg), -1),
+                    _epow(_efn(SUnaryKind.UNARY_SQRT, storage_arg(storage)), -1),
                     da,
                 ],
             )
         elseif kind == SUnaryKind.UNARY_SIN
-            return _emul(Expression[_efn(SUnaryKind.UNARY_COS, storage.arg), da])
+            return _emul(Expression[_efn(SUnaryKind.UNARY_COS, storage_arg(storage)), da])
         else
             return _emul(
                 Expression[
                     SymExpr.ENum(-one(ComplexF64)),
-                    _efn(SUnaryKind.UNARY_SIN, storage.arg),
+                    _efn(SUnaryKind.UNARY_SIN, storage_arg(storage)),
                     da,
                 ],
             )
@@ -665,13 +673,13 @@ function _subs(e::Expression, map::Dict{Symbol, Expression})::Expression
     elseif storage isa EVarStorage
         return get(map, storage.name, e)
     elseif storage isa EAddStorage
-        return _eadd(Expression[_subs(a, map) for a in storage.args])
+        return _eadd(Expression[_subs(a, map) for a in storage_args(storage)])
     elseif storage isa EMulStorage
-        return _emul(Expression[_subs(a, map) for a in storage.args])
+        return _emul(Expression[_subs(a, map) for a in storage_args(storage)])
     elseif storage isa EPowStorage
-        return _epow(_subs(storage.base, map), storage.exp)
+        return _epow(_subs(storage_base(storage), map), storage.exp)
     else # EFnStorage
-        return _efn(storage.kind, _subs(storage.arg, map))
+        return _efn(storage.kind, _subs(storage_arg(storage), map))
     end
 end
 
@@ -730,7 +738,7 @@ function _den_powers(d::Expression)::Tuple{ComplexF64, Dict{Expression, Int}}
     coeff = one(ComplexF64)
     powers = Dict{Expression, Int}()
     storage = expr_storage(d)
-    factors = storage isa EMulStorage ? storage.args : Expression[d]
+    factors = storage isa EMulStorage ? storage_args(storage) : Expression[d]
     for f in factors
         v = expr_number(f)
         if v !== nothing
@@ -787,18 +795,18 @@ num_den(x / (y - 1) + y)   # (x + y*(-1 + y), -1 + y)
 function num_den(f::Expression)::Tuple{Expression, Expression}
     storage = expr_storage(f)
     if storage isa EAddStorage
-        return _num_den_add(storage.args)
+        return _num_den_add(storage_args(storage))
     elseif storage isa EMulStorage
         num = one(Expression)
         den = one(Expression)
-        for a in storage.args
+        for a in storage_args(storage)
             (p, q) = num_den(a)
             num = _emul(Expression[num, p])
             den = _emul(Expression[den, q])
         end
         return num, den
     elseif storage isa EPowStorage
-        (p, q) = num_den(storage.base)
+        (p, q) = num_den(storage_base(storage))
         k = storage.exp
         return k > 0 ? (_epow(p, k), _epow(q, k)) : (_epow(q, -k), _epow(p, -k))
     end
@@ -825,7 +833,7 @@ function _degree_bounds(
     elseif storage isa EAddStorage
         lo = typemax(Int)
         hi = 0
-        for a in storage.args
+        for a in storage_args(storage)
             bounds = _degree_bounds(a, weights)
             bounds === nothing && return nothing
             lo = min(lo, bounds[1])
@@ -835,7 +843,7 @@ function _degree_bounds(
     elseif storage isa EMulStorage
         lo = 0
         hi = 0
-        for a in storage.args
+        for a in storage_args(storage)
             bounds = _degree_bounds(a, weights)
             bounds === nothing && return nothing
             lo += bounds[1]
@@ -843,13 +851,13 @@ function _degree_bounds(
         end
         return (lo, hi)
     elseif storage isa EPowStorage
-        bounds = _degree_bounds(storage.base, weights)
+        bounds = _degree_bounds(storage_base(storage), weights)
         bounds === nothing && return nothing
         bounds == (0, 0) && return (0, 0)
         storage.exp < 0 && return nothing
         return (storage.exp * bounds[1], storage.exp * bounds[2])
     else # EFnStorage
-        bounds = _degree_bounds(storage.arg, weights)
+        bounds = _degree_bounds(storage_arg(storage), weights)
         bounds === nothing && return nothing
         return bounds == (0, 0) ? (0, 0) : nothing
     end
@@ -913,19 +921,19 @@ function has_real_coefficients(e::Expression)::Bool
     elseif storage isa EVarStorage
         return true
     elseif storage isa EAddStorage
-        for a in storage.args
+        for a in storage_args(storage)
             has_real_coefficients(a) || return false
         end
         return true
     elseif storage isa EMulStorage
-        for a in storage.args
+        for a in storage_args(storage)
             has_real_coefficients(a) || return false
         end
         return true
     elseif storage isa EPowStorage
-        return has_real_coefficients(storage.base)
+        return has_real_coefficients(storage_base(storage))
     else # EFnStorage
-        return has_real_coefficients(storage.arg)
+        return has_real_coefficients(storage_arg(storage))
     end
 end
 
@@ -946,21 +954,21 @@ function expression_scale(e::Expression)::Float64
         return 1.0
     elseif storage isa EAddStorage
         s = 0.0
-        for a in storage.args
+        for a in storage_args(storage)
             s += expression_scale(a)
         end
         return s
     elseif storage isa EMulStorage
         s = 1.0
-        for a in storage.args
+        for a in storage_args(storage)
             s *= expression_scale(a)
         end
         return s
     elseif storage isa EPowStorage
-        return expression_scale(storage.base)^storage.exp
+        return expression_scale(storage_base(storage))^storage.exp
     else # EFnStorage
         storage.kind == SUnaryKind.UNARY_SQRT &&
-            return sqrt(expression_scale(storage.arg))
+            return sqrt(expression_scale(storage_arg(storage)))
         return 1.0
     end
 end
@@ -986,27 +994,27 @@ function _show_expr(io::IO, e::Expression, prec::Int)::Nothing
         print(io, storage.name)
     elseif storage isa EAddStorage
         prec > 1 && print(io, "(")
-        for (i, a) in enumerate(storage.args)
+        for (i, a) in enumerate(storage_args(storage))
             i > 1 && print(io, " + ")
             _show_expr(io, a, 1)
         end
         prec > 1 && print(io, ")")
     elseif storage isa EMulStorage
         prec > 2 && print(io, "(")
-        for (i, a) in enumerate(storage.args)
+        for (i, a) in enumerate(storage_args(storage))
             i > 1 && print(io, "*")
             _show_expr(io, a, 2)
         end
         prec > 2 && print(io, ")")
     elseif storage isa EPowStorage
-        _show_expr(io, storage.base, 3)
+        _show_expr(io, storage_base(storage), 3)
         print(io, "^", storage.exp)
     else # EFnStorage
         kind = storage.kind
         name = kind == SUnaryKind.UNARY_SQRT ? "sqrt" :
             kind == SUnaryKind.UNARY_SIN ? "sin" : "cos"
         print(io, name, "(")
-        _show_expr(io, storage.arg, 0)
+        _show_expr(io, storage_arg(storage), 0)
         print(io, ")")
     end
     return nothing
@@ -1039,19 +1047,19 @@ function expression_to_sexpr(
         throw(_unknown_symbol_error(storage.name))
     elseif storage isa EAddStorage
         return _canonical_add(
-            SExprT[expression_to_sexpr(a, var_to_idx, param_to_idx) for a in storage.args],
+            SExprT[expression_to_sexpr(a, var_to_idx, param_to_idx) for a in storage_args(storage)],
         )
     elseif storage isa EMulStorage
         return _canonical_mul(
-            SExprT[expression_to_sexpr(a, var_to_idx, param_to_idx) for a in storage.args],
+            SExprT[expression_to_sexpr(a, var_to_idx, param_to_idx) for a in storage_args(storage)],
         )
     elseif storage isa EPowStorage
         return SExpr.SPow(
-            expression_to_sexpr(storage.base, var_to_idx, param_to_idx), storage.exp,
+            expression_to_sexpr(storage_base(storage), var_to_idx, param_to_idx), storage.exp,
         )
     else # EFnStorage
         return _canonical_unary(
-            storage.kind, expression_to_sexpr(storage.arg, var_to_idx, param_to_idx),
+            storage.kind, expression_to_sexpr(storage_arg(storage), var_to_idx, param_to_idx),
         )
     end
 end

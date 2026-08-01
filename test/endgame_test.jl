@@ -556,4 +556,24 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         @test nnonsingular(result) == 1
     end
 
+    @testset "Integration: cyclic 7 has 924 solutions" begin
+        using HomotopyContinuationNext: solve, TotalDegree, Polyhedral, nsolutions,
+            ntracked, mixed_volume
+
+        include("test_systems.jl")
+        polys, vars, _ = cyclic_system(7)
+        F = System(polys; variables = vars)
+
+        td = solve(F, TotalDegree(; seed = UInt32(1), show_progress = false))
+        @test ntracked(td) == 5040
+        @test nsolutions(td) == 924
+
+        # The mixed volume is the exact root count here, so polyhedral tracks no
+        # path that misses.
+        @test mixed_volume(F) == 924
+        ph = solve(F, Polyhedral(; seed = UInt32(1), show_progress = false))
+        @test ntracked(ph) == 924
+        @test nsolutions(ph) == 924
+    end
+
 end # top-level testset

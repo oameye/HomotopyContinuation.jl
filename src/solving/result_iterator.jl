@@ -37,18 +37,33 @@ Base.eltype(::Type{<:ResultIterator}) = PathResult
 Base.length(ri::ResultIterator)::Int = count(ri.mask)
 
 function Base.iterate(ri::ResultIterator, i::Int = 1)
-    n = length(ri.cache.start_solutions)
-    while i <= n && !ri.mask[i]
-        i += 1
+    j = findnext(ri.mask, i)
+    j === nothing && return nothing
+    return (_path_result(ri.cache, j), j + 1)
+end
+
+Base.firstindex(::ResultIterator)::Int = 1
+Base.lastindex(ri::ResultIterator)::Int = length(ri)
+
+"""
+    ri[k]
+
+Track the `k`-th path `ri` selects, and only that one.
+"""
+function Base.getindex(ri::ResultIterator, k::Int)::PathResult
+    1 <= k <= length(ri) || throw(BoundsError(ri, k))
+    i = 0
+    for _ in 1:k
+        i = findnext(ri.mask, i + 1)::Int
     end
-    i > n && return nothing
-    return (_path_result(ri.cache, i), i + 1)
+    return _path_result(ri.cache, i)
 end
 
 function Base.show(io::IO, ri::ResultIterator)
-    n = length(ri.cache.start_solutions)
-    k = length(ri)
-    print(io, "ResultIterator over ", k, " of ", n, " start solutions")
+    print(
+        io, "ResultIterator over ", length(ri), " of ",
+        length(ri.cache.start_solutions), " start solutions",
+    )
     return
 end
 
@@ -71,43 +86,65 @@ path_results(ri::ResultIterator)::Vector{PathResult} = collect(ri)
 """
     start_solutions(ri::ResultIterator)
 
-The start solutions of `ri`, including the ones its mask filters out.
+The start solutions of the underlying solve, including the ones `ri` does not
+track. Fresh vectors, so writing to one cannot change what a later `collect`
+tracks from.
 """
-start_solutions(ri::ResultIterator) = ri.cache.start_solutions
-
-# A copy: the constructor pins `length(mask)`, so a `push!` on the internal
-# `BitVector` would break `length(ri)`.
-"""
-    bitmask(ri::ResultIterator)
-
-The mask selecting which start solutions `ri` tracks.
-"""
-bitmask(ri::ResultIterator)::BitVector = copy(ri.mask)
+start_solutions(ri::ResultIterator)::Vector{Vector{ComplexF64}} =
+    _start_points(ri.cache.start_solutions)
 
 """
-    bitmask(f, ri::ResultIterator)
+    selection(ri::ResultIterator)
 
-Track every selected path and record `f(path_result)` as a `BitVector` over the
-selected paths.
+The paths `ri` tracks, as a `BitVector` with one entry per start solution.
 """
-bitmask(f, ri::ResultIterator)::BitVector = BitVector(map(f, ri))
+selection(ri::ResultIterator)::BitVector = copy(ri.mask)
 
 """
-    bitmask_filter(f, ri::ResultIterator)
+    selection(f, ri::ResultIterator)
 
-Return a new [`ResultIterator`](@ref) restricted to the paths for which
-`f(path_result)` is `true`. The paths are tracked once here to evaluate `f`; the
-returned iterator tracks the surviving ones again when iterated.
+Track every path `ri` selects and record `f(path_result)` as a `BitVector` with
+one entry per start solution, `false` for every path `ri` does not track. Pass
+it to [`restrict`](@ref) to replay only the paths it selects; use
+[`filter`](@ref) instead when the results themselves are wanted.
 """
-function bitmask_filter(f, ri::ResultIterator)::ResultIterator
-    mask = copy(ri.mask)
-    selected = findall(mask)
-    keep = bitmask(f, ri)
-    for (j, i) in enumerate(selected)
-        mask[i] = keep[j]
+function selection(f, ri::ResultIterator)::BitVector
+    mask = falses(length(ri.mask))
+    for i in eachindex(ri.mask)
+        ri.mask[i] || continue
+        mask[i] = f(_path_result(ri.cache, i))::Bool
     end
-    return ResultIterator(ri.cache, mask)
+    return mask
 end
+
+"""
+    restrict(ri::ResultIterator, mask::BitVector)
+
+A [`ResultIterator`](@ref) over the paths `mask` selects, which has one entry
+per start solution of `ri`. Nothing is tracked here, and a path `ri` already
+skips stays skipped; `mask` usually comes from [`selection`](@ref).
+"""
+function restrict(ri::ResultIterator, mask::BitVector)::ResultIterator
+    length(mask) == length(ri.mask) || throw(
+        ArgumentError(
+            string(
+                "the mask has length ", length(mask), ", but the solve has ",
+                length(ri.mask), " start solution(s)",
+            ),
+        ),
+    )
+    return ResultIterator(ri.cache, mask .& ri.mask)
+end
+
+"""
+    filter(f, ri::ResultIterator)
+
+Track every path `ri` selects and keep the results with `f(path_result)`. Use
+`Iterators.filter` to keep the tracking lazy, or [`selection`](@ref) to record
+which paths passed without keeping their results.
+"""
+Base.filter(f, ri::ResultIterator)::Vector{PathResult} =
+    collect(Iterators.filter(f, ri))
 
 """
     Result(ri::ResultIterator)
@@ -133,6 +170,8 @@ _excess_checker(::WorkerSolveCache) = nothing
     result_iterator(F::System, starts, p_start, p_target, alg = Continuation())
     result_iterator(F::System, starts, L_start::LinearSubspace,
                     L_target::LinearSubspace, alg = Continuation())
+    result_iterator(G::System, F::System, starts, alg = Continuation())
+    result_iterator(H::AbstractHomotopy, starts, alg = Continuation())
 
 Build a [`ResultIterator`](@ref) for the same problems [`solve`](@ref) accepts,
 tracking paths lazily instead of all at once. Tracking is serial, so the
@@ -147,8 +186,12 @@ A `ResultIterator` may be passed as the start solutions of another `solve` or
 F = System([x^2 + y^2 - 5])
 L = rand_subspace(2; codim = 1)
 ri = result_iterator(F, L)
-first(ri)                 # tracks exactly one path
-real_paths = bitmask_filter(is_real, ri)
+first(ri)                  # tracks exactly one path
+real_paths = filter(is_real, ri)
+
+# Record which paths are worth tracking, then replay only those.
+keep = selection(is_success, ri)
+restrict(ri, keep)
 ```
 """
 result_iterator(F::System, alg::TotalDegree = TotalDegree())::ResultIterator =
@@ -173,10 +216,23 @@ result_iterator(
 )
 
 result_iterator(
+    G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
+    alg::Continuation = Continuation(),
+)::ResultIterator = ResultIterator(
+    CommonSolve.init(G, F, starts, _quiet(alg), Serial()),
+)
+
+result_iterator(
     F::System, starts::StartsLike, L_start::LinearSubspace,
     L_target::LinearSubspace, alg::Continuation = Continuation(),
 )::ResultIterator = ResultIterator(
     CommonSolve.init(F, starts, L_start, L_target, _quiet(alg), Serial()),
+)
+
+result_iterator(
+    H::HomotopyLike, starts::StartsLike, alg::Continuation = Continuation(),
+)::ResultIterator = ResultIterator(
+    CommonSolve.init(H, starts, _quiet(alg), Serial()),
 )
 
 # A `ResultIterator` used as start solutions contributes every successful

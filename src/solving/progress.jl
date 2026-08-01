@@ -11,7 +11,7 @@ ProgressStats() = ProgressStats(0, 0, 0, 0)
 function record!(stats::ProgressStats, r::PathResult)::Nothing
     if is_success(r)
         rl = is_real(r)
-        if r.singular
+        if _singular(r)
             stats.singular += 1
             rl && (stats.singular_real += 1)
         else

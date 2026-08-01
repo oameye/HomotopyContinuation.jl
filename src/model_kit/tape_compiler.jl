@@ -147,24 +147,24 @@ function _compile_storage!(c::TapeCompiler, storage::STmpStorage)::Int32
 end
 
 function _compile_storage!(c::TapeCompiler, storage::SPowStorage)::Int32
-    base_slot = _compile!(c, storage.base)
+    base_slot = _compile!(c, storage_base(storage))
     return _tape_pow!(c, base_slot, storage.exp)
 end
 
 @inline _compile_storage!(c::TapeCompiler, storage::SMulStorage)::Int32 =
-    _compile_mul!(c, storage.args)
+    _compile_mul!(c, storage_args(storage))
 @inline _compile_storage!(c::TapeCompiler, storage::SAddStorage)::Int32 =
-    _compile_sum!(c, storage.args)
+    _compile_sum!(c, storage_args(storage))
 @inline _compile_storage!(c::TapeCompiler, storage::SNegStorage)::Int32 =
-    _tape_neg!(c, _compile!(c, storage.arg))
+    _tape_neg!(c, _compile!(c, storage_arg(storage)))
 @inline _compile_storage!(c::TapeCompiler, storage::SUnaryStorage)::Int32 =
-    _emit!(c, unary_op_type(storage.kind), _compile!(c, storage.arg))
+    _emit!(c, unary_op_type(storage.kind), _compile!(c, storage_arg(storage)))
 
 function _compile_storage!(c::TapeCompiler, storage::SFuncSymStorage)::Int32
     if storage.kind == SFuncKind.SFUNC_ADD
-        return _compile_sum!(c, storage.args)
+        return _compile_sum!(c, storage_args(storage))
     elseif storage.kind == SFuncKind.SFUNC_MUL
-        return _compile_mul!(c, storage.args)
+        return _compile_mul!(c, storage_args(storage))
     end
     error("Unknown SFuncSym kind: $(storage.kind)")
 end
@@ -187,9 +187,9 @@ function _compile_split_into_num_denom!(c::TapeCompiler, args::Vector{SExprT})
     for arg in args
         storage = sexpr_storage(arg)
         if storage isa SPowStorage && storage.exp < 0
-            push!(denoms, _tape_pow!(c, _compile!(c, storage.base), -storage.exp))
+            push!(denoms, _tape_pow!(c, _compile!(c, storage_base(storage)), -storage.exp))
         elseif storage isa SPowStorage
-            push!(nums, _tape_pow!(c, _compile!(c, storage.base), storage.exp))
+            push!(nums, _tape_pow!(c, _compile!(c, storage_base(storage)), storage.exp))
         else
             push!(nums, _compile!(c, arg))
         end
@@ -249,7 +249,7 @@ function _split_into_positives_negatives(args::Vector{SExprT})
     for arg in args
         storage = sexpr_storage(arg)
         if storage isa SMulStorage
-            sign, values = _split_off_minus_one(storage.args)
+            sign, values = _split_off_minus_one(storage_args(storage))
             val = length(values) == 1 ? values[1] : SExpr.SMul(values)
         else
             sign = 1
@@ -269,7 +269,7 @@ function _compile_reduce_to_at_most_two!(
     )::Tuple{Int32, Int32}
     storage = sexpr_storage(expr)
     if storage isa SMulStorage
-        args = storage.args
+        args = storage_args(storage)
         if length(args) == 2
             return (_compile!(c, args[1]), _compile!(c, args[2]))
         elseif length(args) == 1

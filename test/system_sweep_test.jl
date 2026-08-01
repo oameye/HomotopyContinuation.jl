@@ -6,6 +6,8 @@ using DynamicPolynomials: @polyvar, subs
 using MultivariatePolynomials: MultivariatePolynomials as MP
 
 include("test_systems.jl")
+# Data for the collection's `minors` entry, which only this sweep builds.
+include("minors_polys.jl")
 
 const MODES = (CompileMode.INTERPRETED, CompileMode.COMPILED, CompileMode.COMPILED_ALL)
 
@@ -38,7 +40,10 @@ function taylor_vector(X)
     return tv
 end
 
-@testset "System sweep: $name" for (name, polys, vars, params) in TEST_SYSTEM_COLLECTION
+# (name, polys, variables, parameters), built once for both sweeps below.
+const TEST_SYSTEMS = [(name, build()...) for (name, build) in TEST_SYSTEM_COLLECTION]
+
+@testset "System sweep: $name" for (name, polys, vars, params) in TEST_SYSTEMS
     rng = MersenneTwister(0x00051ee7 + length(name))
     m, n, r = length(polys), length(vars), length(params)
     xvals = randn(rng, ComplexF64, n)
@@ -94,7 +99,7 @@ end
 
 # H(x,t) = γ·t·G(x) + (1-t)·F(x) with the total-degree start system needs one
 # equation per variable.
-const SQUARE_SYSTEMS = filter(t -> length(t[2]) == length(t[3]), TEST_SYSTEM_COLLECTION)
+const SQUARE_SYSTEMS = filter(t -> length(t[2]) == length(t[3]), TEST_SYSTEMS)
 
 @testset "StraightLineHomotopy sweep: $name" for (name, polys, vars, params) in
     SQUARE_SYSTEMS

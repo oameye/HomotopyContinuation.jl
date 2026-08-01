@@ -282,8 +282,8 @@ _solution_indices(r::Result) = (first(c) for c in r.clusters)
         pr::PathResult, only_real::Bool, only_nonsingular::Bool,
         only_singular::Bool, real_tol::Float64,
     )::Bool
-    only_nonsingular && pr.singular && return false
-    only_singular && !pr.singular && return false
+    only_nonsingular && _singular(pr) && return false
+    only_singular && !_singular(pr) && return false
     only_real && !is_real(pr; tol = real_tol) && return false
     return true
 end
@@ -540,7 +540,7 @@ function solutions(
     out = Vector{ComplexF64}[]
     for i in _solution_indices(r)
         pr = prs[i]
-        pr.singular && continue
+        _singular(pr) && continue
         only_real && !is_real(pr; tol = real_tol) && continue
         push!(out, pr.solution)
     end
@@ -559,7 +559,7 @@ function real_solutions(
     out = Vector{Float64}[]
     for i in _solution_indices(r)
         pr = prs[i]
-        pr.singular && continue
+        _singular(pr) && continue
         is_real(pr; tol = tol) && push!(out, Float64.(real.(pr.solution)))
     end
     return out
@@ -571,12 +571,12 @@ nsolutions(r::AbstractSolutionResult)::Int = nnonsingular(r)
 
 function nsingular(r::AbstractSolutionResult)::Int
     prs = path_results(r)
-    return count(i -> prs[i].singular, _solution_indices(r))
+    return count(i -> _singular(prs[i]), _solution_indices(r))
 end
 
 function nnonsingular(r::AbstractSolutionResult)::Int
     prs = path_results(r)
-    return count(i -> !prs[i].singular, _solution_indices(r))
+    return count(i -> !_singular(prs[i]), _solution_indices(r))
 end
 
 nat_infinity(r::Result)::Int = count(is_at_infinity, r.path_results)
@@ -595,7 +595,7 @@ function nreal(
     )::Int
     prs = path_results(r)
     return count(_solution_indices(r)) do i
-        !prs[i].singular && is_real(prs[i]; tol = tol)
+        !_singular(prs[i]) && is_real(prs[i]; tol = tol)
     end
 end
 

@@ -2,7 +2,8 @@ using Test
 import HomotopyContinuationNext as HC
 using HomotopyContinuationNext: System, StraightLineHomotopy, HomotopyEvaluator,
     Tracker, TrackerCode, TrackerOptions, track!, Valuation,
-    CONSERVATIVE_TRACKER_OPTIONS, _total_degree_startevaluator, _total_degree_solutions
+    CONSERVATIVE_TRACKER_OPTIONS, _total_degree_startevaluator,
+    total_degree_start_solutions
 using DynamicPolynomials: @polyvar
 
 # Track every total-degree path to `t_end` and read off the valuation there.
@@ -17,7 +18,7 @@ function path_valuations(polys, vars, γ, t_end::Float64, opts = TrackerOptions(
     )
     tracker = Tracker(HomotopyEvaluator(H); options = opts)
     val = Valuation(length(vars))
-    return map(_total_degree_solutions(degrees)) do s
+    return map(total_degree_start_solutions(degrees)) do s
         code = track!(tracker, s; t₁ = complex(1.0), t₀ = complex(t_end))
         HC.init!(val)
         HC.update!(val, tracker.predictor, real(tracker.state.segment.t))

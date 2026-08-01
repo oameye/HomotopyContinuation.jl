@@ -217,8 +217,18 @@ end
 Base.size(F::System)::Tuple{Int, Int} = size(F.evaluator)
 @inline system_shape(::System{P, V, M, S}) where {P, V, M, S} = S()
 degrees(F::System)::Vector{Int} = F.degrees
-# Factor each input equation was divided by. It leaves `V(F)` alone but changes
-# `F` as a map, which an inner composition stage has to undo.
+
+"""
+    equation_scales(F) -> Vector{Float64}
+
+Factor each equation given to `F` was divided by at construction, one entry per
+equation and `1.0` where nothing was divided. An equation whose coefficients sit
+far from unit scale is normalized for tracker conditioning; that leaves the
+solution set alone but changes the value of the map, so multiplying
+[`evaluate`](@ref) entrywise by these factors recovers the equations as given.
+
+Defined for a [`System`](@ref) and a [`Homotopy`](@ref).
+"""
 equation_scales(F::System)::Vector{Float64} = F.equation_scales
 nvariables(F::System)::Int = F.nvars
 nparameters(F::System)::Int = F.nparams
@@ -470,12 +480,16 @@ function _normalize_polys(
     return normalized, scales
 end
 
-# Dividing an equation by a constant leaves `V(F)` unchanged, so an equation far above
-# unit scale is brought back down. A scale of `0` (the zero equation) or a non-finite
-# one carries no information and is left alone.
+# Dividing an equation by a constant leaves `V(F)` unchanged, so one whose scale sits
+# outside this band is brought back towards unity. A scale of `0` (the zero equation) or
+# a non-finite one carries no information and is left alone.
+const _MIN_NORM_SCALE = 1.0e-6
+const _MAX_NORM_SCALE = 1.0e8
+
 function _normalization_scale(nrm::Float64)::Float64
     (iszero(nrm) || !isfinite(nrm)) && return 1.0
-    return nrm <= 1.0e8 ? 1.0 : nrm
+    _MIN_NORM_SCALE <= nrm <= _MAX_NORM_SCALE && return 1.0
+    return nrm
 end
 
 # Scale measured by `expression_scale` rather than by the largest coefficient, which

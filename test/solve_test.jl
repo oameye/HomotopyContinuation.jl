@@ -227,6 +227,41 @@ using CommonSolve: CommonSolve
         @test nsolutions(r_td) == nsolutions(r_ph)
     end
 
+    @testset "Polyhedral: only_torus" begin
+        @polyvar x₁ x₂ s
+        F = System(
+            [
+                x₁^3 * s^15 + x₁ * x₂ * s + x₂^3 + s^12,
+                x₁^2 * s^9 + x₁ * x₂^2 + x₂ * s^3,
+                x₁^2 * x₂ * s^5 + x₁ * s^8 + x₂^2,
+            ],
+        )
+        all_alg = Polyhedral(; seed = UInt32(1), show_progress = false)
+        torus_alg =
+            Polyhedral(; only_torus = true, seed = UInt32(1), show_progress = false)
+        @test paths_to_track(F, all_alg) == 92
+        @test paths_to_track(F, torus_alg) == 54
+        @test mixed_volume(F) == 54
+
+        # Every torus solution is also found by the padded start system, and the
+        # padded one additionally reaches the coordinate hyperplanes.
+        r_all = solve(F, all_alg, Serial())
+        r_torus = solve(F, torus_alg, Serial())
+        @test nsolutions(r_torus) <= nsolutions(r_all)
+        @test all(s -> all(!iszero, s), solutions(r_torus))
+        for s in solutions(r_torus)
+            @test any(t -> maximum(abs.(s .- t)) < 1.0e-8, solutions(r_all))
+        end
+    end
+
+    @testset "mixed_volume: dense system reaches the Bezout number" begin
+        @polyvar x y
+        # A dense system has no sparsity to exploit, so BKK equals Bezout.
+        F = System([x^2 + x * y + y^2 + x + y + 1, x^2 + 2 * x * y - y^2 + x - y + 2])
+        @test mixed_volume(F) == 4
+        @test paths_to_track(F, TotalDegree()) == 4
+    end
+
     @testset "Polyhedral vs TotalDegree: solution counts match" begin
         @polyvar x y
         systems = [

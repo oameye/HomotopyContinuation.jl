@@ -120,11 +120,10 @@ normalize_clusters(clusters) = sort([sort(c) for c in clusters])
     end
 
     @testset "transitivity: chain A≈B≈C merges even when A is far from C" begin
-        # atol = 1e-6; spacing 0.8e-6 chains into one component although
-        # |A - C| = 1.6e-6 > atol.
+        # Spacing 0.8 atol chains into one component although |A - C| = 1.6 atol.
         a = ComplexF64[0.0]
-        b = ComplexF64[0.8e-6]
-        c = ComplexF64[1.6e-6]
+        b = ComplexF64[0.8 * ATOL]
+        c = ComplexF64[1.6 * ATOL]
         prs = fake_path_result.([a, b, c])
         clusters, mult = _cluster_solutions(prs, ATOL, RTOL, nothing)
         @test length(clusters) == 1
@@ -132,10 +131,10 @@ normalize_clusters(clusters) = sort([sort(c) for c in clusters])
     end
 
     @testset "rtol scales the tolerance for large-norm solutions" begin
-        # ‖s‖ = 1e6, rtol = 1e-3 → pair tolerance 1e3; distance 1 clusters.
+        # ‖s‖ = 1e6 → pair tolerance rtol·1e6, well above atol; half of it clusters.
         prs = [
             fake_path_result(ComplexF64[1.0e6, 0.0]),
-            fake_path_result(ComplexF64[1.0e6 + 1.0, 0.0]),
+            fake_path_result(ComplexF64[1.0e6 * (1 + 0.5 * RTOL), 0.0]),
             fake_path_result(ComplexF64[2.0e6, 0.0]),
         ]
         clusters, mult = _cluster_solutions(prs, ATOL, RTOL, nothing)
@@ -163,7 +162,8 @@ normalize_clusters(clusters) = sort([sort(c) for c in clusters])
             prs = PathResult[]
             for _ in 1:k
                 c = centers[rand(rng, 1:length(centers))]
-                jitter = 1.0e-8 * randn(rng, ComplexF64, nvars)
+                # Well inside rtol·‖c‖, so every same-center group is one cluster.
+                jitter = 1.0e-11 * randn(rng, ComplexF64, nvars)
                 push!(prs, fake_path_result(c .+ jitter; success = rand(rng) < 0.9))
             end
             clusters, mult = _cluster_solutions(prs, ATOL, RTOL, nothing)
@@ -256,7 +256,7 @@ end
             for _ in 1:rand(rng, 1:6)
                 c = randn(rng, ComplexF64, nvars)
                 for s in (c, im .* c, -c, -im .* c)
-                    jitter = 1.0e-9 * randn(rng, ComplexF64, nvars)
+                    jitter = 1.0e-11 * randn(rng, ComplexF64, nvars)
                     push!(prs, fake_path_result(s .+ jitter; success = rand(rng) < 0.9))
                 end
             end
@@ -282,7 +282,7 @@ end
             for c in centers, s in (c, -c)
                 # Each orbit member appears once or twice, with tiny jitter.
                 for _ in 1:rand(rng, 1:2)
-                    jitter = 1.0e-9 * randn(rng, ComplexF64, nvars)
+                    jitter = 1.0e-11 * randn(rng, ComplexF64, nvars)
                     push!(prs, fake_path_result(s .+ jitter; success = rand(rng) < 0.9))
                 end
             end

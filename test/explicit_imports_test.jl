@@ -8,6 +8,11 @@ const DISTRIBUTED_EXT = Base.get_extension(
     HomotopyContinuationNext, :HomotopyContinuationNextDistributedExt,
 )
 
+# An extension reaches into its parent by design, and whether one is loaded here
+# depends on what else the worker imported, so the rules below must not turn on it.
+_is_extension(m::Module)::Bool =
+    Base.get_extension(HomotopyContinuationNext, nameof(m)) === m
+
 # Allow non-public but necessary accesses:
 # - Base.RefValue: used for mutable cache scalars in immutable structs
 # - Base.decompose: required for DoubleF64 <: AbstractFloat
@@ -27,6 +32,9 @@ const QUALIFIED_ACCESS_IGNORE = (
     :broadcastable,
     # Base.deepcopy_internal is the documented `deepcopy` customization hook:
     :deepcopy_internal,
+    # Base.SizeUnknown is the documented `IteratorSize` trait for an iterator
+    # whose length is not known ahead of time, but is not declared public:
+    :SizeUnknown,
     # Deliberate construction-time compiler barrier used to isolate
     # mutually exclusive TTFX-heavy backends:
     :inferencebarrier,
@@ -41,6 +49,10 @@ const QUALIFIED_ACCESS_IGNORE = (
     # loaded has no public spelling, and a custom `Serialization.serialize` method
     # has to write the type tag itself:
     :PkgId, :root_module_exists, :serialize_type,
+    # SemialgebraicSets extension. The solver interface a backend has to subtype
+    # and extend, none of it declared public by SemialgebraicSets:
+    :AbstractAlgebraicSolver, :NoAlgorithm, :promote_for,
+    Symbol("default_gröbner_basis_algorithm"),
 )
 
 @testset "ExplicitImports" begin
@@ -94,7 +106,7 @@ const QUALIFIED_ACCESS_IGNORE = (
                 # The check's own default `skip = (Base => Core,)`.
                 row.accessing_from === Base &&
                     ExplicitImports.public_or_exported(Core, row.name) && continue
-                submodule === DISTRIBUTED_EXT &&
+                _is_extension(submodule) &&
                     row.accessing_from === HomotopyContinuationNext && continue
                 push!(offenders, (nameof(submodule), row.name, row.accessing_from))
             end

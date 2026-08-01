@@ -9,7 +9,7 @@
 
 Lazily track the paths of a solve cache, yielding one [`PathResult`](@ref) per
 start solution. `mask` selects which start solutions are tracked (all by
-default); see [`bitmask_filter`](@ref).
+default); see [`restrict`](@ref) and [`selection`](@ref).
 
 Build one with [`result_iterator`](@ref) rather than from a cache directly.
 """

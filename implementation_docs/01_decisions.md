@@ -155,9 +155,13 @@ Polyhedral init passes a `_lifting_sampler` closure to `MixedSubdivisions.fine_m
 
 `Result` deduplicates successful paths with O(k²) pairwise comparison plus union-find, tolerance `max(atol, rtol * max(‖s1‖, ‖s2‖))` in infinity norm. Transitive and order-independent; `multiplicity` tracks cluster sizes.
 
+Defaults are `atol = 1e-14`, `rtol = 1e-8`, the same as v2's. A well-conditioned square system returns its solutions to ~1e-10, so paths that converged to one root agree far below that, and a looser tolerance merges distinct roots instead: at relative 1e-3 the 3264 conics tangent to five real conics collapse to 2840, and certification confirms the 417 merged points are distinct real solutions.
+
 ### Coefficient normalization
 
-Systems with O(10⁸+) coefficients are scaled to O(1) at construction for tracker conditioning.
+An equation whose coefficients fall outside `1e-6 … 1e8` is divided by that scale at construction, for tracker conditioning.
+
+The band is wider above than below, which is measured rather than chosen. On `[k*(u+v+1), u*v-2]` under `Regeneration`, leaving the equation unnormalized loses a witness point (degree 2 comes back as 1) for 1 seed in 400 at `k = 1e-7` and 5 in 400 at `k = 1e-8`, while `k` from `1e-6` up to `1e8` is clean over the same 400 seeds and normalizing is clean at every `k`. An equation far under unit scale stops constraining the corrector against its neighbours well before one far above swamps them.
 
 ### Channel-based job queue for threaded monodromy
 
@@ -402,6 +406,57 @@ Certification is the only consumer of Arblib; loading it into core cost ~0.34s o
 ### Arb fallback state is built lazily
 
 `AcbCertCache` (several KB of Arb buffers) is only needed when the Float64 Krawczyk test fails. `CertificationCache` is therefore a `mutable struct` with `const` on every field except `arb`, which the inner constructor leaves undefined; `_arb(cache)` builds it on first use from the stored instruction sequences and size, so no reference to `F` is held. Each cache is used by a single task.
+
+### Two independent singularity signals, and what `sing_cond` is for
+
+An endpoint is labelled `singular` by one of three mechanisms, and they are not
+interchangeable. The Cauchy endgame estimates a winding number `m` and flags `m > 1`;
+this is the mechanism that finds multiple roots, and the condition numbers it reports
+are *low* (measured: 4.4e9 for the double root of `(x-10)^2`, 1.5e8-3.4e10 for the two
+multiplicity-6 roots of Hyperbolic 6,6). The second is the endpoint check in
+`tracking_stopped!`, which fires when a path reaches `t = 0` through the regular tracker
+and so has no winding number at all. There the endpoint Jacobian is the only evidence,
+and `sing_cond` is the line drawn on it.
+
+The third is the cluster size, and it exists because the first two together still miss
+cases: for `[(x-1)^2, y-1]` one of the two paths to `(1,1)` goes through the endgame and
+is flagged by winding number, while the other reaches `t = 0` regularly at condition
+3.2e14, under `sing_cond`, and comes out regular. `is_singular`/`is_nonsingular`
+therefore read `r.singular || r.multiplicity > 1`, not the stored flag, so the two paths
+of one double root cannot be classified against each other. This is derived on read
+rather than stamped into the field so that `recluster` at a different tolerance
+re-derives it instead of inheriting a stale `true`. `multiplicity` is 0 before `Result`
+clusters, so an unclustered `PathResult` still reports just its endpoint flag.
+
+The default is `inv(eps(Float64))`, not a tuned constant: below it the scaled Jacobian is
+still invertible in the working precision, so the root is regular and merely
+ill-conditioned, and at or above it no computation at that precision can separate it from
+a singular one. The scaling matters here, because it is what makes the distinction
+visible at all: the five worst conics of the 3264-at-five-real-conics instance have
+unscaled condition number 1.9e18-2.9e18, which is past the line, but 1.03e14-1.51e14
+after Skeel row and column scaling, which is not, and Krawczyk certifies all five as
+regular. The excess endpoints the same solve produces sit at 1.1e17-4.6e18 scaled and
+stay excluded. Lowering the default to catch those five's neighbourhood costs genuine
+solutions out of `nsolutions`, which is the worse error of the two: a root wrongly called
+singular vanishes from the default accessor, whereas one wrongly called regular is still
+returned, with `multiplicity` and clustering still carrying what is known about it.
+
+Regeneration and `Membership` deliberately override it far lower (`1e12`), because there
+a point on a higher-dimensional component must be rejected rather than collected as a
+spurious isolated solution. Those are explicit and unaffected by the default.
+
+### Certification parameters must enclose the exact input
+
+`CertificationParameters` holds the target parameters three ways: `ComplexF64` for the Newton
+refinement of the candidate, `IComplexF64` for the Float64 Krawczyk test, and an `AcbRefVector`
+for the Arb fallback. The latter two carry the certificate, so both must *enclose* the value the
+caller passed, not approximate it. `Interval{T}(a::Rational)` already divides numerator by
+denominator with directed rounding, so a rational parameter comes out as a width-1e-16 interval
+around the exact value. The Arb ball must likewise be assigned `pᵢ` itself: Arblib's setter
+produces a ball enclosing the exact `Rational`, `BigFloat` or `Irrational`, while coercing
+through `ComplexF64` first gives a zero-radius ball at the rounding, which does not contain the
+value. Getting that wrong makes the high-precision fallback prove a *weaker* claim than the
+Float64 path it rescues, about `F(·, fl(p))` rather than `F(·, p)`.
 
 ### Certification allocation hygiene
 

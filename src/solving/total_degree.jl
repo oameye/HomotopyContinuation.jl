@@ -1,7 +1,8 @@
 ## TotalDegree — Bezout bound start system for homotopy continuation.
 
 """
-    TotalDegree(; early_stop_callback, tracker_options, endgame_options, seed, show_progress)
+    TotalDegree(; early_stop_callback, excess_residual_tol, tracker_options,
+                  endgame_options, seed, show_progress)
 
 Algorithm that constructs a total-degree (Bezout) start system.
 The number of paths tracked is prod(degrees), the Bezout bound.
@@ -9,6 +10,15 @@ The number of paths tracked is prod(degrees), the Bezout bound.
 `early_stop_callback` is called with each successful [`PathResult`](@ref); return
 `true` to stop. Paths already running still finish, so which extra results appear
 is not reproducible under [`Threaded`](@ref) or [`DistributedExecutor`](@ref).
+
+For an overdetermined system, an endpoint solving the squared-up system but not
+the original one is reported as an excess solution. A positive
+`excess_residual_tol` instead keeps such an endpoint when its residual on the
+original system is at most that value, which is what a system consistent only up
+to a measurement error needs. It is compared against the same quantity
+[`residual`](@ref) reports, so it is read on the equations [`evaluate`](@ref)
+gives; divide by [`equation_scales`](@ref) to state it in the units of a system
+whose coefficients were normalized. Must be non-negative.
 
 # Examples
 ```julia
@@ -26,6 +36,7 @@ result = solve(F, TotalDegree(; tracker_options = TrackerOptions(; max_steps = 5
 struct TotalDegree <: AbstractAlgorithm
     common::CommonOptions
     early_stop::EarlyStop
+    excess_residual_tol::Float64
 end
 
 struct TotalDegreeStartSystem <: AbstractSystem
@@ -128,6 +139,7 @@ taylor!(
 
 TotalDegree(;
     early_stop_callback = _never_stop,
+    excess_residual_tol::Float64 = 0.0,
     tracker_options::TrackerOptions = TrackerOptions(),
     endgame_options::EndgameOptions = EndgameOptions(),
     seed::UInt32 = rand(Random.RandomDevice(), UInt32),
@@ -135,17 +147,23 @@ TotalDegree(;
 ) = TotalDegree(
     CommonOptions(tracker_options, endgame_options, seed, show_progress),
     _early_stop(early_stop_callback),
+    _checked_excess_residual_tol(excess_residual_tol),
 )
 
 early_stop_callback(alg::TotalDegree)::EarlyStop = alg.early_stop
 
+excess_residual_tol(alg::TotalDegree)::Float64 = alg.excess_residual_tol
+
+# Every option but `common` survives, so a new field reaches `_reseed`/`_quiet` here.
+_with_common(alg::TotalDegree, common::CommonOptions)::TotalDegree =
+    TotalDegree(common, alg.early_stop, alg.excess_residual_tol)
+
 # A parent derives its children's seeds from its own, so one top-level seed
 # reproduces every stage.
 _reseed(alg::TotalDegree, seed::UInt32)::TotalDegree =
-    TotalDegree(_with_seed(alg.common, seed), alg.early_stop)
+    _with_common(alg, _with_seed(alg.common, seed))
 
-_quiet(alg::TotalDegree)::TotalDegree =
-    TotalDegree(_quiet(alg.common), alg.early_stop)
+_quiet(alg::TotalDegree)::TotalDegree = _with_common(alg, _quiet(alg.common))
 
 function _total_degree_startsystem(degrees::Vector{Int})::TotalDegreeStartSystem
     return TotalDegreeStartSystem(copy(degrees))
@@ -155,7 +173,18 @@ function _total_degree_startevaluator(degrees::Vector{Int})::SystemEvaluator
     return SystemEvaluator(_total_degree_startsystem(degrees))
 end
 
-function _total_degree_solutions(degrees::Vector{Int})::Vector{Vector{ComplexF64}}
+"""
+    total_degree_start_solutions(degrees) -> Vector{Vector{ComplexF64}}
+
+The `prod(degrees)` solutions of the total-degree start system
+`[xᵢ^dᵢ - 1 for (i, dᵢ) in enumerate(degrees)]`, in the order
+[`solve`](@ref) tracks them.
+
+```julia
+total_degree_start_solutions([2, 2])   # the four points (±1, ±1)
+```
+"""
+function total_degree_start_solutions(degrees::Vector{Int})::Vector{Vector{ComplexF64}}
     n = length(degrees)
     npaths = prod(degrees)
     result = Vector{Vector{ComplexF64}}(undef, npaths)

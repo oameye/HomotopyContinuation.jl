@@ -2,7 +2,8 @@ using Test
 using HomotopyContinuationNext
 using HomotopyContinuationNext: Serial, Result, PathResult, TotalDegree, Polyhedral,
     solution, is_success, is_real, seed, path_results, nsolutions, solutions,
-    nexcess_solutions, path_number, start_solution
+    nexcess_solutions, path_number, start_solution, total_degree_start_solutions,
+    System, Continuation
 using CommonSolve: CommonSolve
 using DynamicPolynomials: @polyvar
 using LinearAlgebra: norm
@@ -77,23 +78,42 @@ using LinearAlgebra: norm
         end
     end
 
-    @testset "bitmask and bitmask_filter" begin
+    @testset "selection and restrict" begin
         F = System([x^2 - 1, y^2 - 4]; variables = [x, y])
         ri = result_iterator(F)
         @test length(ri) == 4
-        @test bitmask(ri) == trues(4)
-        bm = bitmask(is_real, ri)
+        @test selection(ri) == trues(4)
+        bm = selection(is_real, ri)
         @test bm isa BitVector
         @test count(bm) == 4                      # all four solutions are real
-        filtered = bitmask_filter(pr -> real(solution(pr)[1]) > 0, ri)
+        filtered = restrict(ri, selection(pr -> real(solution(pr)[1]) > 0, ri))
         @test length(filtered) == 2
         @test all(pr -> real(solution(pr)[1]) > 0, collect(filtered))
-        @test count(bitmask(filtered)) == 2
-        # `bitmask` hands out a copy, and `length(ri)` counts the mask.
-        mutated = bitmask(ri)
+        @test count(selection(filtered)) == 2
+        # `selection` hands out a copy, and `length(ri)` counts the mask.
+        mutated = selection(ri)
         push!(mutated, true)
-        @test length(bitmask(ri)) == 4
+        @test length(selection(ri)) == 4
         @test length(ri) == 4
+    end
+
+    @testset "filter keeps the results, getindex tracks one path" begin
+        F = System([x^2 - 1, y^2 - 4]; variables = [x, y])
+        ri = result_iterator(F)
+        real_paths = filter(is_real, ri)
+        @test real_paths isa Vector{PathResult}
+        @test length(real_paths) == 4
+        @test isempty(filter(pr -> !is_success(pr), ri))
+        @test [solution(pr) for pr in Iterators.filter(is_real, ri)] ==
+            [solution(pr) for pr in real_paths]
+
+        @test start_solution(ri[2]) == start_solutions(ri)[2]
+        @test path_number(ri[end]) == 4
+        @test_throws BoundsError ri[5]
+        # Indices count the selected paths, not the start solutions.
+        kept = restrict(ri, BitVector([false, false, true, true]))
+        @test path_number(kept[1]) == 3
+        @test_throws BoundsError kept[3]
     end
 
     @testset "explicit mask selects a subset of the paths up front" begin
@@ -104,7 +124,7 @@ using LinearAlgebra: norm
         mask = BitVector([true, false, false, true])
         ri = ResultIterator(cache, mask)
         @test length(ri) == 2
-        @test bitmask(ri) == mask
+        @test selection(ri) == mask
         prs = collect(ri)
         @test length(prs) == 2
         # Only the selected start solutions were tracked.
@@ -128,5 +148,63 @@ using LinearAlgebra: norm
         io = IOBuffer()
         show(io, result_iterator(F))
         @test occursin("ResultIterator over 4 of 4", String(take!(io)))
+    end
+
+    @testset "restrict with a precomputed mask" begin
+        F = System([x^2 + y - 1, x * y - 2]; variables = [x, y])
+        ri = result_iterator(F)
+        kept = restrict(ri, BitVector([true, false, true, false]))
+        @test length(kept) == 2
+        @test selection(kept) == BitVector([true, false, true, false])
+        @test [start_solution(pr) for pr in kept] ==
+            start_solutions(ri)[[1, 3]]
+
+        # Masks compose, in the one index domain of the start solutions, and
+        # never widen a restriction.
+        again = restrict(kept, BitVector([true, true, true, false]))
+        @test selection(again) == BitVector([true, false, true, false])
+        @test selection(restrict(kept, BitVector([false, false, true, false]))) ==
+            BitVector([false, false, true, false])
+        @test_throws ArgumentError restrict(ri, BitVector([true]))
+    end
+
+    @testset "start to target route" begin
+        G = System([x^2 - 1, y^2 - 1]; variables = [x, y])
+        F = System([x^2 + 2 * y^2 - 3, x * y - 1]; variables = [x, y])
+        ri = result_iterator(G, F, total_degree_start_solutions([2, 2]))
+        @test length(ri) == 4
+        @test all(is_success, collect(ri))
+        @test nsolutions(Result(ri)) == 4
+    end
+
+    # Re-encode a solved system as its start system plus the mask of the start solutions
+    # that reach one, so replaying tracks only those paths. Both tracks share one
+    # homotopy, so the path correspondence holds.
+    @testset "compression" begin
+        include("test_systems.jl")
+        polys, vars, _ = cyclic_system(5)
+        F = System(polys; variables = vars)
+        d = HomotopyContinuationNext.degrees(F)
+        S = total_degree_start_solutions(d)
+        @test length(S) == 120
+
+        G = System([vi^di - 1 for (vi, di) in zip(vars, d)]; variables = vars)
+        alg = Continuation(; seed = UInt32(1), show_progress = false)
+        full = result_iterator(G, F, S, alg)
+        @test length(full) == 120
+
+        B = selection(is_success, full)
+        @test count(B) < 120
+        compressed = restrict(full, B)
+        @test compressed isa ResultIterator
+        @test length(compressed) == count(B)
+
+        replayed = collect(compressed)
+        @test all(is_success, replayed)
+        @test nsolutions(Result(compressed)) == 70
+        # Replaying the same seed retracks the same paths to the same endpoints.
+        @test [start_solution(pr) for pr in replayed] == S[findall(B)]
+        @test sort(round.(abs.(reduce(vcat, solutions(Result(compressed)))); digits = 8)) ==
+            sort(round.(abs.(reduce(vcat, solutions(Result(full)))); digits = 8))
     end
 end

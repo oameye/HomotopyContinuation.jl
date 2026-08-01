@@ -222,7 +222,7 @@ function _init_total_degree(
         degs, F, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, _total_degree_solutions(degs), _seed(alg), nothing,
+        exec, builder, total_degree_start_solutions(degs), _seed(alg), nothing,
         _show_progress(alg), early_stop_callback(alg),
     )
 end
@@ -232,13 +232,14 @@ function _init_total_degree(
         exec::AbstractExecutor, rng::Random.MersenneTwister, γ::ComplexF64,
     )
     n = nvariables(F)
-    A, perm, excess_checker = _square_up(rng, F.evaluator, degrees(F))
+    A, perm, excess_checker =
+        _square_up(rng, F.evaluator, degrees(F), alg.excess_residual_tol)
     degs = degrees(F)[perm[1:n]]
     builder = RandomizedStraightLineBuilder(
         degs, F, A, perm, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, _total_degree_solutions(degs), _seed(alg), excess_checker,
+        exec, builder, total_degree_start_solutions(degs), _seed(alg), excess_checker,
         _show_progress(alg), early_stop_callback(alg),
     )
 end
@@ -392,6 +393,57 @@ paths_to_track(System([x * y - 2, x^2 - 4]; variable_groups = [[x], [y]]))  # 2
 """
 paths_to_track(F::CloneableSystem, alg::TotalDegree = TotalDegree())::Int =
     length(CommonSolve.init(F, _quiet(alg), Serial()).start_solutions)
+
+# The BKK bound of the prepared support, not a solve: building the start solutions
+# means a binomial solve per mixed cell and both trackers, all of it discarded.
+paths_to_track(F::Union{System, CompositionSystem}, alg::Polyhedral)::Int =
+    _mixed_volume(_polyhedral_support(_polyhedral_system(F, alg), alg))
+
+"""
+    mixed_volume(F::System) -> Int
+
+Mixed volume (BKK bound) of the Newton polytopes of `F`: the number of solutions
+with all coordinates non-zero, counted with multiplicity, for a generic system
+with `F`'s support. This is the number of paths
+`solve(F, Polyhedral(; only_torus = true))` tracks.
+
+An overdetermined `F` is squared up and a homogeneous one is put on an affine
+chart first, as [`Polyhedral`](@ref) does.
+"""
+mixed_volume(F::System)::Int = paths_to_track(F, Polyhedral(; only_torus = true))
+
+"""
+    SemialgebraicSetsHCSolver(; algorithm, executor, real_tol, compile)
+
+A `SemialgebraicSets.AbstractAlgebraicSolver` backed by homotopy continuation,
+for use with `SemialgebraicSets.@set` and `algebraicset`. Load SemialgebraicSets
+to make it available.
+
+`algorithm` (a [`TotalDegree`](@ref) or [`Polyhedral`](@ref)) and `executor` are
+forwarded to [`solve`](@ref), `compile` to [`System`](@ref), and `real_tol` to
+[`real_solutions`](@ref), which is what selects the returned points.
+
+With SemialgebraicSets loaded, [`solve`](@ref) also takes an algebraic set
+directly and returns the full [`Result`](@ref), and
+[`real_solutions`](@ref) takes a set and a solver.
+
+```julia
+using HomotopyContinuationNext, SemialgebraicSets
+@polyvar x y
+collect(SemialgebraicSets.@set x^2 == 1 && y^2 == 2 SemialgebraicSetsHCSolver())
+```
+"""
+function SemialgebraicSetsHCSolver(args...; kwargs...)
+    Base.@nospecialize args kwargs
+    # The extension's zero-argument method is more specific than this `Vararg` one,
+    # so it takes over once SemialgebraicSets is loaded.
+    throw(
+        ArgumentError(
+            "`SemialgebraicSetsHCSolver` needs the SemialgebraicSets extension. " *
+                "Run `using SemialgebraicSets`.",
+        ),
+    )
+end
 
 solve(
     F::System, alg::Polyhedral, exec::AbstractExecutor = Threaded(),

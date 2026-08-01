@@ -2,8 +2,8 @@ fast_abs(z::Complex) = sqrt(abs2(z))
 fast_abs(x::Real) = abs(x)
 
 const DEFAULT_REAL_TOL = 1.0e-6
-const DEFAULT_CLUSTER_ATOL = 1.0e-6
-const DEFAULT_CLUSTER_RTOL = 1.0e-3
+const DEFAULT_CLUSTER_ATOL = 1.0e-14
+const DEFAULT_CLUSTER_RTOL = 1.0e-8
 
 """
     LazyRef{T}

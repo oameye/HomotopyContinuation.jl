@@ -52,8 +52,27 @@ function _add_steps(r::PathResult, accepted::Int, rejected::Int)::PathResult
 end
 
 is_success(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_SUCCESS
-is_singular(r::PathResult)::Bool = is_success(r) && r.singular
-is_nonsingular(r::PathResult)::Bool = is_success(r) && !r.singular
+
+"""
+    is_singular(r::PathResult)
+
+`true` if the path succeeded and its endpoint is a multiple root, or is too
+ill-conditioned to be told apart from one at the precision used. A `true` result is
+therefore not a proof of multiplicity; `certify` decides that question rigorously.
+"""
+is_singular(r::PathResult)::Bool = is_success(r) && _singular(r)
+
+"""
+    is_nonsingular(r::PathResult)
+
+`true` if the path succeeded and its endpoint is a regular root (see
+[`is_singular`](@ref)).
+"""
+is_nonsingular(r::PathResult)::Bool = is_success(r) && !_singular(r)
+
+# Derived on read, not stored, so `recluster` at a different tolerance cannot inherit a
+# stale `true`. `multiplicity` is 0 until `Result` clusters.
+_singular(r::PathResult)::Bool = r.singular || r.multiplicity > 1
 
 is_at_infinity(r::PathResult)::Bool =
     r.return_code == PathResultCode.PATH_AT_INFINITY ||

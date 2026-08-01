@@ -236,7 +236,7 @@ function _init_multi_homogeneous(
         # the folded homotopy does not expose.
         charted = homogeneous ?
             _sliced_evaluator(F.evaluator, L, ComplexF64[]) : F.evaluator
-        checker = ExcessSolutionChecker(charted, A, perm)
+        checker = ExcessSolutionChecker(charted, A, perm, alg.excess_residual_tol)
         D = _folded_group_degrees(D, perm_equations, N)
     end
 

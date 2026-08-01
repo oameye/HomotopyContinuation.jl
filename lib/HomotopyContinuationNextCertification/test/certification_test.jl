@@ -334,7 +334,7 @@ end
             end
             C = inv(cache.J_C64)
             cert_params = HCNC.certification_parameters(isempty(params) ? nothing : params)
-            is_real_system = HCNC._is_real_system(F)
+            is_real_system = HCN.is_real(F)
             CertT = extended ? HCNC.ExtendedSolutionCertificate : HCNC.SolutionCertificate
             return HCNC.extended_prec_certify_solution(
                 F, cand, x̃, C, cert_params, cache, 1, is_real_system, CertT,
@@ -412,8 +412,8 @@ end
         @test precision(only(certificates(ct))) == 53
 
         Fc = System([x^2 + im * y, x - y])
-        @test !HCNC._is_real_system(Fc)
-        @test HCNC._is_real_system(Fr)
+        @test !HCN.is_real(Fc)
+        @test HCN.is_real(Fr)
     end
 end
 
