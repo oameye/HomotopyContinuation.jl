@@ -39,6 +39,11 @@ using HomotopyContinuationNextCertification: HomotopyContinuationNextCertificati
         :add_solution!,
         :distinct_certified_solutions,
         :distinct_certified_solutions!,
+        :stats,
+        :ncertified_distinct,
+        :nprocessed,
+        :nduplicates,
+        :nnotcertified,
         :show_straight_line_program,
     ]
 

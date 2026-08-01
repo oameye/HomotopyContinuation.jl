@@ -361,11 +361,42 @@ end
 end
 
 # OP_POW_INT # a^r where r isa Integer
-# Uses logarithmic differentiation recurrence:
+#
+# The recurrence below divides by `a[0]`, so a series with a vanishing constant
+# term goes through division-free repeated squaring instead. Its coefficients are
+# finite (`a[0] = 0` and `r > 0` give `a^r = O(t^r)`), which the recurrence would
+# report as `Inf * 0 = NaN`. A negative `r` at `a[0] = 0` is a genuine pole and
+# keeps the non-finite result.
+@inline function taylor_op_pow_int(a::TTS{N, T}, r::I) where {N, T, I <: Integer}
+    if N > 1 && iszero(a.val[1]) && r > 0
+        return _taylor_pow_by_squaring(a, r)
+    end
+    return _taylor_op_pow_int_recurrence(a, r)
+end
+
+# `r ≥ 1`, so at most `2 log₂ r` truncated multiplications, each of which is a
+# short unrolled convolution.
+function _taylor_pow_by_squaring(a::TTS{N, T}, r::I) where {N, T, I <: Integer}
+    n = r
+    base = a
+    result = one(TTS{N, T})
+    while n > 0
+        if isodd(n)
+            result = taylor_op_mul(result, base)
+        end
+        n >>= 1
+        n > 0 && (base = taylor_op_sqr(base))
+    end
+    return result
+end
+
+# Logarithmic differentiation recurrence:
 # w[0] = a[0]^r
 # w[k] = (1/k) * (1/a[0]) * Σ_{j=1}^{k} (r*j - (k-j)) * a[j] * w[k-j]
 # This is the standard recurrence from Griewank & Walther (Chapter 13).
-@generated function taylor_op_pow_int(a::TTS{N, T}, r::I) where {N, T, I <: Integer}
+@generated function _taylor_op_pow_int_recurrence(
+        a::TTS{N, T}, r::I,
+    ) where {N, T, I <: Integer}
     stmts = Expr[]
     push!(stmts, :(w1 = op_pow_int(a.val[1], r)))
     if N >= 2

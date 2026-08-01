@@ -44,7 +44,7 @@ function Decomposition(;
         monodromy::MonodromyOptions = _decompose_stage_monodromy(),
         max_iters::Int = 50,
         warning::Bool = true,
-        sorted::Bool = true,
+        sorted::EquationSorting.T = EquationSorting.BY_DEGREE,
         max_codim::Union{Nothing, Int} = nothing,
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),

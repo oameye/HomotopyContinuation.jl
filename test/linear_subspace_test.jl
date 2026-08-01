@@ -1,7 +1,8 @@
 using Test, Random
 using LinearAlgebra
 using HomotopyContinuationNext
-using HomotopyContinuationNext: LinearSubspace, rand_subspace, dim, codim, ambient_dim,
+using HomotopyContinuationNext: LinearSubspace, rand_subspace, rand_subspace!, dim,
+    codim, ambient_dim,
     intrinsic, extrinsic, coord_change, translate, geodesic, geodesic_distance,
     Intrinsic, Extrinsic, IntrinsicDescription, ExtrinsicDescription, is_linear
 
@@ -28,6 +29,40 @@ end
     x0 = randn(ComplexF64, 4)
     L = rand_subspace(x0; dim = 2)
     @test norm(extrinsic(L).A * x0 - extrinsic(L).b) < 1.0e-12
+end
+
+@testset "rand_subspace!" begin
+    Random.seed!(21)
+    A = zeros(ComplexF64, 3, 5)
+    b = zeros(ComplexF64, 3)
+
+    L = rand_subspace!(A, b)
+    @test dim(L) == 2
+    @test codim(L) == 3
+    @test ambient_dim(L) == 5
+    @test !is_linear(L)
+
+    Llin = rand_subspace!(A, b; affine = false)
+    @test is_linear(Llin)
+    @test iszero(extrinsic(Llin).b)
+
+    x0 = randn(ComplexF64, 5)
+    Lx = rand_subspace!(A, b, x0)
+    @test norm(extrinsic(Lx).A * x0 - extrinsic(Lx).b) < 1.0e-12
+
+    # Linear through a point: the whole ray of `x0` lies in the subspace.
+    Lray = rand_subspace!(A, b, x0; affine = false)
+    @test is_linear(Lray)
+    @test norm(extrinsic(Lray).A * x0) < 1.0e-12
+    @test norm(extrinsic(Lray).A * (3.5 * x0)) < 1.0e-12
+
+    # The returned subspace keeps copies, so redrawing does not disturb it.
+    kept = copy(extrinsic(Lray).A)
+    rand_subspace!(A, b)
+    @test extrinsic(Lray).A == kept
+
+    @test_throws ArgumentError rand_subspace!(A, zeros(ComplexF64, 2))
+    @test_throws ArgumentError rand_subspace!(A, b, randn(ComplexF64, 4))
 end
 
 @testset "translate" begin

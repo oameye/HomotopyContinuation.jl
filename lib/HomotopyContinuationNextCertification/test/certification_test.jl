@@ -10,7 +10,9 @@ using HomotopyContinuationNextCertification:
     certified_solution_interval, solution_candidate, solution_approximation,
     certificate_index, distinct_certificates, distinct_solutions,
     ExtendedSolutionCertificate, SolutionCertificate, CertificationResult,
-    save, DistinctCertifiedSolutions, add_solution!, distinct_certified_solutions
+    save, DistinctCertifiedSolutions, add_solution!, distinct_certified_solutions,
+    distinct_certified_solutions!, stats, ncertified_distinct, nprocessed,
+    nduplicates, nnotcertified
 import DynamicPolynomials as DP
 import Arblib
 using LinearAlgebra: det
@@ -244,6 +246,73 @@ end
             Certification(; show_progress = false),
         )
         @test length(solutions(dcs2)) == 3264
+    end
+
+    @testset "DistinctCertifiedSolutions incremental API" begin
+        @polyvar x y
+        F = System([x^2 + y^2 - 1, x - y])
+        sols = solutions(solve(F, TotalDegree(; show_progress = false)))
+
+        dcs = DistinctCertifiedSolutions(F, nothing)
+        added, status, representative, sol = add_solution!(dcs, sols[1], 1)
+        @test added
+        @test status == :certified_distinct
+        @test representative == 1
+        @test sol isa Vector{ComplexF64}
+
+        added, status, representative, sol = add_solution!(dcs, sols[1], 2)
+        @test !added
+        @test status == :duplicate
+        @test representative == 1
+        @test isnothing(sol)
+
+        @test stats(dcs) ==
+            (processed = 2, certified_distinct = 1, duplicates = 1, not_certified = 0)
+
+        # A point far from any solution cannot be certified.
+        @var xe ye
+        C = System([xe^2 + ye^2 - 1, xe - ye]; variables = [xe, ye])
+        not_certified = DistinctCertifiedSolutions(C, nothing)
+        added, status, representative, sol = add_solution!(
+            not_certified, ComplexF64[100.0, -70.0], 3; max_precision = 64,
+        )
+        @test !added
+        @test status == :not_certified
+        @test representative == 0
+        @test isnothing(sol)
+        @test stats(not_certified) ==
+            (processed = 1, certified_distinct = 0, duplicates = 0, not_certified = 1)
+
+        # Two solutions equidistant from the reference point land in the same
+        # interval-tree key, so the tree must separate them by their intervals.
+        @polyvar z
+        collision = DistinctCertifiedSolutions(
+            System([z^2 - 1]; variables = [z]), nothing;
+            reference_point = ComplexF64[0.0],
+        )
+        added, status, representative, _ = add_solution!(collision, ComplexF64[1.0], 1)
+        @test added && status == :certified_distinct && representative == 1
+        added, status, representative, _ = add_solution!(collision, ComplexF64[-1.0], 2)
+        @test added && status == :certified_distinct && representative == 2
+        @test length(collision) == 2
+        @test sort(map(s -> real(s[1]), solutions(collision))) == [-1.0, 1.0]
+
+        # Two batches into one accumulator: the repeated solution is a duplicate.
+        batches = DistinctCertifiedSolutions(F, nothing)
+        alg = Certification(; show_progress = false)
+        distinct_certified_solutions!(batches, sols[1:1], alg, Serial())
+        distinct_certified_solutions!(batches, [sols[2], sols[1]], alg, Serial())
+        @test length(solutions(batches)) == 2
+        @test ncertified_distinct(batches) == 2
+        @test nduplicates(batches) == 1
+        @test nprocessed(batches) == 3
+        @test nnotcertified(batches) == 0
+
+        left = distinct_certified_solutions(F, sols[1:1], nothing, alg, Serial())
+        right = distinct_certified_solutions(F, [sols[2], sols[1]], nothing, alg, Serial())
+        merge!(left, right)
+        @test length(solutions(left)) == 2
+        @test nduplicates(left) == 1
     end
 
     @testset "duplicate detection" begin

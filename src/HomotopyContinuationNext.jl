@@ -42,7 +42,7 @@ export is_failed, is_finite
 export AbstractResult, AbstractSolutionResult
 export TotalDegree, Polyhedral, Result, PathResult, paths_to_track, mixed_volume
 export Continuation, Sweep, Monodromy, Witness, Membership
-export Regeneration, Intersection, Decomposition
+export Regeneration, Intersection, Decomposition, EquationSorting
 export CommonOptions, early_stop_callback, excess_residual_tol
 export path_results, seed, ntracked, failed, at_infinity, nonsingular, singular
 export recluster, clusters, cluster_of
@@ -58,7 +58,7 @@ export UniquePoints, search_in_radius, add!, multiplicities, unique_points
 export satisfies_triangle_inequality, InfNorm, EuclideanNorm
 export LinearSubspace, ExtrinsicDescription, IntrinsicDescription, Intrinsic, Extrinsic
 export intrinsic, extrinsic, is_linear, dim, codim, ambient_dim
-export rand_subspace, translate, geodesic, geodesic_distance, coord_change
+export rand_subspace, rand_subspace!, translate, geodesic, geodesic_distance, coord_change
 export IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy, set_subspaces!
 export AffineChartHomotopy, on_affine_chart, linear_subspace_homotopy
 export find_start_pair, verify_solution_completeness

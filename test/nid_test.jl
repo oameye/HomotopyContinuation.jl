@@ -1,6 +1,7 @@
 using Test, Random
 using HomotopyContinuationNext
-using HomotopyContinuationNext: TrackerOptions, MonodromyOptions
+using HomotopyContinuationNext: TrackerOptions, MonodromyOptions, linear_subspace,
+    is_linear, dim
 using DynamicPolynomials: @polyvar
 import MultivariatePolynomials as MP
 
@@ -30,7 +31,12 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test eltype(dec) === eltype(W)
 
         # sorting
-        W = solve(F, Regeneration(; sorted = false, show_progress = false))
+        W = solve(
+            F,
+            Regeneration(;
+                sorted = EquationSorting.UNSORTED, show_progress = false,
+            ),
+        )
         @test sort(degree.(W); rev = true) == [8, 8, 2]
 
         # limited codimension
@@ -255,6 +261,52 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         N_Curve = solve(Curve, Decomposition(; show_progress = false))
         @test degrees(N_Curve) == Dict(1 => [6])
         @test ncomponents(N_Curve) == 1
+    end
+
+    @testset "Homogeneous systems" begin
+        @polyvar x[1:4]
+        a = x[1]^2 + x[2]^2 + x[3]^2 + x[4]^2
+        b = x[1]^3 + x[2]^3 + 2x[3]^3 + 3x[4]^3
+        c = x[1]^4 + 2x[2]^4 + 4x[3]^4 - x[4]^4
+        # V(a*c, b*c) = V(c) ∪ V(a, b): a quartic surface and a degree-6 curve
+        # in P³. Homogeneous input is regenerated projectively, so the witness
+        # sets are cut by linear (not affine) subspaces.
+        G = System([a * c, b * c]; variables = x)
+        # Seeded: the splitting stage's trace test on a projective witness set
+        # fails on a minority of seeds and drops the surface (02_status.md).
+        N = solve(G, Decomposition(; seed = UInt32(3), show_progress = false))
+        @test degrees(N) == Dict(2 => [4], 1 => [6])
+        @test ncomponents(N) == 2
+
+        Ws = witness_sets(N)
+        W1, W2 = first(Ws[2]), first(Ws[1])
+        @test all(W -> W.projective, [W1, W2])
+        @test all(W -> is_linear(linear_subspace(W)), [W1, W2])
+
+        # `EquationSorting.RANDOMIZED` combines equations of different degrees,
+        # which does not stay homogeneous.
+        @test_throws ArgumentError solve(
+            G,
+            Regeneration(;
+                sorted = EquationSorting.RANDOMIZED, show_progress = false,
+            ),
+        )
+    end
+
+    @testset "randomization" begin
+        @polyvar x y z
+        # A degree-2 and a degree-3 surface meeting in a degree-6 curve. The
+        # random upper-triangular combination leaves V(f, g) unchanged.
+        f = rand_poly(ComplexF64, [x, y, z], 2)
+        g = rand_poly(ComplexF64, [x, y, z], 3)
+        N = solve(
+            System([f, g]; variables = [x, y, z]),
+            Decomposition(;
+                sorted = EquationSorting.RANDOMIZED, show_progress = false,
+            ),
+        )
+        @test degrees(N) == Dict(1 => [6])
+        @test ncomponents(N) == 1
     end
 
     @testset "Overdetermined Test" begin

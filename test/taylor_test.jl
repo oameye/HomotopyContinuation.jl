@@ -99,6 +99,34 @@ function cauchy_coefficients(f, series; K::Int, M::Int = 64, r::Float64 = 0.15)
     return [acc[k + 1] / (M * r^k) for k in 0:K]
 end
 
+@testset "taylor_op_pow_int with a vanishing constant term" begin
+    # `a(t) = t` gives `a^r = t^r`: coefficient 1 at order r, 0 below it. The
+    # log-derivative recurrence divides by `a[0]`, so this is where it would
+    # report NaN.
+    a = TruncatedTaylorSeries((0.0 + 0im, 1.0 + 0im, 0.0 + 0im, 0.0 + 0im))
+    @testset "r = $r" for r in 1:5
+        w = taylor_op_pow_int(a, r)
+        for k in 0:3
+            @test isfinite(w[k])
+            @test w[k] ≈ (k == r ? 1.0 + 0im : 0.0 + 0im) atol = 1.0e-14
+        end
+    end
+
+    # A general series with a zero constant term: `(2t - 3t²)³ = 8t³ - 36t⁴ + …`,
+    # so orders 0..2 vanish and order 3 is 8.
+    b = TruncatedTaylorSeries((0.0 + 0im, 2.0 + 0im, -3.0 + 0im, 0.0 + 0im))
+    w = taylor_op_pow_int(b, 3)
+    @test all(isfinite, (w[0], w[1], w[2], w[3]))
+    @test w[0] ≈ 0.0 + 0im atol = 1.0e-14
+    @test w[1] ≈ 0.0 + 0im atol = 1.0e-14
+    @test w[2] ≈ 0.0 + 0im atol = 1.0e-14
+    @test w[3] ≈ 8.0 + 0im atol = 1.0e-13
+
+    # A nonzero constant term still goes through the recurrence unchanged.
+    c = TruncatedTaylorSeries((1.5 + 0.5im, 0.3 - 0.2im, 0.1 + 0.4im, -0.2 + 0.1im))
+    @test taylor_op_pow_int(c, 4)[3] ≈ taylor_op_mul(taylor_op_sqr(c), taylor_op_sqr(c))[3] atol = 1.0e-10
+end
+
 @testset "taylor_op_* against a Cauchy-integral oracle" begin
     K = 3
     a = TruncatedTaylorSeries((1.3 + 0.4im, 0.3 - 0.2im, -0.15 + 0.25im, 0.05 + 0.1im))

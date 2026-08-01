@@ -2,6 +2,10 @@
 #
 # At t=1: H = γ·G (start system)
 # At t=0: H = F  (target system)
+#
+# Every loop writing the caller's `u` runs over the scratch buffers, not over
+# `u`: a wrapper (AffineChartHomotopy) passes a `u` with rows of its own past
+# this homotopy's, and `eachindex(u)` would read the scratch out of bounds.
 
 const _EMPTY_PARAMS = FSVec{ComplexF64}(ComplexF64[])
 
@@ -69,7 +73,7 @@ function evaluate!(
     evaluate!(H.u_target, H.target, x, _EMPTY_PARAMS)
     γt = H.γ * t
     t1 = one(ComplexF64) - t
-    @inbounds for i in eachindex(u)
+    @inbounds for i in eachindex(H.u_start)
         u[i] = γt * H.u_start[i] + t1 * H.u_target[i]
     end
     return nothing
@@ -88,7 +92,7 @@ function evaluate!(
     evaluate!(H.ū_target, H.target, x, _EMPTY_PARAMS)
     γt = H.γ * t
     t1 = one(ComplexF64) - t
-    @inbounds for i in eachindex(u)
+    @inbounds for i in eachindex(H.ū_start)
         u[i] = ComplexF64(γt * H.ū_start[i] + t1 * H.ū_target[i])
     end
     return nothing
@@ -104,10 +108,10 @@ function evaluate_and_jacobian!(
     evaluate_and_jacobian!(H.u_target, H.U_target, H.target, x, _EMPTY_PARAMS)
     γt = H.γ * t
     t1 = one(ComplexF64) - t
-    @inbounds for i in eachindex(u)
+    @inbounds for i in eachindex(H.u_start)
         u[i] = γt * H.u_start[i] + t1 * H.u_target[i]
     end
-    @inbounds for j in axes(U, 2), i in axes(U, 1)
+    @inbounds for j in axes(U, 2), i in axes(H.U_start, 1)
         U[i, j] = γt * H.U_start[i, j] + t1 * H.U_target[i, j]
     end
     return nothing
@@ -121,7 +125,7 @@ function taylor!(
     )::Nothing
     evaluate!(H.u_start, H.start, x, _EMPTY_PARAMS)
     evaluate!(H.u_target, H.target, x, _EMPTY_PARAMS)
-    @inbounds for i in eachindex(u)
+    @inbounds for i in eachindex(H.u_start)
         u[i] = H.γ * H.u_start[i] - H.u_target[i]
     end
     return nothing
@@ -149,7 +153,7 @@ function taylor!(
     taylor!(H.u_start, Val(2), H.start, tx, _EMPTY_PARAMS)
     taylor!(H.u_target, Val(2), H.target, tx, _EMPTY_PARAMS)
     t1 = one(ComplexF64) - t
-    @inbounds for i in eachindex(u)
+    @inbounds for i in eachindex(H.u_start)
         u[i] = H.γ * (H.u_cross_start[i] + t * H.u_start[i]) +
             t1 * H.u_target[i] - H.u_cross_target[i]
     end
@@ -168,7 +172,7 @@ function taylor!(
     taylor!(H.u_start, Val(3), H.start, tx, _EMPTY_PARAMS)
     taylor!(H.u_target, Val(3), H.target, tx, _EMPTY_PARAMS)
     t1 = one(ComplexF64) - t
-    @inbounds for i in eachindex(u)
+    @inbounds for i in eachindex(H.u_start)
         u[i] = H.γ * (H.u_cross_start[i] + t * H.u_start[i]) +
             t1 * H.u_target[i] - H.u_cross_target[i]
     end

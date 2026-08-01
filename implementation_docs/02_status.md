@@ -670,7 +670,9 @@ Closed by this audit:
   successful endpoints within `rtol`, collapsing eight regular roots separated by 6e-9 into
   four and relabelling them multiple; proximity merging is now restricted to endpoints the
   endgame flagged singular, as v2 does by clustering only `filter(is_singular, path_results)`.
-  Now 900 tracked, 693 nonsingular, 0 singular, 207 at infinity on every seed tried.
+  Now 900 tracked, 693 nonsingular, 0 singular, 207 at infinity. The first four are
+  seed-independent; `nat_infinity` is not, so `v2_parity_test.jl` pins a seed for it (see the
+  open item below).
 - [x] **`(x-10)^d` winding numbers, d = 2 and 6.** The port was the defect: v2's test writes
   `@var x` and keeps the root factored, the port wrote `@polyvar x`, and DynamicPolynomials
   expands, so the degree-6 coefficients cancel from 10^6 down to 10^-9 near x = 10 and the
@@ -682,6 +684,83 @@ Closed by this audit:
   with no winding number. `EndgameState` now keeps the best prediction it handed back and
   `tracking_stopped!` prefers it when it beats the endpoint. 80 seeds at each degree give
   v2's exact answer: d winding numbers of d, one singular solution at 10.
+- [x] **Projective regeneration**, which closes both the `Regeneration` / `Decomposition`
+  entry and the `intersect` one: they were one missing mode, not two bugs. Homogeneous input
+  now takes `projective = is_homogeneous(F)` through the regeneration state. The seed
+  subspace is linear of one dimension more (`initialize_witness_sets(...; affine = false)`),
+  which makes `get_flag` take `u = 0` and keeps the whole flag linear; `expected_max_codim`
+  drops by one; the deformation equation is `u^d − ℓ^d` for a generic linear form `ℓ`, so it
+  stays homogeneous, and each start point takes `u = ℓ(p)·ζ` over the `d`-th roots of unity;
+  the u-homotopy and the containment test run on an affine chart, the latter drawing its query
+  rows through the point (as the projective `membership` already did) rather than reusing the
+  structured ones. `ℓ` has real coefficients so it types like the equations it joins; the locus
+  it must avoid is a proper subvariety, which meets `ℝⁿ` in measure zero. `intersect` requires
+  both witness sets to agree on `projective` and draws a linear slice for a hypersurface
+  argument. Now `Dict(2 => [4], 1 => [6])` and `degree.(B) == [4, 6]`, matching v2, with
+  `W.projective` set and linear subspaces throughout.
+
+  Two core bugs surfaced on the way, both latent until a chart wrapper appeared over a
+  straight-line homotopy:
+  - `taylor_op_pow_int` divides by the base's constant term, so `x^r` at `x = 0` returned
+    `Inf * 0 = NaN` instead of finite coefficients. The projective flag puts the endpoint at
+    exactly `u = 0`, so every u-homotopy path hit it: the predictor's trust region collapsed
+    and the tracker could not take a step. A vanishing constant term with `r > 0` now goes
+    through division-free repeated squaring. (v2 never hits this because its u-homotopy runs
+    on an intermediate generic subspace and only a third stage lands on `u = 0`.)
+  - `StraightLineHomotopy`'s `evaluate!` / `evaluate_and_jacobian!` / `taylor!` looped over
+    `eachindex(u)`, the caller's buffer, while indexing their own `m`-row scratch. Wrapped in
+    an `AffineChartHomotopy` the buffer is one row longer, so they read the scratch out of
+    bounds under `@inbounds`. They now loop over the scratch.
+- [ ] **Mohab's at-infinity count is seed-dependent.** A few divergent paths reach
+  `max_steps` before the at-infinity criterion fires, so the 207 non-solutions split between
+  `PATH_AT_INFINITY` and `PATH_TERMINATED_MAX_STEPS` differently from seed to seed: over 25
+  runs, 207 on 19 and 195-205 on the rest. `tracked_paths = 900` and the 693 nonsingular
+  solutions never move. Pre-existing and not specific to mohab: the same at-infinity /
+  max-steps drift is what the `skeel_row_scaling!` entry above reports for two paths over
+  `TEST_SYSTEM_COLLECTION`. `v2_parity_test.jl` pins `seed = 1` so the assertion is
+  deterministic; the criterion itself is what wants fixing.
+- [ ] **The splitting stage's trace test on a projective witness set is flaky.** Reachable
+  only now that `Regeneration` produces projective witness sets. Splitting the projective
+  quartic of `nid_test.jl` "Homogeneous systems" on its own over 30 seeds (single-threaded,
+  as `make test` runs its workers) drops the surface on 2 of them, reporting degree 1 or
+  nothing and warning that the trace test failed; the same-degree, same-dimension affine
+  witness set is 0 of 30. The regeneration stage is correct on every seed tried; only the
+  split fails, so `nid_test.jl` "Homogeneous systems" pins a seed.
+
+  Not yet root-caused. The asymmetry worth checking first: `MonodromySolver` fixes
+  `projective = is_linear(L) && is_homogeneous(F)` once from the base subspace, and every
+  worker homotopy carries the chart from then on, while `MonodromyLoop` translates the base
+  into subspaces that are no longer linear. v2 builds its loop homotopy the same way, so this
+  is not a plain v2/v3 divergence, and the tight `trace_test_tol = 1.0e-10` of
+  `_decompose_stage_monodromy` may simply be what makes it visible here.
+- [x] **`EquationSorting.RANDOMIZED`** on `Regeneration` and `Decomposition`: sort by
+  decreasing degree, then replace the equations by a random upper-triangular combination, which
+  leaves every `V(eqs[i:end])` unchanged while giving each equation the top degree. Rejected for
+  homogeneous input, where such a combination is not homogeneous. v2 spells the option
+  `sorted = :randomized`; v3 has `sorted::EquationSorting.T` with `UNSORTED` / `BY_DEGREE` /
+  `RANDOMIZED`, since the codebase uses scoped enums rather than Symbol keywords.
+  Closes `nid_test.jl` "randomization".
+- [x] **`rand_subspace!`**, the in-place redraw of a `LinearSubspace` into given `A`/`b`
+  buffers, with and without a point to pass through, `affine = false` projecting the rows off
+  the point so the whole ray is contained. The returned subspace holds copies, so redrawing
+  does not disturb one handed out earlier.
+- [x] **`DistinctCertifiedSolutions` incremental API.** `add_solution!` now returns
+  `(added, status, representative, certified_solution)`, with `representative` the index
+  carried by the certificate a duplicate was matched to and `certified_solution` the
+  interval midpoint when `added`. Added `stats`, `nprocessed`, `ncertified_distinct`,
+  `nduplicates`, `nnotcertified` (atomic counters, so the threaded route counts correctly)
+  and `merge!`, which is restricted to two accumulators of the same certificate type since
+  the interval tree is typed. The bulk routes call an internal entry point returning the
+  matched certificate instead of its midpoint: `solution_approximation` allocates a vector
+  per call and they discard it.
+
+  Porting v2's collision case exposed a defect in v3's dedup:
+  `DistinctSolutionCertificates` keyed one certificate per `squared_distance_interval`, so
+  two distinct solutions equidistant from the reference point overwrote each other and the
+  distinct count was silently short. The tree now buckets per key, as v2 does. A
+  `reference_point` keyword on the constructor makes the collision reachable in a test
+  without the mutable-struct reassignment v2 uses.
+  Closes `certification_test.jl` "DistinctCertifiedSolutions incremental API".
 
 Open, ordered by consequence:
 
@@ -707,23 +786,6 @@ Open, ordered by consequence:
   `MonodromyResult`. Awkward in v3's layout: monodromy is in core and `certify` is in the
   certification subpackage, so core cannot call it. Blocks `monodromy_test.jl` "certified
   duplicate checks".
-- [ ] **`DistinctCertifiedSolutions` incremental API.** v3 has the type,
-  `add_solution!` and `distinct_certified_solutions!`, but `add_solution!` returns
-  `(added, status)` where v2 returns `(added, status, representative, certificate)`, and
-  `stats`, `merge!`, `nduplicates` and `ncertified_distinct` are missing. Blocks
-  `certification_test.jl` "DistinctCertifiedSolutions incremental API".
-- [ ] **Projective input to `Regeneration` / `Decomposition`.** On the homogeneous
-  `[a*c, b*c]` of `nid_test.jl` "Homogeneous systems", v2 returns `Dict(2 => [4], 1 => [6])`
-  with projective witness sets cut by linear (not affine) subspaces; v3 returns
-  `Dict(2 => [6], 3 => [4])` with affine ones. The degrees agree, the dimensions are off by
-  one and `W.projective` is never set.
-- [ ] **`intersect` on two projective witness sets** throws
-  `ArgumentError: Expected m >= n, got m=1, n=2`. Blocks `witness_set_test.jl`
-  "intersect projective" (v2: `degree.(B) == [4, 6]`).
-- [ ] **`Regeneration(; sorted = :randomized)`**, which sorts by decreasing degree and then
-  replaces the equations by a random upper-triangular combination of them. v3's `sorted` is a
-  `Bool`. v2 rejects the option for homogeneous input. Blocks `nid_test.jl` "randomization".
-- [ ] **`rand_subspace!`**, the in-place redraw of a `LinearSubspace`.
 
 Deliberately not ported from v2.22: `model_kit/compiled_cache_test.jl`, which exercises the
 locks around v2's global `TSYSTEM_TABLE` / `THOMOTOPY_TABLE`. v3 keeps no global compile table

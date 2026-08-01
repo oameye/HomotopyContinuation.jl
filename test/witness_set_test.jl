@@ -5,7 +5,7 @@ using HomotopyContinuationNext: corank, extrinsic, TrackerOptions,
     IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy,
     EndgameTracker, Tracker, HomotopyEvaluator, PathResult,
     intrinsic_coordinates!, ambient_coordinates!, track!, is_success, FSVec,
-    fix_parameters
+    fix_parameters, is_linear, linear_subspace, dim
 using DynamicPolynomials: @polyvar
 import MultivariatePolynomials as MP
 
@@ -229,6 +229,38 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         B = intersect(H[1], H[2])
         C = vcat([intersect(Hi, H[3], Intersection(; show_progress = false)) for Hi in B]...)
         @test sort(degree.(C)) == [2, 8, 8]
+    end
+
+    @testset "intersect projective" begin
+        @polyvar w[1:4]
+        a = w[1]^2 + w[2]^2 + w[3]^2 + w[4]^2
+        b = w[1]^3 + w[2]^3 + 2w[3]^3 + 3w[4]^3
+        c = w[1]^4 + 2w[2]^4 + 4w[3]^4 - w[4]^4
+        # Two homogeneous hypersurfaces in P³ sharing the quartic V(c): the
+        # intersection is that surface plus the degree-6 curve V(a, b).
+        Hp = [
+            solve(System([g]; variables = w), Witness(; show_progress = false))
+                for g in [a * c, b * c]
+        ]
+        @test all(W -> W.projective, Hp)
+        B = intersect(Hp[1], Hp[2], Intersection(; show_progress = false))
+        @test sort(degree.(B)) == [4, 6]
+        @test sort(dim.(B)) == [1, 2]
+        @test all(W -> W.projective && is_linear(linear_subspace(W)), B)
+
+        # A projective witness set and a homogeneous hypersurface given directly.
+        Bf = intersect(Hp[1], b * c, Intersection(; show_progress = false))
+        @test sort(degree.(Bf)) == [4, 6]
+
+        # Mixing a projective and an affine witness set slices in the wrong
+        # ambient space, so it is rejected rather than answered wrongly.
+        Waff = solve(
+            System([a * c - 1]; variables = w), Witness(; show_progress = false),
+        )
+        @test !Waff.projective
+        @test_throws ArgumentError intersect(
+            Hp[1], Waff, Intersection(; show_progress = false),
+        )
     end
 
     @testset "sliced solve and subspace moves" begin

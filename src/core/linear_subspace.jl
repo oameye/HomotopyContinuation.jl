@@ -467,6 +467,67 @@ rand_subspace(
     Random.default_rng(), x; dim = dim, codim = codim, affine = affine,
 )
 
+"""
+    rand_subspace!([rng], A::AbstractMatrix, b::AbstractVector; affine = true)
+
+Redraw a random [`LinearSubspace`](@ref) into the given extrinsic description
+buffers `A` and `b`, whose sizes fix the codimension, and return it. `b` is
+zeroed unless `affine`.
+
+    rand_subspace!([rng], A::AbstractMatrix, b::AbstractVector, x::AbstractVector; affine = true)
+
+Redraw a random subspace through the point `x`. When `affine` is `false` the rows
+of `A` are projected off `x`, so the subspace contains the whole ray of `x`.
+
+The returned subspace holds copies of `A` and `b`, so redrawing into the same
+buffers does not disturb a subspace handed out earlier.
+"""
+function rand_subspace!(
+        rng::Random.AbstractRNG, A::AbstractMatrix, b::AbstractVector;
+        affine::Bool = true,
+    )
+    size(A, 1) == length(b) ||
+        throw(ArgumentError("`A` has $(size(A, 1)) rows but `b` has $(length(b))."))
+    Random.randn!(rng, A)
+    affine ? Random.randn!(rng, b) : fill!(b, zero(eltype(b)))
+    return LinearSubspace(Matrix(A), Vector(b))
+end
+
+function rand_subspace!(
+        rng::Random.AbstractRNG, A::AbstractMatrix, b::AbstractVector,
+        x::AbstractVector; affine::Bool = true,
+    )
+    size(A, 2) == length(x) || throw(
+        ArgumentError("`A` has $(size(A, 2)) columns but `x` has $(length(x)) entries."),
+    )
+    size(A, 1) == length(b) ||
+        throw(ArgumentError("`A` has $(size(A, 1)) rows but `b` has $(length(b))."))
+    Random.randn!(rng, A)
+    if affine
+        LA.mul!(b, A, x)
+    else
+        fill!(b, zero(eltype(b)))
+        nrmsq = sum(abs2, x)
+        for i in axes(A, 1)
+            α = zero(eltype(A))
+            for j in axes(A, 2)
+                α += A[i, j] * x[j]
+            end
+            α /= nrmsq
+            for j in axes(A, 2)
+                A[i, j] -= α * conj(x[j])
+            end
+        end
+    end
+    return LinearSubspace(Matrix(A), Vector(b))
+end
+
+rand_subspace!(A::AbstractMatrix, b::AbstractVector; affine::Bool = true) =
+    rand_subspace!(Random.default_rng(), A, b; affine = affine)
+rand_subspace!(
+    A::AbstractMatrix, b::AbstractVector, x::AbstractVector; affine::Bool = true,
+) = rand_subspace!(Random.default_rng(), A, b, x; affine = affine)
+
 # Coordinate changes
 """
     coord_change(A::LinearSubspace, C₁::Coordinates, C₂::Coordinates, p)

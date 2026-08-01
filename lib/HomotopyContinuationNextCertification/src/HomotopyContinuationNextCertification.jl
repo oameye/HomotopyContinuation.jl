@@ -60,6 +60,7 @@ export certify, Certification, SolutionCertificate, ExtendedSolutionCertificate,
     ncertified, nreal_certified, ncomplex_certified, ndistinct_certified,
     ndistinct_real_certified, ndistinct_complex_certified, solutions,
     save, DistinctCertifiedSolutions, add_solution!, distinct_certified_solutions,
-    distinct_certified_solutions!, show_straight_line_program
+    distinct_certified_solutions!, stats, ncertified_distinct, nprocessed,
+    nduplicates, nnotcertified, show_straight_line_program
 
 end # module

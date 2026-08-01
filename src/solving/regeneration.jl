@@ -7,8 +7,9 @@
 # `decompose` for the irreducible decomposition.
 #
 # Notes:
-# * The deformation equation is `u^d - 1`, divided by the denominator of the
-#   equation it deforms into so both endpoint systems have the same poles.
+# * The deformation equation is `u^d - 1` (`u^d - ℓ^d` for homogeneous input, so
+#   that it stays homogeneous), divided by the denominator of the equation it
+#   deforms into so both endpoint systems have the same poles.
 # * Every `slice(System, L)` is the ambient `_sliced_system` (`[F; A x − b]`).
 # * The intersection u-homotopy is a `StraightLineHomotopy` between two sliced
 #   ambient systems; the fill-up and membership steps reuse the existing
@@ -50,11 +51,12 @@ end
 
 # ── Flag construction ────────────────────────────────────────────────────────
 
-# Build the flag of (type-2, type-1) subspace pairs from a dimension-1 base
-# subspace `L₀` in n-space. For index `i` this drops the first `i-1` rows of the
-# base and, for type 2, prepends the equation `u = c`.
+# Build the flag of (type-2, type-1) subspace pairs from a base subspace `L₀` in
+# n-space. For index `i` this drops the first `i-1` rows of the base and, for
+# type 2, prepends the equation `u = c`. A linear `L₀` takes `c = 0`, so the whole
+# flag stays linear and the u-regeneration runs projectively.
 function get_flag(iter, L₀::LinearSubspace, rng::Random.MersenneTwister)
-    A₀ = extrinsic(L₀).A          # orthonormal rows, size (n-1) × n
+    A₀ = extrinsic(L₀).A          # orthonormal rows
     b₀ = extrinsic(L₀).b
     n = size(A₀, 1) + 1
     m = size(A₀, 2)
@@ -63,24 +65,30 @@ function get_flag(iter, L₀::LinearSubspace, rng::Random.MersenneTwister)
     Aᵤ = [A₀ zeros(ComplexF64, n - 1)]
     bᵤ = b₀
     # type 2: prepend the equation u = c
-    c = randn(rng, ComplexF64)
+    c = is_linear(L₀) ? zero(ComplexF64) : randn(rng, ComplexF64)
     A = [zeros(ComplexF64, 1, m) one(ComplexF64); A₀ zeros(ComplexF64, n - 1)]
     b = [c; b₀]
 
     return map(iter) do i
-        j = i + 1
-        Eᵤ = ExtrinsicDescription(Aᵤ[i:end, :], bᵤ[i:end]; orthonormal = true)
+        # `i > n - 1` leaves no rows: an empty range, not a wrapped one.
+        idx = i <= n - 1 ? (i:(n - 1)) : (n:(n - 1))
+        Eᵤ = ExtrinsicDescription(Aᵤ[idx, :], bᵤ[idx]; orthonormal = true)
         Lᵤ = LinearSubspace(Eᵤ)
-        E = ExtrinsicDescription(A[[1; j:n], :], b[[1; j:n]]; orthonormal = true)
+        rows = [1; idx .+ 1]
+        E = ExtrinsicDescription(A[rows, :], b[rows]; orthonormal = true)
         L = LinearSubspace(E)
         return (L, Lᵤ)
     end
 end
 
 function initialize_witness_sets(
-        codim::Int, n::Int, rng::Random.MersenneTwister,
+        codim::Int, n::Int, rng::Random.MersenneTwister; affine::Bool = true,
     )::Vector{WitnessPoints}
-    L₀ = rand_subspace(rng, n; dim = 1)
+    # A projective slice needs one more ambient dimension than an affine one to
+    # cut out the same projective dimension.
+    d = affine ? 1 : 2
+    L₀ = d == n ? LinearSubspace(zeros(ComplexF64, 0, n)) :
+        rand_subspace(rng, n; dim = d, affine = affine)
     flag = get_flag(1:codim, L₀, rng)
     out = Vector{WitnessPoints}(undef, length(flag))
     for (i, (L, Lᵤ)) in enumerate(flag)
@@ -128,6 +136,12 @@ struct RegenerationState{P, V, S <: System}
     i::Int
     codim::Int
     Fᵢ::S
+    # Homogeneous input is regenerated projectively: the flag stays linear, the
+    # deformation equation is `u^d − ℓ^d` for the linear form `ℓ` (so it is
+    # homogeneous too), and every homotopy runs on an affine chart.
+    projective::Bool
+    ℓ::P
+    ℓ_coeffs::Vector{Float64}
     tracker_options::TrackerOptions
     endgame_options::EndgameOptions
     # Every draw below a regeneration route comes off this one stream, so the
@@ -139,12 +153,14 @@ end
         out::Vector{WitnessPoints}, H::Vector{W},
         eqs::Vector{P}, vars::Vector{V}, u::V,
         i::Int, codim::Int, F_prev::S,
+        projective::Bool, ℓ::P, ℓ_coeffs::Vector{Float64},
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
         rng::Random.MersenneTwister,
         exec::AbstractExecutor, atol::Float64, rtol::Float64,
     )::Nothing where {W <: WitnessSet, P, V, S <: System}
     state = RegenerationState(
-        eqs, vars, u, i, codim, F_prev, tracker_options, endgame_options, rng,
+        eqs, vars, u, i, codim, F_prev, projective, ℓ, ℓ_coeffs,
+        tracker_options, endgame_options, rng,
     )
     intersect_all!(out, H, state, exec; atol = atol, rtol = rtol)
     return nothing
@@ -154,12 +170,14 @@ end
         out::Vector{WitnessPoints}, monodromy_options::MonodromyOptions,
         eqs::Vector{P}, vars::Vector{V}, u::V,
         i::Int, codim::Int, Fᵢ::S,
+        projective::Bool, ℓ::P, ℓ_coeffs::Vector{Float64},
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
         rng::Random.MersenneTwister,
         show_monodromy_progress::Bool, exec::AbstractExecutor,
     )::Nothing where {P, V, S <: System}
     state = RegenerationState(
-        eqs, vars, u, i, codim, Fᵢ, tracker_options, endgame_options, rng,
+        eqs, vars, u, i, codim, Fᵢ, projective, ℓ, ℓ_coeffs,
+        tracker_options, endgame_options, rng,
     )
     fill_up!(out, monodromy_options, state, show_monodromy_progress, exec)
     return nothing
@@ -176,6 +194,20 @@ _equation_by_equation_monodromy() =
     MonodromyOptions(; trace_test = true, parameter_sampler = weighted_normal)
 
 """
+    EquationSorting
+
+How [`Regeneration`](@ref) orders the equations before regenerating:
+`EquationSorting.UNSORTED` keeps the given order, `EquationSorting.BY_DEGREE`
+sorts by decreasing degree, and `EquationSorting.RANDOMIZED` additionally
+replaces them by a random upper-triangular combination of the sorted equations.
+"""
+@enumx EquationSorting::Int8 begin
+    UNSORTED
+    BY_DEGREE
+    RANDOMIZED
+end
+
+"""
     Regeneration(; sorted, max_codim, monodromy, atol, rtol, options...)
 
 Solve a system equation by equation and return a [`WitnessSet`](@ref) for every
@@ -185,22 +217,24 @@ Every equation must be polynomial or rational in the variables. A rational
 equation is handled through its numerator, and numerator zeros that are poles of
 the equation are dropped.
 
-`sorted` sorts the equations by decreasing degree; `max_codim` bounds the
-codimension computed. `show_progress` draws the codimension bar,
-`show_monodromy_progress` the bar of every monodromy fill-up underneath it.
+`sorted` is an [`EquationSorting`](@ref) choosing how the equations are ordered;
+`EquationSorting.RANDOMIZED` is not available for homogeneous input.
+`max_codim` bounds the codimension computed. `show_progress` draws the
+codimension bar, `show_monodromy_progress` the bar of every monodromy fill-up
+underneath it.
 """
 struct Regeneration{MO <: MonodromyOptions} <: AbstractAlgorithm
     common::CommonOptions
     monodromy::MO
     show_monodromy_progress::Bool
-    sorted::Bool
+    sorted::EquationSorting.T
     max_codim::Union{Nothing, Int}
     atol::Float64
     rtol::Float64
 end
 
 Regeneration(;
-    sorted::Bool = true,
+    sorted::EquationSorting.T = EquationSorting.BY_DEGREE,
     max_codim::Union{Nothing, Int} = nothing,
     monodromy::MonodromyOptions = _equation_by_equation_monodromy(),
     atol::Float64 = 1.0e-14,
@@ -302,10 +336,15 @@ function solve(
     _check_regeneration_input(F, "`regeneration`")
     rng = Random.MersenneTwister(seed)
 
-    vars = collect(variables(F))
+    xvars = collect(variables(F))
+    vars = copy(xvars)
     n = nvariables(F)         # ambient dimension
     c = size(F)[1]            # number of equations
-    expected_max_codim = min(c, n)
+    projective = is_homogeneous(F)
+    _check_regeneration_sorted(sorted, projective)
+    # A projective variety of codimension k lives in the ambient space with one
+    # dimension spent on the cone direction.
+    expected_max_codim = min(c, n - projective)
     codim = if max_codim !== nothing && max_codim < expected_max_codim
         # compute one extra codim so spurious points can be removed
         max_codim + 1
@@ -318,7 +357,7 @@ function solve(
     push!(vars, u)
 
     # witness supersets, out[k] for codimension k
-    out = initialize_witness_sets(codim, n, rng)
+    out = initialize_witness_sets(codim, n, rng; affine = !projective)
 
     # witness sets for each hypersurface f_i = 0 on the seed subspace
     H = initialize_hypersurfaces(
@@ -328,11 +367,27 @@ function solve(
 
     # sort equations by decreasing degree
     eqs = _regeneration_equations(F)
-    if sorted
+    if sorted !== EquationSorting.UNSORTED
         σ = sortperm(H; by = degree, rev = true)
         eqs = eqs[σ]
         H = H[σ]
     end
+    if sorted === EquationSorting.RANDOMIZED
+        eqs = _randomize_equations(eqs, rng)
+        # The combination is upper triangular with generic coefficients, so
+        # `V(eqs[i:end])` is unchanged and the sorted degrees still hold; the
+        # hypersurface witness sets that seeded the sort are not.
+        H = initialize_hypersurfaces(
+            System(eqs; parameters = empty(vars), variables = vars),
+            vars, linear_subspace(out[1]), rng, exec,
+            tracker_options, endgame_options,
+        )
+    end
+
+    # The deformation equation `u^d − ℓ^d` must be homogeneous in the projective
+    # case, so `1` is replaced by a generic linear form.
+    ℓ_coeffs = projective ? randn(rng, n) : Float64[]
+    ℓ = _linear_form(eqs, xvars, ℓ_coeffs)
 
     # core loop: intersect all current witness sets with each hypersurface
     progress = show_progress ?
@@ -350,11 +405,13 @@ function solve(
             )
             _intersect_regeneration_phase!(
                 out, H, eqs, vars, u, i, codim, F_prev,
+                projective, ℓ, ℓ_coeffs,
                 tracker_options, endgame_options, rng, exec, atol, rtol,
             )
             Fᵢ = System(eqs[1:i]; parameters = empty(vars), variables = vars)
             _fill_regeneration_phase!(
                 out, monodromy_options, eqs, vars, u, i, codim, Fᵢ,
+                projective, ℓ, ℓ_coeffs,
                 tracker_options, endgame_options, rng,
                 show_monodromy_progress, exec,
             )
@@ -374,7 +431,7 @@ function solve(
     for i in eachindex(out)
         W = out[i]
         P, L = u_transform(W)
-        result[i] = WitnessSet(F, L, P)
+        result[i] = WitnessSet(F, L, P; projective = projective)
     end
     # Junk removal: a codim-k witness superset can pick up points where its
     # slice crosses a higher-dimensional component; those points lie on that
@@ -435,11 +492,61 @@ _u_degree(h::MP.AbstractPolynomialLike, ::AbstractVector)::Int = MP.maxdegree(h)
 _u_degree(h::Expression, vars::AbstractVector{Expression})::Int =
     degree(first(num_den(h)), vars)
 
-# Start equation of the u-homotopy. Carrying the denominator of the equation it
+# Start equation of the u-homotopy: `u^d − 1` affinely, `u^d − ℓ^d` projectively,
+# where `ℓ` keeps it homogeneous. Carrying the denominator of the equation it
 # deforms into makes both endpoint systems singular on the same set.
-_u_start_equation(::MP.AbstractPolynomialLike, d::Int, u) = u^d - 1
-_u_start_equation(h::Expression, d::Int, u::Expression)::Expression =
-    (u^d - 1) / last(num_den(h))
+_u_start_equation(::MP.AbstractPolynomialLike, d::Int, u, one_or_ℓ) =
+    u^d - one_or_ℓ^d
+_u_start_equation(h::Expression, d::Int, u::Expression, one_or_ℓ)::Expression =
+    (u^d - one_or_ℓ^d) / last(num_den(h))
+
+# What the start equation `u^d − ℓ^d` subtracts, typed like the equations it
+# joins: the linear form `Σ coeffs[j] xvars[j]` projectively, and `1` affinely,
+# which is the plain `u^d − 1`. Real coefficients: the locus they must avoid is a
+# proper subvariety, which meets `ℝⁿ` in measure zero.
+function _linear_form(
+        eqs::Vector{P}, xvars::Vector{V}, coeffs::Vector{Float64},
+    )::P where {P <: MP.AbstractPolynomialLike, V}
+    isempty(coeffs) && return one(P)
+    return convert(P, sum(coeffs[j] * xvars[j] for j in eachindex(coeffs)))
+end
+
+function _linear_form(
+        ::Vector{Expression}, xvars::Vector{Expression}, coeffs::Vector{Float64},
+    )::Expression
+    isempty(coeffs) && return Expression(1)
+    return sum(coeffs[j] * xvars[j] for j in eachindex(coeffs))
+end
+
+# `u` starts on the `d`-th roots of `ℓ(p)^d` rather than of 1.
+_u_scaling(p::Vector{ComplexF64}, ℓ_coeffs::Vector{Float64})::ComplexF64 =
+    isempty(ℓ_coeffs) ? one(ComplexF64) :
+    sum(ℓ_coeffs[j] * p[j] for j in eachindex(ℓ_coeffs))
+
+# Replace the sorted equations by a random upper-triangular combination of
+# themselves. `V(eqs[i:end])` is preserved for every `i`, so the regeneration
+# still sees the same flag of varieties, but each equation now has the top degree.
+function _randomize_equations(
+        eqs::Vector{P}, rng::Random.MersenneTwister,
+    )::Vector{P} where {P}
+    c = length(eqs)
+    return P[
+        sum(randn(rng) * eqs[j] for j in i:c) for i in 1:c
+    ]
+end
+
+function _check_regeneration_sorted(
+        sorted::EquationSorting.T, projective::Bool,
+    )::Nothing
+    (sorted === EquationSorting.RANDOMIZED && projective) && throw(
+        ArgumentError(
+            "`EquationSorting.RANDOMIZED` is not available for a homogeneous " *
+                "system: a random combination of the equations is not homogeneous " *
+                "unless they all have the same degree.",
+        ),
+    )
+    return nothing
+end
 
 # The hypersurface whose witness set gives the witness set of `f = 0`, and the
 # denominator of `f`, or `nothing` when it has none.
@@ -560,7 +667,7 @@ function intersect_with_hypersurface!(
     # whole component.
     m = .!(
         _is_contained(
-            W, H, system(H), state.rng;
+            W, H, system(H), state.rng, state.projective;
             atol = atol, rtol = rtol,
             tracker_options = state.tracker_options,
             endgame_options = state.endgame_options,
@@ -571,18 +678,47 @@ function intersect_with_hypersurface!(
     X === nothing && return nothing
 
     # Step 2: track P_next × (d-th roots of unity) through the u-homotopy.
-    F₀, G₀, d = _u_homotopy_systems(W, F, X, h, vars, u)
+    F₀, G₀, d = _u_homotopy_systems(W, F, X, h, vars, u, state.ℓ)
     γ = _random_gamma(state.rng)
     roots = ComplexF64[cis(2π * k / d) for k in 0:(d - 1)]
-    if _wants_tasks(exec) && length(P_next) * d > 1
-        _threaded_intersection!(
-            X, P_next, roots, F₀, G₀, γ,
-            state.tracker_options, state.endgame_options, _local_ntasks(exec),
+    # One chart for both endpoint systems and every task, so all the tracked
+    # representatives are comparable. Empty means the route is affine.
+    chart = state.projective ?
+        randn(state.rng, ComplexF64, size(F₀)[2]) : ComplexF64[]
+    ntasks = _wants_tasks(exec) && length(P_next) * d > 1 ? _local_ntasks(exec) : 0
+    if state.projective
+        _run_intersection!(
+            X, P_next, roots, F₀, G₀, γ, chart, state.ℓ_coeffs, Val(true),
+            state.tracker_options, state.endgame_options, ntasks,
         )
     else
-        Hom = StraightLineHomotopy(F₀.evaluator, G₀.evaluator; γ = γ)
-        eg = _endgame_tracker(Hom, state.tracker_options, state.endgame_options)
-        _serial_intersection!(X, P_next, roots, eg)
+        _run_intersection!(
+            X, P_next, roots, F₀, G₀, γ, chart, state.ℓ_coeffs, Val(false),
+            state.tracker_options, state.endgame_options, ntasks,
+        )
+    end
+    return nothing
+end
+
+# `ntasks == 0` runs serially. Both branches are concretely typed in the homotopy.
+function _run_intersection!(
+        X::WitnessPoints, P::Vector{Vector{ComplexF64}}, roots::Vector{ComplexF64},
+        F₀::S1, G₀::S2, γ::ComplexF64, chart::Vector{ComplexF64},
+        ℓ_coeffs::Vector{Float64}, projective::Val,
+        tracker_options::TrackerOptions, endgame_options::EndgameOptions,
+        ntasks::Int,
+    )::Nothing where {S1 <: System, S2 <: System}
+    if ntasks > 0
+        _threaded_intersection!(
+            X, P, roots, F₀, G₀, γ, chart, ℓ_coeffs, projective,
+            tracker_options, endgame_options, ntasks,
+        )
+    else
+        eg = _endgame_tracker(
+            _u_homotopy(F₀.evaluator, G₀.evaluator, γ, chart, projective),
+            tracker_options, endgame_options,
+        )
+        _serial_intersection!(X, P, roots, eg, chart, ℓ_coeffs)
     end
     return nothing
 end
@@ -612,12 +748,26 @@ function _track_u_root(
     return nothing
 end
 
-function _serial_intersection!(X::WitnessPoints, P, roots, eg::EndgameTracker)
+# The u-placeholder becomes a d-th root of 1 affinely, of `ℓ(p)^d` projectively.
+# Charting afterwards rescales x and u together, which leaves `u^d = ℓ(x)^d` and
+# the linear equations (all with `b = 0` here) satisfied.
+function _u_start_point(
+        p::Vector{ComplexF64}, ζ::ComplexF64, chart::Vector{ComplexF64},
+        ℓ_coeffs::Vector{Float64},
+    )::Vector{ComplexF64}
+    q0 = copy(p)
+    q0[end] = _u_scaling(p, ℓ_coeffs) * ζ
+    isempty(chart) || on_chart!(q0, chart)
+    return q0
+end
+
+function _serial_intersection!(
+        X::WitnessPoints, P, roots, eg::EndgameTracker,
+        chart::Vector{ComplexF64}, ℓ_coeffs::Vector{Float64},
+    )
     for p in P
         for ζ in roots
-            q0 = copy(p)
-            q0[end] = ζ    # replace the u-placeholder with a d-th root of unity
-            q = _track_u_root(eg, q0)
+            q = _track_u_root(eg, _u_start_point(p, ζ, chart, ℓ_coeffs))
             q === nothing || push!(X, q)
         end
     end
@@ -631,7 +781,8 @@ end
 # serial order.
 function _threaded_intersection!(
         X::WitnessPoints, P::Vector{Vector{ComplexF64}}, roots::Vector{ComplexF64},
-        F₀::S1, G₀::S2, γ::ComplexF64,
+        F₀::S1, G₀::S2, γ::ComplexF64, chart::Vector{ComplexF64},
+        ℓ_coeffs::Vector{Float64}, projective::Val,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
         nt::Int,
     )::Nothing where {S1 <: System, S2 <: System}
@@ -641,15 +792,14 @@ function _threaded_intersection!(
     @tasks for k in 1:njobs
         @set ntasks = nt
         @local eg = _endgame_tracker(
-            StraightLineHomotopy(
-                _clone_system_evaluator(F₀), _clone_system_evaluator(G₀); γ = γ,
+            _u_homotopy(
+                _clone_system_evaluator(F₀), _clone_system_evaluator(G₀),
+                γ, chart, projective,
             ),
             tracker_options, endgame_options,
         )
         i, j = fldmod1(k, nroots)
-        q0 = copy(P[i])
-        q0[end] = roots[j]
-        q = _track_u_root(eg, q0)
+        q = _track_u_root(eg, _u_start_point(P[i], roots[j], chart, ℓ_coeffs))
         q === nothing || (results[k] = q)
     end
     for r in results
@@ -658,13 +808,13 @@ function _threaded_intersection!(
     return nothing
 end
 
-# Deform `u^d − 1` into `h`, moving from W's type-1 subspace to X's type-2.
-# Returns the two sliced ambient endpoint systems and the degree `d`.
+# Deform the start equation into `h`, moving from W's type-1 subspace to X's
+# type-2. Returns the two sliced ambient endpoint systems and the degree `d`.
 function _u_homotopy_systems(
-        W::WitnessPoints, F::System, X::WitnessPoints, h, vars, u,
+        W::WitnessPoints, F::System, X::WitnessPoints, h, vars, u, ℓ,
     )
     d = _u_degree(h, vars)
-    h0 = _u_start_equation(h, d, u)
+    h0 = _u_start_equation(h, d, u, ℓ)
     eqs = polynomials(F)
 
     L = linear_subspace_u(W)      # start: u free
@@ -675,13 +825,27 @@ function _u_homotopy_systems(
     return F₀, G₀, d
 end
 
+# The u-homotopy. Projectively, both sliced endpoint systems are homogeneous and
+# one row short of square, and the chart row completes them. The `Val` keeps each
+# branch's homotopy type concrete instead of returning a union.
+_u_homotopy(
+    F₀::SystemEvaluator, G₀::SystemEvaluator, γ::ComplexF64,
+    ::Vector{ComplexF64}, ::Val{false},
+) = StraightLineHomotopy(F₀, G₀; γ = γ)
+
+_u_homotopy(
+    F₀::SystemEvaluator, G₀::SystemEvaluator, γ::ComplexF64,
+    chart::Vector{ComplexF64}, ::Val{true},
+) = on_affine_chart(StraightLineHomotopy(F₀, G₀; γ = γ), copy(chart))
+
 # ── Membership within regeneration (structured subspace) ─────────────────────
 
 # Whether each point of X lies on Y's variety. Builds a query subspace reusing
 # X's linear equations (plus random rows), passing through each point, then
 # moves Y's witness points there and checks proximity.
 function _is_contained(
-        X::WitnessPoints, Y::WitnessSet, F::System, rng::Random.MersenneTwister;
+        X::WitnessPoints, Y::WitnessSet, F::System, rng::Random.MersenneTwister,
+        projective::Bool;
         atol::Float64, rtol::Float64,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
     )::BitVector
@@ -689,8 +853,15 @@ function _is_contained(
     LY = linear_subspace(Y)
     (isempty(points(Y)) || isempty(points(X))) && return falses(length(points(X)))
 
-    A = _membership_matrix(LX, LY, rng)
     m, n = size(F)
+    cY = codim(LY)
+    # Affinely the query rows reuse X's, which keeps `L_x` structured and well
+    # conditioned. Projectively they must annihilate `x` instead, so they are
+    # drawn fresh per point and projected off it.
+    A = projective ? zeros(ComplexF64, 0, 0) : _membership_matrix(LX, LY, rng)
+    Rs = projective ? [randn(rng, ComplexF64, cY, n) for _ in points(X)] :
+        Matrix{ComplexF64}[]
+    chart = projective ? randn(rng, ComplexF64, n) : ComplexF64[]
     x0 = LA.normalize!(randn(rng, ComplexF64, n))
     y0 = FSVec{ComplexF64}(zeros(ComplexF64, m))
     y = FSVec{ComplexF64}(zeros(ComplexF64, m))
@@ -701,13 +872,15 @@ function _is_contained(
     # is singular at the start points whenever `dim(LY) <= codim(LY)`, so tracks
     # die with PATH_TERMINATED_INVALID_START and a whole component gets dropped.
     # The intrinsic form `x = A(t) v + a(t)` is well conditioned in every
-    # dim/codim regime and tracks in only `dim(LY) <= n` coordinates.
-    Hom = IntrinsicSubspaceHomotopy(
-        F.evaluator, LY, LY; gamma = _random_gamma(rng),
-    )
+    # dim/codim regime and tracks in only `dim(LY) <= n` coordinates. Projectively
+    # the sliced system is square only on a chart, so the chart row joins it.
+    hom_ev = projective ?
+        SystemEvaluator(AffineChartSystem(F.evaluator, chart)) : F.evaluator
+    Hom = IntrinsicSubspaceHomotopy(hom_ev, LY, LY; gamma = _random_gamma(rng))
     eg = _endgame_tracker(Hom, tracker_options, endgame_options)
     u_buf = FSVec{ComplexF64}(zeros(ComplexF64, size(Hom)[2]))
     amb_buf = FSVec{ComplexF64}(zeros(ComplexF64, n))
+    q_chart = zeros(ComplexF64, n)
 
     out = falses(length(points(X)))
     for (idx, x) in enumerate(points(X))
@@ -716,14 +889,30 @@ function _is_contained(
         evaluate!(y, F.evaluator, FSVec{ComplexF64}(xc), p_empty)
         LA.norm(y, Inf) > 1.0e-2 * LA.norm(y0, Inf) && continue
 
-        bx = A * xc
-        L_x = LinearSubspace(ExtrinsicDescription(A, bx; orthonormal = true))
+        if projective
+            on_chart!(xc, chart)      # compare chart representatives
+            Ax = _orthonormal_rows_through!(Rs[idx], xc)
+            L_x = LinearSubspace(
+                ExtrinsicDescription(Ax, zeros(ComplexF64, cY); orthonormal = true),
+            )
+        else
+            L_x = LinearSubspace(
+                ExtrinsicDescription(A, A * xc; orthonormal = true),
+            )
+        end
         set_subspaces!(Hom, LY, L_x)
         rad = max(atol, LA.norm(xc, Inf) * rtol)
         for q0 in points(Y)
-            intrinsic_coordinates!(u_buf, Hom, ComplexF64.(q0), complex(1.0))
+            q = if projective
+                copyto!(q_chart, q0)
+                on_chart!(q_chart, chart)
+                q_chart
+            else
+                ComplexF64.(q0)
+            end
+            intrinsic_coordinates!(u_buf, Hom, q, complex(1.0))
             track!(eg, u_buf)
-            pr = PathResult(eg; path_number = 0, start_solution = Vector{ComplexF64}(q0))
+            pr = PathResult(eg; path_number = 0, start_solution = copy(q))
             is_success(pr) || continue
             ambient_coordinates!(amb_buf, Hom, solution(pr), complex(0.0))
             if _vt_distance(InfNorm(), amb_buf, xc) < rad
@@ -844,6 +1033,15 @@ function Base.intersect(
     vars = collect(variables(system(W)))
     u = _fresh_variable(vars)
     vars_u = [vars; u]
+    # Both inputs must agree: a projective step keeps the whole flag linear, and
+    # mixing the two would slice one of the varieties in the wrong ambient space.
+    W.projective == H.projective || throw(
+        ArgumentError(
+            "cannot intersect a projective witness set with an affine one; both " *
+                "must be projective or both affine.",
+        ),
+    )
+    projective = W.projective
 
     # W's and H's equations, both expressed in W's variables `vars`.
     eqs = _regeneration_equations(system(W))
@@ -851,6 +1049,8 @@ function Base.intersect(
         _regeneration_equations(system(H)), variables(system(H)), vars,
     )
     h = heqs[1]
+    ℓ_coeffs = projective ? randn(rng, length(vars)) : Float64[]
+    ℓ = _linear_form([eqs; h], vars, ℓ_coeffs)
 
     # Flags in (n+1)-space; the u-value fixes the appended coordinate.
     flagW = get_flag(1:2, linear_subspace(W), rng)
@@ -871,6 +1071,7 @@ function Base.intersect(
     intersect_state = RegenerationState(
         [eqs; h], vars_u, u, length(eqs) + 1, 2,
         System(eqs; parameters = empty(vars_u), variables = vars_u),
+        projective, ℓ, ℓ_coeffs,
         tracker_options, endgame_options, rng,
     )
 
@@ -880,6 +1081,7 @@ function Base.intersect(
     fill_state = RegenerationState(
         [eqs; h], vars_u, u, length(eqs) + 1, 2,
         System([eqs; h]; parameters = empty(vars_u), variables = vars_u),
+        projective, ℓ, ℓ_coeffs,
         tracker_options, endgame_options, rng,
     )
     Ws = W₂ === nothing ? WitnessPoints[W₁] : WitnessPoints[W₁, W₂]
@@ -894,7 +1096,7 @@ function Base.intersect(
     out = WitnessSet[]
     for Wi in Ws
         P, L = u_transform(Wi)
-        push!(out, WitnessSet(G, L, P))
+        push!(out, WitnessSet(G, L, P; projective = projective))
     end
     # Remove spurious witness points of a lower-dimensional set that actually
     # lie on a higher-dimensional component (they are junk from the u-homotopy).
@@ -940,7 +1142,9 @@ function Base.intersect(
     )
     _check_front_end(system(W), false)
     rng = Random.MersenneTwister(_seed(alg))
-    H = _hypersurface_witness_set(f, collect(variables(system(W))), rng, alg, exec)
+    H = _hypersurface_witness_set(
+        f, collect(variables(system(W))), rng, alg, exec, W.projective,
+    )
     # A derived seed, so the regeneration step does not replay the stream that
     # produced H's slice.
     return intersect(W, H, _reseed(alg, rand(rng, UInt32)), exec)
@@ -955,14 +1159,14 @@ function Base.intersect(
     _check_front_end(system(W), true)
     rng = Random.MersenneTwister(_seed(alg))
     H = _hypersurface_witness_set(
-        f, _as_variables(collect(variables(system(W)))), rng, alg, exec,
+        f, _as_variables(collect(variables(system(W)))), rng, alg, exec, W.projective,
     )
     return intersect(W, H, _reseed(alg, rand(rng, UInt32)), exec)
 end
 
-# Witness set of `V(f)` in the ambient space of `vars`, which may hold variables `f`
-# does not use. The slice is the affine line the flag is built from, also for a
-# homogeneous `f`, whose projective slice has one dimension too many for it.
+# Witness set of `V(f)` in the ambient space of `vars`, which may hold variables
+# `f` does not use. The slice matches the flag the regeneration step builds: an
+# affine line, or a linear plane when the step runs projectively.
 _hypersurface_witness(alg::Intersection, seed::UInt32)::Witness{TotalDegree} =
     Witness(
     _with_seed(alg.common, seed), nothing, nothing,
@@ -975,7 +1179,7 @@ _hypersurface_witness(alg::Intersection, seed::UInt32)::Witness{TotalDegree} =
 
 function _hypersurface_witness_set(
         f::MP.AbstractPolynomialLike, vars::Vector, rng::Random.MersenneTwister,
-        alg::Intersection, exec::AbstractExecutor,
+        alg::Intersection, exec::AbstractExecutor, projective::Bool,
     )::WitnessSet
     extra = setdiff(MP.effective_variables(f), vars)
     isempty(extra) || throw(
@@ -986,16 +1190,20 @@ function _hypersurface_witness_set(
     )
     return solve(
         System([f]; parameters = empty(vars), variables = vars),
-        rand_subspace(rng, length(vars); dim = 1),
+        _hypersurface_slice(rng, length(vars), projective),
         _hypersurface_witness(alg, rand(rng, UInt32)),
         exec,
     )
 end
 
+_hypersurface_slice(rng::Random.MersenneTwister, n::Int, projective::Bool) =
+    projective ? rand_subspace(rng, n; dim = 2, affine = false) :
+    rand_subspace(rng, n; dim = 1)
+
 # A rational `f` is solved through its numerator, with its poles dropped.
 function _hypersurface_witness_set(
         f::Expression, vars::Vector{Expression}, rng::Random.MersenneTwister,
-        alg::Intersection, exec::AbstractExecutor,
+        alg::Intersection, exec::AbstractExecutor, projective::Bool,
     )::WitnessSet
     (p, q) = num_den(f)
     (degree(p, vars) < 0 || degree(q, vars) < 0) && throw(
@@ -1007,11 +1215,11 @@ function _hypersurface_witness_set(
     h = System([f]; parameters = Expression[], variables = vars)
     G, Q = _numerator_system(f, h, vars)
     Wp = solve(
-        G, rand_subspace(rng, length(vars); dim = 1),
+        G, _hypersurface_slice(rng, length(vars), projective),
         _hypersurface_witness(alg, rand(rng, UInt32)), exec,
     )
     R = Q === nothing ? solutions(Wp) : _drop_poles(Q, solutions(Wp))
-    return WitnessSet(h, linear_subspace(Wp), R)
+    return WitnessSet(h, linear_subspace(Wp), R; projective = projective)
 end
 
 function _regeneration_monodromy_options(M::MonodromyOptions, W)

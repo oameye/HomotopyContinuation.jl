@@ -430,9 +430,11 @@ function squared_distance_interval(
     return IntervalTrees.Interval(d.lo, d.hi)
 end
 
+# Certificates are bucketed per interval key: two distinct certificates can share
+# a `squared_distance_interval` key, and a one-per-key map would drop one of them.
 struct DistinctSolutionCertificates{S <: AbstractSolutionCertificate}
     reference_point::Vector{ComplexF64}
-    distinct_tree::IntervalTrees.IntervalMap{Float64, S}
+    distinct_tree::IntervalTrees.IntervalMap{Float64, Vector{S}}
     acb_solution_candidate::AcbMatrix
 end
 
@@ -443,14 +445,19 @@ function DistinctSolutionCertificates(
     S = extended_certificate ? ExtendedSolutionCertificate : SolutionCertificate
     return DistinctSolutionCertificates(
         reference_point,
-        IntervalTrees.IntervalMap{Float64, S}(),
+        IntervalTrees.IntervalMap{Float64, Vector{S}}(),
         AcbMatrix(length(reference_point), 1),
     )
 end
 DistinctSolutionCertificates(dim::Integer; kwargs...) =
     DistinctSolutionCertificates(randn(ComplexF64, dim); kwargs...)
 
-Base.length(d::DistinctSolutionCertificates) = length(d.distinct_tree)
+Base.length(d::DistinctSolutionCertificates) =
+    sum(length, Base.values(d.distinct_tree); init = 0)
+
+# Every stored certificate, bucket order flattened.
+all_certificates(d::DistinctSolutionCertificates{S}) where {S} =
+    collect(Iterators.flatten(Base.values(d.distinct_tree)))::Vector{S}
 Base.show(io::IO, d::DistinctSolutionCertificates) =
     print(io, "DistinctSolutionCertificates with $(length(d)) certificates")
 
@@ -461,18 +468,57 @@ Insert `cert` into the interval tree unless an existing certificate's interval
 overlaps it (a duplicate). Returns `(is_distinct, certificate)`.
 """
 function add_certificate!(
-        distinct_sols::DistinctSolutionCertificates,
-        cert::AbstractSolutionCertificate,
-    )
+        distinct_sols::DistinctSolutionCertificates{S},
+        cert::S,
+    ) where {S <: AbstractSolutionCertificate}
     d = squared_distance_interval(cert, distinct_sols.reference_point)
+    bucket_for_d = nothing
     for match in intersect(distinct_sols.distinct_tree, d)
-        certᵢ = IntervalTrees.value(match)
-        if Bool(Arblib.overlaps(cert.I, certᵢ.I))
-            return (false, certᵢ)
+        bucket = IntervalTrees.value(match)
+        for certᵢ in bucket
+            if Bool(Arblib.overlaps(cert.I, certᵢ.I))
+                return (false, certᵢ)
+            end
+        end
+        if first(match) == first(d) && last(match) == last(d)
+            bucket_for_d = bucket
         end
     end
-    distinct_sols.distinct_tree[d] = cert
+    if isnothing(bucket_for_d)
+        distinct_sols.distinct_tree[d] = S[cert]
+    else
+        push!(bucket_for_d, cert)
+    end
     return (true, cert)
+end
+
+"""
+    guaranteed_duplicate_certificate(distinct_sols, s)
+
+Return the stored certificate whose interval provably contains the point `s`, so
+`s` certifies a solution already accounted for, and `nothing` when there is
+none. Used to skip certifying candidates that are guaranteed duplicates.
+"""
+function guaranteed_duplicate_certificate(
+        distinct_sols::DistinctSolutionCertificates{S},
+        s::AbstractVector{ComplexF64},
+    ) where {S}
+    d = squared_distance_interval(s, distinct_sols.reference_point)
+    assigned = false
+    for match in intersect(distinct_sols.distinct_tree, d)
+        if !assigned
+            for (i, xᵢ) in enumerate(s)
+                distinct_sols.acb_solution_candidate[i] = xᵢ
+            end
+            assigned = true
+        end
+        for certᵢ in IntervalTrees.value(match)
+            if Bool(Arblib.contains(certᵢ.I, distinct_sols.acb_solution_candidate))
+                return certᵢ
+            end
+        end
+    end
+    return nothing
 end
 
 """
@@ -480,28 +526,11 @@ end
 
 Return `true` when the point `s` is provably contained in the interval of an
 already-stored certificate, so it certifies a solution already accounted for.
-Used to skip certifying candidates that are guaranteed duplicates.
 """
-function is_solution_candidate_guaranteed_duplicate(
-        distinct_sols::DistinctSolutionCertificates,
-        s::AbstractVector{ComplexF64},
-    )
-    d = squared_distance_interval(s, distinct_sols.reference_point)
-    assigned = false
-    for match in intersect(distinct_sols.distinct_tree, d)
-        certᵢ = IntervalTrees.value(match)
-        if !assigned
-            for (i, xᵢ) in enumerate(s)
-                distinct_sols.acb_solution_candidate[i] = xᵢ
-            end
-            assigned = true
-        end
-        if Bool(Arblib.contains(certᵢ.I, distinct_sols.acb_solution_candidate))
-            return true
-        end
-    end
-    return false
-end
+is_solution_candidate_guaranteed_duplicate(
+    distinct_sols::DistinctSolutionCertificates,
+    s::AbstractVector{ComplexF64},
+) = !isnothing(guaranteed_duplicate_certificate(distinct_sols, s))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Certification parameters
@@ -1170,6 +1199,16 @@ sets into a single deduplicated set.
 The struct is immutable; the interval tree of distinct certificates mutates in
 place, guarded by `access_lock` so [`add_solution!`](@ref) is thread-safe.
 """
+struct DistinctCertifiedSolutionStats
+    processed::Threads.Atomic{Int}
+    duplicates::Threads.Atomic{Int}
+    not_certified::Threads.Atomic{Int}
+end
+
+DistinctCertifiedSolutionStats() = DistinctCertifiedSolutionStats(
+    Threads.Atomic{Int}(0), Threads.Atomic{Int}(0), Threads.Atomic{Int}(0),
+)
+
 struct DistinctCertifiedSolutions{
         S <: System,
         P <: Union{Nothing, CertificationParameters},
@@ -1183,27 +1222,38 @@ struct DistinctCertifiedSolutions{
     # The certificate type `C` records whether this is an extended accumulator,
     # so no separate `extended_certificate` flag is stored.
     distinct::DistinctSolutionCertificates{C}
+    stats::DistinctCertifiedSolutionStats
 end
 
 """
-    DistinctCertifiedSolutions(F::System, params; extended_certificate = false, max_precision = 256)
+    DistinctCertifiedSolutions(F::System, params; extended_certificate = false, max_precision = 256, reference_point = nothing)
 
 Create an empty accumulator for the (parametric) system `F` at parameters
-`params` (`nothing` for a parameter-free system).
+`params` (`nothing` for a parameter-free system). Distinctness is decided by
+distance to a random `reference_point`, which may be given explicitly.
 """
 function DistinctCertifiedSolutions(
         F::System,
         params;
         extended_certificate::Bool = false,
         max_precision::Int = 256,
+        reference_point::Union{Nothing, AbstractVector{ComplexF64}} = nothing,
     )
     m, n = size(F)
     m == n || throw(ArgumentError("We can only certify solutions to square systems."))
     if isnothing(params) && nparameters(F) > 0
         throw(ArgumentError("The given system expects parameters but none are given."))
     end
+    if !isnothing(reference_point) && length(reference_point) != n
+        throw(ArgumentError("`reference_point` must have $n entries, got $(length(reference_point))."))
+    end
     cert_params = certification_parameters(params; prec = max_precision)
-    distinct = DistinctSolutionCertificates(n; extended_certificate = extended_certificate)
+    distinct = isnothing(reference_point) ?
+        DistinctSolutionCertificates(n; extended_certificate = extended_certificate) :
+        DistinctSolutionCertificates(
+            convert(Vector{ComplexF64}, reference_point);
+            extended_certificate = extended_certificate,
+        )
     return DistinctCertifiedSolutions(
         F,
         cert_params,
@@ -1211,6 +1261,7 @@ function DistinctCertifiedSolutions(
         is_real(F),
         ReentrantLock(),
         distinct,
+        DistinctCertifiedSolutionStats(),
     )
 end
 
@@ -1219,24 +1270,97 @@ Base.show(io::IO, d::DistinctCertifiedSolutions) =
     print(io, "DistinctCertifiedSolutions with ", length(d), " distinct solutions")
 
 """
-    add_solution!(d::DistinctCertifiedSolutions, sol, index = 0; max_precision = 256, refine_solution = true)
+    ncertified_distinct(d::DistinctCertifiedSolutions)
 
-Certify `sol` and store it if it is a new distinct certified solution. Returns a
-`(added::Bool, status::Symbol)` pair with `status` one of `:duplicate`,
-`:certified_distinct`, or `:not_certified`.
+Return the number of distinct certified solutions stored in `d`.
 """
-add_solution!(
-    d::DistinctCertifiedSolutions,
-    sol::AbstractVector{<:Number},
-    index::Integer = 0;
-    max_precision::Int = 256,
-    refine_solution::Bool = true,
-) = add_solution!(
-    d, sol, index, d.cache;
-    max_precision = max_precision, refine_solution = refine_solution,
+ncertified_distinct(d::DistinctCertifiedSolutions) = length(d)
+
+"""
+    nprocessed(d::DistinctCertifiedSolutions)
+
+Return the number of solution candidates `d` has been offered.
+"""
+nprocessed(d::DistinctCertifiedSolutions) = d.stats.processed[]
+
+"""
+    nduplicates(d::DistinctCertifiedSolutions)
+
+Return the number of candidates rejected as duplicates of a stored solution.
+"""
+nduplicates(d::DistinctCertifiedSolutions) = d.stats.duplicates[]
+
+"""
+    nnotcertified(d::DistinctCertifiedSolutions)
+
+Return the number of candidates that could not be certified.
+"""
+nnotcertified(d::DistinctCertifiedSolutions) = d.stats.not_certified[]
+
+"""
+    stats(d::DistinctCertifiedSolutions)
+
+Return a named tuple with the counters for processed candidates,
+certified-distinct solutions, duplicates, and non-certified candidates.
+"""
+stats(d::DistinctCertifiedSolutions) = (
+    processed = nprocessed(d),
+    certified_distinct = ncertified_distinct(d),
+    duplicates = nduplicates(d),
+    not_certified = nnotcertified(d),
 )
 
+function _record_add_solution!(d::DistinctCertifiedSolutions, status::Symbol)
+    Threads.atomic_add!(d.stats.processed, 1)
+    if status === :duplicate
+        Threads.atomic_add!(d.stats.duplicates, 1)
+    elseif status === :not_certified
+        Threads.atomic_add!(d.stats.not_certified, 1)
+    end
+    return nothing
+end
+
+"""
+    add_solution!(d::DistinctCertifiedSolutions, sol, index = 0; max_precision = 256, refine_solution = true)
+
+Certify `sol` and store it if it is a new distinct certified solution. Returns
+`(added, status, representative, certified_solution)`. `status` is one of
+`:certified_distinct`, `:duplicate` or `:not_certified`; `representative` is the
+index carried by the stored certificate `sol` was matched to, or `0` when there
+is none; `certified_solution` is the midpoint of the certified interval when
+`added` is `true` and `nothing` otherwise.
+"""
 function add_solution!(
+        d::DistinctCertifiedSolutions,
+        sol::AbstractVector{<:Number},
+        index::Integer = 0;
+        max_precision::Int = 256,
+        refine_solution::Bool = true,
+    )
+    return add_solution!(
+        d, sol, index, d.cache;
+        max_precision = max_precision, refine_solution = refine_solution,
+    )
+end
+
+function add_solution!(
+        d::DistinctCertifiedSolutions,
+        sol::AbstractVector{<:Number},
+        index::Integer,
+        cache::CertificationCache;
+        max_precision::Int = 256,
+        refine_solution::Bool = true,
+    )
+    added, status, representative, cert = _add_solution!(
+        d, sol, index, cache;
+        max_precision = max_precision, refine_solution = refine_solution,
+    )
+    return (added, status, representative, isnothing(cert) ? nothing : solution_approximation(cert))
+end
+
+# Returns the matched certificate rather than its midpoint: the bulk routes
+# discard it, and `solution_approximation` allocates a vector per call.
+function _add_solution!(
         d::DistinctCertifiedSolutions{S, P, C},
         sol::AbstractVector{<:Number},
         index::Integer,
@@ -1246,8 +1370,10 @@ function add_solution!(
     ) where {S, P, C}
     s = convert(Vector{ComplexF64}, sol)
     Base.@lock d.access_lock begin
-        if is_solution_candidate_guaranteed_duplicate(d.distinct, s)
-            return (false, :duplicate)
+        certᵢ = guaranteed_duplicate_certificate(d.distinct, s)
+        if !isnothing(certᵢ)
+            _record_add_solution!(d, :duplicate)
+            return (false, :duplicate, certificate_index(certᵢ), nothing)
         end
     end
     # `C` is the concrete certificate type of this accumulator; pass it so
@@ -1257,10 +1383,16 @@ function add_solution!(
         max_precision = max_precision,
         refine_solution = refine_solution,
     )
-    is_certified(cert) || return (false, :not_certified)
+    if !is_certified(cert)
+        _record_add_solution!(d, :not_certified)
+        return (false, :not_certified, 0, nothing)
+    end
     Base.@lock d.access_lock begin
-        added, _ = add_certificate!(d.distinct, cert)
-        return added ? (true, :certified_distinct) : (false, :duplicate)
+        added, certⱼ = add_certificate!(d.distinct, cert)
+        _record_add_solution!(d, added ? :certified_distinct : :duplicate)
+        return added ?
+            (true, :certified_distinct, certificate_index(cert), cert) :
+            (false, :duplicate, certificate_index(certⱼ), nothing)
     end
 end
 
@@ -1269,8 +1401,7 @@ end
 
 Return the vector of stored distinct solution certificates.
 """
-certificates(d::DistinctCertifiedSolutions) =
-    collect(Base.values(d.distinct.distinct_tree))
+certificates(d::DistinctCertifiedSolutions) = all_certificates(d.distinct)
 
 """
     solutions(d::DistinctCertifiedSolutions)
@@ -1278,6 +1409,26 @@ certificates(d::DistinctCertifiedSolutions) =
 Return the midpoint approximations of the stored distinct certified solutions.
 """
 solutions(d::DistinctCertifiedSolutions) = map(solution_approximation, certificates(d))
+
+"""
+    merge!(dest::DistinctCertifiedSolutions, src::DistinctCertifiedSolutions)
+
+Add every certificate stored in `src` to `dest`, keeping only the ones distinct
+from what `dest` already holds, and return `dest`. Both accumulators must store
+the same certificate type.
+"""
+function Base.merge!(
+        dest::DistinctCertifiedSolutions{S₁, P₁, C},
+        src::DistinctCertifiedSolutions{S₂, P₂, C},
+    ) where {S₁, P₁, S₂, P₂, C}
+    for cert in certificates(src)
+        Base.@lock dest.access_lock begin
+            added, _ = add_certificate!(dest.distinct, cert)
+            _record_add_solution!(dest, added ? :certified_distinct : :duplicate)
+        end
+    end
+    return dest
+end
 
 """
     distinct_certified_solutions(F, S, p = nothing, alg = Certification(), exec = Threaded())
@@ -1321,7 +1472,7 @@ function distinct_certified_solutions!(
         plock = ReentrantLock()
         @tasks for i in eachindex(S)
             @local cache = CertificationCache(d.system)
-            add_solution!(
+            _add_solution!(
                 d, S[i], i, cache;
                 max_precision = max_precision, refine_solution = refine_solution,
             )
@@ -1329,8 +1480,8 @@ function distinct_certified_solutions!(
         end
     else
         for (i, sol) in enumerate(S)
-            add_solution!(
-                d, sol, i;
+            _add_solution!(
+                d, sol, i, d.cache;
                 max_precision = max_precision, refine_solution = refine_solution,
             )
             progress === nothing || ProgressMeter.next!(progress)
