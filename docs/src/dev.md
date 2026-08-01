@@ -12,7 +12,7 @@ src/
 ├── utils.jl                        # SegmentStepper, fast_abs
 ├── primitives/                     # Numeric building blocks
 │   ├── double_f64.jl               # DoubleF64, ComplexDF64
-│   ├── norms.jl                    # InfNorm, WeightedNorm
+│   ├── norms.jl                    # InfNorm, EuclideanNorm, WeightedNorm
 │   └── linear_algebra.jl           # MatrixWorkspace, LU, QR, condition estimation
 ├── model_kit/                      # Polynomial → tape interpreter pipeline
 │   ├── operations.jl               # OpType enum, scalar op_* functions

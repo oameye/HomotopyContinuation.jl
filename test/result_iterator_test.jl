@@ -3,7 +3,7 @@ using HomotopyContinuationNext
 using HomotopyContinuationNext: Serial, Result, PathResult, TotalDegree, Polyhedral,
     solution, is_success, is_real, seed, path_results, nsolutions, solutions,
     nexcess_solutions, path_number, start_solution, total_degree_start_solutions,
-    System, Continuation
+    System, Continuation, trace
 using CommonSolve: CommonSolve
 using DynamicPolynomials: @polyvar
 using LinearAlgebra: norm
@@ -166,6 +166,29 @@ using LinearAlgebra: norm
         @test selection(restrict(kept, BitVector([false, false, true, false]))) ==
             BitVector([false, false, true, false])
         @test_throws ArgumentError restrict(ri, BitVector([true]))
+    end
+
+    @testset "trace" begin
+        # y = x², y = x³ meet at (0,0) (twice) and (1,1); the total-degree run
+        # tracks 6 paths, 3 of which stay finite, and their coordinate sums are
+        # 0 + 0 + 1 in each coordinate.
+        G = System([y - x^2, y - x^3]; variables = [x, y])
+        td = result_iterator(G, TotalDegree(; seed = UInt32(3)))
+        @test length(td) == 6
+        finite = selection(isfinite, td)
+        @test count(finite) == 3
+        @test norm(trace(restrict(td, finite)) - [1.0 + 0im, 1.0 + 0im]) < 1.0e-12
+
+        # A slice through a circle: the two endpoints are symmetric about the
+        # foot of the perpendicular, so the trace is twice that point.
+        C = System([x^2 + y^2 - 5]; variables = [x, y])
+        L = rand_subspace(2; codim = 1)
+        ri = result_iterator(C, L)
+        @test trace(ri) ≈ sum(solution, collect(ri))
+
+        # Diverging paths contribute nothing, and an empty selection sums to
+        # the empty vector rather than throwing.
+        @test isempty(trace(restrict(td, falses(6))))
     end
 
     @testset "start to target route" begin

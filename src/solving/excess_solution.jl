@@ -139,10 +139,10 @@ end
 """
     _residual_within_tol(c, solution) -> Bool
 
-`true` if the residual of the original system at the endpoint is at most
-`c.residual_tol`, both on the normalized equations, as `residual(::PathResult)`
-is. Both branches of the strict test clobber the scratch buffers, so the residual
-is recomputed here rather than read back.
+`true` if `‖F(x)‖∞` at the endpoint is at most `c.residual_tol`, both on the
+normalized equations of the original system, not on the squared-up system
+`residual(::PathResult)` reports. Both branches of the strict test clobber the
+scratch buffers, so the residual is recomputed here rather than read back.
 """
 function _residual_within_tol(
         c::ExcessSolutionChecker, solution::Vector{ComplexF64},

@@ -1,8 +1,44 @@
-# Norms — InfNorm and WeightedNorm for homotopy continuation.
+# Norms — InfNorm, EuclideanNorm and WeightedNorm for homotopy continuation.
 # Only the infinity norm is used internally. WeightedNorm is hardcoded to infinity norm.
 # Weights are stored in FSVec{Float64} for a single concrete type regardless of size.
 
+"""
+    InfNorm()
+
+The infinity norm ``\\max_i |x_i|``, as a value that can be passed wherever a
+`distance` is taken (`UniquePoints`, `multiplicities`, `unique_points`,
+`monodromy`). This is the default everywhere.
+"""
 struct InfNorm end
+
+"""
+    EuclideanNorm()
+
+The Euclidean norm ``\\sqrt{\\sum_i |x_i|^2}``, as a value that can be passed
+wherever a `distance` is taken (`UniquePoints`, `multiplicities`,
+`unique_points`, `monodromy`).
+"""
+struct EuclideanNorm end
+
+"""
+    euclidean_norm(x::AbstractVector)
+
+Compute the Euclidean norm ``\\sqrt{\\sum_i |x_i|^2}``.
+"""
+@inline euclidean_norm(x::AbstractVector) = sqrt(sum(abs2, x))
+
+"""
+    euclidean_distance(x::AbstractVector, y::AbstractVector)
+
+Compute the Euclidean distance ``\\sqrt{\\sum_i |x_i - y_i|^2}``.
+"""
+@inline function euclidean_distance(x::AbstractVector, y::AbstractVector)
+    d = zero(real(eltype(x)))
+    @inbounds for i in eachindex(x, y)
+        d += abs2(x[i] - y[i])
+    end
+    return sqrt(d)
+end
 
 Base.@kwdef struct WeightedNormOptions
     scale_min::Float64 = 1.0e-4

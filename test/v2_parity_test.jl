@@ -5,9 +5,9 @@ using Test
 using HomotopyContinuationNext
 using HomotopyContinuationNext: TotalDegree, Polyhedral, Result, PathResult,
     PathResultCode, TrackerOptions, EndgameOptions,
-    solutions, real_solutions, nsolutions, nreal, nresults,
+    solutions, real_solutions, nsolutions, nreal, nresults, results,
     nsingular, nnonsingular, nat_infinity, multiplicity,
-    is_success, is_real, is_singular
+    is_success, is_real, is_singular, paths_to_track, mixed_volume, @var
 using DynamicPolynomials: @polyvar
 using CommonSolve: CommonSolve
 
@@ -111,20 +111,17 @@ using CommonSolve: CommonSolve
 
     # ── From v2 endgame_test.jl: "(x-10)^d" ─────────────────────────────
 
-    @testset "(x-10)^d singular roots" begin
-        @testset "d=2" begin
-            @polyvar x
-            result = solve(System([(x - 10)^2]), TotalDegree(; show_progress = false))
-            @test nresults(result) == 1
-            @test nsingular(result) == 1
-        end
+    # `@var` keeps the root factored. Expanding it first (`@polyvar`, or `expand`)
+    # leaves the coefficients of a degree-d polynomial cancelling to nothing near
+    # x = 10, and no tracker recovers the winding numbers from that.
 
-        @testset "d=6" begin
-            @polyvar x
-            result = solve(System([(x - 10)^6]), TotalDegree(; show_progress = false))
-            # Most paths detect winding number 6 (seed-dependent)
-            @test count(r -> r.winding_number == 6, result.path_results) >= 4
-        end
+    @testset "(x-10)^d singular roots, d=$d" for d in (2, 6)
+        @var x
+        result = solve(System([(x - 10)^d]), TotalDegree(; show_progress = false))
+        @test count(r -> r.winding_number == d, result.path_results) == d
+        @test nresults(result) == 1
+        @test nsingular(result) == 1
+        @test only(only(results(result)).solution) ≈ 10 atol = 1.0e-8
     end
 
     # ── From v2 endgame_test.jl: "Winding Number Family" ────────────────
@@ -230,14 +227,13 @@ using CommonSolve: CommonSolve
     @testset "paths to track: total degree vs polyhedral" begin
         @polyvar x y
         f = System([2y + 3y^2 - x * y^3, x + 4x^2 - 2x^3 * y])
-        # Total degree = 4 * 4 = 16
-        r_td = solve(f, TotalDegree(; show_progress = false))
-        @test r_td.tracked_paths == 16
+        @test paths_to_track(f, TotalDegree()) == 16
+        @test paths_to_track(f, Polyhedral()) == 8
+        @test paths_to_track(f, Polyhedral(; only_torus = true)) == 3
+        @test mixed_volume(f) == 3
 
-        # Polyhedral (mixed volume) tracks fewer paths
-        r_ph = solve(f, Polyhedral(; show_progress = false))
-        @test r_ph.tracked_paths <= 16
-        @test r_ph.tracked_paths >= 3  # mixed volume = 3 for torus solutions
+        @test solve(f, TotalDegree(; show_progress = false)).tracked_paths == 16
+        @test solve(f, Polyhedral(; show_progress = false)).tracked_paths == 8
     end
 
     # ── From v2 endgame_test.jl: "Mohab" (large system) ─────────────────
@@ -264,19 +260,29 @@ using CommonSolve: CommonSolve
             ],
         )
         result = solve(F, TotalDegree(; show_progress = false))
-        # v2 finds 693 nonsingular + 0 singular. We find ~679 nonsingular + ~23 singular
-        # (more genuine solutions, fewer at-infinity misclassifications).
-        @test nnonsingular(result) >= 670
+        @test result.tracked_paths == 900
+        @test nnonsingular(result) == 693
+        @test nsingular(result) == 0
+        @test nresults(result) == 693
+        @test nat_infinity(result) == 207
     end
 
     # ── From v2 polyhedral_test.jl: "affine + torus solutions" ───────────
 
-    @testset "polyhedral: torus solutions count" begin
+    @testset "polyhedral: affine + torus solutions" begin
         @polyvar x y
         f = System([2y + 3y^2 - x * y^3, x + 4x^2 - 2x^3 * y])
-        result = solve(f, Polyhedral(; show_progress = false))
-        # v2: 6 affine solutions (8 paths including non-torus)
-        @test nsolutions(result) >= 3
+
+        affine = solve(f, Polyhedral(; only_torus = false, show_progress = false))
+        @test affine.tracked_paths == 8
+        @test count(is_success, affine.path_results) == 6
+        @test nsolutions(affine) == 6
+
+        # Dividing out the lowest monomial keeps only the roots with no zero coordinate.
+        torus = solve(f, Polyhedral(; only_torus = true, show_progress = false))
+        @test torus.tracked_paths == 3
+        @test count(is_success, torus.path_results) == 3
+        @test nsolutions(torus) == 3
     end
 
 end

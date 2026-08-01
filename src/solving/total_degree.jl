@@ -15,10 +15,11 @@ For an overdetermined system, an endpoint solving the squared-up system but not
 the original one is reported as an excess solution. A positive
 `excess_residual_tol` instead keeps such an endpoint when its residual on the
 original system is at most that value, which is what a system consistent only up
-to a measurement error needs. It is compared against the same quantity
-[`residual`](@ref) reports, so it is read on the equations [`evaluate`](@ref)
-gives; divide by [`equation_scales`](@ref) to state it in the units of a system
-whose coefficients were normalized. Must be non-negative.
+to a measurement error needs. It bounds `‖F(x)‖∞` on the equations
+[`evaluate`](@ref) gives, not the [`residual`](@ref) of a [`PathResult`](@ref),
+which is measured on the squared-up system that was tracked; divide by
+[`equation_scales`](@ref) to state it in the units of a system whose coefficients
+were normalized. Must be non-negative.
 
 # Examples
 ```julia

@@ -147,6 +147,29 @@ Base.filter(f, ri::ResultIterator)::Vector{PathResult} =
     collect(Iterators.filter(f, ri))
 
 """
+    trace(ri::ResultIterator)
+
+The coordinate-wise sum of the solutions `ri` selects, accumulated one path at a
+time so the solutions are never all held at once. A path that does not end at a
+finite point contributes nothing.
+
+For a witness set moving along a pencil of parallel slices the trace is affine in
+the slice parameter, which is what the trace test exploits.
+"""
+function trace(ri::ResultIterator)::Vector{ComplexF64}
+    t = ComplexF64[]
+    started = false
+    for r in ri
+        if !started
+            t = zeros(ComplexF64, length(solution(r)))
+            started = true
+        end
+        isfinite(r) && (t .+= solution(r))
+    end
+    return t
+end
+
+"""
     Result(ri::ResultIterator)
 
 Track every selected path and assemble a full [`Result`](@ref), including

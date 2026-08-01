@@ -16,6 +16,11 @@ Two solutions are considered identical if their infinity-norm distance is
 connected components over the tolerance graph, so the result is transitive
 and order-independent: if A≈B and B≈C then A, B, C are always in one cluster.
 
+Only endpoints the endgame flagged singular are eligible to merge. Two regular
+roots resolved to machine precision are distinct solutions however close they
+lie, and `rtol` is far coarser than that resolution; merging them would drop
+roots and relabel the survivor as multiple.
+
 Candidate pairs are found with a sort-and-window sweep instead of a full O(k²)
 scan: paths are sorted by the 1-Lipschitz-bounded projection
 `Re(x₁) + Im(x₁)`, and a pair at inf-distance `d` differs by at most `2d` in
@@ -86,14 +91,17 @@ function _cluster_solutions(
     order = sortperm(keys)
 
     # Build edges: sorted sweep, comparing only pairs within the key window
+    mergeable = BitVector(path_results[i].singular for i in success_idx)
     for a in 1:k
         j = order[a]
+        mergeable[j] || continue
         sol_j = path_results[success_idx[j]].solution
         norm_j = norms[j]
         key_j = keys[j]
         for b in (a + 1):k
             l = order[b]
             keys[l] - key_j > window && break
+            mergeable[l] || continue
             d = inf_distance(sol_j, path_results[success_idx[l]].solution)
             tol = max(atol, rtol * max(norm_j, norms[l]))
             if d <= tol
@@ -232,8 +240,11 @@ than individual points, represented by their lowest-numbered path.
 symmetry group: an orbit is collapsed whole even when each action returns a single
 image, as long as the orbit's points are all present among the solutions.
 
-Two solutions are treated as one when their infinity-norm distance is at most
-`max(atol, rtol * norm(solution))`.
+`atol` and `rtol` set the merge tolerance: points are treated as one when their
+infinity-norm distance is at most `max(atol, rtol * norm(solution))`. Only
+singular endpoints are merged by proximity; two regular roots are distinct
+solutions however close they lie. Orbit collapse uses the same tolerance to match
+a solution against the image of another, and applies to regular endpoints too.
 
 ## Example
 ```julia

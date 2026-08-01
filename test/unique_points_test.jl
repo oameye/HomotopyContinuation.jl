@@ -2,7 +2,7 @@ using Test, Random
 using LinearAlgebra
 using HomotopyContinuationNext
 using HomotopyContinuationNext: UniquePoints, GroupActions, add!, multiplicities,
-    unique_points, InfNorm, satisfies_triangle_inequality
+    unique_points, InfNorm, EuclideanNorm, satisfies_triangle_inequality
 
 @testset "UniquePoints" begin
     Random.seed!(0x75b1)
@@ -395,6 +395,27 @@ end
     UP = unique_points(W)
     @test length(UP) == 8
     @test unique_points(W; atol = 0.0, rtol = 0.0) == W
+end
+
+@testset "EuclideanNorm as the distance" begin
+    Random.seed!(0x75b4)
+    V = [randn(ComplexF64, 3) for _ in 1:8]
+    W = [V; map(v -> v .+ 1.0e-12, V)]
+    @test length(unique_points(W; distance = EuclideanNorm())) == 8
+    @test sort(multiplicities(W; distance = EuclideanNorm())) ==
+        sort(multiplicities(W; distance = InfNorm()))
+
+    # ‖·‖₂ ≤ √d‖·‖∞, so a point at inf-distance just inside the tolerance can sit
+    # outside it in the Euclidean one.
+    tol = 1.0e-6
+    a = zeros(ComplexF64, 3)
+    b = fill(complex(0.9 * tol), 3)
+    inf_up = UniquePoints(3; distance = InfNorm())
+    euc_up = UniquePoints(3; distance = EuclideanNorm())
+    add!(inf_up, a, 1, tol)
+    add!(euc_up, a, 1, tol)
+    @test add!(inf_up, b, 2, tol) == (1, false)
+    @test add!(euc_up, b, 2, tol) == (2, true)
 end
 
 # Pruning is only sound for a metric, and probing random triples to decide that

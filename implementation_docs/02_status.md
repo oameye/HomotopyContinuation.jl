@@ -396,10 +396,9 @@ entries in the evaluation sweep's system collection, both recorded with their re
 
 ### v2 parity gaps
 
-Found by comparing every v2 `@testset` against the v3 suite on 2026-07-29. Each entry names
-the v2 test that was unported until the feature landed. Ordered by consequence. Every feature
-entry is closed as of 2026-07-31; the two open ones are the public interface surface and two
-sweep-collection systems.
+Found by comparing every v2 `@testset` against the v3 suite on 2026-07-29, and re-run against
+v2.22.1 on 2026-08-01 (see "Re-audit against v2.22.1" below). Each entry names the v2 test that
+was unported until the feature landed. Ordered by consequence.
 
 - [x] **Multi-homogeneous (variable-group) total degree.** `System(polys; variable_groups)`
   stores the groups as index vectors and `is_homogeneous` becomes per-group, which is strictly
@@ -630,6 +629,103 @@ sweep-collection systems.
   - The sweep's tape roundtrip compares `expand` of both sides. Re-executing a tape over
     `Expression` values reorders commutative operands and can fold a constant factor into a
     sum, so the reconstruction is the same function but not the same tree.
+
+### Re-audit against v2.22.1
+
+The list above was written against `HomotopyContinuation/`, the vendored copy of v2 in this
+repository, which is **2.18.0**, as is the pin in `test/Manifest.toml` that `compare_v2_*`
+loads. The four releases since it were never compared. Re-running the testset-by-testset
+comparison against **2.22.1** on 2026-08-01 found the following. Everything above stays closed;
+these are new.
+
+Closed by this audit:
+
+- [x] **`trace(::ResultIterator)`**, the coordinate-wise sum of the selected solutions,
+  accumulated one path at a time so they are never all held at once. v2 reaches it through
+  `bitmask_filter`, whose v3 spelling is `restrict(ri, selection(f, ri))`. Diverging paths
+  contribute nothing and an empty selection sums to the empty vector rather than throwing.
+  Closes the `trace` half of `result_test.jl` "Basic functionality of ResultIterator".
+- [x] **`EuclideanNorm`**, alongside `InfNorm`, as a distance marker for `UniquePoints`,
+  `multiplicities`, `unique_points` and monodromy. Both are metrics, so `VoronoiTree` prunes
+  with either; `‖·‖₂ ≤ √d‖·‖∞` means the two disagree on a point just inside the tolerance,
+  which is what the test pins.
+- [x] **Weakened parity assertions tightened to v2's exact counts** in `v2_parity_test.jl`:
+  `(x-10)^6` (6 paths of winding number 6, not "at least 4"), the polyhedral affine/torus
+  split (8 paths → 6 solutions, 3 → 3, matching `polyhedral_test.jl` "affine + torus
+  solutions"), and `paths_to_track` / `mixed_volume` (16 / 8 / 3 / 3). v3 already matched v2
+  on all of these; only the assertions were loose.
+- [x] **Mohab reaches v2's 693.** Two independent causes, both fixed on 2026-08-01.
+  `tracking_stopped!` rejected an endpoint on an absolute `‖H(x,0)‖ > 1e-3`, which on a system
+  whose terms reach 10^44 at the endpoint threw away two converged solutions; the check is now
+  relative to the row scale `Σⱼ|∂Hᵢ/∂xⱼ|·|xⱼ|`. And `_cluster_solutions` merged any two
+  successful endpoints within `rtol`, collapsing eight regular roots separated by 6e-9 into
+  four and relabelling them multiple; proximity merging is now restricted to endpoints the
+  endgame flagged singular, as v2 does by clustering only `filter(is_singular, path_results)`.
+  Now 900 tracked, 693 nonsingular, 0 singular, 207 at infinity on every seed tried.
+- [x] **`(x-10)^d` winding numbers, d = 2 and 6.** The port was the defect: v2's test writes
+  `@var x` and keeps the root factored, the port wrote `@polyvar x`, and DynamicPolynomials
+  expands, so the degree-6 coefficients cancel from 10^6 down to 10^-9 near x = 10 and the
+  Jacobian carries about three correct digits. v2 on the expanded form is worse than v3 (6/6
+  winding numbers on 1 of 10 seeds, against v3's 52 of 60). With `@var` v3 already matched v2
+  at d = 6. d = 2 also needed a fix: the singular endgame declines a prediction until its
+  sample condition number crosses `min_cond`, hands the path back, and v3's tracker (unlike
+  v2's) then converges at t = 0, so a 1e-16 prediction was discarded for a 1e-11 endpoint
+  with no winding number. `EndgameState` now keeps the best prediction it handed back and
+  `tracking_stopped!` prefers it when it beats the endpoint. 80 seeds at each degree give
+  v2's exact answer: d winding numbers of d, one singular solution at 10.
+
+Open, ordered by consequence:
+
+- [ ] **Transcendental operations.** v2.22 tapes carry `exp`, `tan`, `asin`, `acos`, `sinh`,
+  `cosh`, `tanh`; v3's `Expression` and `SExpr` carry only `sqrt`, `sin`, `cos`. Adding them
+  touches the whole model_kit stack (canonicalization, `differentiate`, lowering, the tape
+  interpreter, the Taylor rules, `ComplexDF64`, the Acb interpreter and the interval arithmetic
+  the certification subpackage runs on). Blocks `symbolic_test.jl` "trigonometric functions" and
+  `homotopies_test.jl` "Homotopy with trigonometric functions".
+- [ ] **Real and rational powers** (`a^b` for numeric non-integer `b`, v2's `OP_POW`). v3 has
+  `OP_POW_INT` and `OP_SQRT` only, so `(x+1)^(3//2)` cannot be expressed. Same reach as the
+  entry above. Blocks `slp_test.jl` "fractional powers" and "Evaluation of Acb with fractional
+  powers", and the `OP_POW` branch of `operations_test.jl`.
+- [ ] **`skeel_row_scaling!` stops scaling once the Jacobian is large.** Faithful to v2, and
+  wrong in both: `s = scaling_threshold + maximum(d)` adds a threshold meant for a binary
+  exponent to a raw row sum, then compares it against `exponent(d[i])`. Any system whose scaled
+  Jacobian row sums exceed roughly 2^30 leaves every row unscaled, so the row scaling and every
+  condition number derived from it silently degrade. Intended reading is
+  `scaling_threshold + exponent(maximum(d))`. Left alone because it moves `cond` on every solve
+  and so the singular/nonsingular split everywhere; wants its own pass with the counts measured.
+- [ ] **BSP certification of a `ResultIterator`.** v2.22 certifies lazily by partitioning the
+  solution candidates along one coordinate (`IteratorCertificationResult`, `BSPPartition`, `bsp`,
+  `npaths`, `start_iterator_length`, `target_iterator_length`, `nnotcertified`, `nleaves`,
+  `max_leaf_size`, `nleaf_splits`, `oversized_leaves`, `unsplittable_leaves`, and the
+  `leaf_size_bound` / `boundaries` / `coordinate` / `certify_oversized_leaves` / `max_depth`
+  options). v3 certifies an eagerly collected vector only. Blocks the three
+  `certification_test.jl` "BSP certification" testsets.
+- [ ] **`monodromy` `duplicate_check = :certified`**, which dedups by Krawczyk certificate
+  instead of by distance, and the `ncertified_distinct` / `ndiscarded_uncertified` accessors on
+  `MonodromyResult`. Awkward in v3's layout: monodromy is in core and `certify` is in the
+  certification subpackage, so core cannot call it. Blocks `monodromy_test.jl` "certified
+  duplicate checks".
+- [ ] **`DistinctCertifiedSolutions` incremental API.** v3 has the type,
+  `add_solution!` and `distinct_certified_solutions!`, but `add_solution!` returns
+  `(added, status)` where v2 returns `(added, status, representative, certificate)`, and
+  `stats`, `merge!`, `nduplicates` and `ncertified_distinct` are missing. Blocks
+  `certification_test.jl` "DistinctCertifiedSolutions incremental API".
+- [ ] **Projective input to `Regeneration` / `Decomposition`.** On the homogeneous
+  `[a*c, b*c]` of `nid_test.jl` "Homogeneous systems", v2 returns `Dict(2 => [4], 1 => [6])`
+  with projective witness sets cut by linear (not affine) subspaces; v3 returns
+  `Dict(2 => [6], 3 => [4])` with affine ones. The degrees agree, the dimensions are off by
+  one and `W.projective` is never set.
+- [ ] **`intersect` on two projective witness sets** throws
+  `ArgumentError: Expected m >= n, got m=1, n=2`. Blocks `witness_set_test.jl`
+  "intersect projective" (v2: `degree.(B) == [4, 6]`).
+- [ ] **`Regeneration(; sorted = :randomized)`**, which sorts by decreasing degree and then
+  replaces the equations by a random upper-triangular combination of them. v3's `sorted` is a
+  `Bool`. v2 rejects the option for homogeneous input. Blocks `nid_test.jl` "randomization".
+- [ ] **`rand_subspace!`**, the in-place redraw of a `LinearSubspace`.
+
+Deliberately not ported from v2.22: `model_kit/compiled_cache_test.jl`, which exercises the
+locks around v2's global `TSYSTEM_TABLE` / `THOMOTOPY_TABLE`. v3 keeps no global compile table
+(`compile` is a per-`System` setting), so there is nothing to make thread-safe.
 
 ### Extensive suite (`make test-extensive`)
 

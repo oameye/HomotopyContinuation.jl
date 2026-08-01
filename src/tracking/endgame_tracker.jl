@@ -75,6 +75,11 @@ mutable struct EndgameState
     const prediction::FSVec{ComplexF64}
     const prev_prediction::FSVec{ComplexF64}
     prev_accuracy::Float64
+    # Best singular prediction handed back to the tracker, so a later regular
+    # endpoint cannot replace it with a worse one.
+    const best_singular::FSVec{ComplexF64}
+    best_singular_accuracy::Float64
+    best_singular_winding::Int
     # Scaling for condition number
     const row_scaling::FSVec{Float64}
     const col_scaling::FSVec{Float64}
@@ -99,6 +104,8 @@ function EndgameState(n::Int)
         FSVec{ComplexF64}(zeros(ComplexF64, n)),          # prediction
         FSVec{ComplexF64}(zeros(ComplexF64, n)),          # prev_prediction
         Inf,                                              # prev_accuracy
+        FSVec{ComplexF64}(zeros(ComplexF64, n)),          # best_singular
+        Inf, 0,                                           # best_singular_accuracy, _winding
         FSVec{Float64}(ones(n)),                          # row_scaling
         FSVec{Float64}(zeros(n)),                         # col_scaling
     )
@@ -158,6 +165,9 @@ function _reset_state!(state::EndgameState)::Nothing
     fill!(state.prediction, zero(ComplexF64))
     fill!(state.prev_prediction, zero(ComplexF64))
     state.prev_accuracy = Inf
+    fill!(state.best_singular, zero(ComplexF64))
+    state.best_singular_accuracy = Inf
+    state.best_singular_winding = 0
     fill!(state.row_scaling, 1.0)
     fill!(state.col_scaling, 0.0)
     return nothing
@@ -244,6 +254,17 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
 
     copyto!(state.solution, ts.x)
 
+    # The singular endgame hands a path back whenever its acceptance test has not
+    # fired yet, not because the prediction was bad. If that prediction beat the
+    # endpoint the tracker went on to reach, it is the answer.
+    if ts.code == TrackerCode.TRACKER_SUCCESS &&
+            state.best_singular_accuracy < state.accuracy
+        copyto!(state.solution, state.best_singular)
+        state.accuracy = state.best_singular_accuracy
+        state.winding_number = state.best_singular_winding
+        state.singular = true
+    end
+
     if ts.code == TrackerCode.TRACKER_SUCCESS
         @inbounds for i in eachindex(state.col_scaling)
             state.col_scaling[i] = ts.norm.weights[i]
@@ -257,10 +278,12 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
             state.solution, complex(0.0),
         )
 
-        # Residual sanity check: if ‖H(solution, 0)‖ is large, the path diverged
-        # to a spurious point. Reclassify as at-infinity rather than success.
-        residual = inf_norm(eg.tracker.corrector.r)
-        if residual > opts.max_residual
+        # A spurious endpoint leaves ‖H(solution, 0)‖ far from zero; call it
+        # at-infinity rather than a success. Relative to the row scale, so the
+        # threshold means the same whether the terms of H are O(1) at the endpoint
+        # or O(10^40).
+        if _max_relative_residual(eg.tracker.corrector.r, ws.A, state.col_scaling) >
+                opts.max_residual
             state.code = EndgameCode.AT_INFINITY
             return nothing
         end
@@ -298,6 +321,27 @@ end
         norm_val = @fastmath max(norm_val, row_sum * row_scaling[i])
     end
     return norm_val
+end
+
+# |H_i| against the size the terms of row i reach at this point, so the same
+# threshold works for a system whose Jacobian row sums are O(1) and one where
+# they are O(10^40). A zero row scale leaves the residual unscaled.
+@inline function _max_relative_residual(
+        r::FSVec{ComplexF64},
+        A::FSMat{ComplexF64},
+        col_scaling::FSVec{Float64},
+    )::Float64
+    m, n = size(A)
+    worst = 0.0
+    @inbounds for i in 1:m
+        scale = 0.0
+        for j in 1:n
+            scale += fast_abs(A[i, j]) * col_scaling[j]
+        end
+        rᵢ = fast_abs(r[i])
+        worst = @fastmath max(worst, scale > 0.0 ? rᵢ / scale : rᵢ)
+    end
+    return worst
 end
 
 # Row-scaled-only inf norm for J₀ (no col_scaling — used for singular endgame acceptance)
@@ -619,6 +663,21 @@ function switch_to_singular!(eg::EndgameTracker, t::Float64)::Nothing
     return nothing
 end
 
+# `acc` must describe `state.solution` as it stands, not the Hermite prediction it
+# came from: zero-clamping moves the vector away from the point the prediction
+# error was measured on, and `tracking_stopped!` compares the latched accuracy
+# against a regular endpoint's.
+function _latch_best_singular!(
+        state::EndgameState, opts::EndgameOptions, acc::Float64,
+    )::Nothing
+    if acc < min(opts.singular_min_accuracy, state.best_singular_accuracy)
+        copyto!(state.best_singular, state.solution)
+        state.best_singular_accuracy = acc
+        state.best_singular_winding = state.winding_number
+    end
+    return nothing
+end
+
 function switch_to_regular!(eg::EndgameTracker)::Nothing
     state = eg.state
     tracker = eg.tracker
@@ -827,9 +886,19 @@ function _predict_and_finalize!(eg::EndgameTracker, max_steps::Bool)::Nothing
 
     # Zero-clamp coordinates with small valuation
     zero_cond = 1.0 / (m + 1)
+    clamped = 0.0
     @inbounds for i in 1:n
-        state.solution[i] = val.val_x[i] < zero_cond ? state.prediction[i] : zero(ComplexF64)
+        if val.val_x[i] < zero_cond
+            state.solution[i] = state.prediction[i]
+        else
+            state.solution[i] = zero(ComplexF64)
+            clamped = max(clamped, fast_abs(state.prediction[i]))
+        end
     end
+    # Error of the clamped vector, bounded by the prediction error plus the
+    # displacement clamping introduced. Relative, as `state.accuracy` is.
+    norm_sol = inf_norm(state.solution)
+    acc_clamped = state.accuracy + (norm_sol > 1.0e-8 ? clamped / norm_sol : clamped)
 
     # Compute condition number at t=0
     ws = tracker.state.jacobian.workspace
@@ -857,6 +926,7 @@ function _predict_and_finalize!(eg::EndgameTracker, max_steps::Bool)::Nothing
         state.singular = true
         state.code = EndgameCode.SUCCESS
     elseif !max_steps
+        _latch_best_singular!(state, opts, acc_clamped)
         switch_to_regular!(eg)
     else
         state.code = EndgameCode.TERMINATED_MAX_STEPS
@@ -930,6 +1000,7 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
     n = length(state.solution)
     m̂, m̂_err = estimate_winding_number(eg.val, n, opts.max_winding_number)
     if m̂_err > 0.1 || m̂ != state.winding_number
+        _latch_best_singular!(state, opts, state.accuracy)
         switch_to_regular!(eg)
         return nothing
     end

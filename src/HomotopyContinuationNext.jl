@@ -55,7 +55,7 @@ export iterator, path_info, PathInfo, PathStep, path_table
 export ParameterHomotopy, Homotopy, expressions, equation_scales
 export GroupActions, SymmetricGroup
 export UniquePoints, search_in_radius, add!, multiplicities, unique_points
-export satisfies_triangle_inequality
+export satisfies_triangle_inequality, InfNorm, EuclideanNorm
 export LinearSubspace, ExtrinsicDescription, IntrinsicDescription, Intrinsic, Extrinsic
 export intrinsic, extrinsic, is_linear, dim, codim, ambient_dim
 export rand_subspace, translate, geodesic, geodesic_distance, coord_change

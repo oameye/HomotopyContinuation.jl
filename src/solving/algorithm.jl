@@ -127,10 +127,11 @@ early_stop_callback(alg::AbstractAlgorithm)::EarlyStop = NEVER_STOP
 """
     excess_residual_tol(alg) -> Float64
 
-The residual on the original system at which an endpoint that solves only the
-squared-up system is still reported as a solution, read on the same scale as
-[`residual`](@ref). `0.0` for a strict check, and for every algorithm that does
-not square a system up.
+The bound on `‖F(x)‖∞` at which an endpoint that solves only the squared-up
+system is still reported as a solution, read on the equations [`evaluate`](@ref)
+gives rather than on the squared-up system the [`residual`](@ref) of a
+[`PathResult`](@ref) is measured on. `0.0` for a strict check, and for every
+algorithm that does not square a system up.
 """
 excess_residual_tol(::AbstractAlgorithm)::Float64 = 0.0
 

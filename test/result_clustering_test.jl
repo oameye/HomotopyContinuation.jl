@@ -9,11 +9,15 @@ using Random: MersenneTwister
 const ATOL = HC.DEFAULT_CLUSTER_ATOL
 const RTOL = HC.DEFAULT_CLUSTER_RTOL
 
-# Minimal synthetic PathResult: only return_code and solution matter for clustering.
-function fake_path_result(sol::Vector{ComplexF64}; success::Bool = true)
+# Minimal synthetic PathResult: only return_code, solution and singular matter for
+# clustering. `singular` defaults to true so the geometric rule is what each case below
+# exercises; the gate itself gets its own testset.
+function fake_path_result(
+        sol::Vector{ComplexF64}; success::Bool = true, singular::Bool = true,
+    )
     code = success ? PathResultCode.PATH_SUCCESS : PathResultCode.PATH_TERMINATED_MAX_STEPS
     return PathResult(
-        code, sol, 0.0, 1.0e-12, 1.0, 1.0e-12, 1.0e-12, 1.0, 1, false, 10, 0, 0, false,
+        code, sol, 0.0, 1.0e-12, 1.0, 1.0e-12, 1.0e-12, 1.0, 1, singular, 10, 0, 0, false,
         copy(sol), 0.0, 0, ComplexF64[], Float64[], 0,
     )
 end
@@ -106,6 +110,29 @@ normalize_clusters(clusters) = sort([sort(c) for c in clusters])
         clusters, mult = _cluster_solutions(prs, ATOL, RTOL, nothing)
         @test normalize_clusters(clusters) == [[1, 2], [3]]
         @test mult == [2, 2, 1]
+    end
+
+    @testset "regular endpoints stay apart however close they are" begin
+        # Inside rtol·‖s‖ of each other, so the geometric rule alone would merge them.
+        s = ComplexF64[1.0, 2.0]
+        near = s .+ 0.5 * RTOL * 2.0
+        @test HC.inf_distance(s, near) <= RTOL * HC.inf_norm(s)
+
+        regular = [
+            fake_path_result(copy(s); singular = false),
+            fake_path_result(near; singular = false),
+        ]
+        clusters, mult = _cluster_solutions(regular, ATOL, RTOL, nothing)
+        @test normalize_clusters(clusters) == [[1], [2]]
+        @test mult == [1, 1]
+        # …and neither is relabeled singular by the count it did not get.
+        @test all(HC.is_nonsingular, Result(regular, 2, UInt32(1)).path_results)
+
+        # One flagged endpoint is not enough; both have to be.
+        half = [regular[1], fake_path_result(near; singular = true)]
+        @test length(first(_cluster_solutions(half, ATOL, RTOL, nothing))) == 2
+        both = [fake_path_result(copy(s)), fake_path_result(near)]
+        @test length(first(_cluster_solutions(both, ATOL, RTOL, nothing))) == 1
     end
 
     @testset "failed paths are skipped and keep multiplicity 0" begin

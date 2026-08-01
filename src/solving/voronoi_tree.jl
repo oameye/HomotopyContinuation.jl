@@ -12,6 +12,7 @@
 # Distance callable indirection: InfNorm is a marker struct, custom distances
 # are callables d(x, y).
 @inline _vt_distance(::InfNorm, x, y) = inf_distance(x, y)
+@inline _vt_distance(::EuclideanNorm, x, y) = euclidean_distance(x, y)
 @inline _vt_distance(d, x, y) = d(x, y)
 
 mutable struct VTNode{T}
@@ -77,6 +78,7 @@ HomotopyContinuationNext.satisfies_triangle_inequality(::MyMetric) = true
 """
 satisfies_triangle_inequality(_)::Bool = false
 satisfies_triangle_inequality(::InfNorm)::Bool = true
+satisfies_triangle_inequality(::EuclideanNorm)::Bool = true
 
 function VoronoiTree{T}(
         d::Int;
