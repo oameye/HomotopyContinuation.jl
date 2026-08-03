@@ -4,7 +4,7 @@
 #   Expression -> SExpr -> CSE -> tape compiler
 #
 # The Jacobian is produced by symbolic differentiation on `Expression`, which
-# covers division, negative powers and the unary functions that
+# covers division, non-integer and negative powers, and the unary functions that
 # `MP.differentiate` cannot express.
 
 function _expression_index_map(values::AbstractVector{Expression})::Dict{Symbol, Int}

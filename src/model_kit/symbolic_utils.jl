@@ -71,6 +71,8 @@ function expand(e::Expression)::Expression
         return _expand_product(storage_args(storage))
     elseif storage isa EPowStorage
         return _expand_power(expand(storage_base(storage)), storage.exp)
+    elseif storage isa ERPowStorage
+        return _erpow(expand(storage_base(storage)), storage.exp)
     else
         return _efn(storage.kind, expand(storage_arg(storage)))
     end
@@ -100,6 +102,8 @@ function _depends_on(e::Expression, var_to_idx::Dict{Symbol, Int})::Bool
         end
         return false
     elseif storage isa EPowStorage
+        return _depends_on(storage_base(storage), var_to_idx)
+    elseif storage isa ERPowStorage
         return _depends_on(storage_base(storage), var_to_idx)
     elseif storage isa EFnStorage
         return _depends_on(storage_arg(storage), var_to_idx)
@@ -167,6 +171,9 @@ function _expr_terms(
             acc = _multiply_expr_terms(acc, base)
         end
         return acc
+    elseif storage isa ERPowStorage
+        _depends_on(storage_base(storage), var_to_idx) && return nothing
+        return _ExprTerms(zeros(Int, n) => e)
     else
         _depends_on(storage_arg(storage), var_to_idx) && return nothing
         return _ExprTerms(zeros(Int, n) => e)

@@ -151,6 +151,11 @@ function _compile_storage!(c::TapeCompiler, storage::SPowStorage)::Int32
     return _tape_pow!(c, base_slot, storage.exp)
 end
 
+function _compile_storage!(c::TapeCompiler, storage::SRPowStorage)::Int32
+    base_slot = _compile!(c, storage_base(storage))
+    return _emit!(c, OpType.OP_POW, base_slot, _get_constant_slot!(c, storage.exp))
+end
+
 @inline _compile_storage!(c::TapeCompiler, storage::SMulStorage)::Int32 =
     _compile_mul!(c, storage_args(storage))
 @inline _compile_storage!(c::TapeCompiler, storage::SAddStorage)::Int32 =

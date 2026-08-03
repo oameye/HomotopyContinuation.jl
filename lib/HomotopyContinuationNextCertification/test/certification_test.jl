@@ -480,6 +480,29 @@ end
         @test ncertified(ct) == 1
         @test precision(only(certificates(ct))) == 53
 
+        # A certificate at 53 bits means the interval path carried it, not Arb.
+        Fe = System([exp(x) + tan(y) - (exp(0.4) + tan(0.3)), sinh(x) - sinh(0.4)])
+        ce = certify(
+            Fe, [ComplexF64[0.4, 0.3]], nothing, Certification(; show_progress = false),
+        )
+        @test ncertified(ce) == 1
+        @test precision(only(certificates(ce))) == 53
+
+        Fi = System([asin(x / 4) - asin(0.1), acos(y / 4) - acos(0.05)])
+        ci = certify(
+            Fi, [ComplexF64[0.4, 0.2]], nothing, Certification(; show_progress = false),
+        )
+        @test ncertified(ci) == 1
+        @test precision(only(certificates(ci))) == 53
+
+        Fp = System([(x + 1)^(3 // 2) - 2, y^2 - 4])
+        cp = certify(
+            Fp, [ComplexF64[2^(2 / 3) - 1, 2.0], ComplexF64[2^(2 / 3) - 1, -2.0]], nothing,
+            Certification(; show_progress = false),
+        )
+        @test ncertified(cp) == 2
+        @test nreal_certified(cp) == 2
+
         Fc = System([x^2 + im * y, x - y])
         @test !HCN.is_real(Fc)
         @test HCN.is_real(Fr)

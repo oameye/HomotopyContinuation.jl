@@ -14,7 +14,7 @@ Key design decisions:
 - **FixedSizeArrays**: all pre-allocated scratch buffers use `FSVec`/`FSMat` (size is runtime, not a type parameter). **CRITICAL:** `FixedSizeVector{T}` is NOT concrete — the `Mem` parameter is free. Use `FixedSizeArray{T,N,Memory{T}}` for struct fields (see type aliases in main module).
 - **Moshi ADTs**: `SExpr` and `ExecInstruction` use Moshi.jl `@data` for tagged unions — all variants are one concrete type, eliminating dynamic dispatch in CSE and interpreter
 - **DynamicPolynomials input**: users provide polynomials via `@polyvar`, internal pipeline uses `MP.differentiate` for Jacobian
-- **Expression input** for anything not polynomial (division, negative powers, `sqrt`, `sin`, `cos`): `@var` builds a canonicalizing `Expression <: Number` tree, lowered by `expression_to_sexpr` with Jacobians from symbolic `differentiate`. `MP.RationalPoly` converts to `Expression` automatically
+- **Expression input** for anything not polynomial (division, negative and non-integer powers, and the unary functions `sqrt`, `exp`, `sin`, `cos`, `tan`, `asin`, `acos`, `sinh`, `cosh`, `tanh`): `@var` builds a canonicalizing `Expression <: Number` tree, lowered by `expression_to_sexpr` with Jacobians from symbolic `differentiate`. `MP.RationalPoly` converts to `Expression` automatically
 - **Immutable by default**: mutable structs require justification, use `const` fields for buffer references
 
 ## Package layout

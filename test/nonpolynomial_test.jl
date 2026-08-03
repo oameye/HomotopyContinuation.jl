@@ -248,6 +248,92 @@ end
         end
     end
 
+    @testset "transcendental functions differentiate and evaluate" begin
+        @var x
+        F = [
+            sin(x); cos(x); exp(x); tan(x); asin(x); acos(x); sinh(x); cosh(x); tanh(x)
+        ]
+        dF_want = [
+            cos(x)
+            -sin(x)
+            exp(x)
+            1 + tan(x)^2
+            1 / sqrt(1 - x^2)
+            -1 / sqrt(1 - x^2)
+            cosh(x)
+            sinh(x)
+            1 - tanh(x)^2
+        ]
+        @test expand.(differentiate(F, x) - dF_want) == Vector{Expression}(zeros(Int, 9))
+
+        x0 = 0.1
+        got = [Next.expr_number(Next.subs(f, x => Expression(x0))) for f in F]
+        want = ComplexF64[
+            sin(x0), cos(x0), exp(x0), tan(x0), asin(x0), acos(x0),
+            sinh(x0), cosh(x0), tanh(x0),
+        ]
+        @test got ≈ want
+
+        # Each one reaches the tape as its own instruction, in all three modes.
+        G = System(F; variables = [x])
+        for mode in MODES
+            @test eval_system(System(F; variables = [x], compile = mode), [x0], []) ≈ want
+        end
+        @test vec(eval_jacobian(G, [x0], [])[2]) ≈
+            [
+            cos(x0), -sin(x0), exp(x0), 1 + tan(x0)^2, 1 / sqrt(1 - x0^2),
+            -1 / sqrt(1 - x0^2), cosh(x0), sinh(x0), 1 - tanh(x0)^2,
+        ]
+    end
+
+    @testset "fractional powers" begin
+        @var x p
+        F = System([(x + 1)^(3 // 2) - p]; variables = [x], parameters = [p])
+        x₀ = [-0.5]
+        p₀ = [0.1]
+        u, U = eval_jacobian(F, x₀, p₀)
+        @test u[1] ≈ (x₀[1] + 1)^(3 / 2) - p₀[1]
+        @test U[1, 1] ≈ (3 / 2) * (x₀[1] + 1)^(1 / 2)
+
+        # A negative and a complex exponent take the same instruction.
+        @test eval_system(System([(x + 4)^(-4 / 3)]; variables = [x]), [1.0], [])[1] ≈
+            5.0^(-4 / 3)
+        @test eval_system(System([(x + 4)^(1.5im)]; variables = [x]), [1.0], [])[1] ≈
+            ComplexF64(5.0)^(1.5im)
+        # An integer-valued exponent stays an integer power.
+        @test Next.degrees(System([(x + 1)^(4 // 2) - p]; variables = [x], parameters = [p])) ==
+            [2]
+        @test Next.degrees(F) == [-1]
+
+        coeffs = ComplexF64[-0.5, 0.01, 0.002, -0.003]
+        fλ = λ -> (coeffs[1] + coeffs[2] * λ + coeffs[3] * λ^2 + coeffs[4] * λ^3 + 1)^(3 / 2) -
+            p₀[1]
+        @testset "taylor! K=$K" for K in 1:3
+            xdata = FSMat{ComplexF64}(reshape(coeffs[1:(K + 1)], K + 1, 1))
+            uu = fsv(zeros(1))
+            Next.taylor!(
+                uu, Val(K), F.evaluator,
+                TaylorVector{K + 1, ComplexF64}(xdata), fsv(p₀),
+            )
+            @test uu[1] ≈ cauchy_coefficients(λ -> [fλ(λ)], K; r = 0.02)[K + 1][1] atol =
+                1.0e-9
+        end
+    end
+
+    @testset "homotopy with transcendental functions" begin
+        @var x[1:9] t
+        F = [
+            sin(t); cos(t); exp(t); tan(t); asin(t); acos(t); sinh(t); cosh(t); tanh(t)
+        ]
+        at(τ) = ComplexF64[
+            sin(τ), cos(τ), exp(τ), tan(τ), asin(τ), acos(τ), sinh(τ), cosh(τ), tanh(τ),
+        ]
+        G = System(x - F; variables = x, parameters = [t])
+        S = solve(G, [at(π / 4)], [π / 4], [π / 8], Continuation(; show_progress = false))
+        @test nsolutions(S) == 1
+        @test solutions(S)[1] ≈ at(π / 8)
+    end
+
     @testset "extended-precision residual on a transcendental system" begin
         @var x y a b
         F = System([sin(a) * x + cos(y) - b, x^2 + y - 1]; parameters = [a, b])

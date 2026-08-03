@@ -369,6 +369,8 @@ const _TWO_PI = 2.0 * _PI
 # side is a rigorous enclosure.
 _enclose(x::Float64) = Interval(prevfloat(x, 2), nextfloat(x, 2))
 
+const _EMPTY_ICOMPLEX = IComplex(Interval(NaN), Interval(NaN))
+
 """
     sqrt(a::Interval{Float64})
 
@@ -383,6 +385,25 @@ end
 
 Base.sinh(a::Interval{Float64})::Interval{Float64} =
     Interval(_enclose(sinh(a.lo)).lo, _enclose(sinh(a.hi)).hi)
+
+# `exp ≥ 0`, and two ulps below an underflowed endpoint is negative.
+Base.exp(a::Interval{Float64})::Interval{Float64} =
+    Interval(max(_enclose(exp(a.lo)).lo, 0.0), _enclose(exp(a.hi)).hi)
+
+Base.atan(a::Interval{Float64})::Interval{Float64} =
+    Interval(_enclose(atan(a.lo)).lo, _enclose(atan(a.hi)).hi)
+
+"""
+    log(a::Interval{Float64})
+
+Enclosure of `log` over `a`. An `a` reaching zero or below is returned empty
+(`NaN`): the enclosure there is unbounded below, which no later operation can
+narrow.
+"""
+function Base.log(a::Interval{Float64})::Interval{Float64}
+    (isempty(a) || a.lo ≤ 0.0) && return Interval(NaN)
+    return Interval(_enclose(log(a.lo)).lo, _enclose(log(a.hi)).hi)
+end
 
 function Base.cosh(a::Interval{Float64})::Interval{Float64}
     a.lo ≥ 0.0 && return Interval(_enclose(cosh(a.lo)).lo, _enclose(cosh(a.hi)).hi)
@@ -437,7 +458,7 @@ comes from `2uv = Im z`.
 """
 function Base.sqrt(z::IComplex{Float64})::IComplex{Float64}
     x, y = real(z), imag(z)
-    (x.lo < 0.0 && 0.0 ∈ y) && return IComplex(Interval(NaN), Interval(NaN))
+    (x.lo < 0.0 && 0.0 ∈ y) && return _EMPTY_ICOMPLEX
     r = sqrt(sqr(x) + sqr(y))
     if x.lo ≥ 0.0
         u = sqrt((r + x) / 2.0)
@@ -462,6 +483,75 @@ Base.sin(z::IComplex{Float64})::IComplex{Float64} =
 
 Base.cos(z::IComplex{Float64})::IComplex{Float64} =
     IComplex(cos(real(z)) * cosh(imag(z)), -(sin(real(z)) * sinh(imag(z))))
+
+Base.sinh(z::IComplex{Float64})::IComplex{Float64} =
+    IComplex(sinh(real(z)) * cos(imag(z)), cosh(real(z)) * sin(imag(z)))
+
+Base.cosh(z::IComplex{Float64})::IComplex{Float64} =
+    IComplex(cosh(real(z)) * cos(imag(z)), sinh(real(z)) * sin(imag(z)))
+
+Base.exp(z::IComplex{Float64})::IComplex{Float64} =
+    (e = exp(real(z)); IComplex(e * cos(imag(z)), e * sin(imag(z))))
+
+# The denominator straddles zero exactly where the box holds a pole, and overflows
+# to `Inf/Inf`, so the empty result is the pole check.
+
+# tan(x + iy) = (sin 2x + i sinh 2y) / (cos 2x + cosh 2y)
+function Base.tan(z::IComplex{Float64})::IComplex{Float64}
+    x2 = 2.0 * real(z)
+    y2 = 2.0 * imag(z)
+    d = cos(x2) + cosh(y2)
+    return IComplex(sin(x2) / d, sinh(y2) / d)
+end
+
+# tanh(x + iy) = (sinh 2x + i sin 2y) / (cosh 2x + cos 2y)
+function Base.tanh(z::IComplex{Float64})::IComplex{Float64}
+    x2 = 2.0 * real(z)
+    y2 = 2.0 * imag(z)
+    d = cosh(x2) + cos(y2)
+    return IComplex(sinh(x2) / d, sin(y2) / d)
+end
+
+"""
+    log(z::IComplex{Float64})
+
+Enclosure of the principal `log z = log|z| + i·arg z`. A box meeting the branch cut
+along the negative real axis, the origin included, is returned empty.
+
+The argument is taken from whichever of `y/x` and `x/y` cannot straddle a pole,
+which is what makes the enclosure tight next to either axis.
+"""
+function Base.log(z::IComplex{Float64})::IComplex{Float64}
+    x, y = real(z), imag(z)
+    (x.lo ≤ 0.0 && 0.0 ∈ y) && return _EMPTY_ICOMPLEX
+    lr = log(sqr(x) + sqr(y)) / 2.0
+    arg = if x.lo > 0.0
+        atan(y / x)
+    elseif y.lo > 0.0
+        _HALF_PI - atan(x / y)
+    else
+        -_HALF_PI - atan(x / y)
+    end
+    return IComplex(lr, arg)
+end
+
+# asin(z) = -i log(iz + √(1 - z²)), acos(z) = -i log(z + i√(1 - z²)). The cut at
+# `|Re z| > 1` is what `sqrt` and `log` reject in turn. The sum also cancels for a
+# wide box far up the imaginary axis, where `log` declines the straddled origin.
+function Base.asin(z::IComplex{Float64})::IComplex{Float64}
+    r = sqrt(one(IComplex{Float64}) - z * z)
+    w = log(IComplex(real(r) - imag(z), imag(r) + real(z)))
+    return IComplex(imag(w), -real(w))
+end
+
+function Base.acos(z::IComplex{Float64})::IComplex{Float64}
+    r = sqrt(one(IComplex{Float64}) - z * z)
+    w = log(IComplex(real(z) - imag(r), imag(z) + real(r)))
+    return IComplex(imag(w), -real(w))
+end
+
+# An integer exponent goes through `power_by_squaring` instead, with no branch cut.
+Base.:^(z::IComplex{Float64}, w::IComplex{Float64})::IComplex{Float64} = exp(w * log(z))
 
 mid(z::IComplex) = Complex(mid(real(z)), mid(imag(z)))
 diam(z::IComplex) = max(diam(real(z)), diam(imag(z)))

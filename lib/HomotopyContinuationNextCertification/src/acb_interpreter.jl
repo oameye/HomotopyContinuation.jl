@@ -30,16 +30,31 @@ end
 Base.@propagate_inbounds acb_op_neg!(t, x, m) = Arblib.neg!(t, x)
 Base.@propagate_inbounds acb_op_sin!(t, x, m) = Arblib.sin!(t, x)
 Base.@propagate_inbounds acb_op_sqr!(t, x, m) = Arblib.sqr!(t, x)
-# A ball meeting the branch cut breaks the Krawczyk hypotheses, so reject it as
-# `sqrt(::IComplex{Float64})` does.
-Base.@propagate_inbounds function acb_op_sqrt!(t, x::Arblib.AcbOrRef, m)
-    if Arblib.contains_negative(Arblib.realref(x)) &&
-            Arblib.contains_zero(Arblib.imagref(x))
-        return Arblib.indeterminate!(t)
-    end
-    return Arblib.sqrt!(t, x)
+
+# A ball meeting a branch cut breaks the Krawczyk hypotheses, so reject it as the
+# `IComplex{Float64}` operations do. Arb answers on a narrow straddling ball.
+_acb_on_negative_axis(x::Arblib.AcbOrRef)::Bool =
+    Arblib.contains_negative(Arblib.realref(x)) &&
+    Arblib.contains_zero(Arblib.imagref(x))
+
+function _acb_on_inverse_trig_cut(x::Arblib.AcbOrRef)::Bool
+    Arblib.contains_zero(Arblib.imagref(x)) || return false
+    re = Arblib.realref(x)
+    return Arblib.ubound(re) > 1 || Arblib.lbound(re) < -1
 end
+
+Base.@propagate_inbounds acb_op_sqrt!(t, x::Arblib.AcbOrRef, m) =
+    _acb_on_negative_axis(x) ? Arblib.indeterminate!(t) : Arblib.sqrt!(t, x)
 Base.@propagate_inbounds acb_op_identity!(t, x, m) = Arblib.set!(t, x)
+Base.@propagate_inbounds acb_op_exp!(t, x, m) = Arblib.exp!(t, x)
+Base.@propagate_inbounds acb_op_sinh!(t, x, m) = Arblib.sinh!(t, x)
+Base.@propagate_inbounds acb_op_cosh!(t, x, m) = Arblib.cosh!(t, x)
+Base.@propagate_inbounds acb_op_tan!(t, x, m) = Arblib.tan!(t, x)
+Base.@propagate_inbounds acb_op_tanh!(t, x, m) = Arblib.tanh!(t, x)
+Base.@propagate_inbounds acb_op_asin!(t, x::Arblib.AcbOrRef, m) =
+    _acb_on_inverse_trig_cut(x) ? Arblib.indeterminate!(t) : Arblib.asin!(t, x)
+Base.@propagate_inbounds acb_op_acos!(t, x::Arblib.AcbOrRef, m) =
+    _acb_on_inverse_trig_cut(x) ? Arblib.indeterminate!(t) : Arblib.acos!(t, x)
 
 # arity 2
 Base.@propagate_inbounds acb_op_add!(t, x, y, m) = Arblib.add!(t, x, y)
@@ -47,6 +62,8 @@ Base.@propagate_inbounds acb_op_div!(t, x, y, m) = Arblib.div!(t, x, y)
 Base.@propagate_inbounds acb_op_mul!(t, x, y, m) = Arblib.mul!(t, x, y)
 Base.@propagate_inbounds acb_op_sub!(t, x, y, m) = Arblib.sub!(t, x, y)
 Base.@propagate_inbounds acb_op_pow_int!(t, x, k, m) = Arblib.pow!(t, x, convert(Int, k))
+Base.@propagate_inbounds acb_op_pow!(t, x::Arblib.AcbOrRef, y, m) =
+    _acb_on_negative_axis(x) ? Arblib.indeterminate!(t) : Arblib.pow!(t, x, y)
 
 # arity 3
 Base.@propagate_inbounds function acb_op_add3!(t, x, y, z, m)

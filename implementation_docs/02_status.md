@@ -112,18 +112,40 @@ entries in the evaluation sweep's system collection, both recorded with their re
     expanding the expression tree into `exponent vector => coefficient`, since the front-end
     keeps products and powers unexpanded. Both agree term for term with the same system built
     through DynamicPolynomials.
-  - `DoubleF64` gained `exp`, `sin`, `cos`, `sincos`, `sinh`, `cosh` (~32 digits); the
-    `ComplexDF64` versions follow from the generic `Base` complex methods. `sin`/`cos` switch
+  - `DoubleF64` gained `exp`, `log`, `sin`, `cos`, `sincos`, `tan`, `asin`, `acos`, `atan`,
+    `sinh`, `cosh`, `tanh` (~32 digits). `sin`/`cos` switch
     to angle addition over the two limbs past `|a| = 2⁵³`, where double-double reduction modulo
     `2π` drops below Float64 accuracy, and `sinh`/`cosh` take a separate branch past `|a| = 40`,
-    where `e ± 1/e` would be NaN.
-  - Rectangular `Interval`/`IComplex` arithmetic gained `sqrt`, `sin`, `cos` (plus `sinh`
-    and `cosh` as building blocks), so every tape stays on the Float64 Krawczyk path and
-    escalates to Arb only when the test genuinely fails. v2 has none of these and routes
-    such systems to Arb unconditionally. The complex `sqrt` takes whichever of
+    where `e ± 1/e` would be NaN. `log` and `atan` are one Newton step on `exp` and on
+    `sin`/`cos` from a Float64 seed; `asin`/`acos` reduce to `atan`. `log` splits off the binary
+    exponent first, because `exp(-x)` for the Newton step underflows the double-double range
+    (`floatmin(DoubleF64) = 2e-292`, not `Float64`'s `2e-308`) once `|a|` leaves it, which
+    silently costs 7 digits. For `a` near 1 the correction cancels and `log` is accurate
+    absolutely rather than relatively.
+    `ComplexDF64` takes `exp`, `sqrt`, `sin`, `cos`, `sinh`, `cosh` from the generic `Base`
+    complex methods; `log`, `tan`, `tanh`, `asin` and `acos` are written out, since Base routes
+    those through `log1p`, `asinh` and `typemax` on the real part at `Float64`-tuned thresholds.
+  - Rectangular `Interval`/`IComplex` arithmetic gained `sqrt`, `exp`, `log`, `sin`, `cos`,
+    `tan`, `asin`, `acos`, `sinh`, `cosh`, `tanh` and a non-integer `^`, so every tape stays
+    on the Float64 Krawczyk path and
+    escalates to Arb only when the test genuinely fails. v2 has none of these, and its
+    Float64 path is the only way into `certify`, so on 2.22.1 `certify` of a system carrying
+    any of them throws a `MethodError` (`no method matching sin(::IComplexF64)`) rather than
+    falling through to Arb: v2 cannot certify a transcendental system at all. The complex
+    `sqrt` takes whichever of
     `|z| ± Re z` does not cancel and recovers the other root from `2uv = Im z`; the naive
     form inflates the enclosure of a box around a real solution to the square root of its
     width. A box meeting the branch cut returns empty, which falls through to Arb.
+    The complex `log` reads its argument off whichever of `y/x` and `x/y` cannot straddle a
+    pole, which is what keeps a box next to either axis tight; `asin`/`acos` and the
+    non-integer `^` are built on it, so its rejection of the negative real axis is also
+    theirs. `tan`/`tanh` divide by a real interval that straddles zero exactly on a pole,
+    so the empty result is the pole check.
+  - The Acb kernels reject a ball on a branch cut rather than trusting Arb, which for a
+    narrow straddling ball returns a sound but discontinuous enclosure the Krawczyk
+    hypotheses cannot use: `acb_asin`/`acb_acos` at `2.0 ± 1e-12` answer, and
+    `acb_pow` on the negative real axis answers at every width. v2's Acb kernels are bare
+    `Arblib` calls with no cut check anywhere, `sqrt` and `pow` included.
   - Front-end lowering (`_lower_input`) happens before the `@nospecialize` builder chain.
     Dispatching on the input representation inside it made inference walk both front-ends
     on every build, so a polynomial system paid ~0.6 s of TTFX to infer the expression
@@ -789,18 +811,44 @@ Closed by this audit:
   without the mutable-struct reassignment v2 uses.
   Closes `certification_test.jl` "DistinctCertifiedSolutions incremental API".
 
+- [x] **Transcendental operations and real powers.** `exp`, `tan`, `asin`, `acos`, `sinh`,
+  `cosh`, `tanh` and a non-integer `^` (v2's `OP_POW`), landed as one piece: they reach the same
+  stack and the last two v2 test files depend on both. Eight `OpType` entries, seven of them new
+  `SUnaryKind`/`EFn` kinds that the existing lowering already carries, plus a node for the power.
+  - The new ops are **appended to `OpType`, out of arity order**, because
+    `execute_instructions!` emits its switch in declaration order and a rarely used op ahead of
+    `OP_ADD`/`OP_MUL` lengthens the chain every hot tape walks (`interpreter.jl` records the
+    387ns → 710ns cyclic-7 measurement behind that ordering). Confirmed against a worktree at
+    the previous commit, alternating runs of a 200k-iteration loop: cyclic-7 eval 83 to 86 ns
+    before against 83 to 88 after, Jacobian 411 to 422 ns against 396 to 451, inside the noise
+    either way. `@benchmarkable` alone cannot see this, since its timer quantizes to 10 ns here
+    and reported a spurious 700 → 750 ns.
+  - `OP_POW`'s exponent is a **tape constant, not an instruction immediate**: an `Instruction`
+    input is an `Int32` slot, which `OP_POW_INT`'s integer fits and a real one does not. That
+    makes it a plain arity-2 op, needing no `should_use_index_not_reference` case and no codegen
+    branch, and its Taylor rule reads the exponent off a series whose higher coefficients are
+    zero by construction.
+  - A non-integer power is its own node (`ERPow`/`SRPow`) rather than a widened `EPow`, whose
+    `exp::Int` the degree, numerator and power-collection paths all read. `_erpow` folds an
+    integer-valued exponent back to `EPow`, which is what lets `_emul` tally every exponent as a
+    `ComplexF64` and still keep `x * x` an integer power. Without that tally `x^1.5 * x^-1` stayed
+    two factors, and CSE saw two nodes where one belongs.
+  - The Taylor recurrences are `exp`, the coupled `sinh`/`cosh` pair, `tan`/`tanh` through
+    `t' = (1 ± t²)a'`, `asin` through `y'·√(1-a²) = a'` with `acos` its negation past order 0,
+    and `OP_POW` reusing the `OP_POW_INT` logarithmic-differentiation recurrence, which is
+    generic in the exponent: only the order-0 term needed to know it is not an integer.
+  - `sincos(::Expression)` was missing, so the *existing* sin/cos Taylor rules could not run over
+    symbolic coefficients. That is what had made v2's `operations_test.jl` unportable; with it,
+    all 32 ops are now checked against symbolic differentiation of their scalar op at N = 1, 2, 4.
+  - Closes `symbolic_test.jl` "trigonometric functions", `homotopies_test.jl` "Homotopy with
+    trigonometric functions", `slp_test.jl` "fractional powers" and "Evaluation of Acb with
+    fractional powers", and `operations_test.jl` in full. Tests: `operations_test.jl`,
+    `taylor_test.jl`, `nonpolynomial_test.jl` (a `transcendental` entry in
+    `NONPOLYNOMIAL_SYSTEM_COLLECTION` puts every new op through the sweep's central-difference,
+    Cauchy-integral and tape-roundtrip oracles), and the certification subpackage.
+
 Open, ordered by consequence:
 
-- [ ] **Transcendental operations.** v2.22 tapes carry `exp`, `tan`, `asin`, `acos`, `sinh`,
-  `cosh`, `tanh`; v3's `Expression` and `SExpr` carry only `sqrt`, `sin`, `cos`. Adding them
-  touches the whole model_kit stack (canonicalization, `differentiate`, lowering, the tape
-  interpreter, the Taylor rules, `ComplexDF64`, the Acb interpreter and the interval arithmetic
-  the certification subpackage runs on). Blocks `symbolic_test.jl` "trigonometric functions" and
-  `homotopies_test.jl` "Homotopy with trigonometric functions".
-- [ ] **Real and rational powers** (`a^b` for numeric non-integer `b`, v2's `OP_POW`). v3 has
-  `OP_POW_INT` and `OP_SQRT` only, so `(x+1)^(3//2)` cannot be expressed. Same reach as the
-  entry above. Blocks `slp_test.jl` "fractional powers" and "Evaluation of Acb with fractional
-  powers", and the `OP_POW` branch of `operations_test.jl`.
 - [ ] **BSP certification of a `ResultIterator`.** v2.22 certifies lazily by partitioning the
   solution candidates along one coordinate (`IteratorCertificationResult`, `BSPPartition`, `bsp`,
   `npaths`, `start_iterator_length`, `target_iterator_length`, `nnotcertified`, `nleaves`,

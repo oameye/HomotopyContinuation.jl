@@ -25,18 +25,39 @@ Unary function applied by an `SUnary` node. Each kind lowers to one arity-1
     UNARY_SQRT
     UNARY_SIN
     UNARY_COS
+    UNARY_EXP
+    UNARY_TAN
+    UNARY_ASIN
+    UNARY_ACOS
+    UNARY_SINH
+    UNARY_COSH
+    UNARY_TANH
 end
 
 @inline function unary_op_type(kind::SUnaryKind.T)::OpType.T
     kind == SUnaryKind.UNARY_SQRT && return OpType.OP_SQRT
     kind == SUnaryKind.UNARY_SIN && return OpType.OP_SIN
-    return OpType.OP_COS
+    kind == SUnaryKind.UNARY_COS && return OpType.OP_COS
+    kind == SUnaryKind.UNARY_EXP && return OpType.OP_EXP
+    kind == SUnaryKind.UNARY_TAN && return OpType.OP_TAN
+    kind == SUnaryKind.UNARY_ASIN && return OpType.OP_ASIN
+    kind == SUnaryKind.UNARY_ACOS && return OpType.OP_ACOS
+    kind == SUnaryKind.UNARY_SINH && return OpType.OP_SINH
+    kind == SUnaryKind.UNARY_COSH && return OpType.OP_COSH
+    return OpType.OP_TANH
 end
 
 @inline function apply_unary(kind::SUnaryKind.T, val::ComplexF64)::ComplexF64
     kind == SUnaryKind.UNARY_SQRT && return sqrt(val)
     kind == SUnaryKind.UNARY_SIN && return sin(val)
-    return cos(val)
+    kind == SUnaryKind.UNARY_COS && return cos(val)
+    kind == SUnaryKind.UNARY_EXP && return exp(val)
+    kind == SUnaryKind.UNARY_TAN && return tan(val)
+    kind == SUnaryKind.UNARY_ASIN && return asin(val)
+    kind == SUnaryKind.UNARY_ACOS && return acos(val)
+    kind == SUnaryKind.UNARY_SINH && return sinh(val)
+    kind == SUnaryKind.UNARY_COSH && return cosh(val)
+    return tanh(val)
 end
 
 ## ── SExpr ADT ─────────────────────────────────────────────────────────────
@@ -78,12 +99,18 @@ end
         exp::Int
     end
 
+    """Power with a numeric non-integer exponent."""
+    struct SRPow
+        base::SExpr
+        exp::ComplexF64
+    end
+
     """Negation: -arg."""
     struct SNeg
         arg::SExpr
     end
 
-    """Unary function application: sqrt, sin or cos."""
+    """Unary function application."""
     struct SUnary
         kind::SUnaryKind.T
         arg::SExpr
@@ -110,6 +137,7 @@ const STmpStorage = variant_storage_type(SExpr.STmp)
 const SAddStorage = variant_storage_type(SExpr.SAdd)
 const SMulStorage = variant_storage_type(SExpr.SMul)
 const SPowStorage = variant_storage_type(SExpr.SPow)
+const SRPowStorage = variant_storage_type(SExpr.SRPow)
 const SNegStorage = variant_storage_type(SExpr.SNeg)
 const SUnaryStorage = variant_storage_type(SExpr.SUnary)
 const SFuncSymStorage = variant_storage_type(SExpr.SFuncSym)
@@ -129,7 +157,7 @@ const _EMPTY_SEXPR_VEC = SExprT[]
 # A self-referential `@data` field is widened to `Any`; without the assertion every
 # recursive walk dispatches dynamically and boxes its result.
 @inline storage_args(s::Union{SAddStorage, SMulStorage, SFuncSymStorage}) = s.args::Vector{SExprT}
-@inline storage_base(s::SPowStorage) = s.base::SExprT
+@inline storage_base(s::Union{SPowStorage, SRPowStorage}) = s.base::SExprT
 @inline storage_arg(s::Union{SNegStorage, SUnaryStorage}) = s.arg::SExprT
 
 ## ── Hashing (matches old symbol-seeded hash for CSE ordering stability) ──
@@ -158,6 +186,10 @@ function Base.hash(e::SExprT, h::UInt)::UInt
         return hash(_fold_hash(:SMul, storage_args(storage)), h)
     elseif storage isa SPowStorage
         return hash(hash(storage.exp, hash(storage_base(storage), hash(:SPow, zero(UInt)))), h)
+    elseif storage isa SRPowStorage
+        return hash(
+            hash(storage.exp, hash(storage_base(storage), hash(:SRPow, zero(UInt)))), h,
+        )
     elseif storage isa SNegStorage
         return hash(storage_arg(storage), hash(:SNeg, h))
     elseif storage isa SUnaryStorage
@@ -178,7 +210,8 @@ end
     _EMPTY_SEXPR_VEC
 @inline _get_args_storage(storage::SAddStorage) = storage_args(storage)
 @inline _get_args_storage(storage::SMulStorage) = storage_args(storage)
-@inline _get_args_storage(storage::SPowStorage) = SExprT[storage_base(storage)]
+@inline _get_args_storage(storage::Union{SPowStorage, SRPowStorage}) =
+    SExprT[storage_base(storage)]
 @inline _get_args_storage(storage::SNegStorage) = SExprT[storage_arg(storage)]
 @inline _get_args_storage(storage::SUnaryStorage) = SExprT[storage_arg(storage)]
 @inline _get_args_storage(storage::SFuncSymStorage) = storage_args(storage)
@@ -190,6 +223,8 @@ end
     _canonical_mul(args)
 @inline _rebuild_expr_storage(storage::SPowStorage, args::Vector{SExprT})::SExprT =
     SExpr.SPow(args[1], storage.exp)
+@inline _rebuild_expr_storage(storage::SRPowStorage, args::Vector{SExprT})::SExprT =
+    SExpr.SRPow(args[1], storage.exp)
 @inline _rebuild_expr_storage(storage::SNegStorage, args::Vector{SExprT})::SExprT =
     SExpr.SNeg(args[1])
 @inline _rebuild_expr_storage(storage::SUnaryStorage, args::Vector{SExprT})::SExprT =
@@ -230,6 +265,7 @@ end
 @inline _sexpr_tag_order(::SNegStorage)::UInt8 = 0x08
 @inline _sexpr_tag_order(::SUnaryStorage)::UInt8 = 0x09
 @inline _sexpr_tag_order(::SFuncSymStorage)::UInt8 = 0x0a
+@inline _sexpr_tag_order(::SRPowStorage)::UInt8 = 0x0b
 
 function _sexpr_args_lt(a_args::Vector{SExprT}, b_args::Vector{SExprT})::Bool
     n = min(length(a_args), length(b_args))
@@ -271,6 +307,12 @@ function _sexpr_struct_lt(a::SExprT, b::SExprT)::Bool
         b_storage_typed = b_storage::SPowStorage
         if storage_base(a_storage) == storage_base(b_storage_typed)
             return a_storage.exp < b_storage_typed.exp
+        end
+        return _sexpr_struct_lt(storage_base(a_storage), storage_base(b_storage_typed))
+    elseif a_storage isa SRPowStorage
+        b_storage_typed = b_storage::SRPowStorage
+        if storage_base(a_storage) == storage_base(b_storage_typed)
+            return _complex_lt(a_storage.exp, b_storage_typed.exp)
         end
         return _sexpr_struct_lt(storage_base(a_storage), storage_base(b_storage_typed))
     elseif a_storage isa SNegStorage
@@ -387,6 +429,12 @@ function _canonical_unary(kind::SUnaryKind.T, arg::SExprT)::SExprT
     storage = sexpr_storage(arg)
     storage isa SConstStorage && return SExpr.SConst(apply_unary(kind, storage.val))
     return SExpr.SUnary(kind, arg)
+end
+
+function _canonical_rpow(base::SExprT, exp::ComplexF64)::SExprT
+    storage = sexpr_storage(base)
+    storage isa SConstStorage && return SExpr.SConst(storage.val^exp)
+    return SExpr.SRPow(base, exp)
 end
 
 ## ── Polynomial → SExpr conversion ──────────────────────────────────────────

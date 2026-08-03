@@ -376,6 +376,9 @@ function _opts_cse_visit!(
             )
         end
 
+    elseif storage isa SRPowStorage
+        _opts_cse_visit!(storage_base(storage), adds, muls, opt_subs, seen)
+
     elseif storage isa SNegStorage
         # SNeg is our representation for SymEngine's Mul(-1, x) where neg simplifies to atom
         _opts_cse_visit!(storage_arg(storage), adds, muls, opt_subs, seen)

@@ -147,6 +147,61 @@ end
         @test rad(imag(q)) < 1.0e-8
     end
 
+    @testset "real exp, log and atan" begin
+        for x in (-30.0, -1.0, 0.0, 0.5, 3.0, 20.0)
+            @test exp(x) ∈ exp(Interval(x, x))
+            @test atan(x) ∈ atan(Interval(x, x))
+        end
+        @test exp(Interval(-800.0, -700.0)).lo == 0.0
+        @test exp(Interval(1.0, 2.0)) ⊆ Interval(2.71, 7.39)
+        @test atan(Interval(-1.0e300, 1.0e300)) ⊆ Interval(-1.5708, 1.5708)
+
+        for x in (1.0e-30, 0.5, 1.0, 7.0, 1.0e30)
+            @test log(x) ∈ log(Interval(x, x))
+        end
+        @test log(Interval(1.0, exp(2.0))) ⊆ Interval(-1.0e-15, 2.01)
+        # No finite enclosure once the box reaches zero.
+        @test isempty(log(Interval(0.0, 1.0)))
+        @test isempty(log(Interval(-1.0, 1.0)))
+        @test isempty(log(Interval(-2.0, -1.0)))
+    end
+
+    @testset "complex exp, log, hyperbolics and inverse trig" begin
+        z = IComplexF64(0.7, -1.3)
+        zm = 0.7 - 1.3im
+        for f in (exp, sinh, cosh, tan, tanh, log, asin, acos)
+            @test f(zm) ≈ mid(f(z))
+        end
+        @test (zm^1.5) ≈ mid(z^IComplex(Interval(1.5), Interval(0.0)))
+
+        # `log` and a non-integer power are cut along the negative real axis.
+        for f in (log, w -> w^IComplex(Interval(1.5), Interval(0.0)))
+            @test isempty(real(f(IComplex(Interval(-2.0, -1.0), Interval(-0.1, 0.1)))))
+            @test isempty(real(f(IComplex(Interval(-1.0, 1.0), Interval(-1.0, 1.0)))))
+            @test !isempty(real(f(IComplex(Interval(-2.0, -1.0), Interval(0.1, 0.2)))))
+        end
+        # `asin` and `acos` are cut along |Re| > 1 of the real axis.
+        for f in (asin, acos)
+            @test isempty(real(f(IComplex(Interval(1.5, 2.0), Interval(-0.1, 0.1)))))
+            @test isempty(real(f(IComplex(Interval(-2.0, -1.5), Interval(-0.1, 0.1)))))
+            @test !isempty(real(f(IComplex(Interval(-0.5, 0.5), Interval(-0.1, 0.1)))))
+        end
+        # A pole inside the box leaves the real denominator straddling zero.
+        @test isempty(real(tan(IComplex(Interval(1.5, 1.7), Interval(-0.1, 0.1)))))
+        @test isempty(real(tanh(IComplex(Interval(-0.1, 0.1), Interval(1.5, 1.7)))))
+        @test !isempty(real(tan(IComplex(Interval(0.1, 0.2), Interval(-0.1, 0.1)))))
+
+        # The argument stays tight next to either axis.
+        w = 1.0e-8
+        for b in (
+                IComplex(Interval(3.0 - w, 3.0 + w), Interval(-w, w)),
+                IComplex(Interval(-w, w), Interval(3.0 - w, 3.0 + w)),
+                IComplex(Interval(-3.0 - w, -3.0 + w), Interval(-w - 2.0, w - 2.0)),
+            )
+            @test rad(imag(log(b))) < 1.0e-7
+        end
+    end
+
     @testset "enclosure soundness on random boxes" begin
         rng = MersenneTwister(0x5eed)
         real_ok = true
@@ -156,27 +211,41 @@ end
             a = Interval(c - w, c + w)
             real_ok &= samples_enclosed(rng, sin, sin(a), a.lo, a.hi)
             real_ok &= samples_enclosed(rng, cos, cos(a), a.lo, a.hi)
+            real_ok &= samples_enclosed(rng, atan, atan(a), a.lo, a.hi)
             b = Interval(abs(c) - min(w, abs(c)), abs(c) + w)
             real_ok &= samples_enclosed(rng, sqrt, sqrt(b), b.lo, b.hi)
+            e = Interval(c / 40 - w, c / 40 + w)
+            real_ok &= samples_enclosed(rng, exp, exp(e), e.lo, e.hi)
+            b.lo > 0.0 && (real_ok &= samples_enclosed(rng, log, log(b), b.lo, b.hi))
         end
         @test real_ok
 
         complex_ok = true
-        cut_boxes = 0
+        # Each function that can decline a box gets counted, so a sweep that only
+        # ever rejects cannot pass as a sweep that only ever encloses.
+        cut_boxes = Dict(f => 0 for f in (sqrt, log, asin, acos, tan, tanh))
+        pow = w -> w^IComplex(Interval(1.5), Interval(0.0))
         for _ in 1:400
             cx, cy = (rand(rng) - 0.5) * 20, (rand(rng) - 0.5) * 20
             wx, wy = rand(rng) / 2, rand(rng) / 2
             z = IComplex(Interval(cx - wx, cx + wx), Interval(cy - wy, cy + wy))
             complex_ok &= complex_samples_enclosed(rng, sin, sin(z), z)
             complex_ok &= complex_samples_enclosed(rng, cos, cos(z), z)
-            s = sqrt(z)
-            if isempty(real(s))
-                cut_boxes += 1
-            else
-                complex_ok &= complex_samples_enclosed(rng, sqrt, s, z)
+            complex_ok &= complex_samples_enclosed(rng, sinh, sinh(z), z)
+            complex_ok &= complex_samples_enclosed(rng, cosh, cosh(z), z)
+            complex_ok &= complex_samples_enclosed(rng, exp, exp(z), z)
+            for f in (sqrt, log, asin, acos, tan, tanh)
+                v = f(z)
+                if isempty(real(v)) || isempty(imag(v))
+                    cut_boxes[f] += 1
+                else
+                    complex_ok &= complex_samples_enclosed(rng, f, v, z)
+                end
             end
+            p = pow(z)
+            isempty(real(p)) || (complex_ok &= complex_samples_enclosed(rng, w -> w^1.5, p, z))
         end
         @test complex_ok
-        @test cut_boxes > 0
+        @test all(>(0), values(cut_boxes))
     end
 end

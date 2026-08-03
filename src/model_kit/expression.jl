@@ -3,7 +3,8 @@
 # `Expression` is a `Number` subtype, so ordinary Julia arithmetic, `sum`,
 # broadcasting and matrix products build expression trees. It covers everything
 # the tape can execute that `MultivariatePolynomials` cannot express: division,
-# negative integer powers, `sqrt`, `sin` and `cos`.
+# powers with a negative or non-integer exponent, and the unary functions
+# (`sqrt`, `exp`, `sin`, `cos`, `tan`, `asin`, `acos`, `sinh`, `cosh`, `tanh`).
 #
 # The tree is canonicalized on construction (flattening, constant folding, like
 # term collection, power collection) so that structurally equal expressions are
@@ -37,7 +38,13 @@
         exp::Int
     end
 
-    """Unary function application: sqrt, sin or cos."""
+    """Power with a numeric non-integer exponent."""
+    struct ERPow
+        base::SymExpr
+        exp::ComplexF64
+    end
+
+    """Unary function application."""
     struct EFn
         kind::SUnaryKind.T
         arg::SymExpr
@@ -52,6 +59,7 @@ const EVarStorage = variant_storage_type(SymExpr.EVar)
 const EAddStorage = variant_storage_type(SymExpr.EAdd)
 const EMulStorage = variant_storage_type(SymExpr.EMul)
 const EPowStorage = variant_storage_type(SymExpr.EPow)
+const ERPowStorage = variant_storage_type(SymExpr.ERPow)
 const EFnStorage = variant_storage_type(SymExpr.EFn)
 
 @inline expr_storage(e::Expression) = variant_storage(e)
@@ -59,7 +67,7 @@ const EFnStorage = variant_storage_type(SymExpr.EFn)
 # A self-referential `@data` field is widened to `Any`; without the assertion every
 # recursive walk dispatches dynamically and boxes its result.
 @inline storage_args(s::Union{EAddStorage, EMulStorage}) = s.args::Vector{Expression}
-@inline storage_base(s::EPowStorage) = s.base::Expression
+@inline storage_base(s::Union{EPowStorage, ERPowStorage}) = s.base::Expression
 @inline storage_arg(s::EFnStorage) = s.arg::Expression
 
 # Compound nodes are hashed structurally and used as Dict keys, so they must own their
@@ -92,6 +100,8 @@ function Base.hash(e::Expression, h::UInt)::UInt
         return hash(_fold_expr_hash(:EMul, storage_args(storage)), h)
     elseif storage isa EPowStorage
         return hash(storage.exp, hash(storage_base(storage), hash(:EPow, h)))
+    elseif storage isa ERPowStorage
+        return hash(storage.exp, hash(storage_base(storage), hash(:ERPow, h)))
     else # EFnStorage
         return hash(storage_arg(storage), hash(storage.kind, hash(:EFn, h)))
     end
@@ -142,6 +152,8 @@ function Base.conj(e::Expression)::Expression
         return _emul(Expression[conj(a) for a in storage_args(storage)])
     elseif storage isa EPowStorage
         return _epow(conj(storage_base(storage)), storage.exp)
+    elseif storage isa ERPowStorage
+        return _erpow(conj(storage_base(storage)), conj(storage.exp))
     else # EFnStorage
         return _efn(storage.kind, conj(storage_arg(storage)))
     end
@@ -277,11 +289,12 @@ function _flatten_emul!(
     return coeff
 end
 
-"""Split a factor into its base and integer exponent."""
-@inline function _split_power(e::Expression)::Tuple{Expression, Int}
+"""Split a factor into its base and its exponent."""
+@inline function _split_power(e::Expression)::Tuple{Expression, ComplexF64}
     storage = expr_storage(e)
-    storage isa EPowStorage && return (storage_base(storage), storage.exp)
-    return (e, 1)
+    storage isa EPowStorage && return (storage_base(storage), ComplexF64(storage.exp))
+    storage isa ERPowStorage && return (storage_base(storage), storage.exp)
+    return (e, one(ComplexF64))
 end
 
 function _emul(args::Vector{Expression})::Expression
@@ -293,15 +306,16 @@ function _emul(args::Vector{Expression})::Expression
     iszero(coeff) && return zero(Expression)
 
     bases = Expression[]
-    exps = Int[]
+    exps = ComplexF64[]
     _tally!(_split_power, bases, exps, factors)
 
-    # `_epow` can fold a base to a literal (e.g. (1/2)^-1), so re-absorb them.
+    # `_erpow` can fold a base to a literal (e.g. (1/2)^-1), so re-absorb them, and
+    # returns an `EPow` for an integer sum, which keeps `x * x` an integer power.
     kept = Expression[]
     for i in eachindex(bases)
         @inbounds k = exps[i]
-        k == 0 && continue
-        @inbounds p = _epow(bases[i], k)
+        iszero(k) && continue
+        @inbounds p = _erpow(bases[i], k)
         v = expr_number(p)
         if v === nothing
             push!(kept, p)
@@ -333,6 +347,28 @@ function _epow(base::Expression, k::Int)::Expression
     return SymExpr.EPow(base, k)
 end
 
+function _erpow(base::Expression, r::ComplexF64)::Expression
+    # An integer-valued exponent belongs in `EPow`, which the degree, numerator
+    # and power-collection paths all read.
+    iszero(imag(r)) && isinteger(real(r)) && return _epow(base, Int(real(r)))
+    v = expr_number(base)
+    v === nothing || return SymExpr.ENum(v^r)
+    return SymExpr.ERPow(base, r)
+end
+
+function _unary_name(kind::SUnaryKind.T)::String
+    kind == SUnaryKind.UNARY_SQRT && return "sqrt"
+    kind == SUnaryKind.UNARY_SIN && return "sin"
+    kind == SUnaryKind.UNARY_COS && return "cos"
+    kind == SUnaryKind.UNARY_EXP && return "exp"
+    kind == SUnaryKind.UNARY_TAN && return "tan"
+    kind == SUnaryKind.UNARY_ASIN && return "asin"
+    kind == SUnaryKind.UNARY_ACOS && return "acos"
+    kind == SUnaryKind.UNARY_SINH && return "sinh"
+    kind == SUnaryKind.UNARY_COSH && return "cosh"
+    return "tanh"
+end
+
 function _efn(kind::SUnaryKind.T, arg::Expression)::Expression
     v = expr_number(arg)
     v === nothing || return SymExpr.ENum(apply_unary(kind, v))
@@ -352,14 +388,27 @@ Base.literal_pow(::typeof(^), a::Expression, ::Val{K}) where {K} = _epow(a, Int(
 Base.sqrt(a::Expression)::Expression = _efn(SUnaryKind.UNARY_SQRT, a)
 Base.sin(a::Expression)::Expression = _efn(SUnaryKind.UNARY_SIN, a)
 Base.cos(a::Expression)::Expression = _efn(SUnaryKind.UNARY_COS, a)
+# The coupled sin/cos Taylor recurrence asks for both at once, and Base's generic
+# `sincos` would route a symbolic argument through `float`.
+Base.sincos(a::Expression)::Tuple{Expression, Expression} = (sin(a), cos(a))
+Base.exp(a::Expression)::Expression = _efn(SUnaryKind.UNARY_EXP, a)
+Base.tan(a::Expression)::Expression = _efn(SUnaryKind.UNARY_TAN, a)
+Base.asin(a::Expression)::Expression = _efn(SUnaryKind.UNARY_ASIN, a)
+Base.acos(a::Expression)::Expression = _efn(SUnaryKind.UNARY_ACOS, a)
+Base.sinh(a::Expression)::Expression = _efn(SUnaryKind.UNARY_SINH, a)
+Base.cosh(a::Expression)::Expression = _efn(SUnaryKind.UNARY_COSH, a)
+Base.tanh(a::Expression)::Expression = _efn(SUnaryKind.UNARY_TANH, a)
 
-# The tape has no general power instruction.
+Base.:^(a::Expression, r::Real)::Expression = _erpow(a, ComplexF64(r))
+Base.:^(a::Expression, r::Complex)::Expression = _erpow(a, ComplexF64(r))
+# Disambiguates against `^(::Number, ::Rational)`.
+Base.:^(a::Expression, r::Rational)::Expression = _erpow(a, ComplexF64(r))
+
+# The exponent has to be numeric: the tape has no instruction for a symbolic one.
 function Base.:^(a::Expression, b::Expression)::Expression
     v = expr_number(b)
-    if v !== nothing && iszero(imag(v)) && isinteger(real(v))
-        return _epow(a, Int(real(v)))
-    end
-    throw(ArgumentError("only integer exponents are supported, got $(b)"))
+    v === nothing && throw(ArgumentError("only numeric exponents are supported, got $(b)"))
+    return _erpow(a, v)
 end
 
 ## ── Linear algebra ──────────────────────────────────────────────────────────
@@ -540,6 +589,8 @@ function _collect_expr_variables!(
         end
     elseif storage isa EPowStorage
         _collect_expr_variables!(acc, seen, storage_base(storage))
+    elseif storage isa ERPowStorage
+        _collect_expr_variables!(acc, seen, storage_base(storage))
     elseif storage isa EFnStorage
         _collect_expr_variables!(acc, seen, storage_arg(storage))
     end
@@ -613,32 +664,64 @@ function _differentiate(e::Expression, v::Symbol)::Expression
         return _emul(
             Expression[SymExpr.ENum(ComplexF64(k)), _epow(storage_base(storage), k - 1), db],
         )
+    elseif storage isa ERPowStorage
+        db = _differentiate(storage_base(storage), v)
+        iszero(db) && return zero(Expression)
+        r = storage.exp
+        return _emul(
+            Expression[
+                SymExpr.ENum(r), _erpow(storage_base(storage), r - one(ComplexF64)), db,
+            ],
+        )
     else # EFnStorage
         da = _differentiate(storage_arg(storage), v)
         iszero(da) && return zero(Expression)
-        kind = storage.kind
-        if kind == SUnaryKind.UNARY_SQRT
-            # d/dx sqrt(a) = a' / (2 sqrt(a))
-            return _emul(
-                Expression[
-                    SymExpr.ENum(ComplexF64(0.5)),
-                    _epow(_efn(SUnaryKind.UNARY_SQRT, storage_arg(storage)), -1),
-                    da,
-                ],
-            )
-        elseif kind == SUnaryKind.UNARY_SIN
-            return _emul(Expression[_efn(SUnaryKind.UNARY_COS, storage_arg(storage)), da])
-        else
-            return _emul(
-                Expression[
-                    SymExpr.ENum(-one(ComplexF64)),
-                    _efn(SUnaryKind.UNARY_SIN, storage_arg(storage)),
-                    da,
-                ],
-            )
-        end
+        return _emul(Expression[_unary_derivative(storage.kind, storage_arg(storage)), da])
     end
 end
+
+# The outer factor of the chain rule: d/dx f(a) = f'(a) · a'.
+function _unary_derivative(kind::SUnaryKind.T, a::Expression)::Expression
+    if kind == SUnaryKind.UNARY_SQRT
+        return _emul(
+            Expression[
+                SymExpr.ENum(ComplexF64(0.5)), _epow(_efn(SUnaryKind.UNARY_SQRT, a), -1),
+            ],
+        )
+    elseif kind == SUnaryKind.UNARY_SIN
+        return _efn(SUnaryKind.UNARY_COS, a)
+    elseif kind == SUnaryKind.UNARY_COS
+        return _emul(Expression[-one(Expression), _efn(SUnaryKind.UNARY_SIN, a)])
+    elseif kind == SUnaryKind.UNARY_EXP
+        return _efn(SUnaryKind.UNARY_EXP, a)
+    elseif kind == SUnaryKind.UNARY_TAN
+        return _eadd(
+            Expression[one(Expression), _epow(_efn(SUnaryKind.UNARY_TAN, a), 2)],
+        )
+    elseif kind == SUnaryKind.UNARY_ASIN
+        return _epow(_efn(SUnaryKind.UNARY_SQRT, _one_minus_square(a)), -1)
+    elseif kind == SUnaryKind.UNARY_ACOS
+        return _emul(
+            Expression[
+                -one(Expression),
+                _epow(_efn(SUnaryKind.UNARY_SQRT, _one_minus_square(a)), -1),
+            ],
+        )
+    elseif kind == SUnaryKind.UNARY_SINH
+        return _efn(SUnaryKind.UNARY_COSH, a)
+    elseif kind == SUnaryKind.UNARY_COSH
+        return _efn(SUnaryKind.UNARY_SINH, a)
+    end
+    return _eadd(
+        Expression[
+            one(Expression),
+            _emul(Expression[-one(Expression), _epow(_efn(SUnaryKind.UNARY_TANH, a), 2)]),
+        ],
+    )
+end
+
+_one_minus_square(a::Expression)::Expression =
+    _eadd(Expression[one(Expression), _emul(Expression[-one(Expression), _epow(a, 2)])])
 
 """
     differentiate(f::Expression, v::Expression) -> Expression
@@ -678,6 +761,8 @@ function _subs(e::Expression, map::Dict{Symbol, Expression})::Expression
         return _emul(Expression[_subs(a, map) for a in storage_args(storage)])
     elseif storage isa EPowStorage
         return _epow(_subs(storage_base(storage), map), storage.exp)
+    elseif storage isa ERPowStorage
+        return _erpow(_subs(storage_base(storage), map), storage.exp)
     else # EFnStorage
         return _efn(storage.kind, _subs(storage_arg(storage), map))
     end
@@ -810,8 +895,8 @@ function num_den(f::Expression)::Tuple{Expression, Expression}
         k = storage.exp
         return k > 0 ? (_epow(p, k), _epow(q, k)) : (_epow(q, -k), _epow(p, -k))
     end
-    # Literals, variables and `sqrt`/`sin`/`cos` (which have no rational normal
-    # form) are their own numerator.
+    # Literals, variables, a non-integer power and the unary functions have no
+    # rational normal form, so they are their own numerator.
     return f, one(Expression)
 end
 
@@ -856,6 +941,10 @@ function _degree_bounds(
         bounds == (0, 0) && return (0, 0)
         storage.exp < 0 && return nothing
         return (storage.exp * bounds[1], storage.exp * bounds[2])
+    elseif storage isa ERPowStorage
+        bounds = _degree_bounds(storage_base(storage), weights)
+        bounds === nothing && return nothing
+        return bounds == (0, 0) ? (0, 0) : nothing
     else # EFnStorage
         bounds = _degree_bounds(storage_arg(storage), weights)
         bounds === nothing && return nothing
@@ -932,6 +1021,8 @@ function has_real_coefficients(e::Expression)::Bool
         return true
     elseif storage isa EPowStorage
         return has_real_coefficients(storage_base(storage))
+    elseif storage isa ERPowStorage
+        return isreal(storage.exp) && has_real_coefficients(storage_base(storage))
     else # EFnStorage
         return has_real_coefficients(storage_arg(storage))
     end
@@ -966,6 +1057,8 @@ function expression_scale(e::Expression)::Float64
         return s
     elseif storage isa EPowStorage
         return expression_scale(storage_base(storage))^storage.exp
+    elseif storage isa ERPowStorage
+        return expression_scale(storage_base(storage))^real(storage.exp)
     else # EFnStorage
         storage.kind == SUnaryKind.UNARY_SQRT &&
             return sqrt(expression_scale(storage_arg(storage)))
@@ -1009,11 +1102,12 @@ function _show_expr(io::IO, e::Expression, prec::Int)::Nothing
     elseif storage isa EPowStorage
         _show_expr(io, storage_base(storage), 3)
         print(io, "^", storage.exp)
+    elseif storage isa ERPowStorage
+        _show_expr(io, storage_base(storage), 3)
+        print(io, "^")
+        _show_number(io, storage.exp)
     else # EFnStorage
-        kind = storage.kind
-        name = kind == SUnaryKind.UNARY_SQRT ? "sqrt" :
-            kind == SUnaryKind.UNARY_SIN ? "sin" : "cos"
-        print(io, name, "(")
+        print(io, _unary_name(storage.kind), "(")
         _show_expr(io, storage_arg(storage), 0)
         print(io, ")")
     end
@@ -1055,6 +1149,10 @@ function expression_to_sexpr(
         )
     elseif storage isa EPowStorage
         return SExpr.SPow(
+            expression_to_sexpr(storage_base(storage), var_to_idx, param_to_idx), storage.exp,
+        )
+    elseif storage isa ERPowStorage
+        return _canonical_rpow(
             expression_to_sexpr(storage_base(storage), var_to_idx, param_to_idx), storage.exp,
         )
     else # EFnStorage

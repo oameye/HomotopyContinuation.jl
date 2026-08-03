@@ -376,9 +376,27 @@ function rigid_multiview_system()
 end
 
 # (name, expressions, variables, parameters, reference implementation)
+# Every remaining unary op and a fractional power, on arguments that stay clear of
+# every branch cut and pole: `asin`/`acos` need |arg| ≤ 1 and `x + 2` keeps the
+# power's base positive.
+function transcendental_system()
+    @var x y a
+    exprs = [
+        exp(x) + tan(y) - a,
+        asin(x / 4) + acos(y / 4) + sinh(x) * cosh(y) + tanh(a * x) + (x + 2)^(3 // 2),
+    ]
+    ref = (z, p) -> [
+        exp(z[1]) + tan(z[2]) - p[1],
+        asin(z[1] / 4) + acos(z[2] / 4) + sinh(z[1]) * cosh(z[2]) + tanh(p[1] * z[1]) +
+            (z[1] + 2)^(3 / 2),
+    ]
+    return (exprs, [x, y], [a], ref)
+end
+
 const NONPOLYNOMIAL_SYSTEM_COLLECTION = [
     ("small_rational", small_rational_system()...),
     ("sqrt_parameters", sqrt_parameters_system()...),
     ("trig", trig_system()...),
+    ("transcendental", transcendental_system()...),
     ("rigid_multiview", rigid_multiview_system()...),
 ]

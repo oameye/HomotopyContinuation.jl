@@ -151,6 +151,47 @@
         arg_4::Int32
         output::Int32
     end
+
+    struct Acos
+        arg_1::Int32
+        output::Int32
+    end
+
+    struct Asin
+        arg_1::Int32
+        output::Int32
+    end
+
+    struct Cosh
+        arg_1::Int32
+        output::Int32
+    end
+
+    struct Exp
+        arg_1::Int32
+        output::Int32
+    end
+
+    struct Sinh
+        arg_1::Int32
+        output::Int32
+    end
+
+    struct Tan
+        arg_1::Int32
+        output::Int32
+    end
+
+    struct Tanh
+        arg_1::Int32
+        output::Int32
+    end
+
+    struct Pow
+        arg_1::Int32
+        arg_2::Int32
+        output::Int32
+    end
 end
 
 const ExecInstructionT = typeof(ExecInstruction.Stop(Int32(0)))
@@ -184,6 +225,14 @@ const _EXEC_INSTRUCTION_SPECS = (
     (:Mul4, :OP_MUL4),
     (:MulMulAdd, :OP_MULMULADD),
     (:MulMulSub, :OP_MULMULSUB),
+    (:Acos, :OP_ACOS),
+    (:Asin, :OP_ASIN),
+    (:Cosh, :OP_COSH),
+    (:Exp, :OP_EXP),
+    (:Sinh, :OP_SINH),
+    (:Tan, :OP_TAN),
+    (:Tanh, :OP_TANH),
+    (:Pow, :OP_POW),
 )
 
 struct Interpreter{V <: AbstractVector}

@@ -393,12 +393,11 @@ end
 # Logarithmic differentiation recurrence:
 # w[0] = a[0]^r
 # w[k] = (1/k) * (1/a[0]) * Σ_{j=1}^{k} (r*j - (k-j)) * a[j] * w[k-j]
-# This is the standard recurrence from Griewank & Walther (Chapter 13).
-@generated function _taylor_op_pow_int_recurrence(
-        a::TTS{N, T}, r::I,
-    ) where {N, T, I <: Integer}
+# This is the standard recurrence from Griewank & Walther (Chapter 13). It is
+# generic in `r`; only the order-0 term needs to know whether `r` is an integer.
+function _taylor_pow_recurrence_expr(N::Int, w0_call::Symbol)::Expr
     stmts = Expr[]
-    push!(stmts, :(w1 = op_pow_int(a.val[1], r)))
+    push!(stmts, :(w1 = $w0_call(a.val[1], r)))
     if N >= 2
         push!(stmts, :(a0_inv = inv(a.val[1])))
     end
@@ -426,6 +425,25 @@ end
         TTS($(Expr(:tuple, wvars...)))
     end
 end
+
+@generated function _taylor_op_pow_int_recurrence(
+        a::TTS{N, T}, r::I,
+    ) where {N, T, I <: Integer}
+    return _taylor_pow_recurrence_expr(N, :op_pow_int)
+end
+
+@generated function _taylor_op_pow_recurrence(
+        a::TTS{N, T}, r::R,
+    ) where {N, T, R <: Number}
+    return _taylor_pow_recurrence_expr(N, :op_pow)
+end
+
+# OP_POW # a^r where r is a non-integer number
+#
+# The exponent is a constant slot, so only its order-0 coefficient carries anything.
+# A vanishing `a[0]` is a branch point, and the recurrence reports it as non-finite.
+@inline taylor_op_pow(a::TTS{N, T}, r::TTS{N, S}) where {N, T, S} =
+    _taylor_op_pow_recurrence(a, r.val[1])
 
 # OP_SIN and OP_COS
 # Coupled recurrence (0-indexed):
@@ -491,6 +509,143 @@ end
         Base.@_inline_meta
         $(stmts...)
         TTS($(Expr(:tuple, cvars...)))
+    end
+end
+
+# OP_EXP
+# e[0] = exp(a[0])
+# e[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * e[k-j]
+@generated function taylor_op_exp(a::TTS{N, T}) where {N, T}
+    stmts = Expr[:(e1 = exp(a.val[1]))]
+    for k in 2:N
+        terms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:e, k - j))) for j in 1:(k - 1)]
+        push!(stmts, :($(Symbol(:e, k)) = ($(_expr_sum(terms))) / $(k - 1)))
+    end
+    evars = Symbol[Symbol(:e, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, evars...)))
+    end
+end
+
+# OP_SINH and OP_COSH
+# Coupled recurrence, as for sin/cos but with no sign flip:
+# s[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * c[k-j]
+# c[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * s[k-j]
+function _taylor_hyperbolic_stmts(N::Int)::Vector{Expr}
+    stmts = Expr[:(s1 = sinh(a.val[1])), :(c1 = cosh(a.val[1]))]
+    for k in 2:N
+        sterms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:c, k - j))) for j in 1:(k - 1)]
+        push!(stmts, :($(Symbol(:s, k)) = ($(_expr_sum(sterms))) / $(k - 1)))
+        cterms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:s, k - j))) for j in 1:(k - 1)]
+        push!(stmts, :($(Symbol(:c, k)) = ($(_expr_sum(cterms))) / $(k - 1)))
+    end
+    return stmts
+end
+
+@generated function taylor_op_sinh(a::TTS{N, T}) where {N, T}
+    stmts = N == 1 ? Expr[:(s1 = sinh(a.val[1]))] : _taylor_hyperbolic_stmts(N)
+    svars = Symbol[Symbol(:s, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, svars...)))
+    end
+end
+
+@generated function taylor_op_cosh(a::TTS{N, T}) where {N, T}
+    stmts = N == 1 ? Expr[:(c1 = cosh(a.val[1]))] : _taylor_hyperbolic_stmts(N)
+    cvars = Symbol[Symbol(:c, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, cvars...)))
+    end
+end
+
+# OP_TAN and OP_TANH
+# `t' = u·a'` with `u = 1 + t²` for tan and `u = 1 - t²` for tanh, so
+# t[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * u[k-j],  u = ±(t ⋆ t) shifted by 1.
+function _taylor_tangent_stmts(N::Int, t0::Symbol, sign::Int)::Vector{Expr}
+    stmts = Expr[:(t1 = $t0(a.val[1]))]
+    for k in 1:(N - 1)
+        sq = _expr_sum(
+            Expr[:($(Symbol(:t, i)) * $(Symbol(:t, k + 1 - i))) for i in 1:k],
+        )
+        push!(
+            stmts,
+            k == 1 ? :($(Symbol(:u, 1)) = one(T) + $sign * $sq) :
+                :($(Symbol(:u, k)) = $sign * $sq),
+        )
+        terms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:u, k + 1 - j))) for j in 1:k]
+        push!(stmts, :($(Symbol(:t, k + 1)) = ($(_expr_sum(terms))) / $k))
+    end
+    return stmts
+end
+
+@generated function taylor_op_tan(a::TTS{N, T}) where {N, T}
+    stmts = _taylor_tangent_stmts(N, :tan, 1)
+    tvars = Symbol[Symbol(:t, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, tvars...)))
+    end
+end
+
+@generated function taylor_op_tanh(a::TTS{N, T}) where {N, T}
+    stmts = _taylor_tangent_stmts(N, :tanh, -1)
+    tvars = Symbol[Symbol(:t, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, tvars...)))
+    end
+end
+
+# OP_ASIN
+# `y' · g = a'` with `g = √(1 - a²)`, so
+# y[k] = (k*a[k] - Σ_{j=1}^{k-1} j*y[j]*g[k-j]) / (k*g[0]).
+@generated function _taylor_asin_from(a::TTS{N, T}, g::TTS{N, T}) where {N, T}
+    stmts = Expr[:(y1 = asin(a.val[1]))]
+    for k in 2:N
+        m = k - 1
+        expr = :($m * a.val[$k])
+        if m >= 2
+            sub = _expr_sum(
+                Expr[
+                    :($j * $(Symbol(:y, j + 1)) * g.val[$(m - j + 1)]) for j in 1:(m - 1)
+                ],
+            )
+            expr = :($expr - ($sub))
+        end
+        push!(stmts, :($(Symbol(:y, k)) = ($expr) / ($m * g.val[1])))
+    end
+    yvars = Symbol[Symbol(:y, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, yvars...)))
+    end
+end
+
+@inline function taylor_op_asin(a::TTS{N, T}) where {N, T}
+    N == 1 && return TTS((asin(a.val[1]),))
+    return _taylor_asin_from(a, taylor_op_sqrt(taylor_op_sub(one(TTS{N, T}), taylor_op_sqr(a))))
+end
+
+# OP_ACOS # acos = π/2 - asin, so every coefficient past the first is negated.
+@generated function taylor_op_acos(a::TTS{N, T}) where {N, T}
+    N == 1 && return :(TTS((acos(a.val[1]),)))
+    vars = Any[:(acos(a.val[1]))]
+    for k in 2:N
+        push!(vars, :(-y.val[$k]))
+    end
+    return quote
+        Base.@_inline_meta
+        y = taylor_op_asin(a)
+        TTS($(Expr(:tuple, vars...)))
     end
 end
 

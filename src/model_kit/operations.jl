@@ -54,6 +54,20 @@ end
     OP_MUL4 # a * b * c * d
     OP_MULMULADD # a * b + c * d
     OP_MULMULSUB # a * b - c * d
+
+    # Out of arity order: `execute_instructions!` emits its switch in declaration
+    # order, and a rare op ahead of `OP_ADD`/`OP_MUL` lengthens every hot tape walk.
+    # Arity 1
+    OP_ACOS # cos⁻¹(a)
+    OP_ASIN # sin⁻¹(a)
+    OP_COSH # cosh(a)
+    OP_EXP # e^a
+    OP_SINH # sinh(a)
+    OP_TAN # tan(a)
+    OP_TANH # tanh(a)
+
+    # Arity 2
+    OP_POW # a ^ b where b is a non-integer number
 end
 
 const _OP_ARITY = (
@@ -62,6 +76,8 @@ const _OP_ARITY = (
     2, 2, 2, 2, 2,
     3, 3, 3, 3, 3,
     4, 4, 4, 4,
+    1, 1, 1, 1, 1, 1, 1,
+    2,
 )
 
 const _OP_CALL = (
@@ -71,14 +87,20 @@ const _OP_CALL = (
     :op_add, :op_div, :op_mul, :op_sub, :op_pow_int,
     :op_add3, :op_mul3, :op_muladd, :op_mulsub, :op_submul,
     :op_add4, :op_mul4, :op_mulmuladd, :op_mulmulsub,
+    :op_acos, :op_asin, :op_cosh, :op_exp, :op_sinh, :op_tan, :op_tanh,
+    :op_pow,
 )
 
+# `OP_POW` takes its exponent from the tape rather than the instruction, since an
+# `Instruction` input is an `Int32` slot and a real exponent does not fit one.
 const _OP_IMMEDIATE_INPUT = (
     0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 2,
     0, 0, 0, 0, 0,
     0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0,
+    0,
 )
 
 @inline _op_index(op::OpType.T) = Int(op) + 1
@@ -155,3 +177,13 @@ end
 @inline op_mul4(a, b, c, d) = a * b * c * d
 @inline op_mulmuladd(a, b, c, d) = a * b + c * d
 @inline op_mulmulsub(a, b, c, d) = a * b - c * d
+
+# transcendental
+@inline op_acos(x) = acos(x)
+@inline op_asin(x) = asin(x)
+@inline op_cosh(x) = cosh(x)
+@inline op_exp(x) = exp(x)
+@inline op_sinh(x) = sinh(x)
+@inline op_tan(x) = tan(x)
+@inline op_tanh(x) = tanh(x)
+@inline op_pow(x, r) = x^r

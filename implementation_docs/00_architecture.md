@@ -286,7 +286,9 @@ Parameterized by tape type: `Vector{ComplexF64}`, `Vector{ComplexDF64}`, or `Vec
     SMul(args::Vector{SExpr})
     SPow(base::SExpr, exp::Int)          # exp may be negative (division)
     SNeg(arg::SExpr)
-    SUnary(kind::SUnaryKind.T, arg::SExpr)   # sqrt, sin, cos
+    SRPow(base::SExpr, exp::ComplexF64)  # non-integer exponent
+    SUnary(kind::SUnaryKind.T, arg::SExpr)   # sqrt, exp, sin, cos, tan, asin, acos,
+                                             # sinh, cosh, tanh
     SFuncSym(kind::SFuncKind.T, args::Vector{SExpr})
 end
 const SExprT = typeof(SExpr.SConst(zero(ComplexF64)))  # single concrete type
@@ -313,8 +315,8 @@ end
 const Expression = typeof(SymExpr.ENum(zero(ComplexF64)))
 ```
 
-`Expression` is the input layer for systems that are not polynomial: division, negative
-integer powers, `sqrt`, `sin` and `cos`. Because it subtypes `Number`, ordinary Julia
+`Expression` is the input layer for systems that are not polynomial: division, powers with a
+negative or non-integer exponent, and the ten unary functions. Because it subtypes `Number`, ordinary Julia
 arithmetic, `sum`, broadcasting and matrix products build trees without extra machinery.
 
 Every constructor canonicalizes: `EAdd`/`EMul` flatten nested nodes, fold numeric literals,

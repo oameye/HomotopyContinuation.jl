@@ -1,6 +1,8 @@
 using Test
-using HomotopyContinuationNext: @polyvar, @var, System
-using HomotopyContinuationNextCertification: AcbInterpreter, acb_execute!, setprecision!
+using HomotopyContinuationNext: @polyvar, @var, System, Expression
+using HomotopyContinuationNextCertification: AcbInterpreter, acb_execute!, setprecision!,
+    acb_op_exp!, acb_op_sinh!, acb_op_cosh!, acb_op_tan!, acb_op_tanh!, acb_op_asin!,
+    acb_op_acos!, acb_op_pow!, acb_op_sqrt!
 import DynamicPolynomials as DP
 import Arblib
 
@@ -54,6 +56,32 @@ function nonpolynomial_acb_systems()
             (z, p) -> [
                 sqrt(p[1]) cos(z[2])
                 -z[2] * sin(z[1] * z[2]) -z[1] * sin(z[1] * z[2])
+            ],
+        ),
+        (
+            "exp, tan and hyperbolics",
+            [exp(x) + tan(y) - a, sinh(x) * cosh(y) + tanh(b * x)], [x, y], [a, b],
+            (z, p) -> [
+                exp(z[1]) + tan(z[2]) - p[1],
+                sinh(z[1]) * cosh(z[2]) + tanh(p[2] * z[1]),
+            ],
+            (z, p) -> [
+                exp(z[1]) 1 + tan(z[2])^2
+                cosh(z[1]) * cosh(z[2]) + p[2] * (1 - tanh(p[2] * z[1])^2) sinh(z[1]) *
+                    sinh(z[2])
+            ],
+        ),
+        (
+            "inverse trig and a fractional power",
+            [asin(x / 4) + (y + 4)^(3 // 2), acos(y / 4) + (x + 4)^(-4 // 3)],
+            [x, y], Expression[],
+            (z, p) -> [
+                asin(z[1] / 4) + (z[2] + 4)^(3 / 2),
+                acos(z[2] / 4) + (z[1] + 4)^(-4 / 3),
+            ],
+            (z, p) -> [
+                1 / (4 * sqrt(1 - (z[1] / 4)^2)) (3 / 2) * (z[2] + 4)^(1 / 2)
+                (-4 / 3) * (z[1] + 4)^(-7 / 3) -1 / (4 * sqrt(1 - (z[2] / 4)^2))
             ],
         ),
     ]
@@ -141,6 +169,44 @@ end
         acb_execute!(u_low, low, xv, pv)
         for i in 1:m
             @test Arblib.contains(u_low[i], u[i])
+        end
+    end
+
+    # The branch-cut rejections, which the systems above stay away from.
+    @testset "transcendental op kernels" begin
+        prec = 256
+        ball(re, im, err) = (
+            z = Arblib.Acb(re, im; prec);
+            Arblib.add_error!(z, Arblib.Mag(err));
+            z
+        )
+        t = Arblib.Acb(0; prec)
+        for (op!, f) in (
+                (acb_op_exp!, exp), (acb_op_sinh!, sinh), (acb_op_cosh!, cosh),
+                (acb_op_tan!, tan), (acb_op_tanh!, tanh),
+                (acb_op_asin!, asin), (acb_op_acos!, acos),
+            )
+            op!(t, ball(0.7, -1.3, 0.0), ())
+            @test ComplexF64(t) ≈ f(0.7 - 1.3im) rtol = 1.0e-12
+        end
+        acb_op_pow!(t, ball(1.7, 0.4, 0.0), Arblib.Acb(1.5, 0.0; prec), ())
+        @test ComplexF64(t) ≈ (1.7 + 0.4im)^1.5 rtol = 1.0e-12
+
+        # These are the widths Arb itself still answers on, with a sound but
+        # discontinuous enclosure the Krawczyk hypotheses cannot use.
+        for op! in (acb_op_asin!, acb_op_acos!)
+            op!(t, ball(2.0, 0.0, 1.0e-12), ())
+            @test !isfinite(t)
+            op!(t, ball(-2.0, 0.0, 1.0e-12), ())
+            @test !isfinite(t)
+            op!(t, ball(0.3, 0.0, 1.0e-12), ())
+            @test isfinite(t)
+        end
+        for op! in (acb_op_sqrt!, (u, x, m) -> acb_op_pow!(u, x, Arblib.Acb(1.5), m))
+            op!(t, ball(-2.0, 0.0, 1.0e-12), ())
+            @test !isfinite(t)
+            op!(t, ball(2.0, 0.0, 1.0e-12), ())
+            @test isfinite(t)
         end
     end
 end

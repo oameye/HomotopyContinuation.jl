@@ -514,11 +514,14 @@ The fix is to call `_lower_input` from the typed `System` frame, where the input
 known, and pass the result through the barrier as a concretely typed `LoweredInput`. Adding a
 front-end is therefore adding a `_lower_input` method, never a branch further down.
 
-### Rectangular intervals implement sqrt, sin and cos
+### Rectangular intervals implement the transcendental functions
 
-v2 has no `sqrt`/`sin`/`cos` for its rectangular interval type and certifies any system using
-them with Arb from the start. v3 implements them, so those systems take the Float64 Krawczyk
-path and only escalate when the test actually fails.
+v2 has none of these for its rectangular interval type, and its Float64 path is the only way
+into `certify`, so on 2.22.1 certifying a system that uses one throws a `MethodError`
+(`no method matching sin(::IComplexF64)`) rather than falling back to Arb. v3 implements
+`sqrt`, `exp`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `sinh`, `cosh`, `tanh` and a
+non-integer `^`, so those systems take the Float64 Krawczyk path and only escalate when the
+test actually fails.
 
 The complex `sqrt` needs care. The textbook form `√z = u + i·sign(Im z)·v` with
 `u = √((|z| + Re z)/2)` and `v = √((|z| - Re z)/2)` is sound but useless near the positive real

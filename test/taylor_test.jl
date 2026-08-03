@@ -7,7 +7,9 @@ using HomotopyContinuationNext:
     taylor_op_sin, taylor_op_cos, taylor_op_pow_int,
     taylor_op_muladd, taylor_op_mulsub, taylor_op_submul,
     taylor_op_add3, taylor_op_add4, taylor_op_mul3, taylor_op_mul4,
-    taylor_op_mulmuladd, taylor_op_mulmulsub
+    taylor_op_mulmuladd, taylor_op_mulmulsub,
+    taylor_op_exp, taylor_op_sinh, taylor_op_cosh, taylor_op_tan, taylor_op_tanh,
+    taylor_op_asin, taylor_op_acos, taylor_op_pow
 using HomotopyContinuationNext: OpType, op_call
 using FixedSizeArrays: FixedSizeArray
 const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
@@ -133,6 +135,10 @@ end
     b = TruncatedTaylorSeries((-0.7 + 0.9im, 0.2 + 0.1im, 0.3 - 0.05im, -0.2 + 0.15im))
     c = TruncatedTaylorSeries((0.5 - 1.1im, -0.25 + 0.4im, 0.1 + 0.2im, 0.3 - 0.1im))
     d = TruncatedTaylorSeries((1.1 + 0.2im, 0.15 + 0.35im, -0.2 - 0.1im, 0.05 - 0.25im))
+    e = TruncatedTaylorSeries((0.3 + 0.2im, 0.1 - 0.05im, 0.02 + 0.03im, -0.01 + 0.02im))
+    # OP_POW takes its exponent from a tape slot, so it arrives as a constant series.
+    r15 = TruncatedTaylorSeries((1.5 + 0.0im, 0.0im, 0.0im, 0.0im))
+    rm43 = TruncatedTaylorSeries((-4 / 3 + 0.0im, 0.0im, 0.0im, 0.0im))
 
     cases = [
         ("identity", taylor_op_identity, x -> x, (a,)),
@@ -160,6 +166,16 @@ end
         ("mul4", taylor_op_mul4, (x, y, z, w) -> x * y * z * w, (a, b, c, d)),
         ("mulmuladd", taylor_op_mulmuladd, (x, y, z, w) -> x * y + z * w, (a, b, c, d)),
         ("mulmulsub", taylor_op_mulmulsub, (x, y, z, w) -> x * y - z * w, (a, b, c, d)),
+        ("exp", taylor_op_exp, x -> exp(x), (a,)),
+        ("sinh", taylor_op_sinh, x -> sinh(x), (a,)),
+        ("cosh", taylor_op_cosh, x -> cosh(x), (a,)),
+        ("tan", taylor_op_tan, x -> tan(x), (a,)),
+        ("tanh", taylor_op_tanh, x -> tanh(x), (a,)),
+        # `asin`/`acos` need a constant term inside the unit disc, away from ±1.
+        ("asin", taylor_op_asin, x -> asin(x), (e,)),
+        ("acos", taylor_op_acos, x -> acos(x), (e,)),
+        ("pow(1.5)", x -> taylor_op_pow(x, r15), x -> x^1.5, (a,)),
+        ("pow(-4/3)", x -> taylor_op_pow(x, rm43), x -> x^(-4 / 3), (a,)),
     ]
 
     @testset "$name" for (name, taylor_op, scalar_op, args) in cases

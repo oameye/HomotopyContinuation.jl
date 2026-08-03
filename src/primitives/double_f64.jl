@@ -1,6 +1,7 @@
 # DoubleF64 — extended-precision arithmetic using error-free transformations.
 # The transcendental surface is limited to what the tape can execute: `exp`,
-# `sin`, `cos`, `sincos`, `sinh` and `cosh`.
+# `log`, `sin`, `cos`, `sincos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`
+# and `tanh`.
 
 # ---------------------------------------------------------------------------
 # Error-free transformations
@@ -512,6 +513,9 @@ Base.:<=(a::Float64, b::DoubleF64) = !(b < a)
 
 Base.:(==)(a::DoubleF64, b::Float64) = a.hi == b && a.lo == 0.0
 Base.:(==)(a::Float64, b::DoubleF64) = b == a
+# Without this the fallback is `===`, which separates `0.0` from `-0.0` in either
+# limb and equates two NaNs.
+Base.:(==)(a::DoubleF64, b::DoubleF64) = a.hi == b.hi && a.lo == b.lo
 
 # ---------------------------------------------------------------------------
 # Predicates and special value queries
@@ -780,6 +784,175 @@ function Base.sinh(a::DoubleF64)::DoubleF64
         s += p * _INV_FACTORIAL[n]
     end
     return s
+end
+
+# Past this magnitude `1 - |tanh a| = 2e^(-2|a|)` sits below the double-double ulp
+# of 1, so tanh saturates.
+const _TANH_SATURATE = 40.0
+
+function Base.tanh(a::DoubleF64)::DoubleF64
+    isnan(a) && return double_nan
+    iszero(a) && return zero(a)
+    if abs(a.hi) > _TANH_SATURATE
+        return a.hi > 0.0 ? one(DoubleF64) : -one(DoubleF64)
+    end
+    if abs(a.hi) > 0.05
+        e = exp(a)
+        e_inv = inv(e)
+        return (e - e_inv) / (e + e_inv)
+    end
+    # `e ∓ 1/e` loses its leading digits near zero, where `sinh` sums a series
+    # instead and `cosh = sqrt(1 + sinh²)` inherits that accuracy.
+    s = sinh(a)
+    return s / sqrt(one(DoubleF64) + square(s))
+end
+
+"""
+    log(a::DoubleF64)
+
+One Newton step on `exp` from a `Float64` seed, which doubles the ~53 correct bits
+to the full double-double width.
+"""
+function Base.log(a::DoubleF64)::DoubleF64
+    isnan(a) && return double_nan
+    isone(a) && return zero(DoubleF64)
+    iszero(a) && return -double_inf
+    a.hi < 0.0 && throw(DomainError(a, "log of a negative DoubleF64 is not real"))
+    isinf(a) && return double_inf
+
+    # The Newton step evaluates `exp(-x)`, which underflows the double-double range
+    # (`floatmin(DoubleF64) = 2e-292`) and loses the low limb once `a` leaves it.
+    k = exponent(a.hi)
+    m = ldexp(a, -k)
+
+    # The correction is a difference of two values near 1, so `log(m)` carries the
+    # absolute accuracy of `m * exp(-x)` (~2⁻¹⁰⁵), not its relative accuracy.
+    x = DoubleF64(log(m.hi))
+    x = x + m * exp(-x) - 1.0
+    return x + double_log2 * k
+end
+
+"""
+    atan(y::DoubleF64, x::DoubleF64)
+
+One Newton step on whichever of `sin` or `cos` has the larger derivative at the
+`Float64` seed angle, which doubles its ~53 correct bits.
+"""
+function Base.atan(y::DoubleF64, x::DoubleF64)::DoubleF64
+    (isnan(x) || isnan(y)) && return double_nan
+    if isinf(x) || isinf(y)
+        # The branches below give the approached axis or diagonal exactly.
+        return atan(
+            DoubleF64(isinf(y) ? sign(y.hi) : 0.0),
+            DoubleF64(isinf(x) ? sign(x.hi) : 0.0),
+        )
+    end
+    if iszero(x)
+        iszero(y) && return zero(DoubleF64)
+        return y.hi > 0.0 ? double_pi2 : -double_pi2
+    end
+    if iszero(y)
+        return x.hi > 0.0 ? zero(DoubleF64) : double_pi
+    end
+    iszero(x - y) && return y.hi > 0.0 ? double_pi4 : -double_3pi4
+    iszero(x + y) && return y.hi > 0.0 ? double_3pi4 : -double_pi4
+
+    # Scale out the common exponent so `x² + y²` cannot overflow or flush.
+    e = exponent(max(abs(x.hi), abs(y.hi)))
+    xs = ldexp(x, -e)
+    ys = ldexp(y, -e)
+    r = sqrt(square(xs) + square(ys))
+    xx = xs / r
+    yy = ys / r
+
+    z = DoubleF64(atan(y.hi, x.hi))
+    s, c = sincos(z)
+    return abs(xx.hi) > abs(yy.hi) ? z + (yy - s) / c : z - (xx - c) / s
+end
+
+Base.atan(a::DoubleF64)::DoubleF64 = atan(a, one(DoubleF64))
+
+function Base.tan(a::DoubleF64)::DoubleF64
+    s, c = sincos(a)
+    iszero(c) && return double_inf
+    return s / c
+end
+
+function Base.asin(a::DoubleF64)::DoubleF64
+    isnan(a) && return double_nan
+    abs(a) > 1.0 && throw(DomainError(a, "asin is defined on [-1, 1]"))
+    a == 1.0 && return double_pi2
+    a == -1.0 && return -double_pi2
+    return atan(a, sqrt(one(DoubleF64) - square(a)))
+end
+
+function Base.acos(a::DoubleF64)::DoubleF64
+    isnan(a) && return double_nan
+    abs(a) > 1.0 && throw(DomainError(a, "acos is defined on [-1, 1]"))
+    a == 1.0 && return zero(DoubleF64)
+    a == -1.0 && return double_pi
+    return atan(sqrt(one(DoubleF64) - square(a)), a)
+end
+
+# ---------------------------------------------------------------------------
+# ComplexDF64 transcendental functions
+# ---------------------------------------------------------------------------
+#
+# Base's generic complex `exp`, `sqrt`, `sin`, `cos`, `sinh` and `cosh` already work
+# over `DoubleF64`. These route through `log1p`, `asinh` and `typemax` instead,
+# whose thresholds are tuned to `Float64`.
+
+Base.log(z::ComplexDF64)::ComplexDF64 =
+    ComplexDF64(log(abs(z)), atan(imag(z), real(z)))
+
+# Base's `_cpow` needs a real `^` on the limbs, which has no direct algorithm here.
+function Base.:^(z::ComplexDF64, w::ComplexDF64)::ComplexDF64
+    if iszero(z)
+        iszero(w) && return one(ComplexDF64)
+        return real(w).hi > 0.0 ? zero(ComplexDF64) :
+            ComplexDF64(double_nan, double_nan)
+    end
+    return exp(w * log(z))
+end
+
+# tan(x + iy) = (sin 2x + i sinh 2y) / (cos 2x + cosh 2y)
+function Base.tan(z::ComplexDF64)::ComplexDF64
+    x = real(z)
+    y = imag(z)
+    # cosh 2y dominates every other term, leaving ±i.
+    abs(y.hi) > _TANH_SATURATE &&
+        return ComplexDF64(zero(DoubleF64), DoubleF64(sign(y.hi)))
+    y2 = mul_pwr2(y, 2.0)
+    s, c = sincos(mul_pwr2(x, 2.0))
+    d = c + cosh(y2)
+    return ComplexDF64(s / d, sinh(y2) / d)
+end
+
+# tanh(x + iy) = (sinh 2x + i sin 2y) / (cosh 2x + cos 2y)
+function Base.tanh(z::ComplexDF64)::ComplexDF64
+    x = real(z)
+    y = imag(z)
+    abs(x.hi) > _TANH_SATURATE &&
+        return ComplexDF64(DoubleF64(sign(x.hi)), zero(DoubleF64))
+    x2 = mul_pwr2(x, 2.0)
+    s, c = sincos(mul_pwr2(y, 2.0))
+    d = cosh(x2) + c
+    return ComplexDF64(sinh(x2) / d, s / d)
+end
+
+# asin(z) = -i log(iz + √(1 - z²)), acos(z) = -i log(z + i√(1 - z²)).
+# Near the origin the log argument is near 1, where `abs` retains only absolute
+# accuracy: `asin(1e-8)` is relative-accurate to ~1e-24, not to the full width.
+function Base.asin(z::ComplexDF64)::ComplexDF64
+    r = sqrt(one(ComplexDF64) - z * z)
+    w = log(ComplexDF64(real(r) - imag(z), imag(r) + real(z)))
+    return ComplexDF64(imag(w), -real(w))
+end
+
+function Base.acos(z::ComplexDF64)::ComplexDF64
+    r = sqrt(one(ComplexDF64) - z * z)
+    w = log(ComplexDF64(real(z) - imag(r), imag(z) + real(r)))
+    return ComplexDF64(imag(w), -real(w))
 end
 
 # ---------------------------------------------------------------------------
