@@ -67,6 +67,7 @@ export independent_normal, weighted_normal
 # Witness sets / numerical irreducible decomposition
 export slice
 export ResultIterator, result_iterator, selection, restrict, start_solutions
+export nstart_solutions
 export total_degree_start_solutions
 export WitnessSet, trace_test, membership
 export system, linear_subspace, is_irreducible, Irreducibility, degree, points

@@ -103,8 +103,8 @@ function extended_prec_certify_solution(
         cert_cache::CertificationCache,
         index::Int,
         is_real_system::Bool,
-        ::Type{CertT};
-        max_precision::Int = 256,
+        ::Type{CertT},
+        max_precision::Int,
     ) where {CertT <: AbstractSolutionCertificate}
     arb = _arb(cert_cache)
     n = size(C, 1)

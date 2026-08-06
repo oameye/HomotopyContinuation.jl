@@ -60,8 +60,10 @@ const Cert = HomotopyContinuationNextCertification
     end
 
     @testset "ExplicitImports" begin
-        @test check_no_implicit_imports(Cert) === nothing
-        @test check_no_stale_explicit_imports(Cert) === nothing
+        # `@enumx` expands to a module, which the checks cannot see into.
+        allow_unanalyzable = (Cert.IteratorCertificationPhase,)
+        @test check_no_implicit_imports(Cert; allow_unanalyzable) === nothing
+        @test check_no_stale_explicit_imports(Cert; allow_unanalyzable) === nothing
         @test check_all_explicit_imports_via_owners(Cert) === nothing
         @test check_all_qualified_accesses_via_owners(Cert) === nothing
     end

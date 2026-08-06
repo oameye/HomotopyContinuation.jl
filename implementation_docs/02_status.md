@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-08-01.
+Last updated: 2026-08-06.
 
 **Reproduce:**
 - `make benchmark` — steady-state timings
@@ -15,8 +15,9 @@ Cold load + construction + first solve is ~10.6s versus v2's 45s, with no precom
 Endgame is at v2 result parity on v2's default parameters.
 
 At v2 parity: threading, overdetermined systems, parameter homotopies, monodromy (group actions,
-linear subspaces, trace test), certification (Krawczyk with Arb fallback, in the separate
-`lib/HomotopyContinuationNextCertification` subpackage), and witness sets / NID (`witness_set`,
+linear subspaces, trace test), certification (Krawczyk with Arb fallback and the low-memory
+route for a `ResultIterator`, in the separate `lib/HomotopyContinuationNextCertification`
+subpackage), and witness sets / NID (`witness_set`,
 `trace_test`, `membership`, `regeneration`, `decompose`, `nid`, including projective,
 zero-dimensional, parametric, and rational cases).
 
@@ -847,15 +848,135 @@ Closed by this audit:
     `NONPOLYNOMIAL_SYSTEM_COLLECTION` puts every new op through the sweep's central-difference,
     Cauchy-integral and tape-roundtrip oracles), and the certification subpackage.
 
+- [x] **Certification of a `ResultIterator`**, the low-memory route (Breiding, Brysiewicz and
+  Johnson, arXiv:2604.16623), in `lib/.../src/iterator_certification.jl`. `certify(F, ri, p,
+  IteratorCertification(), exec)` streams the iterator, certifies each successful endpoint, and
+  files the enclosure of one coordinate's real part into a binary partition of the real line;
+  leaves are refined until each holds at most `leaf_size_bound` enclosures, and only then is a
+  leaf certified jointly and deduplicated. Two enclosures in different leaves are separated in
+  that coordinate, so they are never compared. What bounds the memory is that a pass keeps one
+  interval per path and drops the certificate: certificates are held one leaf at a time.
+  Returns an `IteratorCertificationResult` (`bsp`, `ntracked`, `nstart_solutions`,
+  `ncandidates`, the certified and distinct counts, `nleaves`, `max_leaf_size`,
+  `oversized_leaves`, `unsplittable_leaves`, `nleaf_splits`), whose `BSPPartition` is iterable:
+  `collect` it for the leaves, each a `(lo, hi, nenclosures, unsplittable)` named tuple.
+  Closes all four `certification_test.jl` "BSP certification" testsets. Tests:
+  `lib/.../test/iterator_certification_test.jl`, plus the 3264-conic instance through this route
+  in `test/extensive/iterator_certification_extensive_test.jl`, which is where the pass count is
+  pinned against the solution count.
+
+  Where it departs from v2, and why:
+  - **v2's memory-bounded sampling is dead code in v2's own flow, and it is what its refinement
+    is built around.** `process_leaf!` reaches its reservoir sample and its two "recollect the
+    full leaf" passes only when `initial_entries === nothing`, and none of its three call sites
+    ever passes that. So v2 always holds every enclosure of the leaf it is refining, while every
+    step of that refinement is written as though it held one sampled enclosure: it proposes a cut
+    from `entries[1]` alone, then re-tracks and re-certifies the whole leaf to find out whether
+    the cut crosses anything and which child each solution lands in. v3 takes a leaf's entries as
+    a required argument and does all of that arithmetically.
+  - **Refinement therefore costs no tracking at all**, and the whole route is one pass over the
+    iterator to place the solutions plus one pass per terminal leaf to certify it (`ntracked` is
+    exactly `length(ri) + ncertified` when nothing is oversized, which the extensive test pins at
+    27072 + 3264). Against v2: a cut derived from one enclosure peels that enclosure off, so
+    reducing a leaf of N enclosures to `leaf_size_bound` takes O(N) splits, each paying a
+    re-tracking pass over the leaf, and leaves ~N terminal leaves each paying another. v3's cut
+    is the most balanced one the leaf admits, so the tree is O(log) deep and the terminal leaves
+    number ~N / `leaf_size_bound`. Sorting the enclosures by upper endpoint makes the candidate
+    cuts the gaps after each of them, and one suffix-minimum sweep says which gaps no later
+    enclosure reaches into, so the balanced valid cut costs one O(N log N) sort per split.
+  - **Leaves merge only while solutions are being placed.** After the assignment pass every
+    enclosure is inside its leaf by construction, and a valid cut leaves that true of both
+    children, so the "this leaf is stale, coarsen and start over" path cannot arise during
+    refinement. v2 carries it through every pass (`stable_leaf_entries!`, the `:restart` status),
+    which it has to, because its passes are what discover a straddling enclosure.
+  - **The terminal pass checks the assumption the partition rests on.** Both v2 and v3 drop
+    certificates and recompute them per leaf, which is only sound if certification is
+    reproducible. v3 asserts it: a leaf that comes back with a different number of certified
+    enclosures, or with one reaching outside the leaf it was filed into, errors instead of
+    quietly reporting a solution as distinct that was never separated. v2 checks the count only.
+  - **An oversized leaf that goes uncertified warns.** Its solutions are certified but never
+    deduplicated, so they are missing from the distinct counts; `oversized_leaves` records it,
+    but a caller reading `ndistinct_certified` alone would take an undercount for an answer.
+  - **One pass primitive, two folds.** Deciding where an enclosure sits relative to a leaf is
+    arithmetic on the projected interval, so it happens in a serial fold after the pass rather
+    than inside the tasks. Both remaining passes are then the same function (certify, project,
+    collect in iterator order), differing only in whether the fold keeps the interval or the
+    certificate. v2 writes each of its four passes twice, once serial and once threaded.
+  - **Threading goes through a core primitive, not `deepcopy`.** A `ResultIterator` tracks through
+    its cache's single tracker, so a concurrent pass needs one worker state per task:
+    `_foreach_path(f, make_state, ri, exec)` (`src/solving/result_iterator.jl`) builds them from
+    the cache's builder, as the threaded solve routes do, and hands each task its own
+    `CertificationCache` from a channel pool. v2 `deepcopy`s the tracker and the system, which in
+    v3 is unsafe (FunctionWrappers cache an object pointer). Payloads are sorted back into
+    iterator order, so every count is identical to `Serial()`; the test asserts all fourteen.
+    A cache whose builder cannot hand out independent workers (`SharedHomotopyBuilder`, which
+    `result_iterator(H, starts)` gets) tracks on one task whatever `exec` asks for, and both the
+    cache pool and the worker pool are sized from that same `_replay_ntasks` rather than from
+    `exec`; see `01_decisions.md`. The workers are built once for the run and handed to every pass
+    (`_path_workers`, then `_foreach_path(…, workers)`): one costs a cloned system evaluator plus
+    an endgame tracker, and this route makes a pass per terminal leaf, so rebuilding them per pass
+    was the whole of a measured 6.1× allocation on a 400-solution system.
+  - **One counter, not three.** An `IteratorCertificationStats` in the context carries every count
+    the run accumulates and is what the result stores; the progress meter reads it. The leaf
+    recursion therefore returns only the index the walk resumes at, and the display carries no
+    mirror of the counts it shows.
+  - **A leaf iterator is `restrict(ri, mask)`.** v3's selection is one index domain over the start
+    solutions, so the parent's selected indices are collected once into the context and a leaf's
+    mask is one write per entry. v2 carries an `indices` vector and a `bitmask` and composes them
+    per leaf.
+  - **The partition is its sorted cut points, not an interval tree.** Leaf `i` is
+    `(cuts[i], cuts[i + 1])` with parallel `counts` and `unsplittable` vectors, so the leaves are
+    a contiguous cover addressed by index: `_find_leaf` is a `searchsortedlast`, a split inserts a
+    cut, a merge deletes a run of them, and the walk over the partition advances by the leaf count
+    the subtree left behind. An `IntervalTrees.IntervalMap` keyed by leaf (plus a duplicate sorted
+    vector of the same leaves, plus a `Set` of tuple-keyed unsplittable ones) bought nothing here:
+    the leaves are disjoint and ordered, so no overlap query is ever asked. `IntervalTrees` stays a
+    dependency for `DistinctSolutionCertificates`, where the boxes genuinely do overlap.
+  - **Per-leaf dedup builds a fresh `DistinctSolutionCertificates`** rather than `empty!`ing a
+    reused accumulator (v3's `DistinctCertifiedSolutions` is immutable, and an
+    `IntervalTrees.IntervalMap` has no `empty!`). One reference point serves the whole run: two
+    overlapping enclosures have intersecting squared-distance intervals to any point, so the
+    reference point decides only how the tree buckets, never whether two certificates match.
+  - Options are one `IteratorCertification` struct embedding `Certification` and re-exposing its
+    keywords, as `TotalDegree` does with `CommonOptions`, where v2 passes twelve loose keywords
+    through four call layers. Dropped: v2's `check_oversized_leaves`, which only zeroes the
+    reported `oversized_leaves` count and changes nothing that was computed.
+  - A lazily filtered iterator is accepted (`Iterators.filter(f, ri)`) by carrying the predicate,
+    which is what v2's `result_predicate` does. The eager spelling,
+    `restrict(ri, selection(f, ri))`, needs nothing: it arrives as a plain `ResultIterator`.
+  - **Three accessors are spelled v3's way, not v2's**, which is a name-level parity break for a
+    caller porting code: v2's `npaths` is `ntracked` (core already means path trackings by that,
+    and every pass adds to it), `start_iterator_length` is `nstart_solutions` (a core accessor on
+    `ResultIterator` too, since the number is the solve's, and the old name read like
+    `length(ri)`, which it is not for a restricted iterator), and `target_iterator_length` is
+    `ncandidates` (also added to `CertificationResult`, which counted the same thing with no
+    accessor). `bsp` keeps v2's name. `BSPPartition` is iterable and has `length`, where v2
+    exposes the type with no way to read it; iteration rather than a `leaves` accessor keeps a
+    generic word out of the export surface, which core curates.
+  - `nstart_solutions` differs for a chained iterator: v3 materializes an iterator's
+    successful endpoints when it is used as another route's start solutions, so this is the number
+    that got through, where v2's lazy start solutions report the length of the first iterator.
+  - **`Certification` on this route errors instead of `MethodError`-ing**, naming
+    `IteratorCertification` and `certify(F, collect(ri), ...)`, and only a filter that bottoms out
+    at a `ResultIterator` is in reach of dispatch. Certifying every successful endpoint (singular
+    included) rather than `solutions(result)` is what the extensive test's singular-Jacobian
+    candidates come from, and the docstring says so.
+
+  One bug in `certify` itself surfaced, found by the 3264-conic test and latent for every caller:
+  `certify_solution` formed the approximate inverse with `inv!(lu!(J))`, which throws
+  `SingularException` on an exact zero pivot. Krawczyk has no operator at a singular Jacobian, so
+  such a candidate is now reported uncertified instead. Nothing reached it before because the
+  eager routes are handed `solutions(result)`, which is nonsingular-only; this route certifies
+  every successful endpoint, and a polyhedral solve of the 3264 instance ends on endpoints at
+  condition numbers past `1/eps`.
+
+  What is and is not verified: the counts, the pass count and the leaf count are pinned by tests,
+  including on the 3264-conic instance. The bounded memory is structural rather than measured. A
+  pass keeps one interval per path and holds one certificate per task, and only a terminal leaf's
+  certificates are alive at once, but no test asserts a peak and none is claimed.
+
 Open, ordered by consequence:
 
-- [ ] **BSP certification of a `ResultIterator`.** v2.22 certifies lazily by partitioning the
-  solution candidates along one coordinate (`IteratorCertificationResult`, `BSPPartition`, `bsp`,
-  `npaths`, `start_iterator_length`, `target_iterator_length`, `nnotcertified`, `nleaves`,
-  `max_leaf_size`, `nleaf_splits`, `oversized_leaves`, `unsplittable_leaves`, and the
-  `leaf_size_bound` / `boundaries` / `coordinate` / `certify_oversized_leaves` / `max_depth`
-  options). v3 certifies an eagerly collected vector only. Blocks the three
-  `certification_test.jl` "BSP certification" testsets.
 - [ ] **`monodromy` `duplicate_check = :certified`**, which dedups by Krawczyk certificate
   instead of by distance, and the `ncertified_distinct` / `ndiscarded_uncertified` accessors on
   `MonodromyResult`. Awkward in v3's layout: monodromy is in core and `certify` is in the
@@ -1041,7 +1162,7 @@ Audited 2026-07-28 over `src/`, `ext/` and `lib/`. Findings below, most conseque
   projective routes reach the latter by slicing with `_full_subspace` rather than adding a
   third spelling. A new projective route still has to guess, and the chart-row Taylor pitfall
   documented in `01_decisions.md` ("Appended linear rows") has two places to get wrong.
-- **The certification subpackage depends on 32 core names, 26 of them unexported.** Its
+- **The certification subpackage depends on 36 core names, 23 of them unexported.** Its
   `using HomotopyContinuationNext:` list
   (`lib/HomotopyContinuationNextCertification/src/HomotopyContinuationNextCertification.jl:26`)
   reaches into the tape compiler and interpreter internals: `_EXEC_INSTRUCTION_SPECS`,

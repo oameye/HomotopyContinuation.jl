@@ -12,7 +12,7 @@ using HomotopyContinuationNextCertification:
     ExtendedSolutionCertificate, SolutionCertificate, CertificationResult,
     save, DistinctCertifiedSolutions, add_solution!, distinct_certified_solutions,
     distinct_certified_solutions!, stats, ncertified_distinct, nprocessed,
-    nduplicates, nnotcertified
+    nduplicates, nnotcertified, ncandidates
 import DynamicPolynomials as DP
 import Arblib
 using LinearAlgebra: det
@@ -406,7 +406,7 @@ end
             is_real_system = HCN.is_real(F)
             CertT = extended ? HCNC.ExtendedSolutionCertificate : HCNC.SolutionCertificate
             return HCNC.extended_prec_certify_solution(
-                F, cand, x̃, C, cert_params, cache, 1, is_real_system, CertT,
+                F, cand, x̃, C, cert_params, cache, 1, is_real_system, CertT, 256,
             )
         end
 
@@ -638,4 +638,20 @@ end
     cert = only(certificates(r))
     @test is_certified(cert)
     @test precision(cert) > 53
+end
+
+@testset "singular Jacobian is not certified" begin
+    # A candidate whose Jacobian is singular has no approximate inverse, so the
+    # Krawczyk operator cannot be formed. That is a certificate saying "not
+    # certified", not an error: a caller may hand over every endpoint of a solve,
+    # including the ones the endgame flagged singular.
+    @var x y
+    F = System([x^2, y - 1]; variables = [x, y])
+    r = certify(F, [[0.0, 1.0]], Certification(; show_progress = false))
+
+    @test ncandidates(r) == 1
+    @test ncertified(r) == 0
+    cert = only(certificates(r))
+    @test !is_certified(cert)
+    @test isnothing(certified_solution_interval(cert))
 end

@@ -423,6 +423,48 @@ Every forwarding boundary (`Monodromy`, `verify_solution_completeness`, internal
 
 Square-up and excess filtering apply only to total-degree/polyhedral start systems; the parameter-homotopy path tracks the rectangular system directly with least-squares QR Newton. No randomization means no excess solutions, and squaring up would introduce them. Tradeoff: a least-squares stationary point can be reported as success.
 
+### A `ResultIterator` is replayed across tasks through the cache's builder
+
+Iterating a `ResultIterator` is serial by construction: it tracks through the one tracker its
+solve cache holds, so two tasks iterating the same iterator would share tape state. A caller that
+wants the same paths tracked concurrently therefore does not iterate at all. `_foreach_path(f,
+make_state, ri, exec)` builds one worker state per task from `cache.builder`, exactly as the
+threaded solve routes do, and calls `f(state, k, path_result)` with `k` the path's position in
+`ri`'s selection. `deepcopy` of the tracker (v2's device) is not an option: a `FunctionWrapper`
+caches a pointer to the object it wraps.
+
+`result_iterator` always inits with `Serial()`, and one builder is exec-dependent:
+`_homotopy_builder(::Serial, H, …)` returns a `SharedHomotopyBuilder`, which wraps the caller's
+homotopy as it stands rather than cloning it, so its worker states share one evaluator's tapes.
+`_replay_ntasks(ri, exec)` therefore answers one whenever
+`_builds_independent_workers(cache.builder)` is false, whatever `exec` asks for, and
+`_foreach_path` uses that rather than `_local_ntasks(exec)`. Without that guard
+`certify(F, result_iterator(H, starts))` raced by default. Every other builder clones, so only the
+`result_iterator(H, starts)` route degrades. `_replay_ntasks` is public-to-the-subpackage because a
+caller sizing per-task resources of its own must size them to the count that will actually run:
+certification pools one `CertificationCache` and one worker per task, and reading `exec.ntasks`
+instead would build a dozen of each for one task.
+
+Independence is the `AbstractPathBuilder` contract, stated on the abstract type: every builder must
+hand out worker states sharing nothing mutable, and a subtype that cannot has to say so by defining
+`_builds_independent_workers`. Giving the seventeen builders that supertype is what lets the
+default live on it rather than on `::Any`, where a future sharing builder would have inherited the
+unsafe answer silently. The alternative, a flag recorded on the three cache structs at
+construction, is the same fact one layer further out and costs a field on each; deciding it at
+`init` instead (so a `ResultIterator` could not hold a sharing builder) was rejected because it
+would make `result_iterator(H, starts)` call `_clone_homotopy`, which throws for any homotopy
+holding a `HomotopyEvaluator`.
+
+A caller replaying an iterator more than once builds its workers once, with `_path_workers`, and
+passes them to each `_foreach_path`; the primitive then bounds its task count by how many it was
+given. Certification does exactly this, since it makes a pass per terminal leaf and a worker costs
+a cloned system evaluator plus an endgame tracker. Workers are keyed to the cache rather than the
+iterator, so the parent's serve every leaf's `restrict` of it.
+
+Per-path results do not depend on the task count, so a caller that sorts by `k` gets bit-identical
+output at any task count. This is what lets certification of a `ResultIterator` thread while the
+iterator keeps its serial contract.
+
 ### Certification is a separate subpackage, not a package extension
 
 Certification is the only consumer of Arblib; loading it into core cost ~0.34s of load time and thousands of extra invalidations (core load ~1.6s to ~0.77s after the move). An extension was rejected: every certificate type embeds an `AcbMatrix`, so the types cannot be defined without Arblib, and extensions can only add methods to existing functions, never define or export new types. See `00_architecture.md`.

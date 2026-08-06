@@ -5,4 +5,5 @@ using Test
 @testset "HomotopyContinuationNext extensive" begin
     include("fano_quintic_extensive_test.jl")
     include("steiner_extensive_test.jl")
+    include("iterator_certification_extensive_test.jl")
 end

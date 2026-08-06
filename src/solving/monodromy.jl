@@ -1086,7 +1086,7 @@ function _chart_parameter_monodromy_worker(
     )
 end
 
-struct ParameterMonodromyBuilder{S <: SystemLike}
+struct ParameterMonodromyBuilder{S <: SystemLike} <: AbstractPathBuilder
     system::S
     parameters::Vector{ComplexF64}
     nvariables::Int
@@ -1100,7 +1100,7 @@ function (builder::ParameterMonodromyBuilder)()
     )
 end
 
-struct ChartParameterMonodromyBuilder{S <: SystemLike}
+struct ChartParameterMonodromyBuilder{S <: SystemLike} <: AbstractPathBuilder
     system::S
     parameters::Vector{ComplexF64}
     chart::Vector{ComplexF64}
@@ -1197,7 +1197,7 @@ function _subspace_monodromy_worker(
     )
 end
 
-struct SubspaceMonodromyBuilder{S <: SystemLike}
+struct SubspaceMonodromyBuilder{S <: SystemLike} <: AbstractPathBuilder
     system::S
     subspace::LinearSubspace{ComplexF64}
     chart::Vector{ComplexF64}

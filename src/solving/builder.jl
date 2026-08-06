@@ -1,12 +1,28 @@
 ## Builder structs: concrete callable types that produce fresh WorkerState from immutable data.
 
 """
+    AbstractPathBuilder
+
+Supertype of the callable builders a solve cache holds. Calling one returns a
+worker state for one task, built from immutable data the builder stores.
+
+Every subtype must return worker states sharing nothing mutable, so that any number
+of them can track concurrently. A subtype that cannot must say so by defining
+`_builds_independent_workers`; `SharedHomotopyBuilder` is the only one that does.
+"""
+abstract type AbstractPathBuilder end
+
+# Whether repeated calls hand out worker states sharing nothing mutable, which is
+# what lets the same paths be tracked on several tasks at once.
+_builds_independent_workers(::AbstractPathBuilder)::Bool = true
+
+"""
     StraightLineBuilder
 
 Builder for TotalDegree homotopy. Stores immutable reconstruction data; each call
 produces a fresh `TrackingWorkerState` with independent mutable state.
 """
-struct StraightLineBuilder{S <: CloneableSystem}
+struct StraightLineBuilder{S <: CloneableSystem} <: AbstractPathBuilder
     degrees::Vector{Int}
     target_system::S
     γ::ComplexF64
@@ -30,7 +46,7 @@ The randomization block `A` and permutation are shared read-only across workers;
 each worker gets a fresh `RandomizedSystem` (independent scratch buffers) around
 a fresh clone of the target evaluator.
 """
-struct RandomizedStraightLineBuilder{S <: CloneableSystem}
+struct RandomizedStraightLineBuilder{S <: CloneableSystem} <: AbstractPathBuilder
     degrees::Vector{Int}          # squared-up degrees (length n)
     target_system::S
     A::FSMat{ComplexF64}
@@ -57,7 +73,7 @@ Builder for the multi-homogeneous total-degree homotopy. The start system is a
 chart rows, one per variable group, and is codimension zero when the system is
 not homogeneous; `perm` is empty unless the charted target is squared up.
 """
-struct MultiHomogeneousBuilder{G <: System, S <: System}
+struct MultiHomogeneousBuilder{G <: System, S <: System} <: AbstractPathBuilder
     start_system::G
     target_system::S
     A::FSMat{ComplexF64}
@@ -86,7 +102,7 @@ end
 Builder for the straight-line homotopy between two parameter-free systems.
 `chart` is empty unless they are homogeneous, and goes on the homotopy.
 """
-struct StartTargetBuilder{G <: CloneableSystem, S <: CloneableSystem}
+struct StartTargetBuilder{G <: CloneableSystem, S <: CloneableSystem} <: AbstractPathBuilder
     start_system::G
     target_system::S
     chart::Vector{ComplexF64}
@@ -115,7 +131,7 @@ end
 Builder wrapping a caller's homotopy as it stands, so a cache holding one runs
 on one task. [`ClonedHomotopyBuilder`](@ref) is what the other executors get.
 """
-struct SharedHomotopyBuilder{H <: AbstractHomotopy}
+struct SharedHomotopyBuilder{H <: AbstractHomotopy} <: AbstractPathBuilder
     homotopy::H
     tracker_options::TrackerOptions
     endgame_options::EndgameOptions
@@ -124,13 +140,17 @@ end
 (b::SharedHomotopyBuilder)()::TrackingWorkerState =
     TrackingWorkerState(_endgame_tracker(b.homotopy, b.tracker_options, b.endgame_options))
 
+# The one exception to the `AbstractPathBuilder` contract: this builder wraps the
+# caller's homotopy as it stands, so two of its workers hold one evaluator's tapes.
+_builds_independent_workers(::SharedHomotopyBuilder)::Bool = false
+
 """
     ClonedHomotopyBuilder
 
 Builder rebuilding a caller's homotopy per task, so the caller's own is never
 tracked.
 """
-struct ClonedHomotopyBuilder{H <: AbstractHomotopy}
+struct ClonedHomotopyBuilder{H <: AbstractHomotopy} <: AbstractPathBuilder
     homotopy::H
     tracker_options::TrackerOptions
     endgame_options::EndgameOptions
@@ -147,7 +167,7 @@ end
 
 Builder calling `build()` per task, which must return a fresh homotopy.
 """
-struct HomotopyBuilder{F <: Function}
+struct HomotopyBuilder{F <: Function} <: AbstractPathBuilder
     build::F
     tracker_options::TrackerOptions
     endgame_options::EndgameOptions
@@ -163,7 +183,7 @@ Builder for parameter homotopy via ParameterHomotopy (general parameter
 dependence; CoefficientHomotopy's tangent shortcut is only valid for systems
 linear and homogeneous in the parameters).
 """
-struct ParameterBuilder{S <: SystemLike}
+struct ParameterBuilder{S <: SystemLike} <: AbstractPathBuilder
     param_system::S
     start_parameters::Vector{ComplexF64}
     target_parameters::Vector{ComplexF64}
@@ -186,7 +206,7 @@ target is a [`SlicedSystem`](@ref) wrapping a fresh clone of `F`'s evaluator.
 Each worker gets independent interpreter tapes and its own copy of the linear
 block; the polynomials are never rebuilt.
 """
-struct SlicedStraightLineBuilder{S <: System}
+struct SlicedStraightLineBuilder{S <: System} <: AbstractPathBuilder
     degrees::Vector{Int}
     target_system::S
     subspace::LinearSubspace{ComplexF64}
@@ -212,7 +232,7 @@ Builder for a parameter homotopy whose target is retargeted between solves.
 Unlike [`ParameterBuilder`](@ref) it returns an [`AmbientWorkerState`](@ref), so
 the caller keeps the concrete `ParameterHomotopy` handle.
 """
-struct ParameterRetargetBuilder{S <: System}
+struct ParameterRetargetBuilder{S <: System} <: AbstractPathBuilder
     param_system::S
     start_parameters::Vector{ComplexF64}
     target_parameters::Vector{ComplexF64}
@@ -234,7 +254,7 @@ Builder for moving ambient points from one linear subspace to another via
 `ExtrinsicSubspaceHomotopy`. `gamma` is shared across workers so every path
 traces the same perturbed homotopy.
 """
-struct ExtrinsicSubspaceBuilder{S <: System}
+struct ExtrinsicSubspaceBuilder{S <: System} <: AbstractPathBuilder
     system::S
     start::LinearSubspace{ComplexF64}
     target::LinearSubspace{ComplexF64}
@@ -257,7 +277,7 @@ end
 positive-dimensional, so the homotopy is wrapped in an `AffineChartHomotopy`.
 A separate type keeps the produced worker-state type concrete.
 """
-struct ChartExtrinsicSubspaceBuilder{S <: System}
+struct ChartExtrinsicSubspaceBuilder{S <: System} <: AbstractPathBuilder
     system::S
     start::LinearSubspace{ComplexF64}
     target::LinearSubspace{ComplexF64}
@@ -285,7 +305,7 @@ Builder for tracking inside a linear subspace via `IntrinsicSubspaceHomotopy`.
 For a projective problem `chart` is nonempty and the chart row is appended to
 the *system*, which leaves the homotopy type unchanged.
 """
-struct IntrinsicSubspaceBuilder{S <: System}
+struct IntrinsicSubspaceBuilder{S <: System} <: AbstractPathBuilder
     system::S
     start::LinearSubspace{ComplexF64}
     target::LinearSubspace{ComplexF64}
@@ -314,7 +334,7 @@ coupled toric homotopy + tracker.
 The coefficient vectors are shared read-only across workers. Thread safety relies on
 `ToricHomotopy` and `CoefficientHomotopy` constructors copying into independent buffers.
 """
-struct PolyhedralBuilder{S}
+struct PolyhedralBuilder{S} <: AbstractPathBuilder
     support_system::S
     start_coeffs::Vector{Vector{ComplexF64}}
     flat_start::Vector{ComplexF64}

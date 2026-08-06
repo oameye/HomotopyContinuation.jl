@@ -45,6 +45,19 @@ using HomotopyContinuationNextCertification: HomotopyContinuationNextCertificati
         :nduplicates,
         :nnotcertified,
         :show_straight_line_program,
+        :ncandidates,
+        # Certification of a `ResultIterator`.
+        :IteratorCertification,
+        :IteratorCertificationResult,
+        :BSPPartition,
+        :bsp,
+        :ntracked,
+        :nstart_solutions,
+        :nleaves,
+        :max_leaf_size,
+        :oversized_leaves,
+        :unsplittable_leaves,
+        :nleaf_splits,
     ]
 
     @testset "certification: $name" for name in certification_public

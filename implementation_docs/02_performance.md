@@ -2,7 +2,7 @@
 
 ## Performance
 
-Measured 2026-04-03, Julia 1.12.5, single-threaded.
+Measured 2026-04-03, Julia 1.12.5, single-threaded, except where a section says otherwise.
 
 ### End-to-end solve vs v2
 
@@ -140,6 +140,72 @@ for more than one that only removes inference.
 Core load stays at 0.77s because certification is a separate `lib/` subpackage. Adding Arblib to
 core raised load to ~1.6s and ~50% more invalidation descendants (one Arblib `show` method alone
 accounted for ~2700), which is what motivated the split.
+
+### Cost of the transcendental ops and the non-integer power
+
+Measured 2026-08-03 against a worktree at the previous commit, alternating runs.
+
+Eight `OpType` entries take `ExecInstruction` from 25 variants to 33, and the switch in
+`execute_instructions!` and `execute_taylor_instructions!` grows with it. Nothing moved:
+
+| | before | after |
+|---|---|---|
+| `sizeof(ExecInstructionT)` | 24 B | 24 B |
+| cyclic-7 eval, 200k-iteration loop | 83 to 86 ns | 83 to 88 ns |
+| cyclic-7 Jacobian, same | 411 to 422 ns | 396 to 451 ns |
+| package load | 1.026 to 1.047 s | 1.028 to 1.038 s |
+| first `total_degree_interpreted_serial` | 8.08 to 8.16 s | 7.96 to 8.11 s |
+| `Base.compilecache` of the package | 9.6 / 9.9 s | 9.8 / 9.6 s |
+
+Moshi had tag room, so the instruction vector did not grow, and the precompile image absorbs the
+larger switch. Cross-process A/B cannot resolve an end-to-end solve here: three fresh processes
+on the *same* tree gave 1.07, 1.49 and 1.56 ms for the 18-solution intro system, so the
+in-process loop above is the only reliable form. `@benchmarkable` is also too coarse, quantizing
+to 10 ns and reporting a spurious 700 → 750 ns for the cyclic-7 Jacobian.
+
+One real regression, in `Expression` construction only. `_emul` now tallies exponents as
+`ComplexF64` rather than `Int`, which is what collapses `x^1.5 * x^-1` to one node instead of
+leaving CSE two. A 4000-factor chained product costs 5.55 to 5.65 ms and 17180 KiB before
+against 5.93 to 6.64 ms and 18677 KiB after (+7% time, +8.7% allocation, the tally vector being
+16 bytes per element instead of 8). The heaviest real build in the suite, the Fano quintic
+restricted to a line, is unchanged at 0.6 ms. An `Int` fast path would be a second code path in
+`_emul` for 7% of a construction-only microbenchmark, so it was left alone.
+
+A first solve on a route that uses the new ops (a transcendental parameter homotopy) costs
+0.82 s load + 4.19 s `System` construction + 4.52 s first solve, against 8.1 s for the plain
+total-degree first solve.
+
+### Certification of a `ResultIterator`
+
+Measured 2026-08-06, `-t auto` on 12 threads.
+
+The 3264-conic instance through this route (27072 polyhedral paths, `leaf_size_bound = 200`,
+`boundaries = -10:0.5:10`) takes 1m23s for 3264 distinct certified solutions, tracking
+30336 paths: 27072 to place the enclosures plus 3264 to certify the terminal leaves. That is one
+pass over the iterator plus one pass over the certified subset, which is what the route costs when
+refinement does no tracking of its own. Peak certificates alive is one leaf's worth, at most 200
+of 3264.
+
+The pass count is what the design turns on, and the tests pin it: `ntracked` is `27072 + 3264`
+there, `2 × 25` on a 25-solution leaf refined to a bound of 3, and 8 on a 4-solution leaf refined
+to 1 (measured at 17 with the earlier refinement, which re-tracked a leaf per proposed cut). The
+growth of that earlier form is derived rather than measured, since it was replaced before the
+large instance ran: a cut taken from a single enclosure peels that one off, so a leaf of N
+enclosures takes O(N) splits at a pass each, and leaves ~N terminal leaves to pay another pass
+each.
+
+The pass count does not change what is tracked (each terminal leaf re-tracks only its own
+entries, so the total is the same however the leaves are cut) but it does multiply the per-pass
+fixed cost, and that is what the default configuration exposes: `leaf_size_bound = 50_000` with
+`boundaries = -100:0.1:100` means refinement never triggers, so there is a pass per *occupied
+grid cell* rather than one per `leaf_size_bound` worth of solutions. Worker construction was the
+bulk of that cost (a cloned system evaluator plus an endgame tracker, ~93 KiB and ~18 µs each,
+built per task per pass), so the workers are now built once per run and handed to every pass. On a
+400-solution bivariate system, default `boundaries` against a single leaf: 2002 leaves vs 1,
+identical output (400 distinct, `ntracked` 800 both ways), 5.5 MiB vs 3.9 MiB and 11 ms vs 8 ms.
+The residual ~1.6 MiB over ~37 passes is the per-pass channels, leaf mask and payload vector.
+Coalescing adjacent under-full leaves before the certification walk would remove that too, at the
+cost of changing what `nleaves` reports; not done.
 
 ### Endgame result parity
 

@@ -59,6 +59,107 @@ function Base.getindex(ri::ResultIterator, k::Int)::PathResult
     return _path_result(ri.cache, i)
 end
 
+# ── Replay across tasks ────────────────────────────────────────────────────
+#
+# Iterating a `ResultIterator` is serial: it goes through the cache's single
+# tracker. Tracking the same paths concurrently needs one worker state per task,
+# which is what the cache's builder makes.
+
+_path_result(cache::SolveCache, ws::TrackingWorkerState, i::Int)::PathResult =
+    _track_path!(ws, cache.start_solutions[i], i)
+
+_path_result(cache::WorkerSolveCache{E, W}, ws::W, i::Int) where {E, W} =
+    _track_path!(ws, cache.start_solutions[i], i)::PathResult
+
+function _path_result(
+        cache::PolyhedralSolveCache, ws::PolyhedralWorkerState, i::Int,
+    )::PathResult
+    cell, x₀ = cache.start_solutions[i]
+    return _track_polyhedral_path!(ws, cache.support, cache.lifting, cell, x₀, i)
+end
+
+"""
+    _replay_ntasks(ri::ResultIterator, exec::AbstractExecutor)
+
+The number of tasks [`_foreach_path`](@ref) will use to replay `ri` under `exec`.
+One whatever `exec` asks for when the cache's builder cannot hand out independent
+workers, which is the case for a cache built around a caller's homotopy: the
+alternative is tracking it on several tasks at once. A caller sizing its own
+per-task resources reads it from here rather than from `exec`.
+"""
+_replay_ntasks(ri::ResultIterator, exec::AbstractExecutor)::Int =
+    _builds_independent_workers(ri.cache.builder) ? _local_ntasks(exec) : 1
+
+"""
+    _path_workers(ri::ResultIterator, ntasks::Int)
+
+One worker state per task, ready to be handed to [`_foreach_path`](@ref). Building
+one clones a system evaluator and an endgame tracker, so a caller that replays `ri`
+(or any iterator over the same cache) more than once builds them once here rather
+than per pass. `ntasks` is [`_replay_ntasks`](@ref).
+"""
+_path_workers(ri::ResultIterator, ntasks::Int) =
+    [_path_worker(ri.cache) for _ in 1:max(ntasks, 1)]
+
+"""
+    _foreach_path(f, make_state, ri::ResultIterator, exec::AbstractExecutor)
+    _foreach_path(f, make_state, ri::ResultIterator, exec, workers)
+
+Track every path `ri` selects and call `f(state, k, path_result)` for each, where
+`k` is the path's position in `ri`'s selection. `state` is what `make_state()`
+returns, once per task.
+
+The paths are tracked concurrently, so `f` must be thread-safe and must not depend
+on the order it is called in. A path result never depends on the task count, which
+is [`_replay_ntasks`](@ref) rather than whatever `exec` asks for.
+
+`workers` are [`_path_workers`](@ref) over the same cache, reused rather than
+rebuilt; the task count is then bounded by how many were given.
+"""
+function _foreach_path(
+        f::F, make_state::G, ri::ResultIterator, exec::AbstractExecutor,
+    )::Nothing where {F, G}
+    workers = _path_workers(ri, _replay_ntasks(ri, exec))
+    return _foreach_path(f, make_state, ri, exec, workers)
+end
+
+function _foreach_path(
+        f::F, make_state::G, ri::ResultIterator, exec::AbstractExecutor,
+        workers::Vector{W},
+    )::Nothing where {F, G, W}
+    idxs = findall(ri.mask)
+    ntasks = min(_replay_ntasks(ri, exec), length(workers))
+    if ntasks > 1 && length(idxs) > 1
+        nt = min(ntasks, length(idxs))
+        # A task draws whichever worker is free rather than owning one by index,
+        # since `@local` gives no task index to key on.
+        pool = Channel{W}(nt)
+        for j in 1:nt
+            put!(pool, workers[j])
+        end
+        @tasks for k in eachindex(idxs)
+            @set ntasks = nt
+            # One `@local` block, not two `@local` lines: only the first is read.
+            @local begin
+                worker = take!(pool)
+                state = make_state()
+            end
+            f(state, k, _path_result(ri.cache, worker, idxs[k]))
+        end
+        close(pool)
+    else
+        state = make_state()
+        for (k, i) in enumerate(idxs)
+            f(state, k, _path_result(ri.cache, workers[1], i))
+        end
+    end
+    return nothing
+end
+
+_path_worker(cache::SolveCache)::TrackingWorkerState = cache.builder()
+_path_worker(cache::WorkerSolveCache{E, W}) where {E, W} = cache.builder()::W
+_path_worker(cache::PolyhedralSolveCache)::PolyhedralWorkerState = cache.builder()
+
 function Base.show(io::IO, ri::ResultIterator)
     print(
         io, "ResultIterator over ", length(ri), " of ",
@@ -92,6 +193,14 @@ tracks from.
 """
 start_solutions(ri::ResultIterator)::Vector{Vector{ComplexF64}} =
     _start_points(ri.cache.start_solutions)
+
+"""
+    nstart_solutions(ri::ResultIterator)
+
+The number of start solutions of the underlying solve, including the ones `ri`
+does not track. `length(ri)` counts only the paths it does.
+"""
+nstart_solutions(ri::ResultIterator)::Int = length(ri.mask)
 
 """
     selection(ri::ResultIterator)
@@ -197,7 +306,7 @@ _excess_checker(::WorkerSolveCache) = nothing
     result_iterator(H::AbstractHomotopy, starts, alg = Continuation())
 
 Build a [`ResultIterator`](@ref) for the same problems [`solve`](@ref) accepts,
-tracking paths lazily instead of all at once. Tracking is serial, so the
+tracking paths lazily instead of all at once. Iterating is serial, so the
 algorithm's `show_progress` is ignored.
 
 A `ResultIterator` may be passed as the start solutions of another `solve` or

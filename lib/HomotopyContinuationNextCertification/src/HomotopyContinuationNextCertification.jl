@@ -16,6 +16,7 @@ using LinearAlgebra: LinearAlgebra
 import MultivariatePolynomials as MP
 
 using Arblib: Arblib, AcbMatrix, AcbRefVector, AcbRefMatrix, Mag
+using EnumX: @enumx
 using IntervalTrees: IntervalTrees
 using OhMyThreads: @tasks, @set, @local
 using Moshi.Data: variant_storage_type
@@ -38,19 +39,24 @@ using HomotopyContinuationNext:
     NewtonCache, _newton, _clone_system_evaluator, solution,
     # results consumed by the certify entry points
     Result, PathResult, MonodromyResult,
+    # lazy path tracking, for certification of a `ResultIterator`
+    ResultIterator, selection, restrict, is_success,
+    _foreach_path, _replay_ntasks, _path_workers,
     # progress bar helper
     make_progress,
     # executors: certification is Serial/Threaded only, see `Certification`
     Serial, Threaded
 
-# Core functions extended with methods on certification types.
-import HomotopyContinuationNext: is_real, solutions
+# Core functions extended with methods on certification types. `nstart_solutions`
+# and `ntracked` are also called on a `ResultIterator`, which an import allows.
+import HomotopyContinuationNext: is_real, solutions, nstart_solutions, ntracked
 
 include("interval_arithmetic.jl")
 include("interval_arblib.jl")
 include("acb_interpreter.jl")
 include("certification.jl")
 include("certification_arb.jl")
+include("iterator_certification.jl")
 
 export certify, Certification, SolutionCertificate, ExtendedSolutionCertificate, CertificationResult,
     CertificationCache, is_certified, is_real, is_complex, is_positive,
@@ -61,6 +67,9 @@ export certify, Certification, SolutionCertificate, ExtendedSolutionCertificate,
     ndistinct_real_certified, ndistinct_complex_certified, solutions,
     save, DistinctCertifiedSolutions, add_solution!, distinct_certified_solutions,
     distinct_certified_solutions!, stats, ncertified_distinct, nprocessed,
-    nduplicates, nnotcertified, show_straight_line_program
+    nduplicates, nnotcertified, show_straight_line_program, ncandidates,
+    IteratorCertification, IteratorCertificationResult, BSPPartition, bsp,
+    nstart_solutions, ntracked, nleaves, max_leaf_size,
+    oversized_leaves, unsplittable_leaves, nleaf_splits
 
 end # module

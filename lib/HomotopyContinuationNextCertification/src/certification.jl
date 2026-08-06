@@ -268,6 +268,13 @@ Return the midpoint approximations of the distinct certified solution intervals.
 distinct_solutions(R::CertificationResult) = solution_approximation.(distinct_certificates(R))
 
 """
+    ncandidates(R::CertificationResult)
+
+Return the number of solution candidates that were given to [`certify`](@ref).
+"""
+ncandidates(R::CertificationResult)::Int = length(R.certificates)
+
+"""
     ncertified(R::CertificationResult)
 
 Return the number of certified solutions.
@@ -350,10 +357,15 @@ function show_straight_line_program(io::IO, R::CertificationResult)
     return
 end
 
-function Base.show(io::IO, R::CertificationResult)
+Base.show(io::IO, R::CertificationResult) = print(
+    io, "CertificationResult with ", ndistinct_certified(R),
+    " distinct certified solutions",
+)
+
+function Base.show(io::IO, ::MIME"text/plain", R::CertificationResult)
     println(io, "CertificationResult")
     println(io, "===================")
-    println(io, "• $(length(R.certificates)) solution candidates given")
+    println(io, "• $(ncandidates(R)) solution candidates given")
     ncert = ncertified(R)
     print(io, "• $ncert certified solution intervals")
     nreal = nreal_certified(R)
@@ -736,6 +748,29 @@ function _arb(cache::CertificationCache)::AcbCertCache
     return cache.arb
 end
 
+# `ntasks` caches, one per task, since `certify_solution` mutates a cache's
+# buffers. The caller's own cache is reused as the first rather than discarded.
+function _cache_set(
+        F::System, cache::CertificationCache, ntasks::Int,
+    )::Vector{CertificationCache}
+    caches = CertificationCache[cache]
+    for _ in 2:ntasks
+        push!(caches, CertificationCache(F))
+    end
+    return caches
+end
+
+# A task takes whichever cache is free rather than owning one by index, so they are
+# handed out through a channel. Cheap enough to rebuild per threaded region, which
+# is what lets one cache set serve several of them.
+function _cache_pool(caches::Vector{CertificationCache})::Channel{CertificationCache}
+    pool = Channel{CertificationCache}(length(caches))
+    for cache in caches
+        put!(pool, cache)
+    end
+    return pool
+end
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Krawczyk operator (Float64)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -918,9 +953,12 @@ function certify_solution(
         cert_cache::CertificationCache,
         index::Int,
         is_real_system::Bool,
-        ::Type{CertT};
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
+        ::Type{CertT},
+        # Positional, not keywords: this runs once per solution candidate, and a
+        # keyword call there neither specializes nor stays allocation-free. The
+        # keywords live on `Certification` at the API boundary.
+        max_precision::Int,
+        refine_solution::Bool,
     ) where {CertT <: AbstractSolutionCertificate}
     candidate = convert(Vector{ComplexF64}, solution_candidate)
     params_c64 = complexF64_params(cert_params)
@@ -952,7 +990,14 @@ function certify_solution(
     _exec_jac!(cert_cache.u_C64, cert_cache.J_C64, cert_cache.jac_interpreter_C64, x̃₀, params_c64)
     C = cert_cache.C_C64
     copyto!(C, cert_cache.J_C64)
-    LinearAlgebra.inv!(LinearAlgebra.lu!(C))
+    J_lu = LinearAlgebra.lu!(C; check = false)
+    # Krawczyk needs an approximate inverse of the Jacobian, so a candidate with a
+    # numerically singular one is not certifiable rather than an error. A caller
+    # handing over every endpoint of a solve, not only the nonsingular ones, hits
+    # this: an endpoint at a condition number past 1/eps has an exact zero pivot.
+    LinearAlgebra.issuccess(J_lu) ||
+        return _uncertified_certificate(CertT, candidate, index, 53)
+    LinearAlgebra.inv!(J_lu)
 
     certified, x₁, x₀, is_real = ε_inflation_krawczyk(x̃₀, cert_params, C, cert_cache)
     is_real_system || (is_real = false)
@@ -967,8 +1012,8 @@ function certify_solution(
 
     # Float64 certification failed: retry in extended precision.
     return extended_prec_certify_solution(
-        F, candidate, x̃₀, C, cert_params, cert_cache, index, is_real_system, CertT;
-        max_precision = max_precision,
+        F, candidate, x̃₀, C, cert_params, cert_cache, index, is_real_system, CertT,
+        max_precision,
     )
 end
 
@@ -1017,31 +1062,22 @@ function _certify_impl(
 
     if exec isa Threaded && exec.ntasks > 1 && N > 1
         plock = ReentrantLock()
-        # One cache per task (certify_solution mutates its buffers). Reuse the
-        # caller-provided `cache` as one of them rather than discarding it, and
-        # build only the remaining `nt - 1`.
         nt = min(exec.ntasks, N)
-        pool = Channel{CertificationCache}(nt)
-        put!(pool, cache)
-        for _ in 2:nt
-            put!(pool, CertificationCache(F))
-        end
+        pool = _cache_pool(_cache_set(F, cache, nt))
         @tasks for i in 1:N
             @set ntasks = nt
             @local task_cache = take!(pool)
             certs[i] = certify_solution(
-                F, solution_candidates[i], p, task_cache, i, is_real_system, CertT;
-                max_precision = max_precision,
-                refine_solution = refine_solution,
+                F, solution_candidates[i], p, task_cache, i, is_real_system, CertT,
+                max_precision, refine_solution,
             )
             progress === nothing || (@lock plock ProgressMeter.next!(progress))
         end
     else
         for i in 1:N
             certs[i] = certify_solution(
-                F, solution_candidates[i], p, cache, i, is_real_system, CertT;
-                max_precision = max_precision,
-                refine_solution = refine_solution,
+                F, solution_candidates[i], p, cache, i, is_real_system, CertT,
+                max_precision, refine_solution,
             )
             progress === nothing || ProgressMeter.next!(progress)
         end
@@ -1087,6 +1123,9 @@ system, whose coefficients are already-rounded `ComplexF64` products of `p`.
 
 See [`Certification`](@ref) for the options. `exec` is [`Serial`](@ref) or
 [`Threaded`](@ref); certificates hold Arb data, which does not cross processes.
+
+A `ResultIterator` is certified by its own method, which never holds every
+certificate at once; see [`IteratorCertification`](@ref).
 """
 function certify end
 
@@ -1352,21 +1391,22 @@ function add_solution!(
         refine_solution::Bool = true,
     )
     added, status, representative, cert = _add_solution!(
-        d, sol, index, cache;
-        max_precision = max_precision, refine_solution = refine_solution,
+        d, sol, index, cache, max_precision, refine_solution,
     )
     return (added, status, representative, isnothing(cert) ? nothing : solution_approximation(cert))
 end
 
 # Returns the matched certificate rather than its midpoint: the bulk routes
-# discard it, and `solution_approximation` allocates a vector per call.
+# discard it, and `solution_approximation` allocates a vector per call. The two
+# options are positional: this runs once per solution, and the keywords belong to
+# the `add_solution!` boundary above.
 function _add_solution!(
         d::DistinctCertifiedSolutions{S, P, C},
         sol::AbstractVector{<:Number},
         index::Integer,
-        cache::CertificationCache;
-        max_precision::Int = 256,
-        refine_solution::Bool = true,
+        cache::CertificationCache,
+        max_precision::Int,
+        refine_solution::Bool,
     ) where {S, P, C}
     s = convert(Vector{ComplexF64}, sol)
     Base.@lock d.access_lock begin
@@ -1379,9 +1419,8 @@ function _add_solution!(
     # `C` is the concrete certificate type of this accumulator; pass it so
     # `certify_solution` returns a concrete type instead of a `Union`.
     cert = certify_solution(
-        d.system, s, d.parameters, cache, Int(index), d.is_real_system, C;
-        max_precision = max_precision,
-        refine_solution = refine_solution,
+        d.system, s, d.parameters, cache, Int(index), d.is_real_system, C,
+        max_precision, refine_solution,
     )
     if !is_certified(cert)
         _record_add_solution!(d, :not_certified)
@@ -1472,18 +1511,12 @@ function distinct_certified_solutions!(
         plock = ReentrantLock()
         @tasks for i in eachindex(S)
             @local cache = CertificationCache(d.system)
-            _add_solution!(
-                d, S[i], i, cache;
-                max_precision = max_precision, refine_solution = refine_solution,
-            )
+            _add_solution!(d, S[i], i, cache, max_precision, refine_solution)
             progress === nothing || (@lock plock ProgressMeter.next!(progress))
         end
     else
         for (i, sol) in enumerate(S)
-            _add_solution!(
-                d, sol, i, d.cache;
-                max_precision = max_precision, refine_solution = refine_solution,
-            )
+            _add_solution!(d, sol, i, d.cache, max_precision, refine_solution)
             progress === nothing || ProgressMeter.next!(progress)
         end
     end

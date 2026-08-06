@@ -5,6 +5,7 @@ authors = ["Orjan Ameye"]
 
 [deps]
 Arblib = "fb37089c-8514-4489-9461-98f9c8763369"
+EnumX = "4e289a0a-7415-4d19-859d-a7e5c4648b56"
 HomotopyContinuationNext = "ec87e138-eaf4-4d78-a098-49d58d8a59d7"
 IntervalTrees = "524e6230-43b7-53ae-be76-1e9e4d08d11b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -17,6 +18,7 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [compat]
 Arblib = "1"
+EnumX = "1"
 IntervalTrees = "1"
 LinearAlgebra = "1"
 Moshi = "0.3.7"
