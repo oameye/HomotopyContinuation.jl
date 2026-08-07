@@ -73,6 +73,8 @@ const QUALIFIED_ACCESS_IGNORE = (
         HomotopyContinuationNext.EndgameCode,  # @enumx module
         HomotopyContinuationNext.MonodromyCode,  # @enumx module
         HomotopyContinuationNext.ReuseLoops,  # @enumx module
+        HomotopyContinuationNext.DuplicateCheck,  # @enumx module
+        HomotopyContinuationNext.AddSolutionCode,  # @enumx module
         HomotopyContinuationNext.Irreducibility,  # @enumx module
         HomotopyContinuationNext.EquationSorting,  # @enumx module
     )

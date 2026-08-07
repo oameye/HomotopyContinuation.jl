@@ -37,19 +37,26 @@ using HomotopyContinuationNext:
     _compile_exec_instructions, execute!,
     # newton refinement
     NewtonCache, _newton, _clone_system_evaluator, solution,
+    # rebuild-a-struct-by-field-name helper
+    _with_fields,
     # results consumed by the certify entry points
-    Result, PathResult, MonodromyResult,
+    Result, PathResult, MonodromyResult, CertifiedEndpoint,
+    # the monodromy seam: core names the accumulator and candidate supertypes
+    AbstractCertifiedSolutions, AbstractCertifiedCandidate,
     # lazy path tracking, for certification of a `ResultIterator`
     ResultIterator, selection, restrict, is_success,
     _foreach_path, _replay_ntasks, _path_workers,
     # progress bar helper
     make_progress,
+    # the status code of `add_solution!`, declared in core for the monodromy seam
+    AddSolutionCode,
     # executors: certification is Serial/Threaded only, see `Certification`
     Serial, Threaded
 
 # Core functions extended with methods on certification types. `nstart_solutions`
 # and `ntracked` are also called on a `ResultIterator`, which an import allows.
-import HomotopyContinuationNext: is_real, solutions, nstart_solutions, ntracked
+import HomotopyContinuationNext: is_real, solutions, nstart_solutions, ntracked,
+    ncertified_distinct
 
 include("interval_arithmetic.jl")
 include("interval_arblib.jl")
@@ -57,6 +64,7 @@ include("acb_interpreter.jl")
 include("certification.jl")
 include("certification_arb.jl")
 include("iterator_certification.jl")
+include("monodromy_certification.jl")
 
 export certify, Certification, SolutionCertificate, ExtendedSolutionCertificate, CertificationResult,
     CertificationCache, is_certified, is_real, is_complex, is_positive,
@@ -65,7 +73,7 @@ export certify, Certification, SolutionCertificate, ExtendedSolutionCertificate,
     solution_approximation, certificates, distinct_certificates, distinct_solutions,
     ncertified, nreal_certified, ncomplex_certified, ndistinct_certified,
     ndistinct_real_certified, ndistinct_complex_certified, solutions,
-    save, DistinctCertifiedSolutions, add_solution!, distinct_certified_solutions,
+    save, DistinctCertifiedSolutions, add_solution!, AddSolutionCode, distinct_certified_solutions,
     distinct_certified_solutions!, stats, ncertified_distinct, nprocessed,
     nduplicates, nnotcertified, show_straight_line_program, ncandidates,
     IteratorCertification, IteratorCertificationResult, BSPPartition, bsp,

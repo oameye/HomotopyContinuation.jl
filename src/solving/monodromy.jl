@@ -16,13 +16,83 @@ end
     NONE
 end
 
-function _symbol_to_reuse_loops(s::Symbol)::ReuseLoops.T
-    s == :all && return ReuseLoops.ALL
-    s == :random && return ReuseLoops.RANDOM
-    s == :none && return ReuseLoops.NONE
-    throw(ArgumentError("Unknown `reuse_loops` value :$s. Expected :all, :random or :none."))
+@enumx DuplicateCheck::Int8 begin
+    HEURISTIC
+    CERTIFIED
 end
-_symbol_to_reuse_loops(r::ReuseLoops.T)::ReuseLoops.T = r
+
+# The verdict on a solution offered to an accumulator of certified-distinct
+# solutions. Declared here because it is the return code of the certification
+# package's `add_solution!` and of the hook below, which core has to read.
+@enumx AddSolutionCode::Int8 begin
+    CERTIFIED_DISTINCT
+    DUPLICATE
+    NOT_CERTIFIED
+end
+
+@noinline _certification_required() = throw(
+    ArgumentError(
+        "`duplicate_check = DuplicateCheck.CERTIFIED` needs Krawczyk certification: run " *
+            "`using HomotopyContinuationNextCertification`.",
+    ),
+)
+
+"""
+    AbstractCertifiedSolutions
+
+Supertype of the accumulator of certified-distinct solutions that
+`duplicate_check = DuplicateCheck.CERTIFIED` files monodromy endpoints into.
+`HomotopyContinuationNextCertification` provides the implementation.
+"""
+abstract type AbstractCertifiedSolutions end
+
+"""
+    AbstractCertifiedCandidate
+
+Supertype of a monodromy endpoint that has been certified but not yet filed into an
+[`AbstractCertifiedSolutions`](@ref).
+"""
+abstract type AbstractCertifiedCandidate end
+
+# The three methods `DuplicateCheck.CERTIFIED` needs from the certification
+# package. This one builds the accumulator for the square system `G` at parameters
+# `p` (`nothing` for a parameter-free `G`). It is reset between solves by `empty!`
+# and written from every task, so its implementation carries one certification cache
+# per task index; `ntasks` sizes that up front.
+function monodromy_certified_solutions(
+        ::SystemLike, ::Union{Nothing, Vector{ComplexF64}}, ::Int, ::Bool,
+    )::AbstractCertifiedSolutions
+    return _certification_required()
+end
+
+# Certify `sol` with task `tid`'s cache, to be handed to `monodromy_file_certified!`.
+# Runs without any lock held.
+function monodromy_certify_candidate(
+        ::AbstractCertifiedSolutions, ::Vector{ComplexF64}, ::Int,
+    )::AbstractCertifiedCandidate
+    return _certification_required()
+end
+
+# File a certified candidate under `index`. Returns the insert status, the index
+# carried by the solution it was matched to (0 when there is none), and a
+# `CertifiedEndpoint` when the status is `CERTIFIED_DISTINCT`, else `nothing`. Call
+# under the lock that decided `index`: distinctness has to be settled against the
+# same set of stored solutions the index is assigned from.
+function monodromy_file_certified!(
+        ::AbstractCertifiedSolutions, ::AbstractCertifiedCandidate, ::Int,
+    )::Tuple{AddSolutionCode.T, Int, Union{Nothing, CertifiedEndpoint}}
+    return _certification_required()
+end
+
+# One certification cache per task index, sized for `ntasks` before a threaded solve
+# hands them out.
+function monodromy_size_caches!(::AbstractCertifiedSolutions, ::Int)
+    return _certification_required()
+end
+
+# Drop every stored solution, keeping the caches. Declared with the hooks above for
+# the same reason: the certified route has to infer in core alone.
+Base.empty!(::AbstractCertifiedSolutions) = _certification_required()
 
 always_false(args...) = false
 
@@ -85,8 +155,8 @@ end
     MonodromyOptions(; options...)
 
 Options for [`Monodromy`](@ref). `group_actions` accepts a `Function`,
-`Tuple`, `AbstractVector` or [`GroupActions`](@ref); `reuse_loops` accepts
-`:all`, `:random`, `:none` or a `ReuseLoops` enum value.
+`Tuple`, `AbstractVector` or [`GroupActions`](@ref); `reuse_loops` takes a
+`ReuseLoops` enum value and `duplicate_check` a `DuplicateCheck` one.
 """
 struct MonodromyOptions{D, GA <: Union{Nothing, GroupActions}, CB, PS}
     check_startsolutions::Bool
@@ -105,6 +175,10 @@ struct MonodromyOptions{D, GA <: Union{Nothing, GroupActions}, CB, PS}
     max_loops_no_progress::Int
     reuse_loops::ReuseLoops.T
     permutations::Bool
+    # deduplication policy
+    duplicate_check::DuplicateCheck.T
+    certification_max_precision::Int
+    certification_refine_solution::Bool
     # unique points options
     distance::D
     triangle_inequality::Bool
@@ -128,8 +202,11 @@ function MonodromyOptions(;
         timeout::Union{Nothing, Real} = nothing,
         min_solutions::Union{Nothing, Int} = nothing,
         max_loops_no_progress::Int = 5,
-        reuse_loops::Union{Symbol, ReuseLoops.T} = ReuseLoops.ALL,
+        reuse_loops::ReuseLoops.T = ReuseLoops.ALL,
         permutations::Bool = false,
+        duplicate_check::DuplicateCheck.T = DuplicateCheck.HEURISTIC,
+        certification_max_precision::Int = 256,
+        certification_refine_solution::Bool = true,
         distance = InfNorm(),
         triangle_inequality::Bool = satisfies_triangle_inequality(distance),
         unique_points_atol::Float64 = 1.0e-14,
@@ -154,8 +231,11 @@ function MonodromyOptions(;
         timeout === nothing ? nothing : Float64(timeout),
         min_solutions,
         max_loops_no_progress,
-        _symbol_to_reuse_loops(reuse_loops),
+        reuse_loops,
         permutations,
+        duplicate_check,
+        certification_max_precision,
+        certification_refine_solution,
         distance,
         triangle_inequality,
         unique_points_atol,
@@ -227,8 +307,11 @@ function Monodromy(;
         timeout::Union{Nothing, Real} = nothing,
         min_solutions::Union{Nothing, Int} = nothing,
         max_loops_no_progress::Int = 5,
-        reuse_loops::Union{Symbol, ReuseLoops.T} = ReuseLoops.ALL,
+        reuse_loops::ReuseLoops.T = ReuseLoops.ALL,
         permutations::Bool = false,
+        duplicate_check::DuplicateCheck.T = DuplicateCheck.HEURISTIC,
+        certification_max_precision::Int = 256,
+        certification_refine_solution::Bool = true,
         distance = InfNorm(),
         triangle_inequality::Bool = satisfies_triangle_inequality(distance),
         unique_points_atol::Float64 = 1.0e-14,
@@ -254,6 +337,9 @@ function Monodromy(;
             max_loops_no_progress = max_loops_no_progress,
             reuse_loops = reuse_loops,
             permutations = permutations,
+            duplicate_check = duplicate_check,
+            certification_max_precision = certification_max_precision,
+            certification_refine_solution = certification_refine_solution,
             distance = distance,
             triangle_inequality = triangle_inequality,
             unique_points_atol = unique_points_atol,
@@ -386,6 +472,10 @@ Base.@kwdef mutable struct MonodromyStatistics
     tracked_loops::Threads.Atomic{Int} = Threads.Atomic{Int}(0)
     tracking_failures::Threads.Atomic{Int} = Threads.Atomic{Int}(0)
     generated_loops::Threads.Atomic{Int} = Threads.Atomic{Int}(0)
+    # All three stay 0 unless `duplicate_check = DuplicateCheck.CERTIFIED`.
+    certification_attempts::Threads.Atomic{Int} = Threads.Atomic{Int}(0)
+    certified_duplicates::Threads.Atomic{Int} = Threads.Atomic{Int}(0)
+    uncertified_discards::Threads.Atomic{Int} = Threads.Atomic{Int}(0)
     solutions::Vector{Int} = Int[]                 # nsolutions after each finished loop generation
     permutations::Vector{Vector{Int}} = Vector{Int}[]
 end
@@ -394,6 +484,11 @@ function Base.show(io::IO, S::MonodromyStatistics)
     println(io, "MonodromyStatistics")
     println(io, " • tracked_loops → ", S.tracked_loops[])
     println(io, " • tracking_failures → ", S.tracking_failures[])
+    if S.certification_attempts[] > 0
+        println(io, " • certification_attempts → ", S.certification_attempts[])
+        println(io, " • certified_duplicates → ", S.certified_duplicates[])
+        println(io, " • uncertified_discards → ", S.uncertified_discards[])
+    end
     print(io, " • solutions → ", S.solutions)
     return
 end
@@ -473,6 +568,7 @@ struct MonodromyResult{P, LP} <: AbstractSolutionResult
     loops::Vector{MonodromyLoop{LP}}
     statistics::MonodromyStatistics
     equivalence_classes::Bool
+    duplicate_check::DuplicateCheck.T
     seed::UInt32
     trace::Union{Nothing, Float64}
 end
@@ -508,6 +604,25 @@ Returns true if the monodromy computation stopped due to the heuristic.
 """
 is_heuristic_stop(result::MonodromyResult)::Bool =
     result.returncode == MonodromyCode.HEURISTIC_STOP
+
+"""
+    ncertified_distinct(result::MonodromyResult)
+
+Return the number of solutions that certified as pairwise distinct, which is `0`
+unless the run used `duplicate_check = DuplicateCheck.CERTIFIED`. With
+`equivalence_classes = true` these are certified distinct points, one per orbit
+found, but whether two of them lie in the same orbit is still decided by distance.
+"""
+ncertified_distinct(r::MonodromyResult)::Int =
+    r.duplicate_check == DuplicateCheck.CERTIFIED ? nresults(r) : 0
+
+"""
+    ndiscarded_uncertified(result::MonodromyResult)
+
+Return the number of tracked endpoints that were discarded because they failed
+certification, which is `0` unless the run used `duplicate_check = DuplicateCheck.CERTIFIED`.
+"""
+ndiscarded_uncertified(r::MonodromyResult)::Int = r.statistics.uncertified_discards[]
 
 """
     path_results(result::MonodromyResult)
@@ -1005,7 +1120,10 @@ serial worker; threaded runs grow the vector lazily via `builder`), the loop
 list, the deduplication structure with its lock, options, statistics and the
 trace matrix for the trace test.
 """
-mutable struct MonodromySolver{H, P, B, UP <: UniquePoints, MO <: MonodromyOptions}
+mutable struct MonodromySolver{
+        H, P, B, UP <: UniquePoints, MO <: MonodromyOptions,
+        CS <: Union{Nothing, AbstractCertifiedSolutions},
+    }
     # Mutable: `loops`, `statistics` and the two trace counters are reset
     # between solves; all other fields are const.
     const workers::Vector{MonodromyWorkerState{H, P}}
@@ -1013,6 +1131,9 @@ mutable struct MonodromySolver{H, P, B, UP <: UniquePoints, MO <: MonodromyOptio
     loops::Vector{MonodromyLoop{P}}
     const unique_points::UP
     const unique_points_lock::ReentrantLock
+    # `nothing` under `DuplicateCheck.HEURISTIC`, else the certification
+    # package's accumulator of certified-distinct solutions.
+    const certified_solutions::CS
     const options::MO
     statistics::MonodromyStatistics
     # We save the sums of the solutions for three values of the loop parameter
@@ -1028,10 +1149,26 @@ mutable struct MonodromySolver{H, P, B, UP <: UniquePoints, MO <: MonodromyOptio
     const trace_lock::ReentrantLock
 end
 
+# The two duplicate-check policies as solver types: `HeuristicMonodromySolver`
+# carries no accumulator, so its certified branch is statically dead. Together they
+# cover the `CS` bound, which is what keeps the dedup path free of a half that has
+# no method.
+const HeuristicMonodromySolver = MonodromySolver{
+    H, P, B, UP, MO, Nothing,
+} where {H, P, B, UP <: UniquePoints, MO <: MonodromyOptions}
+const CertifiedMonodromySolver = MonodromySolver{
+    H, P, B, UP, MO, CS,
+} where {
+    H, P, B, UP <: UniquePoints, MO <: MonodromyOptions,
+    CS <: AbstractCertifiedSolutions,
+}
+
 function _monodromy_solver_from_builder(
         worker::MonodromyWorkerState{H, P}, builder::B, n::Int,
         options::MO, chart::Vector{ComplexF64}, use_chart::Bool,
-    ) where {H, P, B, MO <: MonodromyOptions}
+        # Required, so a new route cannot silently downgrade to the heuristic check.
+        certified_solutions::CS,
+    ) where {H, P, B, MO <: MonodromyOptions, CS <: Union{Nothing, AbstractCertifiedSolutions}}
     group_actions = options.equivalence_classes ? options.group_actions : nothing
     if group_actions !== nothing && use_chart
         group_actions = _ChartActions(chart, group_actions)
@@ -1049,6 +1186,7 @@ function _monodromy_solver_from_builder(
         MonodromyLoop{P}[],
         unique_points,
         ReentrantLock(),
+        certified_solutions,
         options,
         MonodromyStatistics(),
         trace,
@@ -1153,6 +1291,42 @@ function _conditioned_chart(
     return chart
 end
 
+@noinline _certification_needs_equations(F) = throw(
+    ArgumentError(
+        "`duplicate_check = DuplicateCheck.CERTIFIED` certifies the equations of a " *
+            "`System`, which a $(typeof(F)) does not carry.",
+    ),
+)
+
+# The square system the certified duplicate check certifies against, in the
+# coordinates the run reports: a homogeneous system is charted, a subspace
+# intersection is sliced.
+_certified_system(F::System, ::Nothing, chart::Vector{ComplexF64})::System =
+    isempty(chart) ? F : slice(F, _full_subspace(nvariables(F)); chart = chart)
+_certified_system(
+    F::System, L::LinearSubspace{ComplexF64}, chart::Vector{ComplexF64},
+)::System = _rebuild_sliced(F, L, chart)
+_certified_system(
+    F::SystemLike, ::Union{Nothing, LinearSubspace{ComplexF64}}, ::Vector{ComplexF64},
+) = _certification_needs_equations(F)
+
+# The accumulator the certified duplicate check files into, and `nothing` under
+# `DuplicateCheck.HEURISTIC`. `L` is the subspace a witness-set run intersects with
+# and `nothing` for a parameter run, `chart` is empty unless the solutions are
+# projective, and `p` is what certification sees as parameters.
+function _certified_accumulator(
+        F::SystemLike, options::MonodromyOptions,
+        p::Union{Nothing, Vector{ComplexF64}},
+        L::Union{Nothing, LinearSubspace{ComplexF64}},
+        chart::Vector{ComplexF64},
+    )
+    options.duplicate_check == DuplicateCheck.CERTIFIED || return nothing
+    return monodromy_certified_solutions(
+        _certified_system(F, L, chart), p, options.certification_max_precision,
+        options.certification_refine_solution,
+    )
+end
+
 function MonodromySolver(
         F::SystemLike, p::Vector{ComplexF64};
         options::MonodromyOptions = MonodromyOptions(),
@@ -1174,12 +1348,14 @@ function MonodromySolver(
         )
         return _monodromy_solver_from_builder(
             worker, chart_builder, n, options, chart, true,
+            _certified_accumulator(F, options, copy(p), nothing, chart),
         )
     end
     builder = ParameterMonodromyBuilder(F, p, n, tracker_options)
     worker = _parameter_monodromy_worker(F.evaluator, p, n, tracker_options)
     return _monodromy_solver_from_builder(
         worker, builder, n, options, ComplexF64[], false,
+        _certified_accumulator(F, options, copy(p), nothing, ComplexF64[]),
     )
 end
 
@@ -1254,6 +1430,9 @@ function MonodromySolver(
     worker = builder()
     return _monodromy_solver_from_builder(
         worker, builder, n, options, chart, projective,
+        _certified_accumulator(
+            F, options, nothing, L, projective ? chart : ComplexF64[],
+        ),
     )
 end
 
@@ -1276,6 +1455,14 @@ function add_loop!(
 end
 loop(MS::MonodromySolver, i::Int) = MS.loops[i]
 nloops(MS::MonodromySolver)::Int = length(MS.loops)
+
+_reset_certified!(::HeuristicMonodromySolver) = nothing
+_reset_certified!(MS::CertifiedMonodromySolver) =
+    (empty!(MS.certified_solutions); nothing)
+
+_size_certified_caches!(::HeuristicMonodromySolver, ::Int) = nothing
+_size_certified_caches!(MS::CertifiedMonodromySolver, ntasks::Int) =
+    monodromy_size_caches!(MS.certified_solutions, ntasks)
 
 function reset_loops!(MS::MonodromySolver)
     empty!(MS.loops)
@@ -1448,10 +1635,79 @@ function _dedup_tolerances(opts::MonodromyOptions, res::PathResult)::Tuple{Float
     return opts.unique_points_atol, rtol
 end
 
-# Dedup-add a finished PathResult under the solver's tolerance policy.
-function add!(MS::MonodromySolver, res::PathResult, id::Int)
+# The id of a stored solution `res` is an orbit image of, and `nothing` when there
+# is none or the run keeps no equivalence classes. Call with the lock guarding the
+# stored solutions held.
+function _orbit_duplicate(MS::MonodromySolver, res::PathResult)::Union{Nothing, Int}
+    MS.options.equivalence_classes || return nothing
     atol, rtol = _dedup_tolerances(MS.options, res)
-    return add!(MS.unique_points, solution(res), id; atol = atol, rtol = rtol)
+    x = solution(res)
+    UP = MS.unique_points
+    return search_in_radius(UP, x, tolerance_radius(UP, x, atol, rtol))
+end
+
+# Certify a finished PathResult, which is everything the certified duplicate check
+# can do before the caller takes the lock guarding the stored solutions. `nothing`
+# under `DuplicateCheck.HEURISTIC`, which has nothing to do here; `tid` selects the
+# calling task's certification cache.
+certify_candidate(::HeuristicMonodromySolver, ::PathResult, ::Int = 1) = nothing
+
+function certify_candidate(MS::CertifiedMonodromySolver, res::PathResult, tid::Int = 1)
+    # Certifying an orbit image of a stored solution is wasted work. `add!` repeats
+    # the search under the lock it files in, which is what settles the race with a
+    # task that stored the image in between.
+    if MS.options.equivalence_classes
+        orbit = Base.@lock MS.unique_points_lock _orbit_duplicate(MS, res)
+        orbit === nothing || return nothing
+    end
+    Threads.atomic_add!(MS.statistics.certification_attempts, 1)
+    return monodromy_certify_candidate(MS.certified_solutions, solution(res), tid)
+end
+
+# Certify and file in one call, for a caller that takes no lock of its own.
+add!(MS::HeuristicMonodromySolver, res::PathResult, id::Int) =
+    add!(MS, res, id, nothing)
+add!(MS::CertifiedMonodromySolver, res::PathResult, id::Int) =
+    add!(MS, res, id, certify_candidate(MS, res))
+
+# Dedup-add a finished PathResult under the solver's policy, given the candidate
+# `certify_candidate` produced for it. Returns the id of the solution it represents,
+# whether it was added, and the endpoint to store.
+function add!(
+        MS::HeuristicMonodromySolver, res::PathResult, id::Int, ::Nothing,
+    )
+    atol, rtol = _dedup_tolerances(MS.options, res)
+    found, added = add!(MS.unique_points, solution(res), id; atol = atol, rtol = rtol)
+    return (found, added, res)
+end
+
+# Under `DuplicateCheck.CERTIFIED` a candidate is kept only if it certifies as a
+# solution distinct from every stored one, and what gets stored is the midpoint
+# of its certified interval rather than the tracked endpoint.
+function add!(
+        MS::CertifiedMonodromySolver, res::PathResult, id::Int,
+        candidate::Union{Nothing, AbstractCertifiedCandidate},
+    )
+    orbit = _orbit_duplicate(MS, res)
+    orbit === nothing || return (orbit, false, res)
+    # Nothing was certified for this endpoint: it is an orbit image, or the target
+    # count was already met when it finished.
+    candidate === nothing && return (0, false, res)
+    stats = MS.statistics
+    status, representative, certified = monodromy_file_certified!(
+        MS.certified_solutions, candidate, id,
+    )
+    if status == AddSolutionCode.DUPLICATE
+        Threads.atomic_add!(stats.certified_duplicates, 1)
+        return (representative, false, res)
+    elseif status == AddSolutionCode.NOT_CERTIFIED
+        Threads.atomic_add!(stats.uncertified_discards, 1)
+        return (0, false, res)
+    end
+    accepted = _certified_endpoint(res, certified::CertifiedEndpoint)
+    atol, rtol = _dedup_tolerances(MS.options, res)
+    add!(MS.unique_points, solution(accepted), id; atol = atol, rtol = rtol)
+    return (id, true, accepted)
 end
 
 """
@@ -1474,9 +1730,9 @@ function check_start_solutions!(
         end
         res === nothing && continue
         check && !is_success(res) && continue
-        _, added = add!(MS, res, length(results) + 1)
+        _, added, accepted = add!(MS, res, length(results) + 1)
         if added
-            push!(results, res)
+            push!(results, accepted)
         end
     end
     return results
@@ -1576,7 +1832,7 @@ function serial_monodromy_solve!(
                 loop_tracked!(stats)
 
                 # 1) check whether the solution already exists
-                id, got_added = add!(MS, res, length(results) + 1)
+                id, got_added, accepted = add!(MS, res, length(results) + 1)
 
                 if opts.permutations
                     add_permutation!(stats, job.loop_id, job.id, id)
@@ -1584,7 +1840,7 @@ function serial_monodromy_solve!(
 
                 if got_added
                     # 2) doesn't exist, so add to results
-                    push!(results, res)
+                    push!(results, accepted)
 
                     # 3) schedule on the same loop again
                     if !opts.single_loop_per_start_solution
@@ -1726,10 +1982,12 @@ function threaded_monodromy_solve!(
     loop_rng = Random.MersenneTwister(seed)
     queue = Channel{LoopTrackingJob}(Inf)
 
-    # Grow the worker states to one per task via the builder (never deepcopy).
+    # Grow the worker states to one per task via the builder (never deepcopy), and
+    # the certification caches with them, so no task grows either later.
     while length(MS.workers) < nthr
         push!(MS.workers, MS.builder())
     end
+    _size_certified_caches!(MS, nthr)
 
     data_lock = MS.unique_points_lock
     t0 = time()
@@ -1737,6 +1995,7 @@ function threaded_monodromy_solve!(
     stats = MS.statistics
     opts = MS.options
     is_subspace = MS.workers[1].base isa LinearSubspace
+    target_count = something(opts.target_solutions_count, typemax(Int))
     notify_lock = ReentrantLock()
     cond_queue_emptied = Threads.Condition(notify_lock)
     workers_idle = fill(true, nthr)
@@ -1792,28 +2051,36 @@ function threaded_monodromy_solve!(
                             if res !== nothing
                                 loop_tracked!(stats)
 
-                                # 1) check whether the solution already exists
-                                lock(data_lock)
+                                # 1) check whether the solution already exists.
+                                # Certifying the candidate dominates the cost of
+                                # filing it, so it happens before `data_lock` is
+                                # taken; the id it is filed under is still decided
+                                # under the lock. `n_results` only grows, so a
+                                # candidate skipped here is one the locked check
+                                # below drops too.
+                                candidate = n_results[] < target_count ?
+                                    certify_candidate(MS, res, tid) : nothing
                                 got_added = false
                                 id = 0
-                                if length(results) <
-                                        something(opts.target_solutions_count, typemax(Int))
-                                    atol, rtol = _dedup_tolerances(opts, res)
-                                    id, got_added = add!(
-                                        MS.unique_points, solution(res),
-                                        length(results) + 1;
-                                        atol = atol, rtol = rtol,
-                                    )
-                                    if opts.permutations
-                                        add_permutation!(stats, job.loop_id, job.id, id)
+                                Base.@lock data_lock begin
+                                    accepted = res
+                                    if length(results) < target_count
+                                        id, got_added, accepted = add!(
+                                            MS, res, length(results) + 1, candidate,
+                                        )
+                                        if opts.permutations
+                                            add_permutation!(
+                                                stats, job.loop_id, job.id, id,
+                                            )
+                                        end
+                                    end
+                                    if got_added
+                                        # 2) doesn't exist, so add to results
+                                        push!(results, accepted)
+                                        Threads.atomic_add!(n_results, 1)
                                     end
                                 end
                                 if got_added
-                                    # 2) doesn't exist, so add to results
-                                    push!(results, res)
-                                    Threads.atomic_add!(n_results, 1)
-                                    unlock(data_lock)
-
                                     # 3) schedule on the same loop again
                                     if !opts.single_loop_per_start_solution
                                         enqueue!(LoopTrackingJob(id, job.loop_id))
@@ -1832,8 +2099,6 @@ function threaded_monodromy_solve!(
                                         end
                                         enqueue!(LoopTrackingJob(id, k))
                                     end
-                                else
-                                    unlock(data_lock)
                                 end
                             else
                                 loop_failed!(stats)
@@ -1991,6 +2256,7 @@ function _monodromy_solve_body!(
     )::MonodromyResult{P, P} where {H, P}
     MS.statistics = MonodromyStatistics()
     empty!(MS.unique_points)
+    _reset_certified!(MS)
     reset_trace!(MS)
     reset_loops!(MS)
     results = check_start_solutions!(MS, X)
@@ -2021,6 +2287,7 @@ function _monodromy_solve_body!(
         MS.loops,
         MS.statistics,
         MS.options.equivalence_classes,
+        MS.options.duplicate_check,
         seed,
         p isa LinearSubspace ? trace_colinearity(MS) : nothing,
     )
@@ -2058,6 +2325,18 @@ hand to another process as to track.
   base parameters and sort out any that fail to converge. If `false`, the
   provided solutions are refined but trusted (non-converged points are kept).
 * `distance = InfNorm()`: The distance function used for [`UniquePoints`](@ref).
+* `duplicate_check = DuplicateCheck.HEURISTIC`: How a new solution is recognized as
+  one already found. `DuplicateCheck.HEURISTIC` deduplicates by distance through
+  [`UniquePoints`](@ref). `DuplicateCheck.CERTIFIED` accepts a solution only if it
+  certifies as distinct from every solution found so far, and discards an endpoint
+  that certifies as neither; the accepted solutions are the certified interval
+  midpoints, so [`solutions`](@ref) returns certified approximations, and
+  [`ncertified_distinct`](@ref) and [`ndiscarded_uncertified`](@ref) report the
+  counts. Needs `using HomotopyContinuationNextCertification`.
+* `certification_max_precision = 256`: Maximal precision used when certifying,
+  under `duplicate_check = DuplicateCheck.CERTIFIED`.
+* `certification_refine_solution = true`: Whether to refine an endpoint with
+  Newton before certifying it, under `duplicate_check = DuplicateCheck.CERTIFIED`.
 * `loop_finished_callback = always_false`: A callback called with all current
   [`PathResult`](@ref)s after a loop is exhausted. Return `true` to stop.
 * `equivalence_classes = true`: Only applies with group actions: consider two
@@ -2079,8 +2358,8 @@ hand to another process as to track.
   [`System`](@ref). Ignored when `F` is already a `System`.
 * `permutations = false`: Whether to keep track of the permutations induced by
   the loops.
-* `reuse_loops = :all`: Strategy to reuse other loops for newly found
-  solutions: `:all`, `:random` or `:none`.
+* `reuse_loops = ReuseLoops.ALL`: Strategy to reuse other loops for newly found
+  solutions: `ReuseLoops.ALL`, `ReuseLoops.RANDOM` or `ReuseLoops.NONE`.
 * `seed`: Every random choice descends from it, so the same `seed` gives the
   same loops regardless of the state of the global random number generator.
 * `target_solutions_count`: Stop once this number of solutions is reached.

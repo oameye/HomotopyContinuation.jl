@@ -218,3 +218,12 @@ function Base.show(io::IO, S::SegmentStepper)
     end
     return
 end
+
+# `x` with the fields named in `updates` replaced, rebuilt through its default
+# constructor. Field order is not part of the call, so a field added to the struct is
+# carried over without a change in any caller.
+_with_fields(x::T, updates::NamedTuple) where {T} = T(
+    ntuple(
+        i -> get(updates, fieldname(T, i), getfield(x, i)), Val(fieldcount(T)),
+    )...,
+)

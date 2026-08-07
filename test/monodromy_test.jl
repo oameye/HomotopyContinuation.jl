@@ -12,6 +12,7 @@ using HomotopyContinuationNext: MonodromySolver, MonodromyWorkerState, track_loo
     is_success
 using HomotopyContinuationNext: verify_solution_completeness, parameters
 using HomotopyContinuationNext: _accumulate_trace!, _trace_dropped!
+using HomotopyContinuationNext: DuplicateCheck
 
 @testset "find_start_pair" begin
     Random.seed!(0xf00d)
@@ -321,7 +322,7 @@ end
 @testset "reuse_loops variants and stopping" begin
     @polyvar y[1:2] p[1:2]
     F = System([y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]]; variables = y, parameters = p)
-    for rl in (:all, :random, :none)
+    for rl in (ReuseLoops.ALL, ReuseLoops.RANDOM, ReuseLoops.NONE)
         r = solve(
             F,
             Monodromy(;
@@ -340,4 +341,33 @@ end
         Serial(),
     )
     @test nsolutions(rml) == 2 && is_heuristic_stop(rml)
+end
+
+@testset "duplicate_check option" begin
+    @polyvar y[1:2] p[1:2]
+    F = System([y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]]; variables = y, parameters = p)
+
+    @test MonodromyOptions().duplicate_check == DuplicateCheck.HEURISTIC
+    @test MonodromyOptions(; duplicate_check = DuplicateCheck.CERTIFIED).duplicate_check ==
+        DuplicateCheck.CERTIFIED
+    # The option is an enum, not a symbol.
+    @test_throws TypeError MonodromyOptions(; duplicate_check = :certified)
+
+    r = solve(
+        F,
+        Monodromy(; target_solutions_count = 2, seed = UInt32(404), show_progress = false),
+        Serial(),
+    )
+    @test r.duplicate_check == DuplicateCheck.HEURISTIC
+    @test ncertified_distinct(r) == 0
+    @test ndiscarded_uncertified(r) == 0
+
+    # Certifying needs the certification package, which core alone cannot reach.
+    @test_throws ArgumentError solve(
+        F,
+        Monodromy(;
+            duplicate_check = DuplicateCheck.CERTIFIED, show_progress = false,
+        ),
+        Serial(),
+    )
 end

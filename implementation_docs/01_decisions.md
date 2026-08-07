@@ -469,6 +469,52 @@ iterator keeps its serial contract.
 
 Certification is the only consumer of Arblib; loading it into core cost ~0.34s of load time and thousands of extra invalidations (core load ~1.6s to ~0.77s after the move). An extension was rejected: every certificate type embeds an `AcbMatrix`, so the types cannot be defined without Arblib, and extensions can only add methods to existing functions, never define or export new types. See `00_architecture.md`.
 
+### Monodromy reaches certification through three declared functions
+
+`duplicate_check = DuplicateCheck.CERTIFIED` needs Krawczyk certification, which lives in the subpackage that
+depends on core, so core cannot call it. Core declares `monodromy_certified_solutions` (build the
+accumulator for a square system and its parameters), `monodromy_certify_candidate` (certify a
+candidate, no lock held) and `monodromy_file_certified!` (file the certified candidate under an
+index, get back an `AddSolutionCode`, the matched index and the certified midpoint), plus
+`monodromy_size_caches!` and `empty!`, each with a fallback that throws an `ArgumentError` naming
+the package; the subpackage adds the methods for its own accumulator type. Core also names the two
+supertypes the seam is typed on, `AbstractCertifiedSolutions` and `AbstractCertifiedCandidate`, so
+no hook takes an `Any`. Two consequences: the fallbacks keep a core-only inference of the route
+free of a `MethodError`, and the accumulator's type is a parameter of `MonodromySolver` bounded by
+`Union{Nothing, AbstractCertifiedSolutions}`, so the two policies are the solver types
+`HeuristicMonodromySolver` / `CertifiedMonodromySolver` and the heuristic route's certified branch
+is statically dead. Core still owns the coordinates certification happens in, slicing the subspace
+and appending the projective chart row itself (`_certified_system`), because those are the
+coordinates the run reports its solutions in.
+
+### Certified monodromy dedup certifies outside the driver's lock (MEASURED)
+
+Certifying dominates the cost of the check, so it happens before `data_lock` is taken and only the
+filing runs under it, where the id and the permutation entry are decided. That is why the index is
+assigned at filing (`_with_index`) rather than baked into the certificate, and why the
+enclosure-overlap test at filing is what settles a race with a task that stored an overlapping
+solution in between; under `equivalence_classes` the orbit search runs once before certifying, to
+skip an image of a stored solution, and again at filing for the same race. A candidate that
+finishes after `target_solutions_count` is met is not certified at all. Measured on the
+twisted-cubic ED system (6 variables, 21 solutions, 40 loops, seed 7): a certification costs ~12 us
+against ~205 us per loop track, and the certified run costs 8.5 ms serial against 8.0 ms heuristic.
+That ratio is what the split buys back on many tasks, and it is unbounded rather than ~6% when a
+candidate escalates into Arb, which happens near singular solutions.
+
+### A certified endpoint carries the diagnostics of the point it reports
+
+`accuracy`, `residual` and `condition_jacobian` are documented as quantities at the reported
+endpoint, so the certified duplicate check cannot swap the solution for the certified midpoint and
+keep the tracker's numbers: measured on an endpoint 1e-7 short of a solution, they claimed a
+residual of 3.2e-7 where the midpoint's is 1.2e-16, and a condition number of 1e10 for a root the
+certificate proves simple. The certification package therefore recomputes them at the midpoint and
+returns them with it, in the coordinates the run reports. The primitives are core's own, so the
+numbers stay comparable with every other route: one `_newton` iteration whose update is discarded
+(its `accuracy` is the update norm, its `residual` is `‖F(x)‖∞`, both measured before the update)
+and `LA.cond` of the `MatrixWorkspace` that iteration factorized, which is the estimator the
+predictor's `cond_H_x` uses. Discarding the update is what keeps the stored point the midpoint of
+the proven enclosure rather than a refinement of it.
+
 ### Certificate builders behind a type-parameter barrier
 
 `certify_solution` used to return `Union{SolutionCertificate,ExtendedSolutionCertificate}` because `extended_certificate::Bool` chose the type at runtime. The flag is resolved once at the `_certify` boundary and the concrete type is threaded as a type parameter through `certify_solution`/`extended_prec_certify_solution`, with `_float64_certificate`/`_arb_certificate`/`_uncertified_certificate` dispatching on `::Type{CertT}`. Every function on the path infers a concrete return type.

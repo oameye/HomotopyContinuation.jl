@@ -1222,26 +1222,13 @@ function _hypersurface_witness_set(
     return WitnessSet(h, linear_subspace(Wp), R; projective = projective)
 end
 
-function _regeneration_monodromy_options(M::MonodromyOptions, W)
-    return MonodromyOptions(;
-        permutations = false,
-        trace_test = true,
-        single_loop_per_start_solution = M.single_loop_per_start_solution,
-        check_startsolutions = M.check_startsolutions,
-        group_actions = M.group_actions,
-        loop_finished_callback = M.loop_finished_callback,
-        parameter_sampler = M.parameter_sampler,
-        equivalence_classes = M.equivalence_classes,
-        trace_test_tol = M.trace_test_tol,
-        # allow a little slack in case a singular solution slips through
+# The witness points of one component are a trace-tested loop with no permutations;
+# every other option is the caller's. The target count allows a little slack in case
+# a singular solution slips through.
+_regeneration_monodromy_options(M::MonodromyOptions, W) = _with_fields(
+    M,
+    (
+        permutations = false, trace_test = true,
         target_solutions_count = Int(floor(1.5 * degree(W))),
-        timeout = M.timeout,
-        min_solutions = M.min_solutions,
-        max_loops_no_progress = M.max_loops_no_progress,
-        reuse_loops = M.reuse_loops,
-        distance = M.distance,
-        triangle_inequality = M.triangle_inequality,
-        unique_points_atol = M.unique_points_atol,
-        unique_points_rtol = M.unique_points_rtol,
-    )
-end
+    ),
+)

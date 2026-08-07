@@ -41,15 +41,31 @@ end
 
 Return a copy of `r` with additional accepted/rejected steps added (e.g. from a prior phase).
 """
-function _add_steps(r::PathResult, accepted::Int, rejected::Int)::PathResult
-    return PathResult(
-        r.return_code, r.solution, r.t, r.accuracy, r.ω, r.μ, r.residual,
-        r.condition_jacobian, r.winding_number, r.singular,
-        r.accepted_steps + accepted, r.rejected_steps + rejected,
-        r.steps_eg, r.extended_precision_used, r.last_path_point, r.last_path_t,
-        r.path_number, r.start_solution, r.valuation, r.multiplicity,
-    )
-end
+_add_steps(r::PathResult, accepted::Int, rejected::Int)::PathResult = _with_fields(
+    r,
+    (
+        accepted_steps = r.accepted_steps + accepted,
+        rejected_steps = r.rejected_steps + rejected,
+    ),
+)
+
+# What the certification package hands back for an accepted candidate: the
+# midpoint of the enclosure, with its diagnostics measured at that point.
+const CertifiedEndpoint = @NamedTuple{
+    solution::Vector{ComplexF64}, accuracy::Float64, residual::Float64,
+    condition::Float64,
+}
+
+# `e.solution` is the midpoint of an interval proven to contain a single solution,
+# so it is simple whatever the tracker concluded from its condition estimate. The
+# fields not listed describe the path rather than the endpoint, and stay.
+_certified_endpoint(r::PathResult, e::CertifiedEndpoint)::PathResult = _with_fields(
+    r,
+    (
+        solution = e.solution, accuracy = e.accuracy, residual = e.residual,
+        condition_jacobian = e.condition, singular = false,
+    ),
+)
 
 is_success(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_SUCCESS
 

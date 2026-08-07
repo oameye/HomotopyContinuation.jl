@@ -10,7 +10,8 @@ using HomotopyContinuationNextCertification:
     certified_solution_interval, solution_candidate, solution_approximation,
     certificate_index, distinct_certificates, distinct_solutions,
     ExtendedSolutionCertificate, SolutionCertificate, CertificationResult,
-    save, DistinctCertifiedSolutions, add_solution!, distinct_certified_solutions,
+    save, DistinctCertifiedSolutions, add_solution!, AddSolutionCode,
+    distinct_certified_solutions,
     distinct_certified_solutions!, stats, ncertified_distinct, nprocessed,
     nduplicates, nnotcertified, ncandidates
 import DynamicPolynomials as DP
@@ -256,13 +257,13 @@ end
         dcs = DistinctCertifiedSolutions(F, nothing)
         added, status, representative, sol = add_solution!(dcs, sols[1], 1)
         @test added
-        @test status == :certified_distinct
+        @test status == AddSolutionCode.CERTIFIED_DISTINCT
         @test representative == 1
         @test sol isa Vector{ComplexF64}
 
         added, status, representative, sol = add_solution!(dcs, sols[1], 2)
         @test !added
-        @test status == :duplicate
+        @test status == AddSolutionCode.DUPLICATE
         @test representative == 1
         @test isnothing(sol)
 
@@ -277,7 +278,7 @@ end
             not_certified, ComplexF64[100.0, -70.0], 3; max_precision = 64,
         )
         @test !added
-        @test status == :not_certified
+        @test status == AddSolutionCode.NOT_CERTIFIED
         @test representative == 0
         @test isnothing(sol)
         @test stats(not_certified) ==
@@ -291,9 +292,9 @@ end
             reference_point = ComplexF64[0.0],
         )
         added, status, representative, _ = add_solution!(collision, ComplexF64[1.0], 1)
-        @test added && status == :certified_distinct && representative == 1
+        @test added && status == AddSolutionCode.CERTIFIED_DISTINCT && representative == 1
         added, status, representative, _ = add_solution!(collision, ComplexF64[-1.0], 2)
-        @test added && status == :certified_distinct && representative == 2
+        @test added && status == AddSolutionCode.CERTIFIED_DISTINCT && representative == 2
         @test length(collision) == 2
         @test sort(map(s -> real(s[1]), solutions(collision))) == [-1.0, 1.0]
 

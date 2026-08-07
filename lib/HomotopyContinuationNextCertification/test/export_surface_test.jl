@@ -37,6 +37,7 @@ using HomotopyContinuationNextCertification: HomotopyContinuationNextCertificati
         :save,
         :DistinctCertifiedSolutions,
         :add_solution!,
+        :AddSolutionCode,
         :distinct_certified_solutions,
         :distinct_certified_solutions!,
         :stats,

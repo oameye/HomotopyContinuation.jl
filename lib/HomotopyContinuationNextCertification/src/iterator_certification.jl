@@ -62,11 +62,16 @@ function _build_partition(boundaries::Vector{Float64})::BSPPartition
     return BSPPartition(cuts, zeros(Int, n), falses(n))
 end
 
-# The leaf containing `[lo, hi]`, or `nothing` when it straddles a cut. A leaf owns
-# both its endpoints, so an enclosure touching one is inside rather than straddling.
+# A leaf owns its lower cut and not its upper one, so every cut belongs to exactly
+# one leaf and an enclosure reaching a cut straddles it. That is what keeps two
+# enclosures touching at a cut from being separated without being compared.
+_leaf_at(bsp::BSPPartition, x::Float64)::Int =
+    min(searchsortedlast(bsp.cuts, x), _nleaves(bsp))
+
+# The leaf containing `[lo, hi]`, or `nothing` when it straddles a cut.
 function _find_leaf(bsp::BSPPartition, lo::Float64, hi::Float64)
-    i = min(searchsortedlast(bsp.cuts, lo), _nleaves(bsp))
-    return hi <= _leaf_hi(bsp, i) ? i : nothing
+    i = _leaf_at(bsp, lo)
+    return hi < _leaf_hi(bsp, i) ? i : nothing
 end
 
 # Merge the run of leaves `[lo, hi]` touches into one, so it fits in a single leaf,
@@ -76,8 +81,7 @@ function _merge_covering_leaves!(
         bsp::BSPPartition, by_leaf::Dict{Float64, Vector{BSPLeafEntry}},
         lo::Float64, hi::Float64,
     )::Int
-    left = max(searchsortedfirst(bsp.cuts, lo) - 1, 1)
-    right = min(searchsortedlast(bsp.cuts, hi), _nleaves(bsp))
+    left, right = _leaf_at(bsp, lo), _leaf_at(bsp, hi)
     right <= left && return left
 
     merged = get!(() -> BSPLeafEntry[], by_leaf, _leaf_lo(bsp, left))
@@ -552,8 +556,9 @@ end
 # Leaf refinement
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Half-open on the right, the way `_find_leaf` files an enclosure.
 _inside(entry::BSPLeafEntry, lo::Float64, hi::Float64)::Bool =
-    lo <= entry.lo && entry.hi <= hi
+    lo <= entry.lo && entry.hi < hi
 
 # The most balanced cut the leaf admits: a point at least `ε` clear of every
 # enclosure in it, splitting them as evenly as it can. `nothing` when they leave

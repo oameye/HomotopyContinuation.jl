@@ -8,20 +8,7 @@ using DynamicPolynomials: @polyvar, subs, differentiate, monomials, coefficient
 using HomotopyContinuationNext: FSVec, FSMat, evaluate!, evaluate_and_jacobian!,
     nparameters
 
-# The ED-discriminant system of a toric variety: 21 solutions for the twisted
-# cubic exponent matrix used below.
-function toric_ed_system()
-    A = [3 2 1 0; 0 1 2 3]
-    d, n = size(A)
-    @polyvar tv[1:d] yv[1:n] uv[1:n]
-    φ = [prod(tv[i]^A[i, j] for i in 1:d) for j in 1:n]
-    Dφ = [differentiate(φ[j], tv[i]) for j in 1:n, i in 1:d]
-    F = System(
-        [φ .+ yv .- uv; transpose(Dφ) * yv];
-        variables = [tv; yv], parameters = uv,
-    )
-    return F, uv
-end
+include("test_systems.jl")
 
 function rand_poly(vars, d::Int; homogeneous::Bool = false)
     mons = monomials(vars, homogeneous ? (d:d) : 0:d)
@@ -172,11 +159,7 @@ end
     Random.seed!(0x008b868e)
     x₀, p₀ = find_start_pair(F)
 
-    roots_of_unity(s) = begin
-        t = cis(π * 2 / 3)
-        t² = t * t
-        (vcat(t * s[1], t * s[2], s[3:end]), vcat(t² * s[1], t² * s[2], s[3:end]))
-    end
+    roots_of_unity = toric_ed_roots_of_unity
 
     # group action without equivalence classes still finds all 21
     r = solve(
@@ -219,7 +202,7 @@ end
     )
     @test nsolutions(r) == 7
 
-    for rl in (:all, :random, :none)
+    for rl in (ReuseLoops.ALL, ReuseLoops.RANDOM, ReuseLoops.NONE)
         r = solve(
             F,
             [x₀],

@@ -335,28 +335,15 @@ function _decompose_with_monodromy(
     return decomposition
 end
 
-function _decompose_monodromy_options(M::MonodromyOptions)
-    return MonodromyOptions(;
-        permutations = true,
-        trace_test = true,
+# Decomposition needs the permutations of a trace-tested single loop; every other
+# option is the caller's.
+_decompose_monodromy_options(M::MonodromyOptions) = _with_fields(
+    M,
+    (
+        permutations = true, trace_test = true,
         single_loop_per_start_solution = true,
-        check_startsolutions = M.check_startsolutions,
-        group_actions = M.group_actions,
-        loop_finished_callback = M.loop_finished_callback,
-        parameter_sampler = M.parameter_sampler,
-        equivalence_classes = M.equivalence_classes,
-        trace_test_tol = M.trace_test_tol,
-        target_solutions_count = M.target_solutions_count,
-        timeout = M.timeout,
-        min_solutions = M.min_solutions,
-        max_loops_no_progress = M.max_loops_no_progress,
-        reuse_loops = M.reuse_loops,
-        distance = M.distance,
-        triangle_inequality = M.triangle_inequality,
-        unique_points_atol = M.unique_points_atol,
-        unique_points_rtol = M.unique_points_rtol,
-    )
-end
+    ),
+)
 
 # ── NumericalIrreducibleDecomposition ────────────────────────────────────────
 

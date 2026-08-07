@@ -15,9 +15,9 @@ Cold load + construction + first solve is ~10.6s versus v2's 45s, with no precom
 Endgame is at v2 result parity on v2's default parameters.
 
 At v2 parity: threading, overdetermined systems, parameter homotopies, monodromy (group actions,
-linear subspaces, trace test), certification (Krawczyk with Arb fallback and the low-memory
-route for a `ResultIterator`, in the separate `lib/HomotopyContinuationNextCertification`
-subpackage), and witness sets / NID (`witness_set`,
+linear subspaces, trace test, certified duplicate check), certification (Krawczyk with Arb
+fallback and the low-memory route for a `ResultIterator`, in the separate
+`lib/HomotopyContinuationNextCertification` subpackage), and witness sets / NID (`witness_set`,
 `trace_test`, `membership`, `regeneration`, `decompose`, `nid`, including projective,
 zero-dimensional, parametric, and rational cases).
 
@@ -204,7 +204,8 @@ entries in the evaluation sweep's system collection, both recorded with their re
   outermost wrapper, where the predictor has already zeroed that row
 - [x] `solve(F, [sols, p], Monodromy(), exec)` at full v2 parity: `find_start_pair`, serial and threaded
   (Channel job queue) execution, `MonodromyOptions` (~27 explicit kwargs, no splatting),
-  `reuse_loops` (`:all`/`:random`/`:none`), heuristic stop, `target_solutions_count`,
+  `reuse_loops` (a `ReuseLoops` enum where v2 takes `:all`/`:random`/`:none`, as with
+  `duplicate_check` below), heuristic stop, `target_solutions_count`,
   equivalence classes via group actions, `LinearSubspace` parameters, permutations, trace
   test. One deliberate signature deviation: `parameter_sampler` is called `sampler(rng, p)`
   rather than v2's `sampler(p)`.
@@ -975,13 +976,42 @@ Closed by this audit:
   pass keeps one interval per path and holds one certificate per task, and only a terminal leaf's
   certificates are alive at once, but no test asserts a peak and none is claimed.
 
-Open, ordered by consequence:
+Closed by this audit (continued):
 
-- [ ] **`monodromy` `duplicate_check = :certified`**, which dedups by Krawczyk certificate
-  instead of by distance, and the `ncertified_distinct` / `ndiscarded_uncertified` accessors on
-  `MonodromyResult`. Awkward in v3's layout: monodromy is in core and `certify` is in the
-  certification subpackage, so core cannot call it. Blocks `monodromy_test.jl` "certified
-  duplicate checks".
+- [x] **`duplicate_check = DuplicateCheck.CERTIFIED`** on `Monodromy` (an enum, where v2 takes
+  `:certified`), which keeps an endpoint only if it
+  certifies as a solution distinct from every one already found, plus
+  `certification_max_precision` / `certification_refine_solution` and the
+  `ncertified_distinct` / `ndiscarded_uncertified` accessors on `MonodromyResult`. Monodromy is
+  in core and `certify` is in the certification subpackage, so core declares the functions the
+  route needs and the subpackage adds the methods; without it loaded they throw an
+  `ArgumentError` naming the package rather than a `MethodError`. The seam and its concurrency
+  are in `01_decisions.md`. Tests:
+  `lib/.../test/monodromy_certification_test.jl`, plus the option plumbing and the
+  missing-package error in `test/monodromy_test.jl` "duplicate_check option".
+
+  Where it departs from v2:
+  - **The result stores no second solution list.** An accepted endpoint is rebuilt with the
+    midpoint of its certified interval and `singular = false`, so `solutions`, `real_solutions`
+    and every filter keyword return certified approximations with no branch, and
+    `ncertified_distinct` is the result count. v2 keeps a parallel
+    `certified_solutions::Union{Nothing, Vector{Vector{ComplexF64}}}` field that `solutions` and
+    `nsolutions` switch on, which leaves `only_real` reading the tracked endpoints instead.
+  - **`accuracy`, `residual` and `condition_jacobian` are measured at the midpoint**, not carried
+    over from the endpoint it replaces, where v2 replaces only the solution and the singular flag.
+    `ω`, `μ`, the step counts and the winding number describe the path and stay. The numbers and
+    the primitives are in `01_decisions.md`. Cost: one Newton step per accepted solution, 8.4 ms
+    against 8.1 ms on the 21-solution ED system.
+  - **The status of `add_solution!` is an `AddSolutionCode` enum**, declared in core because it
+    is what crosses the seam, where v2 returns `:certified_distinct` / `:duplicate` /
+    `:not_certified`.
+  - **Certification runs outside the threaded driver's data lock**, where v2 certifies under it:
+    the check is two phases, and only the filing that decides the id and the permutation entry
+    needs the lock (`01_decisions.md`).
+  - Two counters, not four: the accumulator already counts what it processed, so core's
+    statistics keep `certification_attempts`, `certified_duplicates` and
+    `uncertified_discards`, and `show(::MonodromyStatistics)` prints them only when the run
+    certified.
 
 Deliberately not ported from v2.22: `model_kit/compiled_cache_test.jl`, which exercises the
 locks around v2's global `TSYSTEM_TABLE` / `THOMOTOPY_TABLE`. v3 keeps no global compile table

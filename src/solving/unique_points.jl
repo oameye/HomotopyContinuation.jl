@@ -95,14 +95,18 @@ function add!(UP::UniquePoints{T, M, GA}, v::AbstractVector, id::Int, tol::Real)
     end
 end
 
+# The radius an `atol` / `rtol` pair allows around `v`, which is what the keyword
+# `add!` and `search_in_radius` are asked for.
+tolerance_radius(
+    UP::UniquePoints, v::AbstractVector, atol::Float64, rtol::Float64,
+)::Float64 = max(atol, rtol * _vt_distance(UP.tree.distance, v, UP.zero_vec))
+
 function add!(
         UP::UniquePoints{T, M, GA}, v::AbstractVector, id::Int;
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
     ) where {T, M, GA}
-    n = _vt_distance(UP.tree.distance, v, UP.zero_vec)
-    rad = max(atol, rtol * n)
-    return add!(UP, v, id, rad)
+    return add!(UP, v, id, tolerance_radius(UP, v, atol, rtol))
 end
 
 ####################

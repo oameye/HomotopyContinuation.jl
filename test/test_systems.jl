@@ -2,7 +2,7 @@
 # tracker regression cases. Each entry returns `(polys, variables, parameters)`.
 using DynamicPolynomials: @polyvar, subs, monomials
 using DynamicPolynomials: differentiate as mp_differentiate
-using HomotopyContinuationNext: @var, dense_poly, to_dict, horner, differentiate
+using HomotopyContinuationNext: @var, System, dense_poly, to_dict, horner, differentiate
 using HomotopyContinuationNext: subs as hc_subs
 using MultivariatePolynomials: variables as mp_variables
 
@@ -254,6 +254,33 @@ function minors_system()
     polys = minors_polys()
     vars = collect(mp_variables(polys[1]))
     return (polys, vars, eltype(vars)[])
+end
+
+# The ED-discriminant system of a toric variety, for the twisted cubic exponent
+# matrix: 21 solutions in 7 orbits of `toric_ed_roots_of_unity`. Returns the system
+# and its parameters.
+function toric_ed_system()
+    A = [3 2 1 0; 0 1 2 3]
+    d, n = size(A)
+    @polyvar tv[1:d] yv[1:n] uv[1:n]
+    φ = [prod(tv[i]^A[i, j] for i in 1:d) for j in 1:n]
+    Dφ = [mp_differentiate(φ[j], tv[i]) for j in 1:n, i in 1:d]
+    F = System(
+        [φ .+ yv .- uv; transpose(Dφ) * yv];
+        variables = [tv; yv], parameters = uv,
+    )
+    return F, uv
+end
+
+# The cube roots of unity acting on the first two coordinates, which is the group
+# action of `toric_ed_system`.
+function toric_ed_roots_of_unity(s)
+    t = cis(π * 2 / 3)
+    t² = t * t
+    return (
+        vcat(t * s[1], t * s[2], s[3:end]),
+        vcat(t² * s[1], t² * s[2], s[3:end]),
+    )
 end
 
 # (name, builder), the builder returning `(polys, variables, parameters)`. Lazy, so a

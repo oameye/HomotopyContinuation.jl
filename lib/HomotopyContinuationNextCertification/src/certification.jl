@@ -168,6 +168,11 @@ Return the index of the solution candidate this certificate was produced from.
 """
 certificate_index(C::AbstractSolutionCertificate)::Int = C.index
 
+# The same certificate under another index, for a caller that learns the index only
+# after certifying. The enclosures are shared, not copied.
+_with_index(C::AbstractSolutionCertificate, index::Int) =
+    _with_fields(C, (index = index,))
+
 """
     precision(certificate::AbstractSolutionCertificate)
 
@@ -1349,11 +1354,13 @@ stats(d::DistinctCertifiedSolutions) = (
     not_certified = nnotcertified(d),
 )
 
-function _record_add_solution!(d::DistinctCertifiedSolutions, status::Symbol)
+function _record_add_solution!(
+        d::DistinctCertifiedSolutions, status::AddSolutionCode.T,
+    )
     Threads.atomic_add!(d.stats.processed, 1)
-    if status === :duplicate
+    if status == AddSolutionCode.DUPLICATE
         Threads.atomic_add!(d.stats.duplicates, 1)
-    elseif status === :not_certified
+    elseif status == AddSolutionCode.NOT_CERTIFIED
         Threads.atomic_add!(d.stats.not_certified, 1)
     end
     return nothing
@@ -1363,11 +1370,11 @@ end
     add_solution!(d::DistinctCertifiedSolutions, sol, index = 0; max_precision = 256, refine_solution = true)
 
 Certify `sol` and store it if it is a new distinct certified solution. Returns
-`(added, status, representative, certified_solution)`. `status` is one of
-`:certified_distinct`, `:duplicate` or `:not_certified`; `representative` is the
-index carried by the stored certificate `sol` was matched to, or `0` when there
-is none; `certified_solution` is the midpoint of the certified interval when
-`added` is `true` and `nothing` otherwise.
+`(added, status, representative, certified_solution)`. `status` is an
+[`AddSolutionCode`](@ref) value; `representative` is the index carried by the
+stored certificate `sol` was matched to, or `0` when there is none;
+`certified_solution` is the midpoint of the certified interval when `added` is
+`true` and `nothing` otherwise.
 """
 function add_solution!(
         d::DistinctCertifiedSolutions,
@@ -1408,12 +1415,32 @@ function _add_solution!(
         max_precision::Int,
         refine_solution::Bool,
     ) where {S, P, C}
-    s = convert(Vector{ComplexF64}, sol)
+    status, representative, cert = _certify_candidate!(
+        d, convert(Vector{ComplexF64}, sol), cache, index, max_precision, refine_solution,
+    )
+    status == AddSolutionCode.CERTIFIED_DISTINCT ||
+        return (false, status, representative, nothing)
+    status, representative, stored = _file_certificate!(d, cert::C, index)
+    return (status == AddSolutionCode.CERTIFIED_DISTINCT, status, representative, stored)
+end
+
+# The two halves of `_add_solution!`, split at the certification so that a caller
+# holding a lock of its own can certify outside it and file the result inside it.
+# Such a caller learns the index only at filing and certifies under `0`; one that
+# knows it up front passes it here and files without a rewrite.
+function _certify_candidate!(
+        d::DistinctCertifiedSolutions{S, P, C},
+        s::Vector{ComplexF64},
+        cache::CertificationCache,
+        index::Integer,
+        max_precision::Int,
+        refine_solution::Bool,
+    ) where {S, P, C}
     Base.@lock d.access_lock begin
         certᵢ = guaranteed_duplicate_certificate(d.distinct, s)
         if !isnothing(certᵢ)
-            _record_add_solution!(d, :duplicate)
-            return (false, :duplicate, certificate_index(certᵢ), nothing)
+            _record_add_solution!(d, AddSolutionCode.DUPLICATE)
+            return (AddSolutionCode.DUPLICATE, certificate_index(certᵢ), nothing)
         end
     end
     # `C` is the concrete certificate type of this accumulator; pass it so
@@ -1423,15 +1450,24 @@ function _add_solution!(
         max_precision, refine_solution,
     )
     if !is_certified(cert)
-        _record_add_solution!(d, :not_certified)
-        return (false, :not_certified, 0, nothing)
+        _record_add_solution!(d, AddSolutionCode.NOT_CERTIFIED)
+        return (AddSolutionCode.NOT_CERTIFIED, 0, nothing)
     end
+    return (AddSolutionCode.CERTIFIED_DISTINCT, 0, cert)
+end
+
+function _file_certificate!(
+        d::DistinctCertifiedSolutions{S, P, C}, cert::C, index::Integer,
+    ) where {S, P, C}
+    stored = certificate_index(cert) == index ? cert : _with_index(cert, Int(index))
     Base.@lock d.access_lock begin
-        added, certⱼ = add_certificate!(d.distinct, cert)
-        _record_add_solution!(d, added ? :certified_distinct : :duplicate)
+        added, certⱼ = add_certificate!(d.distinct, stored)
+        _record_add_solution!(
+            d, added ? AddSolutionCode.CERTIFIED_DISTINCT : AddSolutionCode.DUPLICATE,
+        )
         return added ?
-            (true, :certified_distinct, certificate_index(cert), cert) :
-            (false, :duplicate, certificate_index(certⱼ), nothing)
+            (AddSolutionCode.CERTIFIED_DISTINCT, Int(index), stored) :
+            (AddSolutionCode.DUPLICATE, certificate_index(certⱼ), nothing)
     end
 end
 
@@ -1463,7 +1499,10 @@ function Base.merge!(
     for cert in certificates(src)
         Base.@lock dest.access_lock begin
             added, _ = add_certificate!(dest.distinct, cert)
-            _record_add_solution!(dest, added ? :certified_distinct : :duplicate)
+            _record_add_solution!(
+                dest,
+                added ? AddSolutionCode.CERTIFIED_DISTINCT : AddSolutionCode.DUPLICATE,
+            )
         end
     end
     return dest

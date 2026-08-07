@@ -9,7 +9,8 @@ using HomotopyContinuationNextCertification:
     ncandidates, ncertified,
     nreal_certified, ncomplex_certified, nnotcertified, ndistinct_certified,
     ndistinct_real_certified, ndistinct_complex_certified, nleaves, max_leaf_size,
-    oversized_leaves, unsplittable_leaves, nleaf_splits
+    oversized_leaves, unsplittable_leaves, nleaf_splits,
+    BSPLeafEntry, _build_partition, _ensure_leaf!, _inside
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Certification of a `ResultIterator`: the solutions are filed into a binary
@@ -216,6 +217,21 @@ end
     @test nleaf_splits(res) == 2
     @test max_leaf_size(res) == 1
     @test oversized_leaves(res) == 0
+end
+
+@testset "iterator certification: an enclosure ending on a cut merges" begin
+    # Two enclosures touching exactly at a cut can enclose the same solution, so
+    # that cut may not separate them: filing either one merges the leaves it
+    # touches, and both end up in the leaf that is certified jointly.
+    bsp = _build_partition([0.0])
+    by_leaf = Dict{Float64, Vector{BSPLeafEntry}}()
+
+    @test _ensure_leaf!(bsp, by_leaf, -1.0, 0.0) == 1
+    @test _ensure_leaf!(bsp, by_leaf, 0.0, 1.0) == 1
+    @test length(bsp) == 1
+    # The check a re-tracked leaf is held to is the same convention.
+    @test !_inside(BSPLeafEntry(1, -1.0, 0.0), -1.0, 0.0)
+    @test _inside(BSPLeafEntry(1, -1.0, 0.0), -1.0, 1.0)
 end
 
 @testset "iterator certification: threaded agrees with serial" begin

@@ -2,7 +2,7 @@ using Test
 using HomotopyContinuationNextCertification: HomotopyContinuationNextCertification,
     Interval, IComplex, CertificationResult, DistinctSolutionCertificates,
     SolutionCertificate, ExtendedSolutionCertificate, DistinctCertifiedSolutions
-using HomotopyContinuationNext: @polyvar, System
+using HomotopyContinuationNext: @polyvar, System, monodromy_certified_solutions
 using Aqua: Aqua
 using JET: JET
 using ExplicitImports:
@@ -17,9 +17,15 @@ const Cert = HomotopyContinuationNextCertification
         # HomotopyContinuationNext is an intra-repo dev dependency with no
         # [compat] entry (its version is a prerelease), so skip it in the compat
         # check. Everything else is checked.
+        # `monodromy_certified_solutions` is core's extension point for the
+        # certified duplicate check: core declares it and this package is the
+        # implementer, so its method carries only core's argument types.
         Aqua.test_all(
             Cert;
             deps_compat = (; ignore = [:HomotopyContinuationNext]),
+            piracies = (;
+                treat_as_own = [monodromy_certified_solutions],
+            ),
         )
     end
 
