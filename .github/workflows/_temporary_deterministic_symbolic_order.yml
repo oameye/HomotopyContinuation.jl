@@ -1,0 +1,125 @@
+name: Temporary deterministic symbolic ordering validation
+
+on:
+  push:
+    branches: [v3-deterministic-symbolic-ordering]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      JULIA_NUM_THREADS: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v3-deterministic-symbolic-ordering
+          fetch-depth: 0
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13'
+      - name: Apply deterministic structural ordering
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/model_kit/sexpr.jl')
+          s = p.read_text()
+          old = '_sexpr_lt(a::SExprT, b::SExprT)::Bool = hash(a) < hash(b)\n'
+          new = '_sexpr_lt(a::SExprT, b::SExprT)::Bool = _sexpr_struct_lt(a, b)\n'
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, new))
+
+          p = Path('src/model_kit/expression.jl')
+          s = p.read_text()
+          old = '_expr_lt(a::Expression, b::Expression)::Bool = hash(a) < hash(b)\n'
+          new = r'''@inline _expr_tag_order(::ENumStorage)::UInt8 = 0x01
+          @inline _expr_tag_order(::EVarStorage)::UInt8 = 0x02
+          @inline _expr_tag_order(::EAddStorage)::UInt8 = 0x03
+          @inline _expr_tag_order(::EMulStorage)::UInt8 = 0x04
+          @inline _expr_tag_order(::EPowStorage)::UInt8 = 0x05
+          @inline _expr_tag_order(::ERPowStorage)::UInt8 = 0x06
+          @inline _expr_tag_order(::EFnStorage)::UInt8 = 0x07
+
+          function _expr_args_lt(a_args::Vector{Expression}, b_args::Vector{Expression})::Bool
+              n = min(length(a_args), length(b_args))
+              for i in 1:n
+                  a = a_args[i]
+                  b = b_args[i]
+                  a == b && continue
+                  return _expr_struct_lt(a, b)
+              end
+              return length(a_args) < length(b_args)
+          end
+
+          function _expr_struct_lt(a::Expression, b::Expression)::Bool
+              a_storage = expr_storage(a)
+              b_storage = expr_storage(b)
+              a_tag = _expr_tag_order(a_storage)
+              b_tag = _expr_tag_order(b_storage)
+              a_tag == b_tag || return a_tag < b_tag
+
+              if a_storage isa ENumStorage
+                  return _complex_lt(a_storage.val, (b_storage::ENumStorage).val)
+              elseif a_storage isa EVarStorage
+                  return isless(a_storage.name, (b_storage::EVarStorage).name)
+              elseif a_storage isa EAddStorage
+                  return _expr_args_lt(storage_args(a_storage), storage_args(b_storage::EAddStorage))
+              elseif a_storage isa EMulStorage
+                  return _expr_args_lt(storage_args(a_storage), storage_args(b_storage::EMulStorage))
+              elseif a_storage isa EPowStorage
+                  b_typed = b_storage::EPowStorage
+                  a_base = storage_base(a_storage)
+                  b_base = storage_base(b_typed)
+                  a_base == b_base && return a_storage.exp < b_typed.exp
+                  return _expr_struct_lt(a_base, b_base)
+              elseif a_storage isa ERPowStorage
+                  b_typed = b_storage::ERPowStorage
+                  a_base = storage_base(a_storage)
+                  b_base = storage_base(b_typed)
+                  a_base == b_base && return _complex_lt(a_storage.exp, b_typed.exp)
+                  return _expr_struct_lt(a_base, b_base)
+              else
+                  b_typed = b_storage::EFnStorage
+                  a_storage.kind == b_typed.kind ||
+                      return Int(a_storage.kind) < Int(b_typed.kind)
+                  return _expr_struct_lt(storage_arg(a_storage), storage_arg(b_typed))
+              end
+          end
+
+          _expr_lt(a::Expression, b::Expression)::Bool = _expr_struct_lt(a, b)
+          '''
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, new))
+          PY
+      - name: Instantiate
+        run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Verify fresh-process canonicalization and instruction ceilings
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5; do
+            echo "=== fresh process $i: symbolic ==="
+            julia --project=test test/symbolic_utils_test.jl
+            echo "=== fresh process $i: instruction counts ==="
+            julia --project=test test/instruction_count_test.jl
+          done
+      - name: Run expression, SExpr, CSE and system regressions
+        run: |
+          julia --project=test test/expression_test.jl
+          julia --project=test test/sexpr_test.jl
+          julia --project=test test/cse_test.jl
+          julia --project=test test/system_sweep_test.jl
+      - name: Run quality gates
+        run: |
+          julia --project=test test/concrete_structs_test.jl
+          julia --project=test test/explicit_imports_test.jl
+      - name: Commit tested fix and remove temporary workflow
+        run: |
+          rm .github/workflows/_temporary_deterministic_symbolic_order.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/model_kit/sexpr.jl src/model_kit/expression.jl .github/workflows/_temporary_deterministic_symbolic_order.yml
+          git commit -m 'Make symbolic canonical ordering deterministic'
+          git push origin HEAD:v3-deterministic-symbolic-ordering
