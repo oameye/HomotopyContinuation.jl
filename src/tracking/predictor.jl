@@ -108,7 +108,8 @@ function update!(
     if m > 1
         pred.tx_norm = (n0, n1, 0.0, 0.0)
         pred.method = PredictionMethod.HERMITE
-        pred.trust_region = n0 / max(n1, 1.0e-30)
+        τ = n0 / max(n1, 1.0e-30)
+        pred.trust_region = isfinite(τ) && τ > 0 ? τ : 1.0
         if isnan(pred.local_error)
             # Hermite-mode bootstrap: seed the initial local-error estimate from
             # the first-derivative scale rather than the Padé trust-region formula.
@@ -201,11 +202,14 @@ function _compute_trust_region!(pred::Predictor)::Nothing
         if pred.tx_norm[3] > 0 && pred.tx_norm[4] > 0
             tau = pred.tx_norm[3] / pred.tx_norm[4]
         else
-            tau = pred.tx_norm[1] / max(pred.tx_norm[1], pred.tx_norm[2], pred.tx_norm[3], pred.tx_norm[4])
+            # No derivative-based radius is available. A state-magnitude fallback
+            # collapses to zero on paths crossing x = 0, which in turn makes the
+            # local-error bootstrap infinite. Use the neutral unit radius instead.
+            tau = 1.0
         end
     end
 
-    pred.trust_region = isfinite(tau) ? tau : 1.0
+    pred.trust_region = isfinite(tau) && tau > 0 ? tau : 1.0
     if isnan(pred.local_error)
         inv_tau = inv(pred.trust_region)
         pred.local_error = (inv_tau * inv_tau)^2
