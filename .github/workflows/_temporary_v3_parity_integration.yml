@@ -1,0 +1,40 @@
+name: Temporary v3 parity integration
+
+on:
+  push:
+    branches: [v3-parity-integration-check]
+
+jobs:
+  integrate-test:
+    runs-on: ubuntu-latest
+    env:
+      JULIA_NUM_THREADS: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v3-parity-integration-check
+          fetch-depth: 0
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13'
+      - name: Compose semantic parity commits
+        run: |
+          git config user.name 'parity-validation'
+          git config user.email 'parity-validation@invalid.example'
+          git cherry-pick \
+            497afbdb46183b1308673d927122003efe327fa8 \
+            b05f20d2074903110e85db321f7ca84a154c04e8 \
+            61180cf252bbd7a29f05da2718254a49725aebd7 \
+            5e83ff3e23d9fd2aa0643c44fc57260a6b4da45c \
+            2cbb9eb487766087832375282a4938e071639900 \
+            24cff76b39a13453ca2bfc1a0ac2563fa1cb43bb \
+            d5a077c56704acf3c06179ab0f6b39d4754663ef \
+            4dab7327c20081176a153efc7ccc289e48d3533c
+      - name: Instantiate core test environment
+        run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Instantiate certification test environment
+        run: julia --project=lib/HomotopyContinuationNextCertification/test -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="lib/HomotopyContinuationNextCertification")]); Pkg.instantiate()'
+      - name: Run full core suite
+        run: julia --project=test test/runtests.jl --jobs=4
+      - name: Run full certification suite
+        run: julia --project=lib/HomotopyContinuationNextCertification/test -t 4 lib/HomotopyContinuationNextCertification/test/runtests.jl
