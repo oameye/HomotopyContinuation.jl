@@ -1,0 +1,1117 @@
+# v2.22.4 parity testset inventory
+
+Generated mechanically from source. This is an inventory, not the semantic parity verdict.
+
+- Upstream repository: `JuliaHomotopyContinuation/HomotopyContinuation.jl`
+- Upstream commit: `0cbf1e27d062d7eb01d962c3b948c39444c9a62c` (`v2.22.4`)
+- v3 base: `b5c7c2e81f372c22a29ff2963743ab5fad1fa9ed`
+- Upstream `@testset` occurrences: **208**
+- v3/core+certification `@testset` occurrences: **888**
+
+## Upstream v2.22.4
+
+- `test/binomial_system_test.jl:4` — `@testset "Binomial System Test" begin`
+- `test/binomial_system_test.jl:7` — `@testset "GMP set Int64 on 32-bit systems" begin`
+- `test/binomial_system_test.jl:25` — `@testset "Hermite Normal Form" begin`
+- `test/binomial_system_test.jl:54` — `@testset "Solving (unit b)" begin`
+- `test/binomial_system_test.jl:84` — `@testset "General solving" begin`
+- `test/binomial_system_test.jl:107` — `@testset "MixedCell" begin`
+- `test/certification_test.jl:1` — `@testset "Certification" begin`
+- `test/certification_test.jl:2` — `@testset "Simple 1: Input = Vector{Expression}" begin`
+- `test/certification_test.jl:45` — `@testset "Simple 2: Input = Vector{MP.Polynomial}" begin`
+- `test/certification_test.jl:81` — `@testset "Reality Check" begin`
+- `test/certification_test.jl:95` — `@testset "Parameters: Input = Vector{Expression}" begin`
+- `test/certification_test.jl:127` — `@testset "Parameters: Input = Vector{MP.Polynomial}" begin`
+- `test/certification_test.jl:155` — `@testset "positive" begin`
+- `test/certification_test.jl:165` — `@testset "DistinctCertifiedSolutions incremental API" begin`
+- `test/certification_test.jl:256` — `@testset "3264" begin`
+- `test/certification_test.jl:314` — `@testset "certify uses complex inversion" begin`
+- `test/certification_test.jl:325` — `@testset "certify uses approximate inverse of jacobian" begin`
+- `test/certification_test.jl:452` — `@testset "BSP certification: parameter-free iterator" begin`
+- `test/certification_test.jl:481` — `@testset "BSP certification: parameterized iterator" begin`
+- `test/certification_test.jl:494` — `@testset "BSP certification: bitmasked iterator" begin`
+- `test/certification_test.jl:508` — `@testset "BSP certification: iterator from iterator start solutions" begin`
+- `test/double_double_test.jl:4` — `@testset "DoubleF64" begin`
+- `test/endgame_test.jl:1` — `@testset "Endgame" begin`
+- `test/endgame_test.jl:2` — `@testset "Cyclic 7" begin`
+- `test/endgame_test.jl:7` — `@testset "Hyperbolic - 6,6" begin`
+- `test/endgame_test.jl:24` — `@testset "Singular 1" begin`
+- `test/endgame_test.jl:38` — `@testset "Wilkinson $d" for d in [12]`
+- `test/endgame_test.jl:47` — `@testset "(x-10)^$d" for d in [2, 6]`
+- `test/endgame_test.jl:54` — `@testset "Beyond Polyhedral Homotopy Example" begin`
+- `test/endgame_test.jl:62` — `@testset "Winding Number Family d=$d" for d = 2:2:6`
+- `test/endgame_test.jl:71` — `# @testset "Bacillus Subtilis" begin`
+- `test/endgame_test.jl:76` — `@testset "Mohab" begin`
+- `test/endgame_test.jl:109` — `# @testset "Ill-conditioned solution - look's almost diverging" begin`
+- `test/endgame_tracker_test.jl:1` — `@testset "EndgameTracker" begin`
+- `test/endgame_tracker_test.jl:2` — `@testset "Tracking and PathResult" begin`
+- `test/endgame_tracker_test.jl:48` — `@testset "Overdetermined tracking" begin`
+- `test/extensive/extensive_test.jl:1` — `@testset "Extensive tests" begin`
+- `test/extensive/extensive_test.jl:2` — `@testset "Lines on a quintic surface in 3-space" begin`
+- `test/extensive/extensive_test.jl:18` — `@testset "3264" begin`
+- `test/homotopies_test.jl:34` — `@testset "Taylor, K = $K, incr = $incr" begin`
+- `test/homotopies_test.jl:60` — `@testset "Homotopies" begin`
+- `test/homotopies_test.jl:61` — `@testset "ParameterHomotopy" begin`
+- `test/homotopies_test.jl:81` — `@testset "StraightLineHomotopy" begin`
+- `test/homotopies_test.jl:96` — `@testset "ExtrinsicSubspaceHomotopy" begin`
+- `test/homotopies_test.jl:119` — `@testset "IntrinsicSubspaceHomotopy" begin`
+- `test/homotopies_test.jl:156` — `@testset "IntrinsicSubspaceProjectiveHomotopy" begin`
+- `test/homotopies_test.jl:196` — `@testset "CoefficientHomotopy" begin`
+- `test/homotopies_test.jl:212` — `@testset "MixedHomotopy" begin`
+- `test/homotopies_test.jl:218` — `@testset "Homotopy with transcendental functions" begin`
+- `test/linear_algebra_test.jl:1` — `@testset "LinearAlgebra" begin`
+- `test/linear_algebra_test.jl:2` — `@testset "Constructor + basics" begin`
+- `test/linear_algebra_test.jl:31` — `@testset "QR" begin`
+- `test/linear_algebra_test.jl:51` — `@testset "ldiv" begin`
+- `test/linear_algebra_test.jl:66` — `@testset "Inf-norm estimator / cond" begin`
+- `test/linear_algebra_test.jl:111` — `@testset "Jacobian" begin`
+- `test/linear_test.jl:1` — `@testset "Linear Spaces" begin`
+- `test/linear_test.jl:2` — `@testset "LinearSubspace" begin`
+- `test/linear_test.jl:73` — `@testset "Intersect subspaces" begin`
+- `test/linear_test.jl:86` — `@testset "IntrinsicSubspaceHomotopy" begin`
+- `test/linear_test.jl:126` — `@testset "SubspaceHomotopy between perpendicular spaces" begin`
+- `test/model_kit/compiled_cache_test.jl:14` — `@testset "Compiled cache thread safety" begin`
+- `test/model_kit/e2e_test.jl:3` — `@testset "interpreter: $name" for (name, system) in TEST_SYSTEM_COLLECTION`
+- `test/model_kit/e2e_test.jl:4` — `@testset "interpreter symbolic" begin`
+- `test/model_kit/e2e_test.jl:19` — `@testset "$mode [ComplexF64]" for mode in [InterpretedSystem, CompiledSystem]`
+- `test/model_kit/e2e_test.jl:55` — `@testset "$mode evaluate [ComplexDF64]" for mode in [InterpretedSystem, CompiledSystem]`
+- `test/model_kit/e2e_test.jl:66` — `@testset "$mode taylor order $K [ComplexF64]" for mode in`
+- `test/model_kit/e2e_test.jl:93` — `@testset "interpreted system [acb]" begin`
+- `test/model_kit/e2e_test.jl:131` — `@testset "$mode [ComplexF64]" for mode in [InterpretedHomotopy, CompiledHomotopy]`
+- `test/model_kit/e2e_test.jl:176` — `@testset "$mode evaluate [ComplexDF64]" for mode in`
+- `test/model_kit/e2e_test.jl:196` — `@testset "$mode taylor order $K [ComplexF64]" for mode in [`
+- `test/model_kit/operations_test.jl:1` — `@testset "test operations against taylor operations (N=$N, K=$K)" for (K, N) in [`
+- `test/model_kit/operations_test.jl:55` — `@testset "op: $(op)" for op in ops`
+- `test/model_kit/operations_test.jl:61` — `@testset "Integer Taylor powers with zero constant coefficient" begin`
+- `test/model_kit/slp_test.jl:1` — `@testset "ModelKit - SLP" begin`
+- `test/model_kit/slp_test.jl:3` — `@testset "CompiledHomotopy/InterpretedHomotopy" begin`
+- `test/model_kit/slp_test.jl:45` — `@testset "fractional powers" begin`
+- `test/model_kit/slp_test.jl:77` — `@testset "Homotopy codegen (Katsura(3))" begin`
+- `test/model_kit/slp_test.jl:128` — `@testset "taylor! - system" begin`
+- `test/model_kit/slp_test.jl:159` — `@testset "Monomials" begin`
+- `test/model_kit/slp_test.jl:172` — `@testset "Evaluation of Acb" begin`
+- `test/model_kit/slp_test.jl:193` — `@testset "Evaluation of Acb with fractional powers" begin`
+- `test/model_kit/symbolic_test.jl:1` — `@testset "ModelKit - Symbolic" begin`
+- `test/model_kit/symbolic_test.jl:2` — `@testset "SymEngine" begin`
+- `test/model_kit/symbolic_test.jl:33` — `@testset "Variables" begin`
+- `test/model_kit/symbolic_test.jl:68` — `@testset "Subs" begin`
+- `test/model_kit/symbolic_test.jl:80` — `@testset "Evaluation" begin`
+- `test/model_kit/symbolic_test.jl:87` — `@testset "Linear Algebra" begin`
+- `test/model_kit/symbolic_test.jl:95` — `@testset "Differentiation" begin`
+- `test/model_kit/symbolic_test.jl:108` — `@testset "Expand" begin`
+- `test/model_kit/symbolic_test.jl:113` — `@testset "to_dict" begin`
+- `test/model_kit/symbolic_test.jl:121` — `@testset "evaluate - Issue #500" begin`
+- `test/model_kit/symbolic_test.jl:133` — `@testset "evaluate - Issue #511" begin`
+- `test/model_kit/symbolic_test.jl:139` — `@testset "Modeling" begin`
+- `test/model_kit/symbolic_test.jl:140` — `@testset "Bottleneck" begin`
+- `test/model_kit/symbolic_test.jl:161` — `@testset "Steiner" begin`
+- `test/model_kit/symbolic_test.jl:186` — `@testset "Reach plane curve" begin`
+- `test/model_kit/symbolic_test.jl:205` — `@testset "Horner" begin`
+- `test/model_kit/symbolic_test.jl:233` — `@testset "Rand / dense poly" begin`
+- `test/model_kit/symbolic_test.jl:249` — `@testset "Polynomial to exponents_coefficients and back" begin`
+- `test/model_kit/symbolic_test.jl:267` — `@testset "System" begin`
+- `test/model_kit/symbolic_test.jl:294` — `@testset "System variables groups + homogeneous" begin`
+- `test/model_kit/symbolic_test.jl:310` — `@testset "Homotopy" begin`
+- `test/model_kit/symbolic_test.jl:333` — `@testset "Convert" begin`
+- `test/model_kit/symbolic_test.jl:357` — `@testset "rational functions" begin`
+- `test/model_kit/symbolic_test.jl:371` — `@testset "transcendental functions" begin`
+- `test/model_kit_test.jl:3` — `@testset "ModelKit" begin`
+- `test/monodromy_test.jl:1` — `@testset "Monodromy" begin`
+- `test/monodromy_test.jl:14` — `@testset "monodromy_solve" begin`
+- `test/monodromy_test.jl:180` — `@testset "Method of moments" begin`
+- `test/monodromy_test.jl:206` — `@testset "Projective + Group Actions" begin`
+- `test/monodromy_test.jl:241` — `@testset "permutations" begin`
+- `test/monodromy_test.jl:270` — `@testset "Linear subspaces" begin`
+- `test/monodromy_test.jl:308` — `@testset "Monodromy rational functions" begin`
+- `test/monodromy_test.jl:347` — `@testset "parameter homotopy with monodromy result" begin`
+- `test/monodromy_test.jl:358` — `@testset "Verify solution_completeness" begin`
+- `test/monodromy_test.jl:398` — `@testset "monodromy with predefined tolerance for unique_points" begin`
+- `test/monodromy_test.jl:463` — `@testset "certified duplicate checks" begin`
+- `test/nid_test.jl:1` — `@testset "Numerical Irreducible Decomposition" begin`
+- `test/nid_test.jl:2` — `@testset "Union of 1 2-dim, 2 1-dim and 8 points" begin`
+- `test/nid_test.jl:71` — `@testset "randomization" begin`
+- `test/nid_test.jl:79` — `@testset "rational systems" begin`
+- `test/nid_test.jl:96` — `@testset "Hypersurface of degree 5" begin`
+- `test/nid_test.jl:106` — `@testset "Curve of degree 6" begin`
+- `test/nid_test.jl:117` — `@testset "Homogeneous systems" begin`
+- `test/nid_test.jl:134` — `@testset "Overdetermined Test" begin`
+- `test/nid_test.jl:144` — `@testset "Three Lines" begin`
+- `test/nid_test.jl:157` — `@testset "Bricard6R" begin`
+- `test/nid_test.jl:257` — `@testset "ACR" begin`
+- `test/nid_test.jl:298` — `@testset "Union of a sphere, a line, and a point" begin`
+- `test/norm_test.jl:1` — `@testset "Norms" begin`
+- `test/polyhedral_test.jl:1` — `@testset "Polyhedral" begin`
+- `test/polyhedral_test.jl:2` — `@testset "affine + torus solutions" begin`
+- `test/polyhedral_test.jl:23` — `@testset "only torus" begin`
+- `test/polyhedral_test.jl:38` — `@testset "cyclic" begin`
+- `test/result_test.jl:1` — `@testset "Result" begin`
+- `test/result_test.jl:2` — `@testset "Basic functionality of Result" begin`
+- `test/result_test.jl:58` — `@testset "ResultIterator" begin`
+- `test/result_test.jl:60` — `@testset "Result tests" begin`
+- `test/result_test.jl:122` — `@testset "Basic functionality of ResultIterator" begin`
+- `test/result_test.jl:150` — `@testset "Manual start solutions" begin`
+- `test/result_test.jl:178` — `@testset "Many parameters" begin`
+- `test/result_test.jl:268` — `@testset "Target subspaces" begin`
+- `test/result_test.jl:301` — `@testset "Compression" begin`
+- `test/runtests.jl:31` — `@testset "HomotopyContinuation" begin`
+- `test/semialgebraic_sets_test.jl:1` — `@testset "SemialgebraicSets" begin`
+- `test/semialgebraic_sets_test.jl:12` — `@testset "ε=$ε atol=$atol" begin`
+- `test/solve_test.jl:1` — `@testset "solve" begin`
+- `test/solve_test.jl:3` — `@testset "total degree (simple)" begin`
+- `test/solve_test.jl:63` — `@testset "total degree (variable groups)" begin`
+- `test/solve_test.jl:94` — `@testset "polyhedral" begin`
+- `test/solve_test.jl:134` — `@testset "overdetermined" begin`
+- `test/solve_test.jl:135` — `@testset "3 by 5 minors" begin`
+- `test/solve_test.jl:147` — `@testset "composition" begin`
+- `test/solve_test.jl:160` — `@testset "paths to track" begin`
+- `test/solve_test.jl:178` — `@testset "solve (parameter homotopy)" begin`
+- `test/solve_test.jl:259` — `@testset "solve (Homotopy)" begin`
+- `test/solve_test.jl:268` — `@testset "solve (start target)" begin`
+- `test/solve_test.jl:281` — `@testset "solve (affine sliced)" begin`
+- `test/solve_test.jl:324` — `@testset "solve (Vector{Expression})" begin`
+- `test/solve_test.jl:338` — `@testset "solve (DynamicPolynomials)" begin`
+- `test/solve_test.jl:373` — `@testset "change parameters" begin`
+- `test/solve_test.jl:383` — `@testset "solve (threading)" begin`
+- `test/solve_test.jl:388` — `@testset "stop early callback" begin`
+- `test/solve_test.jl:438` — `@testset "Many parameters solver" begin`
+- `test/solve_test.jl:540` — `@testset "Many parameters threaded" begin`
+- `test/systems_test.jl:59` — `@testset "System" begin`
+- `test/systems_test.jl:60` — `@testset "CompositionSystem" begin`
+- `test/systems_test.jl:68` — `@testset "CompositionSystem - Compose" begin`
+- `test/systems_test.jl:89` — `@testset "MixedSystem" begin`
+- `test/systems_test.jl:96` — `@testset "AffineChartSystem" begin`
+- `test/systems_test.jl:103` — `@testset "FixedParameterSystem" begin`
+- `test/systems_test.jl:110` — `@testset "RandomizedSystem" begin`
+- `test/systems_test.jl:124` — `@testset "SlicedSystem" begin`
+- `test/systems_test.jl:139` — `@testset "is_real" begin`
+- `test/test_cases/four_bar.jl:1` — `@testset "Iterative Refinement for predictor (FourBar)" begin`
+- `test/test_cases/four_bar.jl:90` — `@testset "Fourbar - AD: $AD" for AD = 0:3`
+- `test/test_cases/steiner_higher_prec.jl:4` — `@testset "Steiner High Precision" begin`
+- `test/test_cases/steiner_higher_prec.jl:141` — `@testset "Steiner - AD: $AD" for AD = 1:3`
+- `test/tracker_test.jl:1` — `@testset "Tracker" begin`
+- `test/tracker_test.jl:2` — `@testset "tracking $mode - AD: $AD" for mode in [InterpretedSystem, CompiledSystem],`
+- `test/tracker_test.jl:29` — `@testset "projective tracking $mode - AD: $AD" for mode in`
+- `test/tracker_test.jl:49` — `@testset "Paths through zero" begin`
+- `test/tracker_test.jl:69` — `@testset "Parameter solve with a zero solution" begin`
+- `test/tracker_test.jl:84` — `@testset "iterator" begin`
+- `test/tracker_test.jl:109` — `@testset "path info" begin`
+- `test/tracker_test.jl:117` — `@testset "Change parameters" begin`
+- `test/tracker_test.jl:128` — `@testset "Straight Line Homotopy" begin`
+- `test/tracker_test.jl:142` — `@testset "Compiled/InterpretedHomotopy" begin`
+- `test/tracker_test.jl:172` — `@testset "invalid_startvalue_singular_jacobian" begin`
+- `test/unique_points_test.jl:1` — `@testset "UniquePoints" begin`
+- `test/unique_points_test.jl:36` — `@testset "Multiplicities" begin`
+- `test/utils_test.jl:1` — `@testset "utils.jl" begin`
+- `test/utils_test.jl:2` — `@testset "writing and reading" begin`
+- `test/utils_test.jl:25` — `@testset "SegmentStepper" begin`
+- `test/valuation_test.jl:1` — `@testset "Valuation" begin`
+- `test/valuation_test.jl:2` — `@testset "Example 1" begin`
+- `test/valuation_test.jl:21` — `@testset "Example 2" begin`
+- `test/valuation_test.jl:47` — `@testset "Example 3" begin`
+- `test/voronoi_tree_test.jl:1` — `@testset "VoronoiTree" begin`
+- `test/witness_set_test.jl:1` — `@testset "Witness Sets" begin`
+- `test/witness_set_test.jl:3` — `@testset "affine" begin`
+- `test/witness_set_test.jl:26` — `@testset "projective" begin`
+- `test/witness_set_test.jl:56` — `@testset "dim / codim" begin`
+- `test/witness_set_test.jl:87` — `@testset "dimension zero" begin`
+- `test/witness_set_test.jl:106` — `@testset "membership" begin`
+- `test/witness_set_test.jl:118` — `@testset "intersect" begin`
+- `test/witness_set_test.jl:139` — `@testset "membership projective" begin`
+- `test/witness_set_test.jl:151` — `@testset "intersect projective" begin`
+
+## v3 baseline
+
+- `test/affine_chart_test.jl:11` — `@testset "AffineChartSystem" begin`
+- `test/affine_chart_test.jl:32` — `@testset "evaluate!" begin`
+- `test/affine_chart_test.jl:42` — `@testset "evaluate_and_jacobian!" begin`
+- `test/affine_chart_test.jl:57` — `@testset "taylor!: wrapped rows" begin`
+- `test/affine_chart_test.jl:74` — `@testset "taylor!: chart row" begin`
+- `test/affine_chart_test.jl:94` — `@testset "on_affine_chart draws a random chart" begin`
+- `test/affine_chart_test.jl:104` — `@testset "AffineChartHomotopy" begin`
+- `test/alloc_check_test.jl:48` — `@testset "AllocCheck: zero-allocation hot paths" begin`
+- `test/alloc_check_test.jl:52` — `@testset "Norms" begin`
+- `test/alloc_check_test.jl:64` — `@testset "Linear algebra" begin`
+- `test/alloc_check_test.jl:70` — `@testset "Predictor" begin`
+- `test/alloc_check_test.jl:91` — `@testset "Newton corrector" begin`
+- `test/alloc_check_test.jl:108` — `@testset "RandomizedSystem" begin`
+- `test/alloc_check_test.jl:194` — `@testset "AffineChartSystem" begin`
+- `test/alloc_check_test.jl:228` — `@testset "SlicedSystem" begin`
+- `test/alloc_check_test.jl:273` — `@testset "_BoundParameterSystem" begin`
+- `test/alloc_check_test.jl:322` — `@testset "Tracker step!" begin`
+- `test/alloc_check_test.jl:328` — `@testset "Valuation" begin`
+- `test/alloc_check_test.jl:337` — `@testset "Endgame tracker" begin`
+- `test/aqua_test.jl:5` — `@testset "Aqua.jl" begin`
+- `test/binomial_system_test.jl:6` — `@testset "BinomialSystemSolver" begin`
+- `test/binomial_system_test.jl:7` — `@testset "HNF: 2×2 identity" begin`
+- `test/binomial_system_test.jl:19` — `@testset "HNF: 2×2 general" begin`
+- `test/binomial_system_test.jl:35` — `@testset "HNF: 3×3" begin`
+- `test/binomial_system_test.jl:51` — `@testset "HNF: 1×1" begin`
+- `test/binomial_system_test.jl:61` — `@testset "BinomialSystemSolver: construction" begin`
+- `test/binomial_system_test.jl:78` — `@testset "HNF: Int64 overflow throws, BigInt fallback succeeds" begin`
+- `test/binomial_system_test.jl:92` — `@testset "solve_binomial! direct entry: x^A = b" begin`
+- `test/binomial_system_test.jl:116` — `@testset "solve_binomial! with |b| ≠ 1" begin`
+- `test/binomial_system_test.jl:133` — `@testset "solve_binomial!: 6x6 dense exponents, 6910 solutions" begin`
+- `test/binomial_system_test.jl:159` — `@testset "solve_binomial! survives Int64 HNF overflow (BigInt fallback)" begin`
+- `test/binomial_system_test.jl:180` — `@testset "BinomialSystemSolver: end-to-end via polyhedral solve" begin`
+- `test/codegen_test.jl:20` — `@testset "Code Generation" begin`
+- `test/codegen_test.jl:24` — `@testset "eval expr matches interpreter: katsura-3" begin`
+- `test/codegen_test.jl:50` — `@testset "eval expr matches interpreter: parametric" begin`
+- `test/codegen_test.jl:69` — `@testset "jac expr matches interpreter: katsura-3" begin`
+- `test/codegen_test.jl:98` — `@testset "System(compile=COMPILED) matches INTERPRETED" begin`
+- `test/codegen_test.jl:122` — `@testset "System(compile=COMPILED) zero allocations" begin`
+- `test/codegen_test.jl:138` — `@testset "System default is INTERPRETED" begin`
+- `test/codegen_test.jl:148` — `@testset "System(compile=COMPILED) solves correctly" begin`
+- `test/codegen_test.jl:161` — `@testset "taylor expr matches interpreter: katsura-3, order $K" for K in 1:3`
+- `test/codegen_test.jl:193` — `@testset "taylor expr matches interpreter: parametric, order $K" for K in 1:3`
+- `test/codegen_test.jl:218` — `@testset "taylor param expr matches interpreter: parametric, order $K" for K in 1:3`
+- `test/codegen_test.jl:242` — `@testset "taylor param expr matches interpreter: katsura-3 parametric, order $K" for K in 1:3`
+- `test/codegen_test.jl:269` — `@testset "System(compile=COMPILED_ALL) matches INTERPRETED" begin`
+- `test/codegen_test.jl:305` — `@testset "System(compile=COMPILED_ALL) parametric Taylor matches INTERPRETED" begin`
+- `test/codegen_test.jl:352` — `@testset "System(compile=COMPILED_ALL) zero allocations: eval + jac + taylor" begin`
+- `test/codegen_test.jl:382` — `@testset "System(compile=COMPILED_ALL) solves correctly: residual check" begin`
+- `test/codegen_test.jl:393` — `@testset "System(compile=COMPILED_ALL) katsura-3: solution agreement" begin`
+- `test/codegen_test.jl:423` — `@testset "System(compile=COMPILED_ALL) parameter homotopy: solution agreement" begin`
+- `test/compare_v2_primitives_test.jl:16` — `@testset "Compare v2: DoubleF64" begin`
+- `test/compare_v2_primitives_test.jl:17` — `@testset "arithmetic matches" begin`
+- `test/compare_v2_primitives_test.jl:35` — `@testset "sqrt matches" begin`
+- `test/compare_v2_primitives_test.jl:42` — `@testset "integer power matches" begin`
+- `test/compare_v2_primitives_test.jl:50` — `@testset "Compare v2: Norms" begin`
+- `test/compare_v2_primitives_test.jl:51` — `@testset "inf_norm matches" begin`
+- `test/compare_v2_primitives_test.jl:62` — `@testset "inf_norm overflow (exp2(700))" begin`
+- `test/compare_v2_primitives_test.jl:73` — `@testset "weighted_norm matches" begin`
+- `test/compare_v2_primitives_test.jl:89` — `@testset "weighted_norm overflow (exp2(700))" begin`
+- `test/compare_v2_primitives_test.jl:104` — `@testset "Compare v2: LU solve" begin`
+- `test/compare_v2_primitives_test.jl:105` — `@testset "same solution for well-conditioned" begin`
+- `test/compare_v2_primitives_test.jl:126` — `@testset "same solution for ill-conditioned" begin`
+- `test/compare_v2_primitives_test.jl:150` — `@testset "Compare v2: Condition estimation" begin`
+- `test/compare_v2_solve_counts_test.jl:14` — `@testset "Compare v2: solve result counts" begin`
+- `test/compare_v2_solve_counts_test.jl:16` — `@testset "quadratic: x²+y-1, xy-2" begin`
+- `test/compare_v2_solve_counts_test.jl:31` — `@testset "katsura-3" begin`
+- `test/compare_v2_solve_counts_test.jl:58` — `@testset "at-infinity: 2 finite + 2 diverging" begin`
+- `test/compare_v2_solve_counts_test.jl:75` — `@testset "singular (x-10)^2" begin`
+- `test/compare_v2_solve_counts_test.jl:89` — `@testset "Hyperbolic 6,6" begin`
+- `test/compare_v2_solve_counts_test.jl:118` — `@testset "singular multiplicity 3" begin`
+- `test/compare_v2_solve_match_test.jl:14` — `@testset "Compare v2: solutions match" begin`
+- `test/compare_v2_solve_match_test.jl:16` — `@testset "x²-1, y²-4 solutions agree" begin`
+- `test/compare_v2_solve_match_test.jl:35` — `@testset "parameter homotopy: solutions agree" begin`
+- `test/composition_test.jl:28` — `@testset "compose: shape, variables, parameters" begin`
+- `test/composition_test.jl:59` — `@testset "compose: rejected input" begin`
+- `test/composition_test.jl:71` — `@testset "composition evaluates the substituted system" begin`
+- `test/composition_test.jl:116` — `@testset "composition evaluates with a parameter-free outer stage" begin`
+- `test/composition_test.jl:133` — `@testset "composition degrees and homogeneity" begin`
+- `test/composition_test.jl:176` — `@testset "System(::CompositionSystem)" begin`
+- `test/composition_test.jl:216` — `@testset "start pair system: joint (x, p) evaluation" begin`
+- `test/composition_test.jl:254` — `@testset "composition undoes the inner equation scaling" begin`
+- `test/composition_test.jl:271` — `@testset "solving a composition from a start system" begin`
+- `test/composition_test.jl:300` — `@testset "cloning a composition" begin`
+- `test/composition_test.jl:318` — `@testset "newton and parameter homotopy through a composition" begin`
+- `test/composition_test.jl:347` — `@testset "monodromy through a composition" begin`
+- `test/composition_test.jl:377` — `@testset "start pair and monodromy without an explicit start" begin`
+- `test/concrete_structs_test.jl:10` — `@testset "CheckConcreteStructs" begin`
+- `test/concrete_structs_test.jl:22` — `@testset "$name" begin`
+- `test/concrete_structs_test.jl:28` — `@testset "Interpreter{Vector{ComplexF64}}" begin`
+- `test/concrete_structs_test.jl:31` — `@testset "Interpreter{Vector{ComplexDF64}}" begin`
+- `test/concrete_structs_test.jl:34` — `@testset "TaylorVector{ComplexF64}" begin`
+- `test/concrete_structs_test.jl:37` — `@testset "TruncatedTaylorSeries{2,ComplexF64}" begin`
+- `test/concrete_structs_test.jl:40` — `@testset "TruncatedTaylorSeries{4,ComplexF64}" begin`
+- `test/concrete_structs_test.jl:43` — `@testset "RegenerationState concrete phase" begin`
+- `test/concrete_structs_test.jl:51` — `@testset "NumericalIrreducibleDecomposition concrete result" begin`
+- `test/core_test.jl:145` — `@testset "Core Types" begin`
+- `test/core_test.jl:149` — `@testset "SystemEvaluator from AbstractSystem" begin`
+- `test/core_test.jl:188` — `@testset "SystemEvaluator matches raw Interpreter" begin`
+- `test/core_test.jl:241` — `@testset "HomotopyEvaluator from AbstractHomotopy" begin`
+- `test/core_test.jl:285` — `@testset "HomotopyEvaluator is transparent wrapper" begin`
+- `test/core_test.jl:317` — `@testset "System: metadata" begin`
+- `test/core_test.jl:346` — `@testset "System: homogeneous metadata" begin`
+- `test/core_test.jl:362` — `@testset "System: homogeneity is per polynomial" begin`
+- `test/core_test.jl:369` — `@testset "System: degrees ignore the parameters" begin`
+- `test/core_test.jl:379` — `@testset "System: eval+jac vs MP ground truth" begin`
+- `test/core_test.jl:402` — `@testset "System: with parameters" begin`
+- `test/core_test.jl:419` — `@testset "System: DF64 matches F64" begin`
+- `test/core_test.jl:441` — `@testset "System: DF64 wrappers are installed on first use" begin`
+- `test/core_test.jl:463` — `@testset "System: Taylor vs finite differences" begin`
+- `test/core_test.jl:508` — `@testset "System: katsura-3 eval+jac vs MP" begin`
+- `test/core_test.jl:535` — `@testset "StraightLineHomotopy: boundary conditions" begin`
+- `test/core_test.jl:566` — `@testset "StraightLineHomotopy: DF64 extended precision" begin`
+- `test/core_test.jl:584` — `@testset "StraightLineHomotopy: jacobian via finite differences" begin`
+- `test/core_test.jl:614` — `@testset "StraightLineHomotopy: SLH matches ManualSLH" begin`
+- `test/core_test.jl:653` — `@testset "StraightLineHomotopy: Taylor order 2 via finite differences (coupled x,t)" begin`
+- `test/core_test.jl:688` — `@testset "StraightLineHomotopy: Taylor order 3 via finite differences (coupled x,t)" begin`
+- `test/core_test.jl:724` — `@testset "StraightLineHomotopy: random γ has unit magnitude" begin`
+- `test/core_test.jl:734` — `@testset "zero allocations: SystemEvaluator eval + jac" begin`
+- `test/core_test.jl:751` — `@testset "zero allocations: HomotopyEvaluator eval + jac" begin`
+- `test/core_test.jl:775` — `@testset "CoefficientHomotopy: interpolation" begin`
+- `test/core_test.jl:804` — `@testset "CoefficientHomotopy: jacobian" begin`
+- `test/core_test.jl:823` — `@testset "CoefficientHomotopy: taylor order 1" begin`
+- `test/core_test.jl:839` — `@testset "CoefficientHomotopy: zero allocations" begin`
+- `test/distributed_test.jl:55` — `@testset "Distributed executor" begin`
+- `test/distributed_test.jl:64` — `@testset "system serialization" begin`
+- `test/distributed_test.jl:65` — `@testset "System, compile mode $mode" for mode in (`
+- `test/distributed_test.jl:80` — `@testset "parametric System" begin`
+- `test/distributed_test.jl:88` — `@testset "FixedParameterSystem" begin`
+- `test/distributed_test.jl:100` — `@testset "SystemEvaluator" begin`
+- `test/distributed_test.jl:109` — `@testset "grouped System" begin`
+- `test/distributed_test.jl:120` — `@testset "_SupportSystem" begin`
+- `test/distributed_test.jl:130` — `@testset "CompositionSystem" begin`
+- `test/distributed_test.jl:148` — `@testset "extension hooks" begin`
+- `test/distributed_test.jl:162` — `@testset "no worker process" begin`
+- `test/distributed_test.jl:188` — `@testset "total degree" begin`
+- `test/distributed_test.jl:206` — `@testset "early_stop_callback, driver-side" begin`
+- `test/distributed_test.jl:221` — `@testset "total degree, overdetermined" begin`
+- `test/distributed_test.jl:229` — `@testset "total degree, composition" begin`
+- `test/distributed_test.jl:238` — `@testset "total degree, variable groups" begin`
+- `test/distributed_test.jl:260` — `@testset "polyhedral" begin`
+- `test/distributed_test.jl:280` — `@testset "parameter homotopy" begin`
+- `test/distributed_test.jl:290` — `@testset "start-target" begin`
+- `test/distributed_test.jl:301` — `@testset "explicit homotopy" begin`
+- `test/distributed_test.jl:323` — `@testset "subspace to subspace, intrinsic = $intr" for intr in (false, true)`
+- `test/distributed_test.jl:332` — `@testset "parameter sweep" begin`
+- `test/distributed_test.jl:351` — `@testset "subspace sweep" begin`
+- `test/distributed_test.jl:371` — `@testset "monodromy" begin`
+- `test/distributed_test.jl:396` — `@testset "permutations" begin`
+- `test/distributed_test.jl:407` — `@testset "subspace with trace test" begin`
+- `test/distributed_test.jl:420` — `@testset "timeout" begin`
+- `test/distributed_test.jl:433` — `@testset "error reporting" begin`
+- `test/double_f64_test.jl:4` — `@testset "DoubleF64" begin`
+- `test/double_f64_test.jl:5` — `@testset "construction and conversion" begin`
+- `test/double_f64_test.jl:26` — `@testset "arithmetic precision vs BigFloat" begin`
+- `test/double_f64_test.jl:36` — `@testset "randomized arithmetic accuracy" begin`
+- `test/double_f64_test.jl:50` — `@testset "integer power edge cases" begin`
+- `test/double_f64_test.jl:56` — `@testset "sqrt" begin`
+- `test/double_f64_test.jl:60` — `@testset "comparison and promotion" begin`
+- `test/double_f64_test.jl:83` — `@testset "special values" begin`
+- `test/double_f64_test.jl:91` — `@testset "isbits" begin`
+- `test/double_f64_test.jl:96` — `@testset "ComplexDF64" begin`
+- `test/double_f64_test.jl:105` — `@testset "wide_* correctness" begin`
+- `test/double_f64_test.jl:113` — `@testset "floor, ceil, trunc, isinteger" begin`
+- `test/double_f64_test.jl:124` — `@testset "decompose" begin`
+- `test/double_f64_test.jl:132` — `@testset "transcendental functions" begin`
+- `test/double_f64_test.jl:134` — `@testset "$name" for (f, name) in (`
+- `test/double_f64_test.jl:162` — `@testset "large arguments keep at least Float64 accuracy" begin`
+- `test/double_f64_test.jl:172` — `@testset "sinh and cosh overflow to infinities" begin`
+- `test/double_f64_test.jl:189` — `@testset "log over the whole exponent range" begin`
+- `test/double_f64_test.jl:210` — `@testset "asin and acos" begin`
+- `test/double_f64_test.jl:230` — `@testset "atan quadrants and axes" begin`
+- `test/double_f64_test.jl:256` — `@testset "tan and tanh identities" begin`
+- `test/double_f64_test.jl:277` — `@testset "ComplexDF64 transcendental functions" begin`
+- `test/double_f64_test.jl:286` — `@testset "away from the origin" begin`
+- `test/endgame_test.jl:13` — `@testset "Endgame Tracker" begin`
+- `test/endgame_test.jl:15` — `@testset "Valuation" begin`
+- `test/endgame_test.jl:18` — `@testset "Valuation: construction" begin`
+- `test/endgame_test.jl:28` — `@testset "Valuation: init! resets state" begin`
+- `test/endgame_test.jl:39` — `@testset "estimate_winding_number: m=1 regular" begin`
+- `test/endgame_test.jl:48` — `@testset "estimate_winding_number: m=2 singular" begin`
+- `test/endgame_test.jl:57` — `@testset "estimate_winding_number: m=3" begin`
+- `test/endgame_test.jl:66` — `@testset "update!: zero allocations" begin`
+- `test/endgame_test.jl:87` — `@testset "direct Taylor derivative matches finite difference" begin`
+- `test/endgame_test.jl:104` — `@testset "EndgameTracker construction" begin`
+- `test/endgame_test.jl:128` — `@testset "EndgameTracker: init! and track! (regular paths)" begin`
+- `test/endgame_test.jl:131` — `@testset "init!: valid start" begin`
+- `test/endgame_test.jl:142` — `@testset "init!: invalid start propagates" begin`
+- `test/endgame_test.jl:153` — `@testset "track!: linear system succeeds" begin`
+- `test/endgame_test.jl:166` — `@testset "track!: reusable (multiple paths)" begin`
+- `test/endgame_test.jl:185` — `@testset "check_finite!" begin`
+- `test/endgame_test.jl:188` — `@testset "returns false for regular path (m=1, all valuations near zero)" begin`
+- `test/endgame_test.jl:208` — `@testset "returns true and switches to singular for m=2" begin`
+- `test/endgame_test.jl:235` — `@testset "check_at_infinity!" begin`
+- `test/endgame_test.jl:238` — `@testset "returns false for finite path" begin`
+- `test/endgame_test.jl:260` — `@testset "returns true for diverging coordinate" begin`
+- `test/endgame_test.jl:294` — `@testset "clears stale divergence candidate" begin`
+- `test/endgame_test.jl:321` — `@testset "Singular endgame helpers" begin`
+- `test/endgame_test.jl:322` — `@testset "cubic_hermite!: linear function" begin`
+- `test/endgame_test.jl:337` — `@testset "add_sample! stores scaled sample condition" begin`
+- `test/endgame_test.jl:356` — `@testset "first accurate singular prediction is retained" begin`
+- `test/endgame_test.jl:373` — `@testset "PathResult from EndgameTracker" begin`
+- `test/endgame_test.jl:377` — `@testset "regular success" begin`
+- `test/endgame_test.jl:398` — `@testset "singular success reports extrapolated endpoint" begin`
+- `test/endgame_test.jl:415` — `@testset "invalid start reports tracker point" begin`
+- `test/endgame_test.jl:433` — `@testset "EndgameTracker: zero allocations in step!" begin`
+- `test/endgame_test.jl:461` — `@testset "Integration: (x-10)^d singular roots" begin`
+- `test/endgame_test.jl:464` — `@testset "d=2" begin`
+- `test/endgame_test.jl:479` — `@testset "d=6" begin`
+- `test/endgame_test.jl:488` — `@testset "Integration: at-infinity detection" begin`
+- `test/endgame_test.jl:502` — `@testset "Integration: winding number family" begin`
+- `test/endgame_test.jl:506` — `@testset "d=$d" begin`
+- `test/endgame_test.jl:517` — `@testset "Integration: Hyperbolic 6,6" begin`
+- `test/endgame_test.jl:541` — `@testset "Integration: singular system with multiplicity 3" begin`
+- `test/endgame_test.jl:559` — `@testset "Integration: cyclic 7 has 924 solutions" begin`
+- `test/explicit_imports_test.jl:58` — `@testset "ExplicitImports" begin`
+- `test/explicit_imports_test.jl:100` — `@testset "qualified accesses are public" begin`
+- `test/explicit_imports_test.jl:124` — `@testset "Distributed extension" begin`
+- `test/expression_test.jl:9` — `@testset "Expression frontend" begin`
+- `test/expression_test.jl:10` — `@testset "@var declares variables and arrays" begin`
+- `test/expression_test.jl:26` — `@testset "@unique_var avoids collisions" begin`
+- `test/expression_test.jl:34` — `@testset "unique_variable renames until free" begin`
+- `test/expression_test.jl:41` — `@testset "canonicalization and constant folding" begin`
+- `test/expression_test.jl:60` — `@testset "arithmetic promotes numbers" begin`
+- `test/expression_test.jl:69` — `@testset "variable discovery is sorted by index" begin`
+- `test/expression_test.jl:77` — `@testset "differentiate" begin`
+- `test/expression_test.jl:92` — `@testset "differentiate matches finite differences" begin`
+- `test/expression_test.jl:115` — `@testset "subs" begin`
+- `test/expression_test.jl:136` — `@testset "substituting every variable folds to a number" begin`
+- `test/expression_test.jl:154` — `@testset "determinant" begin`
+- `test/expression_test.jl:172` — `@testset "conjugation" begin`
+- `test/expression_test.jl:193` — `@testset "degree and is_polynomial" begin`
+- `test/expression_test.jl:205` — `@testset "rational functions" begin`
+- `test/expression_test.jl:221` — `@testset "num_den" begin`
+- `test/expression_test.jl:261` — `@testset "has_real_coefficients" begin`
+- `test/expression_test.jl:268` — `@testset "MultivariatePolynomials conversion" begin`
+- `test/expression_test.jl:294` — `@testset "lowering agrees with the polynomial front-end" begin`
+- `test/expression_test.jl:313` — `@testset "expression_to_sexpr rejects unknown symbols" begin`
+- `test/expression_test.jl:321` — `@testset "modeling" begin`
+- `test/expression_test.jl:322` — `@testset "bottleneck" begin`
+- `test/expression_test.jl:340` — `@testset "steiner" begin`
+- `test/expression_test.jl:367` — `@testset "reach of a plane curve" begin`
+- `test/expression_test.jl:385` — `@testset "show" begin`
+- `test/extensive/fano_quintic_extensive_test.jl:10` — `@testset "Lines on a quintic surface in 3-space" begin`
+- `test/extensive/fano_quintic_extensive_test.jl:18` — `@testset "total degree" begin`
+- `test/extensive/fano_quintic_extensive_test.jl:25` — `@testset "polyhedral" begin`
+- `test/extensive/iterator_certification_extensive_test.jl:15` — `@testset "3264 conics through the iterator route" begin`
+- `test/extensive/runtests.jl:5` — `@testset "HomotopyContinuationNext extensive" begin`
+- `test/extensive/steiner_extensive_test.jl:46` — `@testset "3264 conics tangent to five conics" begin`
+- `test/extensive/steiner_extensive_test.jl:60` — `@testset "tracked to the real conics" begin`
+- `test/extensive/steiner_extensive_test.jl:79` — `@testset "solved at the real conics directly" begin`
+- `test/fano_quintic_test.jl:10` — `@testset "Lines on a quintic surface" begin`
+- `test/fano_quintic_test.jl:14` — `@testset "shape" begin`
+- `test/fano_quintic_test.jl:23` — `@testset "equations evaluate to the quintic restricted to the line" begin`
+- `test/fixed_parameter_test.jl:18` — `@testset "fix_parameters" begin`
+- `test/fixed_parameter_test.jl:34` — `@testset "a System substitutes into the equations" begin`
+- `test/fixed_parameter_test.jl:46` — `@testset "a composition binds" begin`
+- `test/fixed_parameter_test.jl:56` — `@testset "rejects a mismatched parameter count" begin`
+- `test/fixed_parameter_test.jl:64` — `@testset "the bound evaluator matches the substituted system" begin`
+- `test/fixed_parameter_test.jl:93` — `@testset "taylor! order $K, $(P === nothing ? "scalar" : "TaylorVector") parameters" for`
+- `test/fixed_parameter_test.jl:113` — `@testset "a bound composition clones per worker" begin`
+- `test/fixed_parameter_test.jl:131` — `@testset "solving a fixed-parameter system" begin`
+- `test/fixed_parameter_test.jl:137` — `@testset "total degree matches the substituted system path for path" begin`
+- `test/fixed_parameter_test.jl:150` — `@testset "polyhedral matches the substituted system" begin`
+- `test/fixed_parameter_test.jl:162` — `@testset "solutions solve the system at those parameter values" begin`
+- `test/fixed_parameter_test.jl:174` — `@testset "$(nameof(typeof(exec))) executor" for exec in (Serial(), Threaded())`
+- `test/fixed_parameter_test.jl:192` — `@testset "the substituted route reuses the parameter-free cache type" begin`
+- `test/fixed_parameter_test.jl:206` — `@testset "compile mode $mode" for mode in`
+- `test/fixed_parameter_test.jl:221` — `@testset "overdetermined, both routes" begin`
+- `test/fixed_parameter_test.jl:243` — `@testset "composition" begin`
+- `test/fixed_parameter_test.jl:256` — `@testset "a parametric system is rejected by name" begin`
+- `test/group_actions_test.jl:5` — `@testset "GroupActions" begin`
+- `test/group_actions_test.jl:35` — `@testset "SymmetricGroup" begin`
+- `test/group_actions_test.jl:46` — `@testset "UniquePoints with group actions" begin`
+- `test/group_actions_test.jl:58` — `@testset "multiplicities" begin`
+- `test/homotopy_solve_test.jl:82` — `@testset "Homotopy solve" begin`
+- `test/homotopy_solve_test.jl:84` — `@testset "start-target: parameter-fixed systems" begin`
+- `test/homotopy_solve_test.jl:109` — `@testset "start-target: agrees with a direct solve" begin`
+- `test/homotopy_solve_test.jl:133` — `@testset "start-target: seed determines the paths" begin`
+- `test/homotopy_solve_test.jl:156` — `@testset "start-target: projective" begin`
+- `test/homotopy_solve_test.jl:177` — `@testset "start-target: overdetermined" begin`
+- `test/homotopy_solve_test.jl:187` — `@testset "start-target: rejected input" begin`
+- `test/homotopy_solve_test.jl:248` — `@testset "solve(H, starts)" begin`
+- `test/homotopy_solve_test.jl:280` — `@testset "solve(H, starts): affine chart" begin`
+- `test/homotopy_solve_test.jl:303` — `@testset "solve(H, starts): threaded" begin`
+- `test/homotopy_solve_test.jl:332` — `@testset "_clone_homotopy" begin`
+- `test/homotopy_solve_test.jl:369` — `@testset "solve(H, starts): rejected input" begin`
+- `test/homotopy_solve_test.jl:396` — `@testset "solve(H, starts): homotopy with no rebuild rule" begin`
+- `test/homotopy_solve_test.jl:438` — `@testset "solve(build_homotopy, starts)" begin`
+- `test/homotopy_solve_test.jl:468` — `@testset "init returns a reusable cache" begin`
+- `test/instruction_count_test.jl:178` — `@testset "Instruction count + correctness" begin`
+- `test/instruction_count_test.jl:179` — `@testset "Cyclic systems" begin`
+- `test/instruction_count_test.jl:181` — `@testset "cyclic-$n" begin`
+- `test/instruction_count_test.jl:191` — `@testset "Chain systems" begin`
+- `test/instruction_count_test.jl:193` — `@testset "chain-$n" begin`
+- `test/instruction_count_test.jl:203` — `@testset "Dense quadratic systems" begin`
+- `test/instruction_count_test.jl:205` — `@testset "dense_quad-$n" begin`
+- `test/instruction_count_test.jl:215` — `@testset "Random sparse 6×6" begin`
+- `test/instruction_count_test.jl:217` — `@testset "sparse6_$seed" begin`
+- `test/instruction_count_test.jl:228` — `@testset "Random sparse 8×8" begin`
+- `test/instruction_count_test.jl:230` — `@testset "sparse8_$seed" begin`
+- `test/interpreter_test.jl:64` — `@testset "Interpreter" begin`
+- `test/interpreter_test.jl:65` — `@testset "execute! with parameters" begin`
+- `test/interpreter_test.jl:73` — `@testset "execute! two outputs" begin`
+- `test/interpreter_test.jl:82` — `@testset "execute! repeated calls" begin`
+- `test/interpreter_test.jl:92` — `@testset "ComplexDF64 tape" begin`
+- `test/interpreter_test.jl:100` — `@testset "non-polynomial unary instructions" begin`
+- `test/interpreter_test.jl:143` — `@testset "division and negative power instructions" begin`
+- `test/interpreter_test.jl:208` — `@testset "execute_taylor! higher order" begin`
+- `test/interpreter_test.jl:230` — `@testset "execute_taylor! with TaylorVector parameters (Cauchy product)" begin`
+- `test/interpreter_test.jl:258` — `@testset "SExpr compound constructors copy arg vectors" begin`
+- `test/jet_test.jl:5` — `@testset "JET.jl" begin`
+- `test/linear_algebra_test.jl:16` — `@testset "MatrixWorkspace" begin`
+- `test/linear_algebra_test.jl:17` — `@testset "construction" begin`
+- `test/linear_algebra_test.jl:23` — `@testset "1x1 system" begin`
+- `test/linear_algebra_test.jl:32` — `@testset "LU solve (square, repeated)" begin`
+- `test/linear_algebra_test.jl:46` — `@testset "overdetermined (QR)" begin`
+- `test/linear_algebra_test.jl:61` — `@testset "Row scaling" begin`
+- `test/linear_algebra_test.jl:92` — `@testset "Scaled condition number" begin`
+- `test/linear_algebra_test.jl:124` — `@testset "Residual computation" begin`
+- `test/linear_algebra_test.jl:134` — `@testset "Mixed precision iterative refinement" begin`
+- `test/linear_algebra_test.jl:152` — `@testset "Jacobian wrapper" begin`
+- `test/linear_algebra_test.jl:185` — `@testset "repeated weighted solves reuse scaled factorization correctly" begin`
+- `test/linear_algebra_test.jl:216` — `@testset "Zero allocations (ldiv!)" begin`
+- `test/linear_algebra_test.jl:232` — `@testset "Condition estimator vs opnorm" begin`
+- `test/linear_subspace_test.jl:9` — `@testset "LinearSubspace round trips" begin`
+- `test/linear_subspace_test.jl:27` — `@testset "rand_subspace through a point" begin`
+- `test/linear_subspace_test.jl:34` — `@testset "rand_subspace!" begin`
+- `test/linear_subspace_test.jl:68` — `@testset "translate" begin`
+- `test/linear_subspace_test.jl:79` — `@testset "LinearSubspace API" begin`
+- `test/linear_subspace_test.jl:131` — `@testset "intersect subspaces" begin`
+- `test/linear_subspace_test.jl:145` — `@testset "geodesic: consistent endpoint convention" begin`
+- `test/many_targets_test.jl:9` — `@testset "Many targets" begin`
+- `test/many_targets_test.jl:27` — `@testset "default return shape" begin`
+- `test/many_targets_test.jl:43` — `@testset "threaded matches serial for $n target(s)" for n in (1, 2, 3, 7, 20)`
+- `test/many_targets_test.jl:59` — `@testset "transform_result" begin`
+- `test/many_targets_test.jl:73` — `@testset "flatten" begin`
+- `test/many_targets_test.jl:97` — `@testset "flatten rejects non-array entries" begin`
+- `test/many_targets_test.jl:101` — `@testset "transform_parameters" begin`
+- `test/many_targets_test.jl:118` — `@testset "transform_parameters is called once per target ($exec)" for exec in`
+- `test/many_targets_test.jl:135` — `@testset "solutions match a single-target solve" begin`
+- `test/many_targets_test.jl:147` — `@testset "retargets instead of rebuilding" begin`
+- `test/many_targets_test.jl:161` — `@testset "targets of the wrong length are rejected" begin`
+- `test/many_targets_test.jl:168` — `@testset "empty targets" begin`
+- `test/many_targets_test.jl:181` — `@testset "target subspaces, $label" for (label, kw) in`
+- `test/many_targets_test.jl:202` — `@testset "target subspaces, threaded matches serial for $n target(s)" for n in`
+- `test/many_targets_test.jl:226` — `@testset "target subspaces, order independent" begin`
+- `test/many_targets_test.jl:244` — `@testset "target subspaces: transform_parameters is called once per target" begin`
+- `test/many_targets_test.jl:260` — `@testset "target subspaces of the wrong dimension are rejected" begin`
+- `test/many_targets_test.jl:274` — `@testset "target subspaces, flatten" begin`
+- `test/many_targets_test.jl:290` — `@testset "subspace sweep agrees with single moves" begin`
+- `test/monodromy_test.jl:17` — `@testset "find_start_pair" begin`
+- `test/monodromy_test.jl:52` — `@testset "monodromy data structures" begin`
+- `test/monodromy_test.jl:92` — `@testset "trace slice step" begin`
+- `test/monodromy_test.jl:112` — `@testset "affine chart conditioning" begin`
+- `test/monodromy_test.jl:127` — `@testset "monodromy start solutions" begin`
+- `test/monodromy_test.jl:147` — `@testset "worker state loop tracking (vector parameters)" begin`
+- `test/monodromy_test.jl:176` — `@testset "monodromy: oracle expectations (serial)" begin`
+- `test/monodromy_test.jl:227` — `@testset "monodromy: subspace run with trace test" begin`
+- `test/monodromy_test.jl:239` — `@testset "trace completeness" begin`
+- `test/monodromy_test.jl:259` — `@testset "threaded == serial on solution sets" begin`
+- `test/monodromy_test.jl:292` — `@testset "verify_solution_completeness" begin`
+- `test/monodromy_test.jl:313` — `@testset "trace discrimination (prototype 11 magnitudes)" begin`
+- `test/monodromy_test.jl:322` — `@testset "reuse_loops variants and stopping" begin`
+- `test/monodromy_test.jl:346` — `@testset "duplicate_check option" begin`
+- `test/monodromy_v2_parity_test.jl:18` — `@testset "toric ED: Monodromy options" begin`
+- `test/monodromy_v2_parity_test.jl:74` — `@testset "toric ED: start pairs, distances, dedup options" begin`
+- `test/monodromy_v2_parity_test.jl:157` — `@testset "toric ED: group action and reuse_loops" begin`
+- `test/monodromy_v2_parity_test.jl:268` — `@testset "method of moments" begin`
+- `test/monodromy_v2_parity_test.jl:297` — `@testset "projective + group actions" begin`
+- `test/monodromy_v2_parity_test.jl:331` — `@testset "permutations (circle pair)" begin`
+- `test/monodromy_v2_parity_test.jl:374` — `@testset "linear subspaces (dim/codim, trace test)" begin`
+- `test/monodromy_v2_parity_test.jl:433` — `@testset "parameter homotopy from a monodromy result" begin`
+- `test/monodromy_v2_parity_test.jl:448` — `@testset "verify_solution_completeness (circle + line)" begin`
+- `test/monodromy_v2_parity_test.jl:486` — `@testset "unique_points tolerances" begin`
+- `test/monodromy_v2_parity_test.jl:505` — `@testset "symmetroids: composition, custom distance, unique_points tolerances" begin`
+- `test/newton_test.jl:6` — `@testset "Standalone newton(F, x₀)" begin`
+- `test/newton_test.jl:13` — `@testset "converges from a nearby guess" begin`
+- `test/newton_test.jl:23` — `@testset "converges to the other real root" begin`
+- `test/newton_test.jl:30` — `@testset "extended precision reaches near machine-eps residual" begin`
+- `test/newton_test.jl:36` — `@testset "extended_precision defaults to false" begin`
+- `test/newton_test.jl:43` — `@testset "reports max_iters when it cannot converge in the budget" begin`
+- `test/newton_test.jl:51` — `@testset "overdetermined consistent system (least squares)" begin`
+- `test/newton_test.jl:60` — `@testset "underdetermined system converges to a point on the variety" begin`
+- `test/newton_test.jl:68` — `@testset "underdetermined with preallocated cache" begin`
+- `test/newton_test.jl:78` — `@testset "underdetermined extended precision" begin`
+- `test/newton_test.jl:86` — `@testset "preallocated NewtonCache" begin`
+- `test/newton_test.jl:95` — `@testset "rejects a wild first update" begin`
+- `test/nid_test.jl:14` — `@testset "Numerical Irreducible Decomposition" begin`
+- `test/nid_test.jl:15` — `@testset "Union of 1 2-dim, 2 1-dim and 8 points" begin`
+- `test/nid_test.jl:146` — `@testset "rational systems" begin`
+- `test/nid_test.jl:203` — `@testset "equation scaling" begin`
+- `test/nid_test.jl:224` — `@testset "intersect with a hypersurface" begin`
+- `test/nid_test.jl:245` — `@testset "Hypersurface of degree 5" begin`
+- `test/nid_test.jl:255` — `@testset "Curve of degree 6" begin`
+- `test/nid_test.jl:266` — `@testset "Homogeneous systems" begin`
+- `test/nid_test.jl:294` — `@testset "randomization" begin`
+- `test/nid_test.jl:310` — `@testset "Overdetermined Test" begin`
+- `test/nid_test.jl:320` — `@testset "Three Lines" begin`
+- `test/nid_test.jl:331` — `@testset "Bricard6R" begin`
+- `test/nid_test.jl:407` — `@testset "ACR" begin`
+- `test/nid_test.jl:444` — `@testset "Union of a sphere, a line, and a point" begin`
+- `test/nid_test.jl:462` — `@testset "seeds determine the result" begin`
+- `test/nonpolynomial_test.jl:59` — `@testset "Non-polynomial system sweep: $name" for (name, exprs, vars, params, ref) in`
+- `test/nonpolynomial_test.jl:89` — `@testset "symbolic tape roundtrip" begin`
+- `test/nonpolynomial_test.jl:97` — `@testset "$mode" for mode in MODES`
+- `test/nonpolynomial_test.jl:112` — `@testset "taylor! K=$K" for K in 1:3`
+- `test/nonpolynomial_test.jl:135` — `@testset "StraightLineHomotopy sweep: $name" for (name, exprs, vars, params, ref) in`
+- `test/nonpolynomial_test.jl:153` — `@testset "$mode" for mode in MODES`
+- `test/nonpolynomial_test.jl:180` — `@testset "taylor! K=$K" for K in 2:3`
+- `test/nonpolynomial_test.jl:193` — `@testset "Non-polynomial input" begin`
+- `test/nonpolynomial_test.jl:194` — `@testset "rational system evaluation and Jacobian" begin`
+- `test/nonpolynomial_test.jl:216` — `@testset "sqrt parameters: compile-mode parity and derivatives" begin`
+- `test/nonpolynomial_test.jl:251` — `@testset "transcendental functions differentiate and evaluate" begin`
+- `test/nonpolynomial_test.jl:289` — `@testset "fractional powers" begin`
+- `test/nonpolynomial_test.jl:311` — `@testset "taylor! K=$K" for K in 1:3`
+- `test/nonpolynomial_test.jl:323` — `@testset "homotopy with transcendental functions" begin`
+- `test/nonpolynomial_test.jl:337` — `@testset "extended-precision residual on a transcendental system" begin`
+- `test/nonpolynomial_test.jl:350` — `@testset "Taylor orders 1-3 against a Cauchy-integral oracle" begin`
+- `test/nonpolynomial_test.jl:380` — `@testset "Taylor-valued parameters against a Cauchy-integral oracle" begin`
+- `test/nonpolynomial_test.jl:414` — `@testset "parameter homotopy tracking through a sqrt parameter" begin`
+- `test/nonpolynomial_test.jl:434` — `@testset "monodromy on rational functions" begin`
+- `test/nonpolynomial_test.jl:454` — `@testset "monodromy on a rational triangulation system" begin`
+- `test/nonpolynomial_test.jl:475` — `@testset "verify_solution_completeness on an expression system" begin`
+- `test/nonpolynomial_test.jl:487` — `@testset "MP rational input builds the same system" begin`
+- `test/nonpolynomial_test.jl:503` — `@testset "start systems reject non-polynomial input" begin`
+- `test/nonpolynomial_test.jl:516` — `@testset "polyhedral start systems on expression input" begin`
+- `test/nonpolynomial_test.jl:519` — `@testset "support matches the polynomial front-end" begin`
+- `test/nonpolynomial_test.jl:534` — `@testset "dense system" begin`
+- `test/nonpolynomial_test.jl:542` — `@testset "sparse system" begin`
+- `test/nonpolynomial_test.jl:549` — `@testset "overdetermined system is squared up" begin`
+- `test/nonpolynomial_test.jl:555` — `@testset "a parameter is not a variable" begin`
+- `test/nonpolynomial_test.jl:562` — `@testset "sliced solve substitutes parameters through the expression front-end" begin`
+- `test/nonpolynomial_test.jl:583` — `@testset "regeneration takes polynomial and rational expression input" begin`
+- `test/norms_test.jl:11` — `@testset "Norms" begin`
+- `test/norms_test.jl:12` — `@testset "inf_norm and inf_distance" begin`
+- `test/norms_test.jl:21` — `@testset "weighted_norm and weighted_distance" begin`
+- `test/norms_test.jl:33` — `@testset "init! and update!" begin`
+- `test/norms_test.jl:47` — `@testset "fast_abs on ComplexDF64" begin`
+- `test/norms_test.jl:52` — `@testset "euclidean_norm and euclidean_distance" begin`
+- `test/norms_test.jl:67` — `@testset "inf_norm overflow (exp2(700), triggers isinf fallback)" begin`
+- `test/operations_test.jl:13` — `@testset "Operations" begin`
+- `test/operations_test.jl:14` — `@testset "arity" begin`
+- `test/operations_test.jl:24` — `@testset "scalar ops (ComplexF64)" begin`
+- `test/operations_test.jl:64` — `@testset "Taylor rules against symbolic differentiation" begin`
+- `test/operations_test.jl:77` — `@testset "N=$N" for N in (1, 2, 4)`
+- `test/operations_test.jl:82` — `@testset "$op" for op in instances(OpType.T)`
+- `test/overdetermined_test.jl:18` — `@testset "Overdetermined" begin`
+- `test/overdetermined_test.jl:22` — `@testset "RandomizedSystem evaluation" begin`
+- `test/overdetermined_test.jl:84` — `@testset "RandomizedSystem permutation" begin`
+- `test/overdetermined_test.jl:111` — `@testset "RandomizedSystem DF64 extended precision" begin`
+- `test/overdetermined_test.jl:164` — `@testset "solve overdetermined: total degree ($(nameof(typeof(exec))))" for exec in (Serial(), Threaded())`
+- `test/overdetermined_test.jl:186` — `@testset "solve overdetermined: polyhedral ($(nameof(typeof(exec))))" for exec in (Serial(), Threaded())`
+- `test/overdetermined_test.jl:199` — `@testset "solve overdetermined: seed reproducibility" begin`
+- `test/overdetermined_test.jl:209` — `@testset "solve overdetermined: singular solution" begin`
+- `test/overdetermined_test.jl:222` — `@testset "underdetermined systems throw" begin`
+- `test/overdetermined_test.jl:232` — `@testset "3 by 5 minors" begin`
+- `test/overdetermined_test.jl:243` — `@testset "underdetermined throws" begin`
+- `test/overdetermined_test.jl:263` — `@testset "parameter homotopy underdetermined throws" begin`
+- `test/overdetermined_test.jl:288` — `@testset "RandomizedSystem with parameters" begin`
+- `test/overdetermined_test.jl:362` — `@testset "square systems unaffected" begin`
+- `test/parameter_homotopy_test.jl:9` — `@testset "ParameterHomotopy" begin`
+- `test/parameter_homotopy_test.jl:27` — `@testset "evaluate! matches F(x; p(t))" begin`
+- `test/parameter_homotopy_test.jl:35` — `@testset "evaluate_and_jacobian!" begin`
+- `test/parameter_homotopy_test.jl:46` — `@testset "taylor! Val(1) is the exact tangent" begin`
+- `test/parameter_homotopy_test.jl:57` — `@testset "taylor! Val(2)/Val(3) match the symbolic series" begin`
+- `test/parameter_homotopy_test.jl:78` — `@testset "parameters! retarget invalidates caches" begin`
+- `test/parameter_homotopy_test.jl:91` — `@testset "tracks a nonlinear-in-p path in few steps" begin`
+- `test/parameter_homotopy_test.jl:103` — `@testset "solve parameter homotopy step-count regression" begin`
+- `test/parameter_homotopy_test.jl:124` — `@testset "start solutions: vector, Result and ResultIterator agree" begin`
+- `test/path_diagnostics_test.jl:13` — `@testset "Path diagnostics accessors" begin`
+- `test/path_diagnostics_test.jl:21` — `@testset "value accessors mirror the stored fields" begin`
+- `test/path_diagnostics_test.jl:30` — `@testset "steps is the total of accepted + rejected" begin`
+- `test/path_diagnostics_test.jl:35` — `@testset "residual is finite and small for a genuine success" begin`
+- `test/path_diagnostics_test.jl:42` — `@testset "last_path_point returns (point, t)" begin`
+- `test/path_diagnostics_test.jl:48` — `@testset "show renders per-path diagnostics" begin`
+- `test/path_diagnostics_test.jl:54` — `@testset "predicates partition the paths" begin`
+- `test/path_diagnostics_test.jl:67` — `@testset "cond is an alias for condition_jacobian" begin`
+- `test/path_diagnostics_test.jl:71` — `@testset "path_number / start_solution are recorded" begin`
+- `test/path_diagnostics_test.jl:80` — `@testset "valuation is empty or per-coordinate" begin`
+- `test/path_diagnostics_test.jl:87` — `@testset "multiplicity is the cluster size (1 for these simple roots)" begin`
+- `test/path_diagnostics_test.jl:94` — `@testset "is_real positional and Base.isreal overloads" begin`
+- `test/path_diagnostics_test.jl:101` — `@testset "Result-level accessors" begin`
+- `test/path_diagnostics_test.jl:111` — `@testset "statistics summarizes the result" begin`
+- `test/path_info_test.jl:14` — `@testset "path iterator" begin`
+- `test/path_info_test.jl:30` — `@testset "a smaller step size yields more points" begin`
+- `test/path_info_test.jl:35` — `@testset "linear path steps at the requested size" begin`
+- `test/path_info_test.jl:49` — `@testset "complex endpoints yield complex t" begin`
+- `test/path_info_test.jl:58` — `@testset "path_info" begin`
+- `test/path_info_test.jl:87` — `@testset "a limited display elides the middle rows" begin`
+- `test/path_info_test.jl:103` — `@testset "tracking the same path twice gives the same table" begin`
+- `test/polyhedral_regression_test.jl:23` — `@testset "Polyhedral regression" begin`
+- `test/polyhedral_regression_test.jl:25` — `@testset "canonical support fast path matches MixedSubdivisions" begin`
+- `test/polyhedral_regression_test.jl:85` — `@testset "support-backed evaluator matches symbolic System" begin`
+- `test/polyhedral_regression_test.jl:157` — `@testset "CoefficientHomotopy Taylor order 2 includes cross term" begin`
+- `test/polyhedral_regression_test.jl:217` — `@testset "CoefficientHomotopy Taylor via Cauchy product matches multi-call" begin`
+- `test/polyhedral_regression_test.jl:261` — `@testset "ToricHomotopy higher-order parameter derivatives" begin`
+- `test/polyhedral_regression_test.jl:307` — `@testset "ToricHomotopy Taylor via Cauchy product matches multi-call" begin`
+- `test/polyhedral_regression_test.jl:358` — `@testset "Polyhedral: cyclic-4 high-weight cells mostly succeed" begin`
+- `test/polyhedral_regression_test.jl:381` — `@testset "Polyhedral: PathResult includes toric phase steps" begin`
+- `test/polyhedral_regression_test.jl:408` — `@testset "Polyhedral: toric steps included in count" begin`
+- `test/polynomial_input_test.jl:85` — `@testset "Eval: edge cases" begin`
+- `test/polynomial_input_test.jl:86` — `@testset "single variable" begin`
+- `test/polynomial_input_test.jl:91` — `@testset "constant polynomial term" begin`
+- `test/polynomial_input_test.jl:100` — `@testset "high-degree monomial" begin`
+- `test/polynomial_input_test.jl:105` — `@testset "pure quadratic (no linear terms)" begin`
+- `test/polynomial_input_test.jl:110` — `@testset "purely linear system" begin`
+- `test/polynomial_input_test.jl:116` — `@testset "single polynomial (m=1)" begin`
+- `test/polynomial_input_test.jl:121` — `@testset "negative coefficients (-1 handling)" begin`
+- `test/polynomial_input_test.jl:127` — `@testset "complex coefficients" begin`
+- `test/polynomial_input_test.jl:133` — `@testset "mixed real and complex coefficients" begin`
+- `test/polynomial_input_test.jl:139` — `@testset "large shared subexpressions" begin`
+- `test/polynomial_input_test.jl:146` — `@testset "identical polynomials (repeated outputs)" begin`
+- `test/polynomial_input_test.jl:161` — `@testset "coefficient 2 (tests 2*x → x+x optimization)" begin`
+- `test/polynomial_input_test.jl:172` — `@testset "Systems with parameters" begin`
+- `test/polynomial_input_test.jl:173` — `@testset "eval with parameters" begin`
+- `test/polynomial_input_test.jl:183` — `@testset "Jacobian with parameters" begin`
+- `test/polynomial_input_test.jl:200` — `@testset "Jacobian with parameters vs ground truth" begin`
+- `test/polynomial_input_test.jl:255` — `@testset "Direct polynomial compiler parity" begin`
+- `test/polynomial_input_test.jl:256` — `@testset "eval and jacobian agree with symbolic compiler" begin`
+- `test/polynomial_input_test.jl:280` — `@testset "edge cases match symbolic compiler" begin`
+- `test/polynomial_input_test.jl:295` — `@testset "selection policy" begin`
+- `test/polynomial_input_test.jl:313` — `@testset "incomplete variable list" begin`
+- `test/polynomial_input_test.jl:330` — `@testset "Real systems: ground truth" begin`
+- `test/polynomial_input_test.jl:331` — `@testset "Katsura-3" begin`
+- `test/polynomial_input_test.jl:342` — `@testset "Cyclic-5" begin`
+- `test/polynomial_input_test.jl:356` — `@testset "Cubic with negative and unit coefficients" begin`
+- `test/polynomial_input_test.jl:367` — `@testset "Instruction count bounds" begin`
+- `test/polynomial_input_test.jl:368` — `@testset "Katsura-3 eval uses fused ops" begin`
+- `test/polynomial_input_test.jl:382` — `@testset "Cyclic-5 eval tape" begin`
+- `test/polynomial_input_test.jl:401` — `@testset "Taylor via System interpreters" begin`
+- `test/polynomial_input_test.jl:402` — `@testset "simple 2-var system" begin`
+- `test/polynomial_input_test.jl:426` — `@testset "Katsura-3 Taylor order 1" begin`
+- `test/polynomial_input_test.jl:461` — `@testset "DF64 via System interpreters" begin`
+- `test/polynomial_input_test.jl:462` — `@testset "simple system" begin`
+- `test/polynomial_input_test.jl:479` — `@testset "complex coefficients" begin`
+- `test/progress_test.jl:19` — `@testset "solve progress bar" begin`
+- `test/progress_test.jl:23` — `@testset "make_progress renders the tracking bar to stdout" begin`
+- `test/progress_test.jl:35` — `@testset "make_progress(n, false) is a no-op sentinel" begin`
+- `test/progress_test.jl:45` — `@testset "record! tallies non-singular / singular / real endpoints" begin`
+- `test/progress_test.jl:58` — `@testset "showvalues includes the live solution counts" begin`
+- `test/progress_test.jl:76` — `@testset "show_progress = false keeps solve silent" begin`
+- `test/progress_test.jl:83` — `@testset "show_progress = true is accepted by serial and threaded solve" begin`
+- `test/result_clustering_test.jl:95` — `@testset "Solution clustering" begin`
+- `test/result_clustering_test.jl:96` — `@testset "empty and all-failed inputs" begin`
+- `test/result_clustering_test.jl:104` — `@testset "exact duplicates cluster, distinct points do not" begin`
+- `test/result_clustering_test.jl:115` — `@testset "regular endpoints stay apart however close they are" begin`
+- `test/result_clustering_test.jl:138` — `@testset "failed paths are skipped and keep multiplicity 0" begin`
+- `test/result_clustering_test.jl:149` — `@testset "transitivity: chain A≈B≈C merges even when A is far from C" begin`
+- `test/result_clustering_test.jl:160` — `@testset "rtol scales the tolerance for large-norm solutions" begin`
+- `test/result_clustering_test.jl:172` — `@testset "identical projection keys with distinct solutions stay separate" begin`
+- `test/result_clustering_test.jl:182` — `@testset "random inputs match the brute-force reference" begin`
+- `test/result_clustering_test.jl:204` — `@testset "large input smoke test (2000 paths)" begin`
+- `test/result_clustering_test.jl:218` — `@testset "Group-action clustering" begin`
+- `test/result_clustering_test.jl:221` — `@testset "an orbit becomes one cluster, multiplicity stays proximity-based" begin`
+- `test/result_clustering_test.jl:238` — `@testset "failed paths stay out of the orbit merge" begin`
+- `test/result_clustering_test.jl:249` — `@testset "chained actions collapse the full orbit" begin`
+- `test/result_clustering_test.jl:265` — `@testset "one generator collapses the orbit it generates" begin`
+- `test/result_clustering_test.jl:295` — `@testset "tolerances are honored" begin`
+- `test/result_clustering_test.jl:303` — `@testset "random inputs match the brute-force reference" begin`
+- `test/result_clustering_test.jl:322` — `@testset "_orbit_merge!" begin`
+- `test/result_clustering_test.jl:360` — `@testset "recluster" begin`
+- `test/result_clustering_test.jl:415` — `@testset "clusters and cluster_of" begin`
+- `test/result_iterator_test.jl:11` — `@testset "ResultIterator" begin`
+- `test/result_iterator_test.jl:15` — `@testset "total degree" begin`
+- `test/result_iterator_test.jl:32` — `@testset "polyhedral" begin`
+- `test/result_iterator_test.jl:42` — `@testset "sliced" begin`
+- `test/result_iterator_test.jl:53` — `@testset "subspace to subspace, and iterator as start solutions" begin`
+- `test/result_iterator_test.jl:69` — `@testset "parameter homotopy" begin`
+- `test/result_iterator_test.jl:81` — `@testset "selection and restrict" begin`
+- `test/result_iterator_test.jl:100` — `@testset "filter keeps the results, getindex tracks one path" begin`
+- `test/result_iterator_test.jl:119` — `@testset "explicit mask selects a subset of the paths up front" begin`
+- `test/result_iterator_test.jl:138` — `@testset "excess solutions are reclassified by Result" begin`
+- `test/result_iterator_test.jl:146` — `@testset "show" begin`
+- `test/result_iterator_test.jl:153` — `@testset "restrict with a precomputed mask" begin`
+- `test/result_iterator_test.jl:171` — `@testset "trace" begin`
+- `test/result_iterator_test.jl:194` — `@testset "start to target route" begin`
+- `test/result_iterator_test.jl:206` — `@testset "compression" begin`
+- `test/semialgebraic_sets_test.jl:18` — `@testset "SemialgebraicSets" begin`
+- `test/semialgebraic_sets_test.jl:21` — `@testset "square set" begin`
+- `test/semialgebraic_sets_test.jl:30` — `@testset "show" begin`
+- `test/semialgebraic_sets_test.jl:45` — `@testset "System from an algebraic set" begin`
+- `test/semialgebraic_sets_test.jl:55` — `@testset "solve and real_solutions on a set" begin`
+- `test/semialgebraic_sets_test.jl:66` — `@testset "options are forwarded" begin`
+- `test/semialgebraic_sets_test.jl:76` — `@testset "only real solutions are returned" begin`
+- `test/semialgebraic_sets_test.jl:86` — `@testset "underdetermined sets are not solved" begin`
+- `test/semialgebraic_sets_test.jl:93` — `@testset "excess_residual_tol" begin`
+- `test/semialgebraic_sets_test.jl:123` — `@testset "excess_residual_tol on the algorithm" begin`
+- `test/sliced_solve_test.jl:20` — `@testset "Sliced solve" begin`
+- `test/sliced_solve_test.jl:22` — `@testset "slice: shape and equations" begin`
+- `test/sliced_solve_test.jl:33` — `@testset "slice: preserves parameters and compile mode" begin`
+- `test/sliced_solve_test.jl:45` — `@testset "slice: chart row" begin`
+- `test/sliced_solve_test.jl:53` — `@testset "slice: ambient dimension mismatch" begin`
+- `test/sliced_solve_test.jl:59` — `@testset "solve(F, L): affine line through a conic" begin`
+- `test/sliced_solve_test.jl:72` — `@testset "solve(F, L): two equations in three variables" begin`
+- `test/sliced_solve_test.jl:83` — `@testset "solve(F, L): projective" begin`
+- `test/sliced_solve_test.jl:96` — `@testset "solve(F, L): parametric" begin`
+- `test/sliced_solve_test.jl:108` — `@testset "solve(F, L): fixing parameters of a parameter-free system" begin`
+- `test/sliced_solve_test.jl:114` — `@testset "solve(F, L): overdetermined slice keeps the excess checker" begin`
+- `test/sliced_solve_test.jl:124` — `@testset "solve(F, L): Polyhedral" begin`
+- `test/sliced_solve_test.jl:135` — `@testset "solve(F, L): executors agree" begin`
+- `test/sliced_solve_test.jl:147` — `@testset "solve(F, L): reproducible chart in the projective case" begin`
+- `test/sliced_solve_test.jl:157` — `@testset "SlicedSystem matches the rebuilt polynomial system" begin`
+- `test/sliced_solve_test.jl:201` — `@testset "SlicedSystem route tracks the same paths as the rebuild route" begin`
+- `test/sliced_solve_test.jl:223` — `@testset "SlicedSystem linear rows and validation" begin`
+- `test/sliced_solve_test.jl:239` — `@testset "solve(F, L): CommonSolve init/solve! interface" begin`
+- `test/solve_test.jl:15` — `@testset "Solve" begin`
+- `test/solve_test.jl:17` — `@testset "solve: linear system" begin`
+- `test/solve_test.jl:27` — `@testset "solve: quadratic system" begin`
+- `test/solve_test.jl:37` — `@testset "solve: x^2-1, y^2-4 finds all real solutions" begin`
+- `test/solve_test.jl:50` — `@testset "solve: katsura-3" begin`
+- `test/solve_test.jl:77` — `@testset "solve: reproducible with seed" begin`
+- `test/solve_test.jl:91` — `@testset "solve: explicit algorithm" begin`
+- `test/solve_test.jl:101` — `@testset "solve: CommonSolve init/solve! interface" begin`
+- `test/solve_test.jl:109` — `@testset "solve: complex-only solutions" begin`
+- `test/solve_test.jl:116` — `@testset "Result: show" begin`
+- `test/solve_test.jl:126` — `@testset "TotalDegree: custom tracker options" begin`
+- `test/solve_test.jl:135` — `@testset "total_degree_count" begin`
+- `test/solve_test.jl:142` — `@testset "Polyhedral: x²+y-1, xy-2" begin`
+- `test/solve_test.jl:153` — `@testset "Polyhedral: x²-1, y²-4 finds all solutions" begin`
+- `test/solve_test.jl:165` — `@testset "Polyhedral: katsura-3" begin`
+- `test/solve_test.jl:192` — `@testset "Polyhedral: reproducible with seed" begin`
+- `test/solve_test.jl:206` — `@testset "Polyhedral: CommonSolve init/solve! interface" begin`
+- `test/solve_test.jl:214` — `@testset "Polyhedral: default endgame options" begin`
+- `test/solve_test.jl:220` — `@testset "Polyhedral: fewer paths than TotalDegree" begin`
+- `test/solve_test.jl:230` — `@testset "Polyhedral: only_torus" begin`
+- `test/solve_test.jl:257` — `@testset "mixed_volume: dense system reaches the Bezout number" begin`
+- `test/solve_test.jl:265` — `@testset "Polyhedral vs TotalDegree: solution counts match" begin`
+- `test/solve_test.jl:289` — `@testset "projective: square after the chart row" begin`
+- `test/solve_test.jl:324` — `@testset "projective: overdetermined after the chart row" begin`
+- `test/solve_test.jl:360` — `@testset "projective: composition and fixed parameters" begin`
+- `test/solve_test.jl:383` — `@testset "Parameter homotopy: basic" begin`
+- `test/solve_test.jl:406` — `@testset "Parameter homotopy: x²-a, y²-a" begin`
+- `test/solve_test.jl:424` — `@testset "Parameter homotopy: CommonSolve interface" begin`
+- `test/solve_test.jl:437` — `@testset "start-system routes reject a parametric system without values" begin`
+- `test/solve_test.jl:457` — `@testset "Executor types" begin`
+- `test/solve_test.jl:469` — `@testset "_clone_system_evaluator: interpreted" begin`
+- `test/solve_test.jl:503` — `@testset "_clone_system_evaluator: compiled" begin`
+- `test/solve_test.jl:529` — `@testset "_clone_system_evaluator: compiled_all" begin`
+- `test/solve_test.jl:555` — `@testset "_clone_system_evaluator: parametric" begin`
+- `test/solve_test.jl:580` — `@testset "PolyhedralSolveCache carries executor" begin`
+- `test/solve_test.jl:591` — `@testset "SolveCache carries executor and builder" begin`
+- `test/solve_test.jl:602` — `@testset "StraightLineBuilder produces working tracker" begin`
+- `test/solve_test.jl:617` — `@testset "System stores compile_mode" begin`
+- `test/solve_test.jl:640` — `@testset "solve: TotalDegree + Serial" begin`
+- `test/solve_test.jl:647` — `@testset "solve: TotalDegree + Threaded" begin`
+- `test/solve_test.jl:654` — `@testset "solve: convenience executor method" begin`
+- `test/solve_test.jl:660` — `@testset "solve: Polyhedral + Serial" begin`
+- `test/solve_test.jl:667` — `@testset "solve: Polyhedral + Threaded" begin`
+- `test/solve_test.jl:674` — `@testset "Parameter homotopy + Serial" begin`
+- `test/solve_test.jl:694` — `@testset "Parameter homotopy + Threaded" begin`
+- `test/solve_test.jl:714` — `@testset "Serial vs Threaded: full consistency" begin`
+- `test/solve_test.jl:741` — `@testset "Polyhedral: Serial vs Threaded consistency" begin`
+- `test/solve_test.jl:757` — `@testset "Serial vs Threaded: cluster structure" begin`
+- `test/solve_test.jl:779` — `@testset "paths_to_track" begin`
+- `test/solve_test.jl:801` — `@testset "early_stop_callback" begin`
+- `test/subspace_homotopy_test.jl:32` — `@testset "IntrinsicSubspaceHomotopy tracks witness points" begin`
+- `test/subspace_homotopy_test.jl:56` — `@testset "taylor! against finite differences" begin`
+- `test/subspace_homotopy_test.jl:76` — `@testset "set_subspaces! retarget" begin`
+- `test/subspace_homotopy_test.jl:96` — `@testset "target_parameters! leaves the start subspace fixed" begin`
+- `test/subspace_homotopy_test.jl:103` — `@testset "$name" for (name, Homotopy) in (`
+- `test/subspace_homotopy_test.jl:133` — `@testset "geodesic memo" begin`
+- `test/subspace_homotopy_test.jl:140` — `@testset "$name" for (name, Homotopy) in (`
+- `test/subspace_homotopy_test.jl:202` — `@testset "ExtrinsicSubspaceHomotopy against explicit formula" begin`
+- `test/subspace_homotopy_test.jl:246` — `@testset "IntrinsicSubspaceHomotopy against explicit formula" begin`
+- `test/subspace_homotopy_test.jl:285` — `@testset "subspace homotopies between perpendicular spaces" begin`
+- `test/subspace_homotopy_test.jl:342` — `@testset "affine chart" begin`
+- `test/subspace_homotopy_test.jl:366` — `@testset "linear_subspace_homotopy dispatch" begin`
+- `test/subspace_solve_test.jl:14` — `@testset "Subspace to subspace solve" begin`
+- `test/subspace_solve_test.jl:16` — `@testset "both regimes reach the target subspace" begin`
+- `test/subspace_solve_test.jl:34` — `@testset "regime selection and homotopy types" begin`
+- `test/subspace_solve_test.jl:56` — `@testset "two equations in three variables" begin`
+- `test/subspace_solve_test.jl:70` — `@testset "projective" begin`
+- `test/subspace_solve_test.jl:93` — `@testset "parametric" begin`
+- `test/subspace_solve_test.jl:105` — `@testset "executors agree" begin`
+- `test/subspace_solve_test.jl:139` — `@testset "mismatched subspaces are rejected" begin`
+- `test/subspace_solve_test.jl:165` — `@testset "start solutions are not aliased into the results" begin`
+- `test/subspace_solve_test.jl:181` — `@testset "non-square subspace homotopy is rejected" begin`
+- `test/subspace_solve_test.jl:190` — `@testset "intrinsic results are ambient, diagnostics are not converted" begin`
+- `test/symbolic_homotopy_test.jl:8` — `@testset "Homotopy: symbolic surface" begin`
+- `test/symbolic_homotopy_test.jl:40` — `@testset "evaluation" begin`
+- `test/symbolic_homotopy_test.jl:50` — `@testset "fix_parameters" begin`
+- `test/symbolic_homotopy_test.jl:63` — `@testset "MultivariatePolynomials input" begin`
+- `test/symbolic_homotopy_test.jl:71` — `@testset "rejected input" begin`
+- `test/symbolic_homotopy_test.jl:85` — `@testset "Homotopy: tracking" begin`
+- `test/symbolic_homotopy_test.jl:102` — `@testset "matches the equivalent ParameterHomotopy" begin`
+- `test/symbolic_homotopy_test.jl:110` — `@testset "executors agree" begin`
+- `test/symbolic_homotopy_test.jl:118` — `@testset "parameters must be bound before tracking" begin`
+- `test/symbolic_utils_test.jl:8` — `@testset "expand" begin`
+- `test/symbolic_utils_test.jl:23` — `@testset "to_dict" begin`
+- `test/symbolic_utils_test.jl:39` — `@testset "monomials" begin`
+- `test/symbolic_utils_test.jl:49` — `@testset "dense_poly / rand_poly / coefficients" begin`
+- `test/symbolic_utils_test.jl:74` — `@testset "exponents_coefficients round trip" begin`
+- `test/symbolic_utils_test.jl:95` — `@testset "horner" begin`
+- `test/symbolic_utils_test.jl:120` — `@testset "to_number and convert" begin`
+- `test/symbolic_utils_test.jl:142` — `@testset "evaluate on expressions" begin`
+- `test/symbolic_utils_test.jl:160` — `@testset "evaluate and jacobian on systems" begin`
+- `test/symbolic_utils_test.jl:181` — `@testset "issue #511: a float system evaluates real" begin`
+- `test/symbolic_utils_test.jl:189` — `@testset "is_real" begin`
+- `test/system_sweep_test.jl:46` — `@testset "System sweep: $name" for (name, polys, vars, params) in TEST_SYSTEMS`
+- `test/system_sweep_test.jl:64` — `@testset "$mode" for mode in MODES`
+- `test/system_sweep_test.jl:84` — `@testset "taylor! K=$K" for K in 1:3`
+- `test/system_sweep_test.jl:104` — `@testset "StraightLineHomotopy sweep: $name" for (name, polys, vars, params) in`
+- `test/system_sweep_test.jl:153` — `@testset "taylor! K=$K" for K in 2:3`
+- `test/taylor_test.jl:17` — `@testset "TruncatedTaylorSeries" begin`
+- `test/taylor_test.jl:18` — `@testset "construction" begin`
+- `test/taylor_test.jl:24` — `@testset "from scalar (zero-padded)" begin`
+- `test/taylor_test.jl:32` — `@testset "taylor_op_* correctness" begin`
+- `test/taylor_test.jl:36` — `@testset "add" begin`
+- `test/taylor_test.jl:43` — `@testset "neg" begin`
+- `test/taylor_test.jl:49` — `@testset "mul (Cauchy product)" begin`
+- `test/taylor_test.jl:56` — `@testset "sqr includes odd-order cross term" begin`
+- `test/taylor_test.jl:65` — `@testset "inv: inv(b) * b ≈ (1, 0, 0)" begin`
+- `test/taylor_test.jl:73` — `@testset "div: (a/b) * b ≈ a" begin`
+- `test/taylor_test.jl:81` — `@testset "sqrt: sqrt(a)^2 ≈ a" begin`
+- `test/taylor_test.jl:104` — `@testset "taylor_op_pow_int with a vanishing constant term" begin`
+- `test/taylor_test.jl:109` — `@testset "r = $r" for r in 1:5`
+- `test/taylor_test.jl:132` — `@testset "taylor_op_* against a Cauchy-integral oracle" begin`
+- `test/taylor_test.jl:181` — `@testset "$name" for (name, taylor_op, scalar_op, args) in cases`
+- `test/taylor_test.jl:189` — `@testset "every OpType is covered" begin`
+- `test/taylor_test.jl:199` — `@testset "inv_not_zero passes a zero constant term through" begin`
+- `test/taylor_test.jl:204` — `@testset "truncation order N is honored" begin`
+- `test/taylor_test.jl:214` — `@testset "TaylorVector" begin`
+- `test/taylor_test.jl:215` — `@testset "getindex / setindex!" begin`
+- `test/taylor_test.jl:223` — `@testset "vectors" begin`
+- `test/tracker_regression_test.jl:10` — `@testset "FourBar: predictor refinement on a near-singular path" begin`
+- `test/tracker_regression_test.jl:83` — `@testset "Steiner: extended-precision residual near a singularity" begin`
+- `test/tracker_warmstart_test.jl:7` — `@testset "warm-started track!" begin`
+- `test/tracker_warmstart_test.jl:37` — `@testset "PathResult carries ω and μ" begin`
+- `test/tracking_test.jl:17` — `@testset "Path Tracking" begin`
+- `test/tracking_test.jl:21` — `@testset "newton!: converges near known solution" begin`
+- `test/tracking_test.jl:53` — `@testset "init_newton!: handles exact solution" begin`
+- `test/tracking_test.jl:77` — `@testset "track!: rejects invalid singular start value" begin`
+- `test/tracking_test.jl:91` — `@testset "tracker option presets" begin`
+- `test/tracking_test.jl:115` — `@testset "_start_jacobian_corank classifies the start Jacobian" begin`
+- `test/tracking_test.jl:130` — `@testset "track!: linear system (trivial path)" begin`
+- `test/tracking_test.jl:148` — `@testset "track!: quadratic system finds solutions" begin`
+- `test/tracking_test.jl:178` — `@testset "track!: katsura-3 (4 variables)" begin`
+- `test/tracking_test.jl:207` — `@testset "track!: reusable tracker (multiple paths)" begin`
+- `test/tracking_test.jl:231` — `@testset "predict!: Pade (2,1) prediction via tracker init" begin`
+- `test/tracking_test.jl:262` — `@testset "predict!: zero allocations" begin`
+- `test/tracking_test.jl:286` — `@testset "track!: max_step_size is enforced" begin`
+- `test/tracking_test.jl:303` — `@testset "_update_stepsize!: rejection branch respects β_a" begin`
+- `test/tracking_test.jl:345` — `@testset "track!: step count sanity (katsura-3)" begin`
+- `test/tracking_test.jl:369` — `@testset "track!: zero allocations in step!" begin`
+- `test/tracking_test.jl:390` — `@testset "TrackerState: ext step counters" begin`
+- `test/unique_points_test.jl:7` — `@testset "UniquePoints" begin`
+- `test/unique_points_test.jl:42` — `@testset "Multiplicities" begin`
+- `test/unique_points_test.jl:379` — `@testset "Multiplicities: non-metric distance" begin`
+- `test/unique_points_test.jl:391` — `@testset "unique_points" begin`
+- `test/unique_points_test.jl:400` — `@testset "EuclideanNorm as the distance" begin`
+- `test/unique_points_test.jl:423` — `@testset "triangle inequality is a trait, not a probe" begin`
+- `test/utils_test.jl:8` — `@testset "Utility functions" begin`
+- `test/utils_test.jl:9` — `@testset "_stable_sort! / _stable_sort_by!: sorted and stable at all sizes" begin`
+- `test/utils_test.jl:27` — `@testset "fast_abs" begin`
+- `test/utils_test.jl:33` — `@testset "nanmin / nanmax" begin`
+- `test/utils_test.jl:43` — `@testset "nthroot" begin`
+- `test/utils_test.jl:53` — `@testset "writing and reading" begin`
+- `test/utils_test.jl:57` — `@testset "round trip is exact" begin`
+- `test/utils_test.jl:69` — `@testset "integer input reads back as complex" begin`
+- `test/utils_test.jl:76` — `@testset "empty and single" begin`
+- `test/utils_test.jl:86` — `@testset "a missing imaginary part is zero" begin`
+- `test/utils_test.jl:92` — `@testset "declared count is checked" begin`
+- `test/utils_test.jl:105` — `@testset "SegmentStepper" begin`
+- `test/utils_test.jl:106` — `@testset "reinit! resets stepper in-place" begin`
+- `test/utils_test.jl:117` — `@testset "forward with extreme steps" begin`
+- `test/utils_test.jl:143` — `@testset "complex backward segment" begin`
+- `test/v2_parity_test.jl:14` — `@testset "v2 Parity" begin`
+- `test/v2_parity_test.jl:18` — `@testset "total degree: affine quadratic" begin`
+- `test/v2_parity_test.jl:34` — `@testset "polyhedral: affine quadratic" begin`
+- `test/v2_parity_test.jl:50` — `@testset "DynamicPolynomials: high-degree system (18 solutions)" begin`
+- `test/v2_parity_test.jl:60` — `@testset "parameter homotopy: affine" begin`
+- `test/v2_parity_test.jl:84` — `@testset "Wilkinson-12" begin`
+- `test/v2_parity_test.jl:102` — `@testset "at-infinity: 2 finite + 2 divergent" begin`
+- `test/v2_parity_test.jl:118` — `@testset "(x-10)^d singular roots, d=$d" for d in (2, 6)`
+- `test/v2_parity_test.jl:129` — `@testset "winding number family d=$d" for d in 2:2:6`
+- `test/v2_parity_test.jl:140` — `@testset "Hyperbolic 6,6: two roots of multiplicity 6" begin`
+- `test/v2_parity_test.jl:160` — `@testset "singular: multiplicity 3 + nonsingular" begin`
+- `test/v2_parity_test.jl:177` — `@testset "polyhedral: cyclic-5" begin`
+- `test/v2_parity_test.jl:187` — `@testset "Result: winding family d=2" begin`
+- `test/v2_parity_test.jl:212` — `@testset "Result: singular system (29/16)x³ - 2xy, x² - y" begin`
+- `test/v2_parity_test.jl:227` — `@testset "paths to track: total degree vs polyhedral" begin`
+- `test/v2_parity_test.jl:241` — `@testset "Mohab: large-coefficient system (degrees 9,10,10)" begin`
+- `test/v2_parity_test.jl:272` — `@testset "polyhedral: affine + torus solutions" begin`
+- `test/valuation_test.jl:29` — `@testset "Valuation" begin`
+- `test/valuation_test.jl:31` — `@testset "(x-10)^5: finite endpoint of winding number 5" begin`
+- `test/valuation_test.jl:47` — `@testset "two finite and two diverging paths" begin`
+- `test/valuation_test.jl:74` — `@testset "winding number family: fractional valuations" begin`
+- `test/valuation_test.jl:99` — `@testset "show" begin`
+- `test/variable_groups_test.jl:34` — `@testset "Variable groups" begin`
+- `test/variable_groups_test.jl:36` — `@testset "construction" begin`
+- `test/variable_groups_test.jl:69` — `@testset "multi-homogeneous Bezout number" begin`
+- `test/variable_groups_test.jl:81` — `@testset "paths_to_track" begin`
+- `test/variable_groups_test.jl:102` — `@testset "start solutions solve the start system" begin`
+- `test/variable_groups_test.jl:135` — `@testset "affine groups" begin`
+- `test/variable_groups_test.jl:158` — `@testset "multi-projective groups" begin`
+- `test/variable_groups_test.jl:198` — `@testset "one group is the plain route" begin`
+- `test/variable_groups_test.jl:210` — `@testset "parameters" begin`
+- `test/variable_groups_test.jl:224` — `@testset "too few equations for the groups" begin`
+- `test/variable_groups_test.jl:231` — `@testset "routes that chart the variables as a whole reject groups" begin`
+- `test/voronoi_tree_test.jl:13` — `@testset "VoronoiTree vs brute-force oracle" begin`
+- `test/voronoi_tree_test.jl:44` — `@testset "10k points: insert, collect, radius search" begin`
+- `test/voronoi_tree_test.jl:68` — `@testset "many points at nearly identical distance" begin`
+- `test/voronoi_tree_test.jl:83` — `@testset "empty! and collect" begin`
+- `test/witness_set_test.jl:20` — `@testset "Witness Sets" begin`
+- `test/witness_set_test.jl:22` — `@testset "affine" begin`
+- `test/witness_set_test.jl:50` — `@testset "polynomial input forms" begin`
+- `test/witness_set_test.jl:69` — `@testset "projective" begin`
+- `test/witness_set_test.jl:98` — `@testset "projective membership" begin`
+- `test/witness_set_test.jl:119` — `@testset "zero-dimensional" begin`
+- `test/witness_set_test.jl:145` — `@testset "parametric (fix_parameters)" begin`
+- `test/witness_set_test.jl:174` — `@testset "dim / codim" begin`
+- `test/witness_set_test.jl:214` — `@testset "membership" begin`
+- `test/witness_set_test.jl:227` — `@testset "intersect" begin`
+- `test/witness_set_test.jl:234` — `@testset "intersect projective" begin`
+- `test/witness_set_test.jl:266` — `@testset "sliced solve and subspace moves" begin`
+- `test/witness_set_test.jl:331` — `@testset "intersect threaded" begin`
+- `test/witness_set_test.jl:344` — `@testset "seeds determine the result" begin`
+- `test/witness_set_test.jl:388` — `@testset "$name" for (name, route) in routes`
+- `lib/HomotopyContinuationNextCertification/test/acb_interpreter_test.jl:90` — `@testset "AcbInterpreter" begin`
+- `lib/HomotopyContinuationNextCertification/test/acb_interpreter_test.jl:91` — `@testset "$name" for (name, polys, vars, params) in acb_test_systems()`
+- `lib/HomotopyContinuationNextCertification/test/acb_interpreter_test.jl:124` — `@testset "low precision brackets high precision" begin`
+- `lib/HomotopyContinuationNextCertification/test/acb_interpreter_test.jl:144` — `@testset "non-polynomial tape: $name" for (name, exprs, vars, params, ref, jac_ref) in`
+- `lib/HomotopyContinuationNextCertification/test/acb_interpreter_test.jl:176` — `@testset "transcendental op kernels" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:71` — `@testset "Certification" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:72` — `@testset "Simple: introduction example (18 solutions, 4 real)" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:111` — `@testset "circle ∩ line (2 real)" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:134` — `@testset "Reality Check" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:147` — `@testset "Parameters (Lagrange multipliers, 36 solutions)" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:178` — `@testset "positive" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:189` — `@testset "3264" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:252` — `@testset "DistinctCertifiedSolutions incremental API" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:319` — `@testset "duplicate detection" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:332` — `@testset "single solution and PathResult inputs" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:346` — `@testset "extended certificate" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:362` — `@testset "certify uses complex inversion (MonodromyResult)" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:378` — `@testset "extended-precision Arb fallback" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:453` — `@testset "non-polynomial input" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:515` — `@testset "rational log-derivative system needs extended precision" begin`
+- `lib/HomotopyContinuationNextCertification/test/certification_test.jl:644` — `@testset "singular Jacobian is not certified" begin`
+- `lib/HomotopyContinuationNextCertification/test/export_surface_test.jl:9` — `@testset "Export surface" begin`
+- `lib/HomotopyContinuationNextCertification/test/export_surface_test.jl:64` — `@testset "certification: $name" for name in certification_public`
+- `lib/HomotopyContinuationNextCertification/test/export_surface_test.jl:70` — `@testset "resolves: $name" for name in certification_public`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:28` — `@testset "Interval arithmetic" begin`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:29` — `@testset "Interval construction and queries" begin`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:49` — `@testset "Interval arithmetic (containment)" begin`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:67` — `@testset "sqr, pow, inv, hull" begin`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:77` — `@testset "IComplex arithmetic" begin`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:90` — `@testset "isinterior and inf_norm_bound" begin`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:105` — `@testset "real sqrt, sinh, cosh" begin`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:117` — `@testset "real sin and cos" begin`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:134` — `@testset "complex sqrt, sin and cos" begin`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:150` — `@testset "real exp, log and atan" begin`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:169` — `@testset "complex exp, log, hyperbolics and inverse trig" begin`
+- `lib/HomotopyContinuationNextCertification/test/interval_arithmetic_test.jl:205` — `@testset "enclosure soundness on random boxes" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:33` — `@testset "iterator certification: parameter-free" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:72` — `@testset "iterator certification: parametric" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:85` — `@testset "iterator certification: restricted iterator" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:100` — `@testset "iterator certification: lazily filtered iterator" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:116` — `@testset "iterator certification: iterator as start solutions" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:139` — `@testset "iterator certification: subspace-move iterator" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:155` — `@testset "iterator certification: leaf splitting" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:178` — `@testset "iterator certification: split balance and pass count" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:203` — `@testset "iterator certification: merged leaves" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:222` — `@testset "iterator certification: an enclosure ending on a cut merges" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:237` — `@testset "iterator certification: threaded agrees with serial" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:258` — `@testset "iterator certification: caller's homotopy stays on one task" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:280` — `@testset "iterator certification: oversized leaves" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:307` — `@testset "iterator certification: option and input errors" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:338` — `@testset "iterator certification: progress meter" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:350` — `@testset "iterator certification: show" begin`
+- `lib/HomotopyContinuationNextCertification/test/iterator_certification_test.jl:365` — `@testset "iterator certification: partition accessors" begin`
+- `lib/HomotopyContinuationNextCertification/test/monodromy_certification_test.jl:26` — `@testset "certified duplicate checks" begin`
+- `lib/HomotopyContinuationNextCertification/test/monodromy_certification_test.jl:53` — `@testset "heuristic route is unchanged" begin`
+- `lib/HomotopyContinuationNextCertification/test/monodromy_certification_test.jl:65` — `@testset "a certified endpoint is not singular" begin`
+- `lib/HomotopyContinuationNextCertification/test/monodromy_certification_test.jl:116` — `@testset "equivalence classes" begin`
+- `lib/HomotopyContinuationNextCertification/test/monodromy_certification_test.jl:136` — `@testset "linear subspace (intrinsic = $intrinsic)" for intrinsic in (false, true)`
+- `lib/HomotopyContinuationNextCertification/test/quality_test.jl:15` — `@testset "Quality" begin`
+- `lib/HomotopyContinuationNextCertification/test/quality_test.jl:16` — `@testset "Aqua" begin`
+- `lib/HomotopyContinuationNextCertification/test/quality_test.jl:32` — `@testset "CheckConcreteStructs" begin`
+- `lib/HomotopyContinuationNextCertification/test/quality_test.jl:41` — `@testset "$name" begin`
+- `lib/HomotopyContinuationNextCertification/test/quality_test.jl:46` — `@testset "IComplex{Float64}" begin`
+- `lib/HomotopyContinuationNextCertification/test/quality_test.jl:49` — `@testset "Interval{Float64}" begin`
+- `lib/HomotopyContinuationNextCertification/test/quality_test.jl:52` — `@testset "CertificationResult{SolutionCertificate}" begin`
+- `lib/HomotopyContinuationNextCertification/test/quality_test.jl:55` — `@testset "DistinctSolutionCertificates{SolutionCertificate}" begin`
+- `lib/HomotopyContinuationNextCertification/test/quality_test.jl:60` — `@testset "DistinctCertifiedSolutions (concrete instantiation)" begin`
+- `lib/HomotopyContinuationNextCertification/test/quality_test.jl:68` — `@testset "ExplicitImports" begin`
+- `lib/HomotopyContinuationNextCertification/test/quality_test.jl:77` — `@testset "JET" begin`
+- `lib/HomotopyContinuationNextCertification/test/runtests.jl:3` — `@testset "HomotopyContinuationNextCertification" begin`
+
+## Audit rule
+
+Every upstream occurrence must receive exactly one final classification in the semantic ledger:
+`equivalent-test`, `replacement-test`, `architecture-obsolete`, `deliberate-api-break`, or `gap`.
+The release gate is zero `gap` and zero unclassified upstream occurrences.
