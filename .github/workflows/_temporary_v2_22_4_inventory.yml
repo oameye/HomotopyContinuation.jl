@@ -1,0 +1,84 @@
+name: Temporary v2.22.4 parity inventory
+
+on:
+  push:
+    branches: [v3-v2-22-4-parity-ledger]
+
+permissions:
+  contents: write
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v3-v2-22-4-parity-ledger
+          fetch-depth: 0
+      - name: Fetch exact upstream baseline
+        run: |
+          git clone --filter=blob:none https://github.com/JuliaHomotopyContinuation/HomotopyContinuation.jl.git /tmp/hc-v2
+          git -C /tmp/hc-v2 checkout 0cbf1e27d062d7eb01d962c3b948c39444c9a62c
+      - name: Generate testset inventory
+        run: |
+          mkdir -p implementation_docs
+          python3 - <<'PY'
+          from pathlib import Path
+
+          upstream = Path('/tmp/hc-v2')
+          here = Path('.')
+
+          def occurrences(root, roots):
+              out = []
+              for relroot in roots:
+                  base = root / relroot
+                  if not base.exists():
+                      continue
+                  for path in sorted(base.rglob('*.jl')):
+                      for lineno, line in enumerate(path.read_text(errors='replace').splitlines(), 1):
+                          if '@testset' in line:
+                              rel = path.relative_to(root)
+                              out.append((str(rel), lineno, line.strip()))
+              return out
+
+          up = occurrences(upstream, ['test'])
+          v3 = occurrences(here, ['test', 'lib/HomotopyContinuationNextCertification/test'])
+
+          lines = [
+              '# v2.22.4 parity testset inventory',
+              '',
+              'Generated mechanically from source. This is an inventory, not the semantic parity verdict.',
+              '',
+              '- Upstream repository: `JuliaHomotopyContinuation/HomotopyContinuation.jl`',
+              '- Upstream commit: `0cbf1e27d062d7eb01d962c3b948c39444c9a62c` (`v2.22.4`)',
+              '- v3 base: `b5c7c2e81f372c22a29ff2963743ab5fad1fa9ed`',
+              f'- Upstream `@testset` occurrences: **{len(up)}**',
+              f'- v3/core+certification `@testset` occurrences: **{len(v3)}**',
+              '',
+              '## Upstream v2.22.4',
+              '',
+          ]
+          for path, lineno, text in up:
+              lines.append(f'- `{path}:{lineno}` — `{text.replace("`", "\\`")}`')
+          lines += ['', '## v3 baseline', '']
+          for path, lineno, text in v3:
+              lines.append(f'- `{path}:{lineno}` — `{text.replace("`", "\\`")}`')
+          lines += [
+              '',
+              '## Audit rule',
+              '',
+              'Every upstream occurrence must receive exactly one final classification in the semantic ledger:',
+              '`equivalent-test`, `replacement-test`, `architecture-obsolete`, `deliberate-api-break`, or `gap`.',
+              'The release gate is zero `gap` and zero unclassified upstream occurrences.',
+              '',
+          ]
+          Path('implementation_docs/v2_22_4_testset_inventory.md').write_text('\n'.join(lines))
+          PY
+      - name: Commit inventory and remove temporary workflow
+        run: |
+          rm .github/workflows/_temporary_v2_22_4_inventory.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add implementation_docs/v2_22_4_testset_inventory.md .github/workflows/_temporary_v2_22_4_inventory.yml
+          git commit -m 'Inventory v2.22.4 parity testsets'
+          git push origin HEAD:v3-v2-22-4-parity-ledger
