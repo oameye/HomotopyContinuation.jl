@@ -172,6 +172,11 @@
         output::Int32
     end
 
+    struct Log
+        arg_1::Int32
+        output::Int32
+    end
+
     struct Sinh
         arg_1::Int32
         output::Int32
@@ -229,6 +234,7 @@ const _EXEC_INSTRUCTION_SPECS = (
     (:Asin, :OP_ASIN),
     (:Cosh, :OP_COSH),
     (:Exp, :OP_EXP),
+    (:Log, :OP_LOG),
     (:Sinh, :OP_SINH),
     (:Tan, :OP_TAN),
     (:Tanh, :OP_TANH),

@@ -8,7 +8,7 @@ using HomotopyContinuationNext:
     taylor_op_muladd, taylor_op_mulsub, taylor_op_submul,
     taylor_op_add3, taylor_op_add4, taylor_op_mul3, taylor_op_mul4,
     taylor_op_mulmuladd, taylor_op_mulmulsub,
-    taylor_op_exp, taylor_op_sinh, taylor_op_cosh, taylor_op_tan, taylor_op_tanh,
+    taylor_op_exp, taylor_op_log, taylor_op_sinh, taylor_op_cosh, taylor_op_tan, taylor_op_tanh,
     taylor_op_asin, taylor_op_acos, taylor_op_pow
 using HomotopyContinuationNext: OpType, op_call
 using FixedSizeArrays: FixedSizeArray
@@ -167,6 +167,7 @@ end
         ("mulmuladd", taylor_op_mulmuladd, (x, y, z, w) -> x * y + z * w, (a, b, c, d)),
         ("mulmulsub", taylor_op_mulmulsub, (x, y, z, w) -> x * y - z * w, (a, b, c, d)),
         ("exp", taylor_op_exp, x -> exp(x), (a,)),
+        ("log", taylor_op_log, x -> log(x), (a,)),
         ("sinh", taylor_op_sinh, x -> sinh(x), (a,)),
         ("cosh", taylor_op_cosh, x -> cosh(x), (a,)),
         ("tan", taylor_op_tan, x -> tan(x), (a,)),
