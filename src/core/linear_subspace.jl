@@ -387,10 +387,10 @@ function rand_subspace(
         throw(ArgumentError("Neither `dim` nor `codim` specified."))
 
     if dim !== nothing
-        0 < dim < n || throw(ArgumentError("`dim` has to be between 0 and `n`."))
+        0 <= dim <= n || throw(ArgumentError("`dim` has to be between 0 and `n`."))
         k = dim
     else
-        0 < codim < n || throw(ArgumentError("`codim` has to be between 0 and `n`."))
+        0 <= codim <= n || throw(ArgumentError("`codim` has to be between 0 and `n`."))
         k = n - codim
     end
     T = real ? Float64 : ComplexF64
@@ -441,11 +441,19 @@ function rand_subspace(
         throw(ArgumentError("Neither `dim` nor `codim` specified."))
 
     if dim !== nothing
-        0 < dim < n || throw(ArgumentError("`dim` has to be between 0 and `n`."))
+        0 <= dim <= n || throw(ArgumentError("`dim` has to be between 0 and `n`."))
         k = dim
     else
-        0 < codim < n || throw(ArgumentError("`codim` has to be between 0 and `n`."))
+        0 <= codim <= n || throw(ArgumentError("`codim` has to be between 0 and `n`."))
         k = n - codim
+    end
+
+    if !affine && k == 0 && !all(iszero, x)
+        throw(
+            ArgumentError(
+                "A zero-dimensional linear subspace is {0} and cannot contain a nonzero point.",
+            ),
+        )
     end
 
     return if affine
@@ -508,14 +516,16 @@ function rand_subspace!(
     else
         fill!(b, zero(eltype(b)))
         nrmsq = sum(abs2, x)
-        for i in axes(A, 1)
-            α = zero(eltype(A))
-            for j in axes(A, 2)
-                α += A[i, j] * x[j]
-            end
-            α /= nrmsq
-            for j in axes(A, 2)
-                A[i, j] -= α * conj(x[j])
+        if !iszero(nrmsq)
+            for i in axes(A, 1)
+                α = zero(eltype(A))
+                for j in axes(A, 2)
+                    α += A[i, j] * x[j]
+                end
+                α /= nrmsq
+                for j in axes(A, 2)
+                    A[i, j] -= α * conj(x[j])
+                end
             end
         end
     end
@@ -645,8 +655,14 @@ end
 
 Translate the (affine) linear subspace `L` by `δb`.
 """
-function translate(L::LinearSubspace, δb, ::Coordinates{:Extrinsic} = Extrinsic)
-    return translate!(copy(L), δb, Extrinsic)
+function translate(
+        L::LinearSubspace{T₁},
+        δb::AbstractVector{T₂},
+        ::Coordinates{:Extrinsic} = Extrinsic,
+    ) where {T₁, T₂ <: Number}
+    T = promote_type(T₁, T₂)
+    L′ = T === T₁ ? copy(L) : convert(LinearSubspace{T}, L)
+    return translate!(L′, Vector{T}(δb), Extrinsic)
 end
 function translate!(L::LinearSubspace, δb, ::Coordinates{:Extrinsic} = Extrinsic)
     ext = extrinsic(L)
