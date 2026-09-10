@@ -37,6 +37,8 @@ struct Decomposition{R <: Regeneration, MO <: MonodromyOptions} <: AbstractAlgor
     show_monodromy_progress::Bool
     max_iters::Int
     warning::Bool
+    atol::Float64
+    rtol::Float64
 end
 
 function Decomposition(;
@@ -67,13 +69,13 @@ function Decomposition(;
     end
     return Decomposition(
         CommonOptions(tracker_options, endgame_options, seed, show_progress),
-        regen, monodromy, show_monodromy_progress, max_iters, warning,
+        regen, monodromy, show_monodromy_progress, max_iters, warning, atol, rtol,
     )
 end
 
 _reseed(alg::Decomposition, seed::UInt32) = Decomposition(
     _with_seed(alg.common, seed), alg.regeneration, alg.monodromy,
-    alg.show_monodromy_progress, alg.max_iters, alg.warning,
+    alg.show_monodromy_progress, alg.max_iters, alg.warning, alg.atol, alg.rtol,
 )
 
 # ── decompose ────────────────────────────────────────────────────────────────
@@ -95,10 +97,12 @@ function solve(
     warning = alg.warning
     show_monodromy_progress = alg.show_monodromy_progress
     tracker_options = _tracker_options(alg)
+    atol = alg.atol
+    rtol = alg.rtol
     rng = Random.MersenneTwister(_seed(alg))
 
     Ws = sort(Ws; by = dim, rev = true)
-    options = _decompose_monodromy_options(monodromy_options)
+    options = _decompose_monodromy_options(monodromy_options, atol, rtol)
     out = WT[]
     isempty(Ws) && return out
 
@@ -106,7 +110,7 @@ function solve(
         if degree(witness) > 0
             dec = _decompose_with_monodromy(
                 witness, options, max_iters, warning, rng, exec,
-                show_monodromy_progress, tracker_options,
+                show_monodromy_progress, tracker_options, atol, rtol,
             )
             append!(out, dec)
         end
@@ -124,9 +128,10 @@ solve(
 ) = solve(_as_system(F), alg, exec)
 
 # Persistent point identities across repeated monodromy calls. The index owns a
-# separate `UniquePoints` with exactly the solver's distance, group-action, and
-# triangle-inequality policy; each insertion uses the same endpoint-dependent
-# tolerances as `MonodromySolver.add!`.
+# separate `UniquePoints` with the solver's distance and triangle-inequality
+# policy, but never a symmetry quotient. Tolerances are fixed by the outer
+# `Decomposition`, so every loop and the persistent union-find share one notion
+# of witness-point identity.
 struct DecompositionPointIdentity{UP <: UniquePoints}
     unique_points::UP
     master::Vector{Vector{ComplexF64}}
@@ -190,19 +195,20 @@ end
 function _point_identity!(
         identity::DecompositionPointIdentity,
         path_result::PathResult,
-        options::MonodromyOptions,
+        atol::Float64,
+        rtol::Float64,
     )::Int
-    atol, rtol = _dedup_tolerances(options, path_result)
     return _point_identity!(identity, solution(path_result), atol, rtol)
 end
 
 function _absorb_monodromy_result!(
         identity::DecompositionPointIdentity,
         result::MonodromyResult,
-        options::MonodromyOptions,
+        atol::Float64,
+        rtol::Float64,
     )::Nothing
     path_results = results(result)
-    indices = Int[_point_identity!(identity, r, options) for r in path_results]
+    indices = Int[_point_identity!(identity, r, atol, rtol) for r in path_results]
     Π = permutations(result)
     for column in eachcol(Π), (i, j) in enumerate(column)
         (j == 0 || i > length(indices) || j > length(indices)) && continue
@@ -215,6 +221,7 @@ function _decompose_with_monodromy(
         W::WT, options::MonodromyOptions, max_iters::Int,
         warning::Bool, rng::Random.MersenneTwister, exec::AbstractExecutor,
         show_monodromy_progress::Bool, tracker_options::TrackerOptions,
+        atol::Float64, rtol::Float64,
     )::Vector{WT} where {WT <: WitnessSet}
     P = points(W)
     L = linear_subspace(W)
@@ -260,7 +267,7 @@ function _decompose_with_monodromy(
     # can grow the set and drop start points (shifting indices), connectivity is
     # tracked by POINT IDENTITY over a growing master list plus a union-find.
     identity = DecompositionPointIdentity(MS, n)
-    _absorb_monodromy_result!(identity, res, options)
+    _absorb_monodromy_result!(identity, res, atol, rtol)
     master = identity.master
     done = identity.done
     d = length(master)                            # running total degree
@@ -279,7 +286,7 @@ function _decompose_with_monodromy(
             res = _monodromy_solve!(
                 MS, active, cp, rand(rng, UInt32), show_monodromy_progress, exec,
             )
-            _absorb_monodromy_result!(identity, res, options)
+            _absorb_monodromy_result!(identity, res, atol, rtol)
             d += length(master) - n_before      # new points grow the total degree
         end
 
@@ -291,45 +298,76 @@ function _decompose_with_monodromy(
         end
 
         for orbit in values(orbit_of)
-            P_orbit = master[orbit]
+            # An earlier trace run in this pass may already have merged and
+            # certified a snapshot orbit. Only process identities still live.
+            live_orbit = [k for k in orbit if !done[k]]
+            isempty(live_orbit) && continue
+
+            P_orbit = master[live_orbit]
+            n_before = length(master)
             res_orbit = _monodromy_solve!(
                 MS, P_orbit, cp, rand(rng, UInt32), show_monodromy_progress, exec,
             )
+
+            # Trace-test monodromy is itself allowed to discover points and orbit
+            # connections. Fold those into the persistent identity before deciding
+            # what the certified orbit actually contains.
+            _absorb_monodromy_result!(identity, res_orbit, atol, rtol)
+            d += length(master) - n_before
+            root = _identity_root!(identity, first(live_orbit))
+            grown_orbit = [
+                k for k in eachindex(master)
+                if !done[k] && _identity_root!(identity, k) == root
+            ]
+
             if something(trace(res_orbit), Inf) >= options.trace_test_tol
-                # A dropped column is why the trace failed here; the orbit is
-                # retried on the next iteration and only silently lost if the
-                # iterations run out.
                 trace_complete(MS) || (inconclusive += 1)
                 continue
             end
 
             # Singleton gate: a point of a degree > 1 component often passes the
-            # trace test alone before accumulation connects it to its siblings,
-            # so trust a singleton as a genuine degree-1 component only at
-            # `iter >= 5`.
-            (length(orbit) > 1 || iter >= 5) || continue
+            # trace test alone before accumulation connects it to its siblings.
+            (length(grown_orbit) > 1 || iter >= 5) || continue
 
             push!(
                 decomposition,
-                WitnessSet(G, L, copy(P_orbit); irreducibility = Irreducibility.IRREDUCIBLE),
+                WitnessSet(
+                    G, L, copy(master[grown_orbit]);
+                    irreducibility = Irreducibility.IRREDUCIBLE,
+                ),
             )
-            for k in orbit
+            for k in grown_orbit
                 done[k] = true
             end
         end
-
         # done?
         if sum(degree, decomposition; init = 0) == d
             break
         end
     end
 
-    if warning && inconclusive > 0 && sum(degree, decomposition; init = 0) < d
-        @warn "Codimension $(dim(L)) is missing " *
-            "$(d - sum(degree, decomposition; init = 0)) of its $d witness points, " *
-            "and $inconclusive orbit trace tests were inconclusive because paths " *
-            "failed to track around the trace loop. The components below are the " *
-            "ones the trace test could confirm."
+    unresolved = Dict{Int, Vector{Int}}()
+    for k in eachindex(master)
+        done[k] && continue
+        push!(get!(unresolved, _identity_root!(identity, k), Int[]), k)
+    end
+    unresolved_degree = sum(length, values(unresolved); init = 0)
+    for orbit in values(unresolved)
+        push!(
+            decomposition,
+            WitnessSet(
+                G, L, copy(master[orbit]); irreducibility = Irreducibility.UNKNOWN,
+            ),
+        )
+    end
+
+    if warning && unresolved_degree > 0
+        detail = inconclusive > 0 ?
+            "; $inconclusive orbit trace test(s) were inconclusive because paths failed to track" :
+            ""
+        @warn "Decomposition stopped after $max_iters iteration(s) with " *
+            "$unresolved_degree of $d witness point(s) still unresolved$detail. " *
+            "They are returned with irreducibility UNKNOWN."
     end
 
     return decomposition
@@ -337,11 +375,19 @@ end
 
 # Decomposition needs the permutations of a trace-tested single loop; every other
 # option is the caller's.
-_decompose_monodromy_options(M::MonodromyOptions) = _with_fields(
+_decompose_monodromy_options(
+    M::MonodromyOptions, atol::Float64, rtol::Float64,
+) = _with_fields(
     M,
     (
         permutations = true, trace_test = true,
         single_loop_per_start_solution = true,
+        # Monodromy is an internal orbit-discovery engine here. Decomposition
+        # owns witness cardinality, so neither endpoint-adaptive tolerances nor
+        # a symmetry quotient may redefine point identity underneath it.
+        unique_points_atol = atol,
+        unique_points_rtol = rtol,
+        equivalence_classes = false,
     ),
 )
 
@@ -369,42 +415,72 @@ function NumericalIrreducibleDecomposition(
 end
 
 """
-    witness_sets(N::NumericalIrreducibleDecomposition; dims = nothing)
+    witness_sets(N::NumericalIrreducibleDecomposition; dims = nothing, irreducibility = nothing)
 
-Return the witness sets in `N` as a `Dict` keyed by dimension. `dims` restricts
-to the given dimensions.
+Return the witness sets stored in `N` as a `Dict` keyed by dimension. By default
+this includes unresolved witness sets: incomplete numerical work is never hidden.
+Set `irreducibility` to an [`Irreducibility`](@ref) value to filter by status.
 """
 function witness_sets(
         N::NumericalIrreducibleDecomposition;
         dims::Union{Vector{Int}, Nothing} = nothing,
+        irreducibility::Union{Irreducibility.T, Nothing} = nothing,
     )
     D = N.Witness_Sets
-    dims === nothing && return D
+    selected_dims = dims === nothing ? keys(D) : dims
     out = empty(D)
-    for k in dims
-        haskey(D, k) && (out[k] = D[k])
+    for k in selected_dims
+        haskey(D, k) || continue
+        Ws = irreducibility === nothing ? D[k] :
+            filter(W -> is_irreducible(W) == irreducibility, D[k])
+        isempty(Ws) || (out[k] = Ws)
     end
     return out
 end
-witness_sets(N::NumericalIrreducibleDecomposition, dim::Int) = witness_sets(N; dims = [dim])
+witness_sets(
+    N::NumericalIrreducibleDecomposition, dim::Int;
+    irreducibility::Union{Irreducibility.T, Nothing} = nothing,
+) = witness_sets(N; dims = [dim], irreducibility = irreducibility)
 seed(N::NumericalIrreducibleDecomposition) = N.seed
+
+"""Return only witness sets proven irreducible by the decomposition trace tests."""
+irreducible_components(
+    N::NumericalIrreducibleDecomposition; dims::Union{Vector{Int}, Nothing} = nothing,
+) = witness_sets(N; dims = dims, irreducibility = Irreducibility.IRREDUCIBLE)
+irreducible_components(N::NumericalIrreducibleDecomposition, dim::Int) =
+    irreducible_components(N; dims = [dim])
+
+"""Return witness sets whose irreducibility has not yet been decided."""
+unresolved_witness_sets(
+    N::NumericalIrreducibleDecomposition; dims::Union{Vector{Int}, Nothing} = nothing,
+) = witness_sets(N; dims = dims, irreducibility = Irreducibility.UNKNOWN)
+unresolved_witness_sets(N::NumericalIrreducibleDecomposition, dim::Int) =
+    unresolved_witness_sets(N; dims = [dim])
+
+"""Return the total witness degree whose irreducibility is still unresolved."""
+function unresolved_degree(
+        N::NumericalIrreducibleDecomposition;
+        dims::Union{Vector{Int}, Nothing} = nothing,
+    )::Int
+    D = unresolved_witness_sets(N; dims = dims)
+    return sum((degree(W) for Ws in values(D) for W in Ws); init = 0)
+end
+unresolved_degree(N::NumericalIrreducibleDecomposition, dim::Int)::Int =
+    unresolved_degree(N; dims = [dim])
 
 """
     ncomponents(N::NumericalIrreducibleDecomposition; dims = nothing)
 
-Return the total number of irreducible components (optionally restricted to
-`dims`).
+Return the number of *proven irreducible* components. Unresolved witness sets are
+available through [`unresolved_witness_sets`](@ref) and are not counted as
+components until the trace test proves irreducibility.
 """
 function ncomponents(
         N::NumericalIrreducibleDecomposition;
         dims::Union{Vector{Int}, Nothing} = nothing,
     )::Int
-    D = N.Witness_Sets
-    isempty(D) && return 0
-    if dims === nothing
-        return sum(length(Ws) for Ws in values(D))
-    end
-    return sum(haskey(D, d) ? length(D[d]) : 0 for d in dims; init = 0)
+    D = irreducible_components(N; dims = dims)
+    return sum(length, values(D); init = 0)
 end
 ncomponents(N::NumericalIrreducibleDecomposition, dim::Int) = ncomponents(N; dims = [dim])
 n_components(N::NumericalIrreducibleDecomposition; dims = nothing) = ncomponents(N; dims = dims)
@@ -413,49 +489,53 @@ n_components(N::NumericalIrreducibleDecomposition, dim::Int) = ncomponents(N; di
 """
     degrees(N::NumericalIrreducibleDecomposition; dims = nothing)
 
-Return a `Dict` mapping each dimension to the degrees of its components.
+Return a `Dict` mapping each dimension to the degrees of its proven irreducible
+components. Unresolved witness degree is reported separately by
+[`unresolved_degree`](@ref).
 """
 function degrees(
         N::NumericalIrreducibleDecomposition;
         dims::Union{Vector{Int}, Nothing} = nothing,
     )
-    D = N.Witness_Sets
-    out = Dict{Int, Vector{Int}}()
-    ks = dims === nothing ? collect(keys(D)) : dims
-    for k in ks
-        haskey(D, k) && (out[k] = [degree(W) for W in D[k]])
-    end
-    return out
+    D = irreducible_components(N; dims = dims)
+    return Dict(k => [degree(W) for W in Ws] for (k, Ws) in D)
 end
 
 function _max_dim(N::NumericalIrreducibleDecomposition)::Int
-    ks = keys(N.Witness_Sets)
+    ks = keys(irreducible_components(N))
     return isempty(ks) ? -1 : maximum(ks)
 end
 
 function Base.show(io::IO, N::NumericalIrreducibleDecomposition)
-    D = N.Witness_Sets
-    total = isempty(D) ? 0 : sum(length(Ws) for Ws in values(D))
+    D = irreducible_components(N)
+    U = unresolved_witness_sets(N)
+    total = sum(length, values(D); init = 0)
+    unresolved_sets = sum(length, values(U); init = 0)
+    unresolved_deg = unresolved_degree(N)
     s = total == 1 ? "component" : "components"
-    header = "Numerical irreducible decomposition with $total $s"
+    header = "Numerical irreducible decomposition with $total proven $s"
     println(io, header)
     println(io, "="^length(header))
-    mdim = _max_dim(N)
-    mdim < 0 && return
-    for d in mdim:-1:0
-        if haskey(D, d)
-            ℓ = length(D[d])
-            ℓ > 0 && println(io, "• $ℓ component(s) of dimension $d.")
-        end
+    if unresolved_sets > 0
+        println(io, "• $unresolved_sets unresolved witness set(s), total degree $unresolved_deg.")
     end
-    println(io, "\n degree table of components:")
-    _degree_table(io, N)
+    mdim = _max_dim(N)
+    if mdim >= 0
+        for d in mdim:-1:0
+            if haskey(D, d)
+                n = length(D[d])
+                n > 0 && println(io, "• $n proven component(s) of dimension $d.")
+            end
+        end
+        println(io, "\n degree table of proven components:")
+        _degree_table(io, N)
+    end
     return
 end
 
 # Hand-rolled unicode degree table (avoids a PrettyTables dependency).
 function _degree_table(io::IO, N::NumericalIrreducibleDecomposition)
-    D = N.Witness_Sets
+    D = irreducible_components(N)
     ks = sort(collect(keys(D)); rev = true)
 
     rows = Vector{Tuple{String, String}}()

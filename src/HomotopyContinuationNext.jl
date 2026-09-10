@@ -75,6 +75,7 @@ export system, linear_subspace, is_irreducible, Irreducibility, degree, points
 export WitnessPoints
 export NumericalIrreducibleDecomposition
 export ncomponents, n_components, witness_sets, degrees
+export irreducible_components, unresolved_witness_sets, unresolved_degree
 export newton, NewtonResult, NewtonCache, NewtonReturnCode
 export Serial, Threaded, DistributedExecutor
 export SemialgebraicSetsHCSolver
