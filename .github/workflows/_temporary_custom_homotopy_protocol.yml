@@ -18,7 +18,9 @@ jobs:
         with:
           version: '1.13'
       - name: Apply protocol refinement
-        run: python .tmp_refine_custom_homotopy_protocol.py
+        run: |
+          python .tmp_refine_custom_homotopy_protocol.py
+          python .tmp_fix_custom_homotopy_constructor.py
       - name: Instantiate tests
         run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
       - name: Public protocol regression
@@ -33,7 +35,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .tmp_refine_custom_homotopy_protocol.py .github/workflows/_temporary_custom_homotopy_protocol.yml
+          git rm .tmp_refine_custom_homotopy_protocol.py .tmp_fix_custom_homotopy_constructor.py .github/workflows/_temporary_custom_homotopy_protocol.yml
           git add src/HomotopyContinuationNext.jl src/core/abstract_types.jl src/core/fixed_parameter_homotopy.jl src/solving/homotopy_solve.jl test/fixed_parameter_homotopy_test.jl
           git commit -m "Expose the custom homotopy extension protocol"
           git push
