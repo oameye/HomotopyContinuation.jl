@@ -1,0 +1,1667 @@
+upstream_sha = "0cbf1e27d062d7eb01d962c3b948c39444c9a62c"
+v3_base_sha = "b5c7c2e81f372c22a29ff2963743ab5fad1fa9ed"
+upstream_testset_occurrences = 208
+
+[[testset]]
+source = "binomial_system_test.jl"
+line = 4
+raw = "@testset \"Binomial System Test\" begin"
+classification = "equivalent-test"
+evidence = "test/binomial_system_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Same binomial/HNF capability, with additional overflow validation in v3."
+
+[[testset]]
+source = "binomial_system_test.jl"
+line = 7
+raw = "@testset \"GMP set Int64 on 32-bit systems\" begin"
+classification = "equivalent-test"
+evidence = "test/binomial_system_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Same binomial/HNF capability, with additional overflow validation in v3."
+
+[[testset]]
+source = "binomial_system_test.jl"
+line = 25
+raw = "@testset \"Hermite Normal Form\" begin"
+classification = "equivalent-test"
+evidence = "test/binomial_system_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Same binomial/HNF capability, with additional overflow validation in v3."
+
+[[testset]]
+source = "binomial_system_test.jl"
+line = 54
+raw = "@testset \"Solving (unit b)\" begin"
+classification = "equivalent-test"
+evidence = "test/binomial_system_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Same binomial/HNF capability, with additional overflow validation in v3."
+
+[[testset]]
+source = "binomial_system_test.jl"
+line = 84
+raw = "@testset \"General solving\" begin"
+classification = "equivalent-test"
+evidence = "test/binomial_system_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Same binomial/HNF capability, with additional overflow validation in v3."
+
+[[testset]]
+source = "binomial_system_test.jl"
+line = 107
+raw = "@testset \"MixedCell\" begin"
+classification = "equivalent-test"
+evidence = "test/binomial_system_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Same binomial/HNF capability, with additional overflow validation in v3."
+
+[[testset]]
+source = "certification_test.jl"
+line = 1
+raw = "@testset \"Certification\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 2
+raw = "@testset \"Simple 1: Input = Vector{Expression}\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 45
+raw = "@testset \"Simple 2: Input = Vector{MP.Polynomial}\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 81
+raw = "@testset \"Reality Check\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 95
+raw = "@testset \"Parameters: Input = Vector{Expression}\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 127
+raw = "@testset \"Parameters: Input = Vector{MP.Polynomial}\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 155
+raw = "@testset \"positive\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 165
+raw = "@testset \"DistinctCertifiedSolutions incremental API\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 256
+raw = "@testset \"3264\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 314
+raw = "@testset \"certify uses complex inversion\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 325
+raw = "@testset \"certify uses approximate inverse of jacobian\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 452
+raw = "@testset \"BSP certification: parameter-free iterator\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 481
+raw = "@testset \"BSP certification: parameterized iterator\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 494
+raw = "@testset \"BSP certification: bitmasked iterator\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "certification_test.jl"
+line = 508
+raw = "@testset \"BSP certification: iterator from iterator start solutions\" begin"
+classification = "replacement-test"
+evidence = "lib/HomotopyContinuationNextCertification/test/"
+rationale = "Certification moved to the dedicated certification subpackage; input forms and Krawczyk/Arb behavior are covered there."
+
+[[testset]]
+source = "double_double_test.jl"
+line = 4
+raw = "@testset \"DoubleF64\" begin"
+classification = "equivalent-test"
+evidence = "test/double_f64_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "DoubleF64 arithmetic is reimplemented and directly compared with v2."
+
+[[testset]]
+source = "endgame_test.jl"
+line = 1
+raw = "@testset \"Endgame\" begin"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Endgame behavior is covered by v3 endpoint/result parity tests."
+
+[[testset]]
+source = "endgame_test.jl"
+line = 2
+raw = "@testset \"Cyclic 7\" begin"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Endgame behavior is covered by v3 endpoint/result parity tests."
+
+[[testset]]
+source = "endgame_test.jl"
+line = 7
+raw = "@testset \"Hyperbolic - 6,6\" begin"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Endgame behavior is covered by v3 endpoint/result parity tests."
+
+[[testset]]
+source = "endgame_test.jl"
+line = 24
+raw = "@testset \"Singular 1\" begin"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Endgame behavior is covered by v3 endpoint/result parity tests."
+
+[[testset]]
+source = "endgame_test.jl"
+line = 38
+raw = "@testset \"Wilkinson $d\" for d in [12]"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Endgame behavior is covered by v3 endpoint/result parity tests."
+
+[[testset]]
+source = "endgame_test.jl"
+line = 47
+raw = "@testset \"(x-10)^$d\" for d in [2, 6]"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Endgame behavior is covered by v3 endpoint/result parity tests."
+
+[[testset]]
+source = "endgame_test.jl"
+line = 54
+raw = "@testset \"Beyond Polyhedral Homotopy Example\" begin"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Endgame behavior is covered by v3 endpoint/result parity tests."
+
+[[testset]]
+source = "endgame_test.jl"
+line = 62
+raw = "@testset \"Winding Number Family d=$d\" for d = 2:2:6"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Endgame behavior is covered by v3 endpoint/result parity tests."
+
+[[testset]]
+source = "endgame_test.jl"
+line = 71
+raw = "# @testset \"Bacillus Subtilis\" begin"
+classification = "upstream-disabled"
+evidence = "-"
+rationale = "The upstream testset occurrence is commented out and is not an active v2.22.4 release gate."
+
+[[testset]]
+source = "endgame_test.jl"
+line = 76
+raw = "@testset \"Mohab\" begin"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Endgame behavior is covered by v3 endpoint/result parity tests."
+
+[[testset]]
+source = "endgame_test.jl"
+line = 109
+raw = "# @testset \"Ill-conditioned solution - look's almost diverging\" begin"
+classification = "upstream-disabled"
+evidence = "-"
+rationale = "The upstream testset occurrence is commented out and is not an active v2.22.4 release gate."
+
+[[testset]]
+source = "endgame_tracker_test.jl"
+line = 1
+raw = "@testset \"EndgameTracker\" begin"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/tracking_test.jl"
+rationale = "Tracker internals were rewritten; endpoint and tracking behavior is covered at the v3 interface."
+
+[[testset]]
+source = "endgame_tracker_test.jl"
+line = 2
+raw = "@testset \"Tracking and PathResult\" begin"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/tracking_test.jl"
+rationale = "Tracker internals were rewritten; endpoint and tracking behavior is covered at the v3 interface."
+
+[[testset]]
+source = "endgame_tracker_test.jl"
+line = 48
+raw = "@testset \"Overdetermined tracking\" begin"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/tracking_test.jl"
+rationale = "Tracker internals were rewritten; endpoint and tracking behavior is covered at the v3 interface."
+
+[[testset]]
+source = "extensive/extensive_test.jl"
+line = 1
+raw = "@testset \"Extensive tests\" begin"
+classification = "replacement-test"
+evidence = "test/extensive/"
+rationale = "Large-solve coverage is retained in the separate extensive suite."
+
+[[testset]]
+source = "extensive/extensive_test.jl"
+line = 2
+raw = "@testset \"Lines on a quintic surface in 3-space\" begin"
+classification = "replacement-test"
+evidence = "test/extensive/"
+rationale = "Large-solve coverage is retained in the separate extensive suite."
+
+[[testset]]
+source = "extensive/extensive_test.jl"
+line = 18
+raw = "@testset \"3264\" begin"
+classification = "replacement-test"
+evidence = "test/extensive/"
+rationale = "Large-solve coverage is retained in the separate extensive suite."
+
+[[testset]]
+source = "homotopies_test.jl"
+line = 34
+raw = "@testset \"Taylor, K = $K, incr = $incr\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/parameter_homotopy_test.jl; test/subspace_homotopy_test.jl; test/nonpolynomial_test.jl"
+rationale = "Homotopy implementations were rewritten behind HomotopyEvaluator; corresponding interpolation, Taylor and tracking behavior is covered."
+
+[[testset]]
+source = "homotopies_test.jl"
+line = 60
+raw = "@testset \"Homotopies\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/parameter_homotopy_test.jl; test/subspace_homotopy_test.jl; test/nonpolynomial_test.jl"
+rationale = "Homotopy implementations were rewritten behind HomotopyEvaluator; corresponding interpolation, Taylor and tracking behavior is covered."
+
+[[testset]]
+source = "homotopies_test.jl"
+line = 61
+raw = "@testset \"ParameterHomotopy\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/parameter_homotopy_test.jl; test/subspace_homotopy_test.jl; test/nonpolynomial_test.jl"
+rationale = "Homotopy implementations were rewritten behind HomotopyEvaluator; corresponding interpolation, Taylor and tracking behavior is covered."
+
+[[testset]]
+source = "homotopies_test.jl"
+line = 81
+raw = "@testset \"StraightLineHomotopy\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/parameter_homotopy_test.jl; test/subspace_homotopy_test.jl; test/nonpolynomial_test.jl"
+rationale = "Homotopy implementations were rewritten behind HomotopyEvaluator; corresponding interpolation, Taylor and tracking behavior is covered."
+
+[[testset]]
+source = "homotopies_test.jl"
+line = 96
+raw = "@testset \"ExtrinsicSubspaceHomotopy\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/parameter_homotopy_test.jl; test/subspace_homotopy_test.jl; test/nonpolynomial_test.jl"
+rationale = "Homotopy implementations were rewritten behind HomotopyEvaluator; corresponding interpolation, Taylor and tracking behavior is covered."
+
+[[testset]]
+source = "homotopies_test.jl"
+line = 119
+raw = "@testset \"IntrinsicSubspaceHomotopy\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/parameter_homotopy_test.jl; test/subspace_homotopy_test.jl; test/nonpolynomial_test.jl"
+rationale = "Homotopy implementations were rewritten behind HomotopyEvaluator; corresponding interpolation, Taylor and tracking behavior is covered."
+
+[[testset]]
+source = "homotopies_test.jl"
+line = 156
+raw = "@testset \"IntrinsicSubspaceProjectiveHomotopy\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/parameter_homotopy_test.jl; test/subspace_homotopy_test.jl; test/nonpolynomial_test.jl"
+rationale = "Homotopy implementations were rewritten behind HomotopyEvaluator; corresponding interpolation, Taylor and tracking behavior is covered."
+
+[[testset]]
+source = "homotopies_test.jl"
+line = 196
+raw = "@testset \"CoefficientHomotopy\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/parameter_homotopy_test.jl; test/subspace_homotopy_test.jl; test/nonpolynomial_test.jl"
+rationale = "Homotopy implementations were rewritten behind HomotopyEvaluator; corresponding interpolation, Taylor and tracking behavior is covered."
+
+[[testset]]
+source = "homotopies_test.jl"
+line = 212
+raw = "@testset \"MixedHomotopy\" begin"
+classification = "architecture-obsolete"
+evidence = "test/codegen_test.jl; test/homotopy_solve_test.jl"
+rationale = "MixedHomotopy as a wrapper type is replaced by the v3 evaluator/compile-mode design."
+
+[[testset]]
+source = "homotopies_test.jl"
+line = 218
+raw = "@testset \"Homotopy with transcendental functions\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/parameter_homotopy_test.jl; test/subspace_homotopy_test.jl; test/nonpolynomial_test.jl"
+rationale = "Homotopy implementations were rewritten behind HomotopyEvaluator; corresponding interpolation, Taylor and tracking behavior is covered."
+
+[[testset]]
+source = "linear_algebra_test.jl"
+line = 1
+raw = "@testset \"LinearAlgebra\" begin"
+classification = "equivalent-test"
+evidence = "test/linear_algebra_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Core linear algebra primitives and condition estimation are directly covered."
+
+[[testset]]
+source = "linear_algebra_test.jl"
+line = 2
+raw = "@testset \"Constructor + basics\" begin"
+classification = "equivalent-test"
+evidence = "test/linear_algebra_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Core linear algebra primitives and condition estimation are directly covered."
+
+[[testset]]
+source = "linear_algebra_test.jl"
+line = 31
+raw = "@testset \"QR\" begin"
+classification = "equivalent-test"
+evidence = "test/linear_algebra_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Core linear algebra primitives and condition estimation are directly covered."
+
+[[testset]]
+source = "linear_algebra_test.jl"
+line = 51
+raw = "@testset \"ldiv\" begin"
+classification = "equivalent-test"
+evidence = "test/linear_algebra_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Core linear algebra primitives and condition estimation are directly covered."
+
+[[testset]]
+source = "linear_algebra_test.jl"
+line = 66
+raw = "@testset \"Inf-norm estimator / cond\" begin"
+classification = "equivalent-test"
+evidence = "test/linear_algebra_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Core linear algebra primitives and condition estimation are directly covered."
+
+[[testset]]
+source = "linear_algebra_test.jl"
+line = 111
+raw = "@testset \"Jacobian\" begin"
+classification = "equivalent-test"
+evidence = "test/linear_algebra_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Core linear algebra primitives and condition estimation are directly covered."
+
+[[testset]]
+source = "linear_test.jl"
+line = 1
+raw = "@testset \"Linear Spaces\" begin"
+classification = "replacement-test"
+evidence = "test/linear_subspace_test.jl; test/subspace_homotopy_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "LinearSubspace and subspace-homotopy behavior is covered by v3-native implementations."
+
+[[testset]]
+source = "linear_test.jl"
+line = 2
+raw = "@testset \"LinearSubspace\" begin"
+classification = "replacement-test"
+evidence = "test/linear_subspace_test.jl; test/subspace_homotopy_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "LinearSubspace and subspace-homotopy behavior is covered by v3-native implementations."
+
+[[testset]]
+source = "linear_test.jl"
+line = 73
+raw = "@testset \"Intersect subspaces\" begin"
+classification = "replacement-test"
+evidence = "test/linear_subspace_test.jl; test/subspace_homotopy_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "LinearSubspace and subspace-homotopy behavior is covered by v3-native implementations."
+
+[[testset]]
+source = "linear_test.jl"
+line = 86
+raw = "@testset \"IntrinsicSubspaceHomotopy\" begin"
+classification = "replacement-test"
+evidence = "test/linear_subspace_test.jl; test/subspace_homotopy_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "LinearSubspace and subspace-homotopy behavior is covered by v3-native implementations."
+
+[[testset]]
+source = "linear_test.jl"
+line = 126
+raw = "@testset \"SubspaceHomotopy between perpendicular spaces\" begin"
+classification = "replacement-test"
+evidence = "test/linear_subspace_test.jl; test/subspace_homotopy_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "LinearSubspace and subspace-homotopy behavior is covered by v3-native implementations."
+
+[[testset]]
+source = "model_kit/compiled_cache_test.jl"
+line = 14
+raw = "@testset \"Compiled cache thread safety\" begin"
+classification = "architecture-obsolete"
+evidence = "test/core_test.jl; test/distributed_test.jl"
+rationale = "V3 has no process-global compiled cache; evaluator builders/clones provide task-local state, so the upstream cache race cannot occur."
+
+[[testset]]
+source = "model_kit/e2e_test.jl"
+line = 3
+raw = "@testset \"interpreter: $name\" for (name, system) in TEST_SYSTEM_COLLECTION"
+classification = "replacement-test"
+evidence = "test/system_sweep_test.jl; test/nonpolynomial_test.jl; test/codegen_test.jl"
+rationale = "ModelKit execution modes became v3 compile modes with system-wide backend sweeps."
+
+[[testset]]
+source = "model_kit/e2e_test.jl"
+line = 4
+raw = "@testset \"interpreter symbolic\" begin"
+classification = "replacement-test"
+evidence = "test/system_sweep_test.jl; test/nonpolynomial_test.jl; test/codegen_test.jl"
+rationale = "ModelKit execution modes became v3 compile modes with system-wide backend sweeps."
+
+[[testset]]
+source = "model_kit/e2e_test.jl"
+line = 19
+raw = "@testset \"$mode [ComplexF64]\" for mode in [InterpretedSystem, CompiledSystem]"
+classification = "replacement-test"
+evidence = "test/system_sweep_test.jl; test/nonpolynomial_test.jl; test/codegen_test.jl"
+rationale = "ModelKit execution modes became v3 compile modes with system-wide backend sweeps."
+
+[[testset]]
+source = "model_kit/e2e_test.jl"
+line = 55
+raw = "@testset \"$mode evaluate [ComplexDF64]\" for mode in [InterpretedSystem, CompiledSystem]"
+classification = "replacement-test"
+evidence = "test/system_sweep_test.jl; test/nonpolynomial_test.jl; test/codegen_test.jl"
+rationale = "ModelKit execution modes became v3 compile modes with system-wide backend sweeps."
+
+[[testset]]
+source = "model_kit/e2e_test.jl"
+line = 66
+raw = "@testset \"$mode taylor order $K [ComplexF64]\" for mode in"
+classification = "replacement-test"
+evidence = "test/system_sweep_test.jl; test/nonpolynomial_test.jl; test/codegen_test.jl"
+rationale = "ModelKit execution modes became v3 compile modes with system-wide backend sweeps."
+
+[[testset]]
+source = "model_kit/e2e_test.jl"
+line = 93
+raw = "@testset \"interpreted system [acb]\" begin"
+classification = "replacement-test"
+evidence = "test/system_sweep_test.jl; test/nonpolynomial_test.jl; test/codegen_test.jl"
+rationale = "ModelKit execution modes became v3 compile modes with system-wide backend sweeps."
+
+[[testset]]
+source = "model_kit/e2e_test.jl"
+line = 131
+raw = "@testset \"$mode [ComplexF64]\" for mode in [InterpretedHomotopy, CompiledHomotopy]"
+classification = "replacement-test"
+evidence = "test/system_sweep_test.jl; test/nonpolynomial_test.jl; test/codegen_test.jl"
+rationale = "ModelKit execution modes became v3 compile modes with system-wide backend sweeps."
+
+[[testset]]
+source = "model_kit/e2e_test.jl"
+line = 176
+raw = "@testset \"$mode evaluate [ComplexDF64]\" for mode in"
+classification = "replacement-test"
+evidence = "test/system_sweep_test.jl; test/nonpolynomial_test.jl; test/codegen_test.jl"
+rationale = "ModelKit execution modes became v3 compile modes with system-wide backend sweeps."
+
+[[testset]]
+source = "model_kit/e2e_test.jl"
+line = 196
+raw = "@testset \"$mode taylor order $K [ComplexF64]\" for mode in ["
+classification = "replacement-test"
+evidence = "test/system_sweep_test.jl; test/nonpolynomial_test.jl; test/codegen_test.jl"
+rationale = "ModelKit execution modes became v3 compile modes with system-wide backend sweeps."
+
+[[testset]]
+source = "model_kit/operations_test.jl"
+line = 1
+raw = "@testset \"test operations against taylor operations (N=$N, K=$K)\" for (K, N) in ["
+classification = "replacement-test"
+evidence = "test/operations_test.jl; test/taylor_test.jl"
+rationale = "Operation/Taylor recurrences are covered by direct and Cauchy-oracle tests."
+
+[[testset]]
+source = "model_kit/operations_test.jl"
+line = 55
+raw = "@testset \"op: $(op)\" for op in ops"
+classification = "replacement-test"
+evidence = "test/operations_test.jl; test/taylor_test.jl"
+rationale = "Operation/Taylor recurrences are covered by direct and Cauchy-oracle tests."
+
+[[testset]]
+source = "model_kit/operations_test.jl"
+line = 61
+raw = "@testset \"Integer Taylor powers with zero constant coefficient\" begin"
+classification = "replacement-test"
+evidence = "test/operations_test.jl; test/taylor_test.jl"
+rationale = "Operation/Taylor recurrences are covered by direct and Cauchy-oracle tests."
+
+[[testset]]
+source = "model_kit/slp_test.jl"
+line = 1
+raw = "@testset \"ModelKit - SLP\" begin"
+classification = "replacement-test"
+evidence = "test/interpreter_test.jl; test/codegen_test.jl; test/taylor_test.jl"
+rationale = "SLP interpreted/compiled implementations became the tape/codegen evaluator pipeline."
+
+[[testset]]
+source = "model_kit/slp_test.jl"
+line = 3
+raw = "@testset \"CompiledHomotopy/InterpretedHomotopy\" begin"
+classification = "replacement-test"
+evidence = "test/interpreter_test.jl; test/codegen_test.jl; test/taylor_test.jl"
+rationale = "SLP interpreted/compiled implementations became the tape/codegen evaluator pipeline."
+
+[[testset]]
+source = "model_kit/slp_test.jl"
+line = 45
+raw = "@testset \"fractional powers\" begin"
+classification = "replacement-test"
+evidence = "test/interpreter_test.jl; test/codegen_test.jl; test/taylor_test.jl"
+rationale = "SLP interpreted/compiled implementations became the tape/codegen evaluator pipeline."
+
+[[testset]]
+source = "model_kit/slp_test.jl"
+line = 77
+raw = "@testset \"Homotopy codegen (Katsura(3))\" begin"
+classification = "replacement-test"
+evidence = "test/interpreter_test.jl; test/codegen_test.jl; test/taylor_test.jl"
+rationale = "SLP interpreted/compiled implementations became the tape/codegen evaluator pipeline."
+
+[[testset]]
+source = "model_kit/slp_test.jl"
+line = 128
+raw = "@testset \"taylor! - system\" begin"
+classification = "replacement-test"
+evidence = "test/interpreter_test.jl; test/codegen_test.jl; test/taylor_test.jl"
+rationale = "SLP interpreted/compiled implementations became the tape/codegen evaluator pipeline."
+
+[[testset]]
+source = "model_kit/slp_test.jl"
+line = 159
+raw = "@testset \"Monomials\" begin"
+classification = "replacement-test"
+evidence = "test/interpreter_test.jl; test/codegen_test.jl; test/taylor_test.jl"
+rationale = "SLP interpreted/compiled implementations became the tape/codegen evaluator pipeline."
+
+[[testset]]
+source = "model_kit/slp_test.jl"
+line = 172
+raw = "@testset \"Evaluation of Acb\" begin"
+classification = "replacement-test"
+evidence = "test/interpreter_test.jl; test/codegen_test.jl; test/taylor_test.jl"
+rationale = "SLP interpreted/compiled implementations became the tape/codegen evaluator pipeline."
+
+[[testset]]
+source = "model_kit/slp_test.jl"
+line = 193
+raw = "@testset \"Evaluation of Acb with fractional powers\" begin"
+classification = "replacement-test"
+evidence = "test/interpreter_test.jl; test/codegen_test.jl; test/taylor_test.jl"
+rationale = "SLP interpreted/compiled implementations became the tape/codegen evaluator pipeline."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 1
+raw = "@testset \"ModelKit - Symbolic\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 2
+raw = "@testset \"SymEngine\" begin"
+classification = "architecture-obsolete"
+evidence = "test/expression_test.jl; test/polynomial_input_test.jl"
+rationale = "V3 deliberately removed the SymEngine frontend; supported symbolic input is Expression or MultivariatePolynomials."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 33
+raw = "@testset \"Variables\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 68
+raw = "@testset \"Subs\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 80
+raw = "@testset \"Evaluation\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 87
+raw = "@testset \"Linear Algebra\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 95
+raw = "@testset \"Differentiation\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 108
+raw = "@testset \"Expand\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 113
+raw = "@testset \"to_dict\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 121
+raw = "@testset \"evaluate - Issue #500\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 133
+raw = "@testset \"evaluate - Issue #511\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 139
+raw = "@testset \"Modeling\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 140
+raw = "@testset \"Bottleneck\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 161
+raw = "@testset \"Steiner\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 186
+raw = "@testset \"Reach plane curve\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 205
+raw = "@testset \"Horner\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 233
+raw = "@testset \"Rand / dense poly\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 249
+raw = "@testset \"Polynomial to exponents_coefficients and back\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 267
+raw = "@testset \"System\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 294
+raw = "@testset \"System variables groups + homogeneous\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 310
+raw = "@testset \"Homotopy\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 333
+raw = "@testset \"Convert\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 357
+raw = "@testset \"rational functions\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit/symbolic_test.jl"
+line = 371
+raw = "@testset \"transcendental functions\" begin"
+classification = "replacement-test"
+evidence = "test/expression_test.jl; test/symbolic_utils_test.jl; test/polynomial_input_test.jl; test/nonpolynomial_test.jl"
+rationale = "ModelKit symbolic functionality moved to the Expression and polynomial frontends."
+
+[[testset]]
+source = "model_kit_test.jl"
+line = 3
+raw = "@testset \"ModelKit\" begin"
+classification = "replacement-test"
+evidence = "test/system_sweep_test.jl; test/expression_test.jl; test/interpreter_test.jl"
+rationale = "ModelKit umbrella behavior is split across v3 frontend/evaluator suites."
+
+[[testset]]
+source = "monodromy_test.jl"
+line = 1
+raw = "@testset \"Monodromy\" begin"
+classification = "replacement-test"
+evidence = "test/monodromy_test.jl; test/monodromy_v2_parity_test.jl; test/monodromy_endpoint_validation_test.jl"
+rationale = "Monodromy is v3-native but has direct v2 parity and endpoint/permutation regressions."
+
+[[testset]]
+source = "monodromy_test.jl"
+line = 14
+raw = "@testset \"monodromy_solve\" begin"
+classification = "replacement-test"
+evidence = "test/monodromy_test.jl; test/monodromy_v2_parity_test.jl; test/monodromy_endpoint_validation_test.jl"
+rationale = "Monodromy is v3-native but has direct v2 parity and endpoint/permutation regressions."
+
+[[testset]]
+source = "monodromy_test.jl"
+line = 180
+raw = "@testset \"Method of moments\" begin"
+classification = "replacement-test"
+evidence = "test/monodromy_test.jl; test/monodromy_v2_parity_test.jl; test/monodromy_endpoint_validation_test.jl"
+rationale = "Monodromy is v3-native but has direct v2 parity and endpoint/permutation regressions."
+
+[[testset]]
+source = "monodromy_test.jl"
+line = 206
+raw = "@testset \"Projective + Group Actions\" begin"
+classification = "replacement-test"
+evidence = "test/monodromy_test.jl; test/monodromy_v2_parity_test.jl; test/monodromy_endpoint_validation_test.jl"
+rationale = "Monodromy is v3-native but has direct v2 parity and endpoint/permutation regressions."
+
+[[testset]]
+source = "monodromy_test.jl"
+line = 241
+raw = "@testset \"permutations\" begin"
+classification = "replacement-test"
+evidence = "test/monodromy_test.jl; test/monodromy_v2_parity_test.jl; test/monodromy_endpoint_validation_test.jl"
+rationale = "Monodromy is v3-native but has direct v2 parity and endpoint/permutation regressions."
+
+[[testset]]
+source = "monodromy_test.jl"
+line = 270
+raw = "@testset \"Linear subspaces\" begin"
+classification = "replacement-test"
+evidence = "test/monodromy_test.jl; test/monodromy_v2_parity_test.jl; test/monodromy_endpoint_validation_test.jl"
+rationale = "Monodromy is v3-native but has direct v2 parity and endpoint/permutation regressions."
+
+[[testset]]
+source = "monodromy_test.jl"
+line = 308
+raw = "@testset \"Monodromy rational functions\" begin"
+classification = "replacement-test"
+evidence = "test/monodromy_test.jl; test/monodromy_v2_parity_test.jl; test/monodromy_endpoint_validation_test.jl"
+rationale = "Monodromy is v3-native but has direct v2 parity and endpoint/permutation regressions."
+
+[[testset]]
+source = "monodromy_test.jl"
+line = 347
+raw = "@testset \"parameter homotopy with monodromy result\" begin"
+classification = "replacement-test"
+evidence = "test/monodromy_test.jl; test/monodromy_v2_parity_test.jl; test/monodromy_endpoint_validation_test.jl"
+rationale = "Monodromy is v3-native but has direct v2 parity and endpoint/permutation regressions."
+
+[[testset]]
+source = "monodromy_test.jl"
+line = 358
+raw = "@testset \"Verify solution_completeness\" begin"
+classification = "replacement-test"
+evidence = "test/monodromy_test.jl; test/monodromy_v2_parity_test.jl; test/monodromy_endpoint_validation_test.jl"
+rationale = "Monodromy is v3-native but has direct v2 parity and endpoint/permutation regressions."
+
+[[testset]]
+source = "monodromy_test.jl"
+line = 398
+raw = "@testset \"monodromy with predefined tolerance for unique_points\" begin"
+classification = "replacement-test"
+evidence = "test/monodromy_test.jl; test/monodromy_v2_parity_test.jl; test/monodromy_endpoint_validation_test.jl"
+rationale = "Monodromy is v3-native but has direct v2 parity and endpoint/permutation regressions."
+
+[[testset]]
+source = "monodromy_test.jl"
+line = 463
+raw = "@testset \"certified duplicate checks\" begin"
+classification = "replacement-test"
+evidence = "test/monodromy_test.jl; test/monodromy_v2_parity_test.jl; test/monodromy_endpoint_validation_test.jl"
+rationale = "Monodromy is v3-native but has direct v2 parity and endpoint/permutation regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 1
+raw = "@testset \"Numerical Irreducible Decomposition\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 2
+raw = "@testset \"Union of 1 2-dim, 2 1-dim and 8 points\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 71
+raw = "@testset \"randomization\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 79
+raw = "@testset \"rational systems\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 96
+raw = "@testset \"Hypersurface of degree 5\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 106
+raw = "@testset \"Curve of degree 6\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 117
+raw = "@testset \"Homogeneous systems\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 134
+raw = "@testset \"Overdetermined Test\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 144
+raw = "@testset \"Three Lines\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 157
+raw = "@testset \"Bricard6R\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 257
+raw = "@testset \"ACR\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "nid_test.jl"
+line = 298
+raw = "@testset \"Union of a sphere, a line, and a point\" begin"
+classification = "replacement-test"
+evidence = "test/nid_test.jl; test/nid_losslessness_test.jl; test/regeneration_ordering_tolerances_test.jl"
+rationale = "NID/regeneration are ambient-coordinate v3 implementations with direct v2 cases and new losslessness regressions."
+
+[[testset]]
+source = "norm_test.jl"
+line = 1
+raw = "@testset \"Norms\" begin"
+classification = "equivalent-test"
+evidence = "test/norms_test.jl; test/compare_v2_primitives_test.jl"
+rationale = "Norm behavior is directly covered and compared with v2."
+
+[[testset]]
+source = "polyhedral_test.jl"
+line = 1
+raw = "@testset \"Polyhedral\" begin"
+classification = "replacement-test"
+evidence = "test/polyhedral_regression_test.jl; test/solve_test.jl"
+rationale = "Polyhedral solving uses rewritten mixed-cell plumbing but preserves solution behavior."
+
+[[testset]]
+source = "polyhedral_test.jl"
+line = 2
+raw = "@testset \"affine + torus solutions\" begin"
+classification = "replacement-test"
+evidence = "test/polyhedral_regression_test.jl; test/solve_test.jl"
+rationale = "Polyhedral solving uses rewritten mixed-cell plumbing but preserves solution behavior."
+
+[[testset]]
+source = "polyhedral_test.jl"
+line = 23
+raw = "@testset \"only torus\" begin"
+classification = "replacement-test"
+evidence = "test/polyhedral_regression_test.jl; test/solve_test.jl"
+rationale = "Polyhedral solving uses rewritten mixed-cell plumbing but preserves solution behavior."
+
+[[testset]]
+source = "polyhedral_test.jl"
+line = 38
+raw = "@testset \"cyclic\" begin"
+classification = "replacement-test"
+evidence = "test/polyhedral_regression_test.jl; test/solve_test.jl"
+rationale = "Polyhedral solving uses rewritten mixed-cell plumbing but preserves solution behavior."
+
+[[testset]]
+source = "result_test.jl"
+line = 1
+raw = "@testset \"Result\" begin"
+classification = "replacement-test"
+evidence = "test/result_iterator_test.jl; test/result_clustering_test.jl; test/path_diagnostics_test.jl"
+rationale = "Result/iterator APIs were redesigned into typed routes; clustering, diagnostics and lazy tracking are covered."
+
+[[testset]]
+source = "result_test.jl"
+line = 2
+raw = "@testset \"Basic functionality of Result\" begin"
+classification = "replacement-test"
+evidence = "test/result_iterator_test.jl; test/result_clustering_test.jl; test/path_diagnostics_test.jl"
+rationale = "Result/iterator APIs were redesigned into typed routes; clustering, diagnostics and lazy tracking are covered."
+
+[[testset]]
+source = "result_test.jl"
+line = 58
+raw = "@testset \"ResultIterator\" begin"
+classification = "replacement-test"
+evidence = "test/result_iterator_test.jl; test/result_clustering_test.jl; test/path_diagnostics_test.jl"
+rationale = "Result/iterator APIs were redesigned into typed routes; clustering, diagnostics and lazy tracking are covered."
+
+[[testset]]
+source = "result_test.jl"
+line = 60
+raw = "@testset \"Result tests\" begin"
+classification = "replacement-test"
+evidence = "test/result_iterator_test.jl; test/result_clustering_test.jl; test/path_diagnostics_test.jl"
+rationale = "Result/iterator APIs were redesigned into typed routes; clustering, diagnostics and lazy tracking are covered."
+
+[[testset]]
+source = "result_test.jl"
+line = 122
+raw = "@testset \"Basic functionality of ResultIterator\" begin"
+classification = "replacement-test"
+evidence = "test/result_iterator_test.jl; test/result_clustering_test.jl; test/path_diagnostics_test.jl"
+rationale = "Result/iterator APIs were redesigned into typed routes; clustering, diagnostics and lazy tracking are covered."
+
+[[testset]]
+source = "result_test.jl"
+line = 150
+raw = "@testset \"Manual start solutions\" begin"
+classification = "replacement-test"
+evidence = "test/result_iterator_test.jl; test/result_clustering_test.jl; test/path_diagnostics_test.jl"
+rationale = "Result/iterator APIs were redesigned into typed routes; clustering, diagnostics and lazy tracking are covered."
+
+[[testset]]
+source = "result_test.jl"
+line = 178
+raw = "@testset \"Many parameters\" begin"
+classification = "replacement-test"
+evidence = "test/result_iterator_test.jl; test/result_clustering_test.jl; test/path_diagnostics_test.jl"
+rationale = "Result/iterator APIs were redesigned into typed routes; clustering, diagnostics and lazy tracking are covered."
+
+[[testset]]
+source = "result_test.jl"
+line = 268
+raw = "@testset \"Target subspaces\" begin"
+classification = "replacement-test"
+evidence = "test/result_iterator_test.jl; test/result_clustering_test.jl; test/path_diagnostics_test.jl"
+rationale = "Result/iterator APIs were redesigned into typed routes; clustering, diagnostics and lazy tracking are covered."
+
+[[testset]]
+source = "result_test.jl"
+line = 301
+raw = "@testset \"Compression\" begin"
+classification = "replacement-test"
+evidence = "test/result_iterator_test.jl; test/result_clustering_test.jl; test/path_diagnostics_test.jl"
+rationale = "Result/iterator APIs were redesigned into typed routes; clustering, diagnostics and lazy tracking are covered."
+
+[[testset]]
+source = "runtests.jl"
+line = 31
+raw = "@testset \"HomotopyContinuation\" begin"
+classification = "replacement-test"
+evidence = "test/runtests.jl"
+rationale = "Top-level suite wrapper."
+
+[[testset]]
+source = "semialgebraic_sets_test.jl"
+line = 1
+raw = "@testset \"SemialgebraicSets\" begin"
+classification = "equivalent-test"
+evidence = "test/semialgebraic_sets_test.jl"
+rationale = "SemialgebraicSets integration is covered directly."
+
+[[testset]]
+source = "semialgebraic_sets_test.jl"
+line = 12
+raw = "@testset \"ε=$ε atol=$atol\" begin"
+classification = "equivalent-test"
+evidence = "test/semialgebraic_sets_test.jl"
+rationale = "SemialgebraicSets integration is covered directly."
+
+[[testset]]
+source = "solve_test.jl"
+line = 1
+raw = "@testset \"solve\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 3
+raw = "@testset \"total degree (simple)\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 63
+raw = "@testset \"total degree (variable groups)\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 94
+raw = "@testset \"polyhedral\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 134
+raw = "@testset \"overdetermined\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 135
+raw = "@testset \"3 by 5 minors\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 147
+raw = "@testset \"composition\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 160
+raw = "@testset \"paths to track\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 178
+raw = "@testset \"solve (parameter homotopy)\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 259
+raw = "@testset \"solve (Homotopy)\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 268
+raw = "@testset \"solve (start target)\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 281
+raw = "@testset \"solve (affine sliced)\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 324
+raw = "@testset \"solve (Vector{Expression})\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 338
+raw = "@testset \"solve (DynamicPolynomials)\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 373
+raw = "@testset \"change parameters\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 383
+raw = "@testset \"solve (threading)\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 388
+raw = "@testset \"stop early callback\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 438
+raw = "@testset \"Many parameters solver\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "solve_test.jl"
+line = 540
+raw = "@testset \"Many parameters threaded\" begin"
+classification = "replacement-test"
+evidence = "test/solve_test.jl; test/homotopy_solve_test.jl; test/many_targets_test.jl; test/subspace_solve_test.jl; test/compare_v2_solve_match_test.jl; test/compare_v2_solve_counts_test.jl"
+rationale = "Solve routes are split by typed algorithm/iterator APIs; numerical behavior is directly compared with v2."
+
+[[testset]]
+source = "systems_test.jl"
+line = 59
+raw = "@testset \"System\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/composition_test.jl; test/fixed_parameter_test.jl; test/overdetermined_test.jl; test/sliced_solve_test.jl"
+rationale = "System wrappers were redesigned at the evaluator layer; their user-visible behavior is covered."
+
+[[testset]]
+source = "systems_test.jl"
+line = 60
+raw = "@testset \"CompositionSystem\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/composition_test.jl; test/fixed_parameter_test.jl; test/overdetermined_test.jl; test/sliced_solve_test.jl"
+rationale = "System wrappers were redesigned at the evaluator layer; their user-visible behavior is covered."
+
+[[testset]]
+source = "systems_test.jl"
+line = 68
+raw = "@testset \"CompositionSystem - Compose\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/composition_test.jl; test/fixed_parameter_test.jl; test/overdetermined_test.jl; test/sliced_solve_test.jl"
+rationale = "System wrappers were redesigned at the evaluator layer; their user-visible behavior is covered."
+
+[[testset]]
+source = "systems_test.jl"
+line = 89
+raw = "@testset \"MixedSystem\" begin"
+classification = "architecture-obsolete"
+evidence = "test/codegen_test.jl; test/system_sweep_test.jl"
+rationale = "MixedSystem as a wrapper type is replaced by CompileMode and the evaluator firewall."
+
+[[testset]]
+source = "systems_test.jl"
+line = 96
+raw = "@testset \"AffineChartSystem\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/composition_test.jl; test/fixed_parameter_test.jl; test/overdetermined_test.jl; test/sliced_solve_test.jl"
+rationale = "System wrappers were redesigned at the evaluator layer; their user-visible behavior is covered."
+
+[[testset]]
+source = "systems_test.jl"
+line = 103
+raw = "@testset \"FixedParameterSystem\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/composition_test.jl; test/fixed_parameter_test.jl; test/overdetermined_test.jl; test/sliced_solve_test.jl"
+rationale = "System wrappers were redesigned at the evaluator layer; their user-visible behavior is covered."
+
+[[testset]]
+source = "systems_test.jl"
+line = 110
+raw = "@testset \"RandomizedSystem\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/composition_test.jl; test/fixed_parameter_test.jl; test/overdetermined_test.jl; test/sliced_solve_test.jl"
+rationale = "System wrappers were redesigned at the evaluator layer; their user-visible behavior is covered."
+
+[[testset]]
+source = "systems_test.jl"
+line = 124
+raw = "@testset \"SlicedSystem\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/composition_test.jl; test/fixed_parameter_test.jl; test/overdetermined_test.jl; test/sliced_solve_test.jl"
+rationale = "System wrappers were redesigned at the evaluator layer; their user-visible behavior is covered."
+
+[[testset]]
+source = "systems_test.jl"
+line = 139
+raw = "@testset \"is_real\" begin"
+classification = "replacement-test"
+evidence = "test/core_test.jl; test/composition_test.jl; test/fixed_parameter_test.jl; test/overdetermined_test.jl; test/sliced_solve_test.jl"
+rationale = "System wrappers were redesigned at the evaluator layer; their user-visible behavior is covered."
+
+[[testset]]
+source = "test_cases/four_bar.jl"
+line = 1
+raw = "@testset \"Iterative Refinement for predictor (FourBar)\" begin"
+classification = "replacement-test"
+evidence = "test/tracker_regression_test.jl; test/endgame_test.jl"
+rationale = "Predictor/refinement behavior is covered in the rewritten tracker regression corpus."
+
+[[testset]]
+source = "test_cases/four_bar.jl"
+line = 90
+raw = "@testset \"Fourbar - AD: $AD\" for AD = 0:3"
+classification = "replacement-test"
+evidence = "test/tracker_regression_test.jl; test/endgame_test.jl"
+rationale = "Predictor/refinement behavior is covered in the rewritten tracker regression corpus."
+
+[[testset]]
+source = "test_cases/steiner_higher_prec.jl"
+line = 4
+raw = "@testset \"Steiner High Precision\" begin"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/double_f64_test.jl"
+rationale = "Extended-precision escalation is covered in v3 tracker/endgame and DoubleF64 tests."
+
+[[testset]]
+source = "test_cases/steiner_higher_prec.jl"
+line = 141
+raw = "@testset \"Steiner - AD: $AD\" for AD = 1:3"
+classification = "replacement-test"
+evidence = "test/endgame_test.jl; test/double_f64_test.jl"
+rationale = "Extended-precision escalation is covered in v3 tracker/endgame and DoubleF64 tests."
+
+[[testset]]
+source = "tracker_test.jl"
+line = 1
+raw = "@testset \"Tracker\" begin"
+classification = "replacement-test"
+evidence = "test/tracking_test.jl; test/tracker_regression_test.jl; test/predictor_zero_crossing_test.jl; test/tracker_warmstart_test.jl"
+rationale = "Tracker implementation is new; v2 path behavior and recent zero-crossing regressions are covered."
+
+[[testset]]
+source = "tracker_test.jl"
+line = 2
+raw = "@testset \"tracking $mode - AD: $AD\" for mode in [InterpretedSystem, CompiledSystem],"
+classification = "replacement-test"
+evidence = "test/tracking_test.jl; test/tracker_regression_test.jl; test/predictor_zero_crossing_test.jl; test/tracker_warmstart_test.jl"
+rationale = "Tracker implementation is new; v2 path behavior and recent zero-crossing regressions are covered."
+
+[[testset]]
+source = "tracker_test.jl"
+line = 29
+raw = "@testset \"projective tracking $mode - AD: $AD\" for mode in"
+classification = "replacement-test"
+evidence = "test/tracking_test.jl; test/tracker_regression_test.jl; test/predictor_zero_crossing_test.jl; test/tracker_warmstart_test.jl"
+rationale = "Tracker implementation is new; v2 path behavior and recent zero-crossing regressions are covered."
+
+[[testset]]
+source = "tracker_test.jl"
+line = 49
+raw = "@testset \"Paths through zero\" begin"
+classification = "replacement-test"
+evidence = "test/tracking_test.jl; test/tracker_regression_test.jl; test/predictor_zero_crossing_test.jl; test/tracker_warmstart_test.jl"
+rationale = "Tracker implementation is new; v2 path behavior and recent zero-crossing regressions are covered."
+
+[[testset]]
+source = "tracker_test.jl"
+line = 69
+raw = "@testset \"Parameter solve with a zero solution\" begin"
+classification = "replacement-test"
+evidence = "test/tracking_test.jl; test/tracker_regression_test.jl; test/predictor_zero_crossing_test.jl; test/tracker_warmstart_test.jl"
+rationale = "Tracker implementation is new; v2 path behavior and recent zero-crossing regressions are covered."
+
+[[testset]]
+source = "tracker_test.jl"
+line = 84
+raw = "@testset \"iterator\" begin"
+classification = "replacement-test"
+evidence = "test/tracking_test.jl; test/tracker_regression_test.jl; test/predictor_zero_crossing_test.jl; test/tracker_warmstart_test.jl"
+rationale = "Tracker implementation is new; v2 path behavior and recent zero-crossing regressions are covered."
+
+[[testset]]
+source = "tracker_test.jl"
+line = 109
+raw = "@testset \"path info\" begin"
+classification = "replacement-test"
+evidence = "test/tracking_test.jl; test/tracker_regression_test.jl; test/predictor_zero_crossing_test.jl; test/tracker_warmstart_test.jl"
+rationale = "Tracker implementation is new; v2 path behavior and recent zero-crossing regressions are covered."
+
+[[testset]]
+source = "tracker_test.jl"
+line = 117
+raw = "@testset \"Change parameters\" begin"
+classification = "replacement-test"
+evidence = "test/tracking_test.jl; test/tracker_regression_test.jl; test/predictor_zero_crossing_test.jl; test/tracker_warmstart_test.jl"
+rationale = "Tracker implementation is new; v2 path behavior and recent zero-crossing regressions are covered."
+
+[[testset]]
+source = "tracker_test.jl"
+line = 128
+raw = "@testset \"Straight Line Homotopy\" begin"
+classification = "replacement-test"
+evidence = "test/tracking_test.jl; test/tracker_regression_test.jl; test/predictor_zero_crossing_test.jl; test/tracker_warmstart_test.jl"
+rationale = "Tracker implementation is new; v2 path behavior and recent zero-crossing regressions are covered."
+
+[[testset]]
+source = "tracker_test.jl"
+line = 142
+raw = "@testset \"Compiled/InterpretedHomotopy\" begin"
+classification = "replacement-test"
+evidence = "test/tracking_test.jl; test/tracker_regression_test.jl; test/predictor_zero_crossing_test.jl; test/tracker_warmstart_test.jl"
+rationale = "Tracker implementation is new; v2 path behavior and recent zero-crossing regressions are covered."
+
+[[testset]]
+source = "tracker_test.jl"
+line = 172
+raw = "@testset \"invalid_startvalue_singular_jacobian\" begin"
+classification = "replacement-test"
+evidence = "test/tracking_test.jl; test/tracker_regression_test.jl; test/predictor_zero_crossing_test.jl; test/tracker_warmstart_test.jl"
+rationale = "Tracker implementation is new; v2 path behavior and recent zero-crossing regressions are covered."
+
+[[testset]]
+source = "unique_points_test.jl"
+line = 1
+raw = "@testset \"UniquePoints\" begin"
+classification = "equivalent-test"
+evidence = "test/unique_points_test.jl; test/result_clustering_test.jl"
+rationale = "Unique-point and multiplicity behavior is directly covered."
+
+[[testset]]
+source = "unique_points_test.jl"
+line = 36
+raw = "@testset \"Multiplicities\" begin"
+classification = "equivalent-test"
+evidence = "test/unique_points_test.jl; test/result_clustering_test.jl"
+rationale = "Unique-point and multiplicity behavior is directly covered."
+
+[[testset]]
+source = "utils_test.jl"
+line = 1
+raw = "@testset \"utils.jl\" begin"
+classification = "replacement-test"
+evidence = "test/utils_test.jl"
+rationale = "Utility behavior is covered by v3 equivalents; implementation details differ."
+
+[[testset]]
+source = "utils_test.jl"
+line = 2
+raw = "@testset \"writing and reading\" begin"
+classification = "replacement-test"
+evidence = "test/utils_test.jl"
+rationale = "Utility behavior is covered by v3 equivalents; implementation details differ."
+
+[[testset]]
+source = "utils_test.jl"
+line = 25
+raw = "@testset \"SegmentStepper\" begin"
+classification = "replacement-test"
+evidence = "test/utils_test.jl"
+rationale = "Utility behavior is covered by v3 equivalents; implementation details differ."
+
+[[testset]]
+source = "valuation_test.jl"
+line = 1
+raw = "@testset \"Valuation\" begin"
+classification = "equivalent-test"
+evidence = "test/valuation_test.jl"
+rationale = "Valuation behavior is directly covered."
+
+[[testset]]
+source = "valuation_test.jl"
+line = 2
+raw = "@testset \"Example 1\" begin"
+classification = "equivalent-test"
+evidence = "test/valuation_test.jl"
+rationale = "Valuation behavior is directly covered."
+
+[[testset]]
+source = "valuation_test.jl"
+line = 21
+raw = "@testset \"Example 2\" begin"
+classification = "equivalent-test"
+evidence = "test/valuation_test.jl"
+rationale = "Valuation behavior is directly covered."
+
+[[testset]]
+source = "valuation_test.jl"
+line = 47
+raw = "@testset \"Example 3\" begin"
+classification = "equivalent-test"
+evidence = "test/valuation_test.jl"
+rationale = "Valuation behavior is directly covered."
+
+[[testset]]
+source = "voronoi_tree_test.jl"
+line = 1
+raw = "@testset \"VoronoiTree\" begin"
+classification = "equivalent-test"
+evidence = "test/voronoi_tree_test.jl"
+rationale = "VoronoiTree behavior is directly covered."
+
+[[testset]]
+source = "witness_set_test.jl"
+line = 1
+raw = "@testset \"Witness Sets\" begin"
+classification = "replacement-test"
+evidence = "test/witness_set_test.jl; test/witness_intersection_variables_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "Witness sets use ambient-coordinate v3 architecture; affine/projective/membership/intersection semantics are covered."
+
+[[testset]]
+source = "witness_set_test.jl"
+line = 3
+raw = "@testset \"affine\" begin"
+classification = "replacement-test"
+evidence = "test/witness_set_test.jl; test/witness_intersection_variables_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "Witness sets use ambient-coordinate v3 architecture; affine/projective/membership/intersection semantics are covered."
+
+[[testset]]
+source = "witness_set_test.jl"
+line = 26
+raw = "@testset \"projective\" begin"
+classification = "replacement-test"
+evidence = "test/witness_set_test.jl; test/witness_intersection_variables_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "Witness sets use ambient-coordinate v3 architecture; affine/projective/membership/intersection semantics are covered."
+
+[[testset]]
+source = "witness_set_test.jl"
+line = 56
+raw = "@testset \"dim / codim\" begin"
+classification = "replacement-test"
+evidence = "test/witness_set_test.jl; test/witness_intersection_variables_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "Witness sets use ambient-coordinate v3 architecture; affine/projective/membership/intersection semantics are covered."
+
+[[testset]]
+source = "witness_set_test.jl"
+line = 87
+raw = "@testset \"dimension zero\" begin"
+classification = "replacement-test"
+evidence = "test/witness_set_test.jl; test/witness_intersection_variables_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "Witness sets use ambient-coordinate v3 architecture; affine/projective/membership/intersection semantics are covered."
+
+[[testset]]
+source = "witness_set_test.jl"
+line = 106
+raw = "@testset \"membership\" begin"
+classification = "replacement-test"
+evidence = "test/witness_set_test.jl; test/witness_intersection_variables_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "Witness sets use ambient-coordinate v3 architecture; affine/projective/membership/intersection semantics are covered."
+
+[[testset]]
+source = "witness_set_test.jl"
+line = 118
+raw = "@testset \"intersect\" begin"
+classification = "replacement-test"
+evidence = "test/witness_set_test.jl; test/witness_intersection_variables_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "Witness sets use ambient-coordinate v3 architecture; affine/projective/membership/intersection semantics are covered."
+
+[[testset]]
+source = "witness_set_test.jl"
+line = 139
+raw = "@testset \"membership projective\" begin"
+classification = "replacement-test"
+evidence = "test/witness_set_test.jl; test/witness_intersection_variables_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "Witness sets use ambient-coordinate v3 architecture; affine/projective/membership/intersection semantics are covered."
+
+[[testset]]
+source = "witness_set_test.jl"
+line = 151
+raw = "@testset \"intersect projective\" begin"
+classification = "replacement-test"
+evidence = "test/witness_set_test.jl; test/witness_intersection_variables_test.jl; test/linear_subspace_edge_cases_test.jl"
+rationale = "Witness sets use ambient-coordinate v3 architecture; affine/projective/membership/intersection semantics are covered."
