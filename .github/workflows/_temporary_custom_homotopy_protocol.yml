@@ -1,0 +1,39 @@
+name: Temporary custom homotopy protocol validation
+
+on:
+  push:
+    branches: [v3-fixed-parameter-homotopy]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v3-fixed-parameter-homotopy
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13'
+      - name: Apply protocol refinement
+        run: python .tmp_refine_custom_homotopy_protocol.py
+      - name: Instantiate tests
+        run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Public protocol regression
+        run: julia -t 2 --project=test test/fixed_parameter_homotopy_test.jl
+      - name: Existing fixed-parameter and homotopy solve suites
+        run: julia -t 2 --project=test -e 'using Test; include("test/fixed_parameter_test.jl"); include("test/homotopy_solve_test.jl")'
+      - name: Import and concrete-struct quality gates
+        run: julia --project=test -e 'using Test; include("test/explicit_imports_test.jl"); include("test/concrete_structs_test.jl")'
+      - name: JET gate
+        run: julia --project=test test/jet_test.jl
+      - name: Commit tested semantic tree and remove harness
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .tmp_refine_custom_homotopy_protocol.py .github/workflows/_temporary_custom_homotopy_protocol.yml
+          git add src/HomotopyContinuationNext.jl src/core/abstract_types.jl src/core/fixed_parameter_homotopy.jl src/solving/homotopy_solve.jl test/fixed_parameter_homotopy_test.jl
+          git commit -m "Expose the custom homotopy extension protocol"
+          git push
