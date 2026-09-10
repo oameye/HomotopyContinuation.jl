@@ -1173,7 +1173,7 @@ function certify(
         cache::CertificationCache = CertificationCache(F),
     )
     return certify(
-        F, solutions(X), p, alg, exec; cache = cache,
+        F, solution.(results(X)), p, alg, exec; cache = cache,
     )
 end
 
@@ -1273,7 +1273,7 @@ end
     DistinctCertifiedSolutions(F::System, params; extended_certificate = false, max_precision = 256, reference_point = nothing)
 
 Create an empty accumulator for the (parametric) system `F` at parameters
-`params` (`nothing` for a parameter-free system). Distinctness is decided by
+`params` (`nothing` for a parameter-free `F`). Distinctness is decided by
 distance to a random `reference_point`, which may be given explicitly.
 """
 function DistinctCertifiedSolutions(
