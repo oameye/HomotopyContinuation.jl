@@ -19,16 +19,17 @@ jobs:
           version: '1.13'
       - name: Instantiate
         run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
-      - name: Baseline symbolic + instruction counts
+      - name: Probe pristine-v3 symbolic determinism
+        shell: bash
         run: |
-          julia --project=test test/symbolic_utils_test.jl
-          julia --project=test test/instruction_count_test.jl
-      - name: Apply logarithm semantic commit
+          for i in 1 2 3 4 5; do
+            echo "=== symbolic run $i ==="
+            julia --project=test test/symbolic_utils_test.jl || true
+          done
+      - name: Probe pristine-v3 instruction counts
+        shell: bash
         run: |
-          git config user.name 'diagnostic'
-          git config user.email 'diagnostic@invalid.example'
-          git cherry-pick 5e83ff3e23d9fd2aa0643c44fc57260a6b4da45c
-      - name: Log-only symbolic + instruction counts
-        run: |
-          julia --project=test test/symbolic_utils_test.jl
-          julia --project=test test/instruction_count_test.jl
+          for i in 1 2 3 4 5; do
+            echo "=== instruction-count run $i ==="
+            julia --project=test test/instruction_count_test.jl || true
+          done
