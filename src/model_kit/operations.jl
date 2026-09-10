@@ -62,6 +62,7 @@ end
     OP_ASIN # sin⁻¹(a)
     OP_COSH # cosh(a)
     OP_EXP # e^a
+    OP_LOG # log(a), principal branch
     OP_SINH # sinh(a)
     OP_TAN # tan(a)
     OP_TANH # tanh(a)
@@ -76,7 +77,7 @@ const _OP_ARITY = (
     2, 2, 2, 2, 2,
     3, 3, 3, 3, 3,
     4, 4, 4, 4,
-    1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1,
     2,
 )
 
@@ -87,7 +88,7 @@ const _OP_CALL = (
     :op_add, :op_div, :op_mul, :op_sub, :op_pow_int,
     :op_add3, :op_mul3, :op_muladd, :op_mulsub, :op_submul,
     :op_add4, :op_mul4, :op_mulmuladd, :op_mulmulsub,
-    :op_acos, :op_asin, :op_cosh, :op_exp, :op_sinh, :op_tan, :op_tanh,
+    :op_acos, :op_asin, :op_cosh, :op_exp, :op_log, :op_sinh, :op_tan, :op_tanh,
     :op_pow,
 )
 
@@ -99,7 +100,7 @@ const _OP_IMMEDIATE_INPUT = (
     0, 0, 0, 0, 2,
     0, 0, 0, 0, 0,
     0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
     0,
 )
 
@@ -183,6 +184,7 @@ end
 @inline op_asin(x) = asin(x)
 @inline op_cosh(x) = cosh(x)
 @inline op_exp(x) = exp(x)
+@inline op_log(x) = log(x)
 @inline op_sinh(x) = sinh(x)
 @inline op_tan(x) = tan(x)
 @inline op_tanh(x) = tanh(x)

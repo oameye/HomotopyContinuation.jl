@@ -47,6 +47,8 @@ Base.@propagate_inbounds acb_op_sqrt!(t, x::Arblib.AcbOrRef, m) =
     _acb_on_negative_axis(x) ? Arblib.indeterminate!(t) : Arblib.sqrt!(t, x)
 Base.@propagate_inbounds acb_op_identity!(t, x, m) = Arblib.set!(t, x)
 Base.@propagate_inbounds acb_op_exp!(t, x, m) = Arblib.exp!(t, x)
+Base.@propagate_inbounds acb_op_log!(t, x::Arblib.AcbOrRef, m) =
+    _acb_on_negative_axis(x) ? Arblib.indeterminate!(t) : Arblib.log!(t, x)
 Base.@propagate_inbounds acb_op_sinh!(t, x, m) = Arblib.sinh!(t, x)
 Base.@propagate_inbounds acb_op_cosh!(t, x, m) = Arblib.cosh!(t, x)
 Base.@propagate_inbounds acb_op_tan!(t, x, m) = Arblib.tan!(t, x)
