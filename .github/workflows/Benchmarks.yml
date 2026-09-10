@@ -1,0 +1,99 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [v3]
+    paths:
+      - '.github/workflows/Benchmarks.yml'
+      - 'src/**'
+      - 'ext/**'
+      - 'benchmark/**'
+      - 'Project.toml'
+  pull_request:
+    branches: [v3]
+    paths:
+      - '.github/workflows/Benchmarks.yml'
+      - 'src/**'
+      - 'ext/**'
+      - 'benchmark/**'
+      - 'Project.toml'
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+env:
+  JULIA_NUM_THREADS: '1'
+  OPENBLAS_NUM_THREADS: '1'
+  OMP_NUM_THREADS: '1'
+
+jobs:
+  benchmark:
+    name: Benchmark tracking / Julia 1.13
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    if: ${{ !github.event.pull_request.draft }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          show-versioninfo: true
+          version: '1.13'
+          arch: x64
+      - uses: julia-actions/cache@v3
+      - name: Run benchmarks
+        run: |
+          cd benchmark
+          julia --project --threads=1 --gcthreads=1 --color=yes -e '
+            using Pkg
+            Pkg.develop(PackageSpec(path=joinpath(pwd(), "..")))
+            Pkg.instantiate()
+            include("runbenchmarks.jl")'
+      - name: Parse and compare benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: HomotopyContinuationNext v3
+          tool: julia
+          output-file-path: benchmark/benchmarks_output.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          alert-threshold: '130%'
+          fail-threshold: '170%'
+          comment-on-alert: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+          comment-always: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+          fail-on-alert: true
+          benchmark-data-dir-path: benchmark-v3
+          max-items-in-chart: 100
+          auto-push: ${{ github.event_name == 'push' }}
+
+  ttfx:
+    name: TTFX smoke / Julia 1.13
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: ${{ !github.event.pull_request.draft }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          show-versioninfo: true
+          version: '1.13'
+          arch: x64
+      - uses: julia-actions/cache@v3
+      - name: Instantiate benchmark environment
+        run: julia --project=benchmark -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Run first-call latency workloads
+        run: julia --project=benchmark benchmark/runttfx.jl | tee ttfx_output.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ttfx-julia-1.13
+          path: ttfx_output.txt
