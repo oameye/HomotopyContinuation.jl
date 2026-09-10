@@ -1,0 +1,49 @@
+name: Temporary PR 1-8 integration validation
+
+on:
+  push:
+    branches: [v3-integration-pr1-pr8]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v3-integration-pr1-pr8
+          fetch-depth: 0
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13'
+      - name: Stack semantic PR commits
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for sha in \
+            497afbdb46183b1308673d927122003efe327fa8 \
+            b05f20d2074903110e85db321f7ca84a154c04e8 \
+            61180cf252bbd7a29f05da2718254a49725aebd7 \
+            5e83ff3e23d9fd2aa0643c44fc57260a6b4da45c \
+            2cbb9eb487766087832375282a4938e071639900 \
+            d554831292644b349f74908abf645c8b75bdb42d \
+            deef28bb0cfbb0e5a58c25ff1cc4c4e540388395 \
+            284ae759af2e07e2b67afdece489bfc6d3eec0d0
+          do
+            git cherry-pick "$sha"
+          done
+      - name: Instantiate core tests
+        run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Full core suite
+        run: julia -t 4 --project=test test/runtests.jl --jobs=4
+      - name: Instantiate certification tests
+        run: julia --project=lib/HomotopyContinuationNextCertification/test -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="lib/HomotopyContinuationNextCertification")]); Pkg.instantiate()'
+      - name: Full certification suite
+        run: julia -t 4 --project=lib/HomotopyContinuationNextCertification/test lib/HomotopyContinuationNextCertification/test/runtests.jl
+      - name: Save tested integration tree and remove harness
+        run: |
+          git rm .github/workflows/_temporary_integration_pr1_pr8.yml
+          git commit -m "Record validated PR 1-8 integration tree"
+          git push
