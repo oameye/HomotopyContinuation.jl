@@ -40,7 +40,7 @@ using HomotopyContinuationNext:
     # rebuild-a-struct-by-field-name helper
     _with_fields,
     # results consumed by the certify entry points
-    Result, PathResult, MonodromyResult, CertifiedEndpoint,
+    Result, PathResult, MonodromyResult, CertifiedEndpoint, results,
     # the monodromy seam: core names the accumulator and candidate supertypes
     AbstractCertifiedSolutions, AbstractCertifiedCandidate,
     # lazy path tracking, for certification of a `ResultIterator`
