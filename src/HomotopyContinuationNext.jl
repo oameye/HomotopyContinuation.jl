@@ -27,7 +27,7 @@ end
 
 export @polyvar, solve, System
 export CompositionSystem, compose
-export FixedParameterSystem, fix_parameters
+export FixedParameterSystem, FixedParameterHomotopy, fix_parameters
 export @var, @unique_var, Expression, differentiate, subs, num_den
 export expand, to_dict, horner, monomials, dense_poly, rand_poly
 export coefficients, coeffs_as_dense_poly
@@ -134,6 +134,7 @@ include("core/subspace_homotopies.jl")
 include("core/affine_chart.jl")
 include("core/sliced_system.jl")
 include("core/fixed_parameter_system.jl")
+include("core/fixed_parameter_homotopy.jl")
 include("core/system_evaluate.jl")
 include("core/symbolic_homotopy.jl")
 include("core/toric_homotopy.jl")
