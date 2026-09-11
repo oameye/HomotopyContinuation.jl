@@ -174,12 +174,13 @@ end
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
         rng::Random.MersenneTwister,
         show_monodromy_progress::Bool, exec::AbstractExecutor,
+        atol::Float64, rtol::Float64,
     )::Nothing where {P, V, S <: System}
     state = RegenerationState(
         eqs, vars, u, i, codim, Fᵢ, projective, ℓ, ℓ_coeffs,
         tracker_options, endgame_options, rng,
     )
-    fill_up!(out, monodromy_options, state, show_monodromy_progress, exec)
+    fill_up!(out, monodromy_options, state, show_monodromy_progress, exec; atol = atol, rtol = rtol)
     return nothing
 end
 
@@ -198,13 +199,23 @@ _equation_by_equation_monodromy() =
 
 How [`Regeneration`](@ref) orders the equations before regenerating:
 `EquationSorting.UNSORTED` keeps the given order, `EquationSorting.BY_DEGREE`
-sorts by decreasing degree, and `EquationSorting.RANDOMIZED` additionally
-replaces them by a random upper-triangular combination of the sorted equations.
+sorts by increasing degree, and `EquationSorting.RANDOMIZED` sorts by decreasing
+degree before replacing the equations by a random upper-triangular combination.
 """
 @enumx EquationSorting::Int8 begin
     UNSORTED
     BY_DEGREE
     RANDOMIZED
+end
+
+function _regeneration_sortperm(H, sorted::EquationSorting.T)::Vector{Int}
+    if sorted === EquationSorting.BY_DEGREE
+        return sortperm(H; by = degree)
+    elseif sorted === EquationSorting.RANDOMIZED
+        return sortperm(H; by = degree, rev = true)
+    else
+        return collect(eachindex(H))
+    end
 end
 
 """
@@ -365,10 +376,9 @@ function solve(
         tracker_options, endgame_options,
     )
 
-    # sort equations by decreasing degree
     eqs = _regeneration_equations(F)
     if sorted !== EquationSorting.UNSORTED
-        σ = sortperm(H; by = degree, rev = true)
+        σ = _regeneration_sortperm(H, sorted)
         eqs = eqs[σ]
         H = H[σ]
     end
@@ -413,7 +423,7 @@ function solve(
                 out, monodromy_options, eqs, vars, u, i, codim, Fᵢ,
                 projective, ℓ, ℓ_coeffs,
                 tracker_options, endgame_options, rng,
-                show_monodromy_progress, exec,
+                show_monodromy_progress, exec, atol, rtol,
             )
         end
         progress !== nothing && ProgressMeter.next!(progress)
@@ -972,12 +982,13 @@ end
 
 function fill_up!(
         out, monodromy_options::MonodromyOptions, state::RegenerationState,
-        show_monodromy_progress::Bool, exec::AbstractExecutor,
+        show_monodromy_progress::Bool, exec::AbstractExecutor;
+        atol::Float64, rtol::Float64,
     )
     Fᵢ = state.Fᵢ
     for W in out
         if W !== nothing && dim(W) > 0 && degree(W) > 0
-            opts = _regeneration_monodromy_options(monodromy_options, W)
+            opts = _regeneration_monodromy_options(monodromy_options, W, atol, rtol)
             res = _monodromy_with_options(
                 Fᵢ, W.R, linear_subspace(W), opts;
                 exec = exec, tracker_options = state.tracker_options,
@@ -985,7 +996,13 @@ function fill_up!(
                 seed = rand(state.rng, UInt32),
             )
             W.R = nsolutions(res) == 0 ? Vector{Vector{ComplexF64}}() :
-                unique_points(solutions(res))
+                unique_points(
+                    solutions(res); distance = opts.distance,
+                    group_actions = opts.group_actions,
+                    triangle_inequality = opts.triangle_inequality,
+                    atol = opts.unique_points_atol::Float64,
+                    rtol = opts.unique_points_rtol::Float64,
+                )
         end
     end
     return nothing
@@ -1088,9 +1105,12 @@ function Base.intersect(
     # The d-th-root tracking can reach the same solution more than once; dedupe
     # the start points so the monodromy fill-up is not seeded with duplicates.
     for Wi in Ws
-        isempty(Wi.R) || (Wi.R = unique_points(Wi.R))
+        isempty(Wi.R) || (Wi.R = unique_points(Wi.R; atol = atol, rtol = rtol))
     end
-    fill_up!(Ws, monodromy_options, fill_state, show_monodromy_progress, exec)
+    fill_up!(
+        Ws, monodromy_options, fill_state, show_monodromy_progress, exec;
+        atol = atol, rtol = rtol,
+    )
 
     G = System([eqs; h]; parameters = empty(vars), variables = vars)
     out = WitnessSet[]
@@ -1225,10 +1245,22 @@ end
 # The witness points of one component are a trace-tested loop with no permutations;
 # every other option is the caller's. The target count allows a little slack in case
 # a singular solution slips through.
-_regeneration_monodromy_options(M::MonodromyOptions, W) = _with_fields(
+_regeneration_monodromy_options(
+    M::MonodromyOptions, W, atol::Float64, rtol::Float64,
+) = _with_fields(
     M,
     (
         permutations = false, trace_test = true,
         target_solutions_count = Int(floor(1.5 * degree(W))),
+        # Regeneration owns witness-point identity.  Monodromy is an internal
+        # discovery engine here, so it must use the same fixed tolerance policy
+        # as the surrounding regeneration/intersection algorithm.
+        unique_points_atol = atol,
+        unique_points_rtol = rtol,
+        # Internal regeneration is computing an actual witness set, not a
+        # symmetry quotient. Group actions may still be present in the caller's
+        # standalone monodromy configuration, but they must not alter witness
+        # cardinality here.
+        equivalence_classes = false,
     ),
 )
