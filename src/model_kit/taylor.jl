@@ -93,7 +93,7 @@ Base.:-(x::TTS{N, T}) where {N, T} = TTS(ntuple(i -> -x.val[i], Val(N)))
 A vector of `TruncatedTaylorSeries{N,T}` backed by an `FSMat{T}`.
 
 The backing matrix has shape `N × n`: `N` rows for Taylor coefficient orders
-(0 to N-1) and `n` columns for vector elements.
+(0 to N-1) and `n` columns for elements.
 """
 struct TaylorVector{N, T} <: AbstractVector{TTS{N, T}}
     data::FSMat{T}
@@ -526,6 +526,29 @@ end
         Base.@_inline_meta
         $(stmts...)
         TTS($(Expr(:tuple, evars...)))
+    end
+end
+
+# OP_LOG
+# l[0] = log(a[0]) on the principal branch. For k ≥ 1, use
+# l′ = a′ / a with b = 1/a:
+# l[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * b[k-j].
+@generated function taylor_op_log(a::TTS{N, T}) where {N, T}
+    stmts = Expr[:(l1 = log(a.val[1]))]
+    if N >= 2
+        push!(stmts, :(b = taylor_op_inv(a)))
+        for k in 1:(N - 1)
+            terms = Expr[
+                :($j * a.val[$(j + 1)] * b.val[$(k - j + 1)]) for j in 1:k
+            ]
+            push!(stmts, :($(Symbol(:l, k + 1)) = ($(_expr_sum(terms))) / $k))
+        end
+    end
+    lvars = Symbol[Symbol(:l, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, lvars...)))
     end
 end
 

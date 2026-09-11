@@ -26,6 +26,7 @@ Unary function applied by an `SUnary` node. Each kind lowers to one arity-1
     UNARY_SIN
     UNARY_COS
     UNARY_EXP
+    UNARY_LOG
     UNARY_TAN
     UNARY_ASIN
     UNARY_ACOS
@@ -39,6 +40,7 @@ end
     kind == SUnaryKind.UNARY_SIN && return OpType.OP_SIN
     kind == SUnaryKind.UNARY_COS && return OpType.OP_COS
     kind == SUnaryKind.UNARY_EXP && return OpType.OP_EXP
+    kind == SUnaryKind.UNARY_LOG && return OpType.OP_LOG
     kind == SUnaryKind.UNARY_TAN && return OpType.OP_TAN
     kind == SUnaryKind.UNARY_ASIN && return OpType.OP_ASIN
     kind == SUnaryKind.UNARY_ACOS && return OpType.OP_ACOS
@@ -52,6 +54,7 @@ end
     kind == SUnaryKind.UNARY_SIN && return sin(val)
     kind == SUnaryKind.UNARY_COS && return cos(val)
     kind == SUnaryKind.UNARY_EXP && return exp(val)
+    kind == SUnaryKind.UNARY_LOG && return log(val)
     kind == SUnaryKind.UNARY_TAN && return tan(val)
     kind == SUnaryKind.UNARY_ASIN && return asin(val)
     kind == SUnaryKind.UNARY_ACOS && return acos(val)

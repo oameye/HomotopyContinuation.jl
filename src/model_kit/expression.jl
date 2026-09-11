@@ -4,7 +4,7 @@
 # broadcasting and matrix products build expression trees. It covers everything
 # the tape can execute that `MultivariatePolynomials` cannot express: division,
 # powers with a negative or non-integer exponent, and the unary functions
-# (`sqrt`, `exp`, `sin`, `cos`, `tan`, `asin`, `acos`, `sinh`, `cosh`, `tanh`).
+# (`sqrt`, `exp`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `sinh`, `cosh`, `tanh`).
 #
 # The tree is canonicalized on construction (flattening, constant folding, like
 # term collection, power collection) so that structurally equal expressions are
@@ -361,6 +361,7 @@ function _unary_name(kind::SUnaryKind.T)::String
     kind == SUnaryKind.UNARY_SIN && return "sin"
     kind == SUnaryKind.UNARY_COS && return "cos"
     kind == SUnaryKind.UNARY_EXP && return "exp"
+    kind == SUnaryKind.UNARY_LOG && return "log"
     kind == SUnaryKind.UNARY_TAN && return "tan"
     kind == SUnaryKind.UNARY_ASIN && return "asin"
     kind == SUnaryKind.UNARY_ACOS && return "acos"
@@ -392,6 +393,7 @@ Base.cos(a::Expression)::Expression = _efn(SUnaryKind.UNARY_COS, a)
 # `sincos` would route a symbolic argument through `float`.
 Base.sincos(a::Expression)::Tuple{Expression, Expression} = (sin(a), cos(a))
 Base.exp(a::Expression)::Expression = _efn(SUnaryKind.UNARY_EXP, a)
+Base.log(a::Expression)::Expression = _efn(SUnaryKind.UNARY_LOG, a)
 Base.tan(a::Expression)::Expression = _efn(SUnaryKind.UNARY_TAN, a)
 Base.asin(a::Expression)::Expression = _efn(SUnaryKind.UNARY_ASIN, a)
 Base.acos(a::Expression)::Expression = _efn(SUnaryKind.UNARY_ACOS, a)
@@ -694,6 +696,8 @@ function _unary_derivative(kind::SUnaryKind.T, a::Expression)::Expression
         return _emul(Expression[-one(Expression), _efn(SUnaryKind.UNARY_SIN, a)])
     elseif kind == SUnaryKind.UNARY_EXP
         return _efn(SUnaryKind.UNARY_EXP, a)
+    elseif kind == SUnaryKind.UNARY_LOG
+        return _epow(a, -1)
     elseif kind == SUnaryKind.UNARY_TAN
         return _eadd(
             Expression[one(Expression), _epow(_efn(SUnaryKind.UNARY_TAN, a), 2)],
