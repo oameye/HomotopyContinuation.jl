@@ -665,19 +665,17 @@ recorded permutations are returned; otherwise repetitions are removed.
 If a solution was not tracked in a loop, the corresponding entry is 0.
 """
 function permutations(r::MonodromyResult; reduced::Bool = true)::Matrix{Int}
-    π = r.statistics.permutations
+    π = reduced ? unique(r.statistics.permutations) : r.statistics.permutations
     N = nresults(r)
-
-    π = filter(πⱼ -> length(πⱼ) == N, π)
-    if reduced
-        π = unique(π)
+    for πⱼ in π
+        N = max(N, length(πⱼ))
+        isempty(πⱼ) || (N = max(N, maximum(πⱼ)))
     end
 
     A = zeros(Int, N, length(π))
-    for (j, πⱼ) in enumerate(π), i in 1:N
+    for (j, πⱼ) in enumerate(π), i in eachindex(πⱼ)
         A[i, j] = πⱼ[i]
     end
-
     return A
 end
 
@@ -1710,6 +1708,30 @@ function add!(
     return (id, true, accepted)
 end
 
+function add_tracked_result!(
+        MS::HeuristicMonodromySolver, res::PathResult, id::Int, ::Nothing,
+        tid::Int = 1,
+    )
+    atol, rtol = _dedup_tolerances(MS.options, res)
+    x = solution(res)
+    UP = MS.unique_points
+    existing = search_in_radius(UP, x, tolerance_radius(UP, x, atol, rtol))
+    existing === nothing || return (existing, false, res)
+
+    validated = track_start!(MS.workers[tid], x)
+    if validated === nothing || !is_success(validated) || validated.singular
+        return (0, false, res)
+    end
+    return add!(MS, validated, id, nothing)
+end
+
+function add_tracked_result!(
+        MS::CertifiedMonodromySolver, res::PathResult, id::Int,
+        candidate::Union{Nothing, AbstractCertifiedCandidate}, ::Int = 1,
+    )
+    return add!(MS, res, id, candidate)
+end
+
 """
     check_start_solutions!(MS, X)
 
@@ -1828,11 +1850,14 @@ function serial_monodromy_solve!(
             res = track_loop!(
                 ws, loop(MS, job.loop_id), results[job.id], collect_trace, MS,
             )
-            if res !== nothing
+            if res !== nothing && !res.singular
                 loop_tracked!(stats)
 
                 # 1) check whether the solution already exists
-                id, got_added, accepted = add!(MS, res, length(results) + 1)
+                candidate = certify_candidate(MS, res, 1)
+                id, got_added, accepted = add_tracked_result!(
+                    MS, res, length(results) + 1, candidate, 1,
+                )
 
                 if opts.permutations
                     add_permutation!(stats, job.loop_id, job.id, id)
@@ -2048,7 +2073,7 @@ function threaded_monodromy_solve!(
                                 ws, loop(MS, job.loop_id), start_res, collect_trace, MS,
                             )
 
-                            if res !== nothing
+                            if res !== nothing && !res.singular
                                 loop_tracked!(stats)
 
                                 # 1) check whether the solution already exists.
@@ -2065,8 +2090,8 @@ function threaded_monodromy_solve!(
                                 Base.@lock data_lock begin
                                     accepted = res
                                     if length(results) < target_count
-                                        id, got_added, accepted = add!(
-                                            MS, res, length(results) + 1, candidate,
+                                        id, got_added, accepted = add_tracked_result!(
+                                            MS, res, length(results) + 1, candidate, tid,
                                         )
                                         if opts.permutations
                                             add_permutation!(

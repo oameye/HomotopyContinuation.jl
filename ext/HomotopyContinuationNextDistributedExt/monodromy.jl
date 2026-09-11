@@ -257,7 +257,7 @@ function _handle_monodromy_result!(
     end
 
     res = r.result
-    if res === nothing
+    if res === nothing || res.singular
         HCN.loop_failed!(stats)
         if opts.permutations
             HCN.add_permutation!(stats, r.loop_id, r.id, 0)
@@ -266,8 +266,14 @@ function _handle_monodromy_result!(
     end
     HCN.loop_tracked!(stats)
 
-    # 1) check whether the solution already exists
-    id, got_added, accepted = HCN.add!(MS, res, length(results) + 1)
+    # The driver owns shared identity state.  Apply exactly the same admission
+    # rule as serial/threaded execution: duplicates reuse an existing validated
+    # start; genuinely new heuristic endpoints are refined at the base before
+    # they can become future starts; certified mode keeps its certificate path.
+    candidate = HCN.certify_candidate(MS, res, 1)
+    id, got_added, accepted = HCN.add_tracked_result!(
+        MS, res, length(results) + 1, candidate, 1,
+    )
 
     if opts.permutations
         HCN.add_permutation!(stats, r.loop_id, r.id, id)
