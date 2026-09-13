@@ -107,12 +107,15 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             unique_points_atol = 2.0e-12, unique_points_rtol = 3.0e-9,
         )
         copied_options = HomotopyContinuationNext._decompose_monodromy_options(
-            identity_options,
+            identity_options, 1.0e-10, 1.0e-8,
         )
         @test copied_options.distance === metric
         @test copied_options.triangle_inequality === false
-        @test copied_options.unique_points_atol == 2.0e-12
-        @test copied_options.unique_points_rtol == 3.0e-9
+        # Decomposition owns witness cardinality, so it replaces the caller's
+        # point-identity tolerances rather than inheriting them. The values here
+        # differ from the ones on `identity_options` so the override is visible.
+        @test copied_options.unique_points_atol == 1.0e-10
+        @test copied_options.unique_points_rtol == 1.0e-8
 
         zero_metric = (x, y) -> 0.0
         identity_points = UniquePoints(

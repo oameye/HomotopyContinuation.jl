@@ -317,7 +317,7 @@ function _decompose_with_monodromy(
             root = _identity_root!(identity, first(live_orbit))
             grown_orbit = [
                 k for k in eachindex(master)
-                if !done[k] && _identity_root!(identity, k) == root
+                    if !done[k] && _identity_root!(identity, k) == root
             ]
 
             if something(trace(res_orbit), Inf) >= options.trace_test_tol
