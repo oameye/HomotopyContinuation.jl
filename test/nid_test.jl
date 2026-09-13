@@ -685,13 +685,17 @@ end
     @test symmetric.equivalence_classes
     @test symmetric.group_actions !== nothing
 
+    # Component order within a dimension is not stable between runs: the
+    # default executor is threaded, so discovery order follows scheduling.
+    sorted_degrees(N) = Dict(d => sort(ds) for (d, ds) in degrees(N))
+
     N_plain = solve(
         F, Decomposition(;
             monodromy = plain, seed = UInt32(0x1234), show_progress = false,
         ),
     )
     @test ncomponents(N_plain) == 2
-    @test degrees(N_plain) == Dict(2 => [2, 1])
+    @test sorted_degrees(N_plain) == Dict(2 => [1, 2])
 
     seen[] = nothing
     N_symmetric = solve(
@@ -700,5 +704,5 @@ end
         ),
     )
     @test ncomponents(N_symmetric) == ncomponents(N_plain)
-    @test degrees(N_symmetric) == degrees(N_plain)
+    @test sorted_degrees(N_symmetric) == sorted_degrees(N_plain)
 end
