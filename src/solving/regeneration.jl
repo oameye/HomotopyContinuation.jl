@@ -998,7 +998,6 @@ function fill_up!(
             W.R = nsolutions(res) == 0 ? Vector{Vector{ComplexF64}}() :
                 unique_points(
                     solutions(res); distance = opts.distance,
-                    group_actions = opts.group_actions,
                     triangle_inequality = opts.triangle_inequality,
                     atol = opts.unique_points_atol::Float64,
                     rtol = opts.unique_points_rtol::Float64,
