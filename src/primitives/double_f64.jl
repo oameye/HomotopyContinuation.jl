@@ -614,6 +614,7 @@ end
 
 Base.trunc(a::DoubleF64) = a.hi >= 0.0 ? floor(a) : ceil(a)
 _trunc_int64(a::DoubleF64)::Int64 = a.hi >= 0.0 ? _floor_int64(a) : _ceil_int64(a)
+Base.trunc(::Type{Int64}, a::DoubleF64)::Int64 = _trunc_int64(a)
 Base.isinteger(x::DoubleF64)::Bool = iszero(x - trunc(x))
 
 # ---------------------------------------------------------------------------

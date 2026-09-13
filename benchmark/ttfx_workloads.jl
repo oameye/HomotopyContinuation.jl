@@ -340,7 +340,7 @@ run(::Val{:subspace_sweep_extrinsic}) = _subspace_sweep(false)
 function run(::Val{:result_iterator_lazy})
     F, L = _conic_and_line()
     ri = result_iterator(F, L, TotalDegree(; seed = UInt32(0x1234)))
-    return first(ri), Result(bitmask_filter(is_real, ri))
+    return first(ri), Result(restrict(ri, selection(is_real, ri)))
 end
 
 function _monodromy_system()

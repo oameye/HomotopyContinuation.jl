@@ -1,0 +1,81 @@
+name: Tests
+
+on:
+  push:
+    branches: [v3]
+    paths:
+      - '.github/workflows/Tests.yml'
+      - 'src/**'
+      - 'ext/**'
+      - 'test/**'
+      - 'lib/**'
+      - 'Project.toml'
+  pull_request:
+    branches: [v3]
+    paths:
+      - '.github/workflows/Tests.yml'
+      - 'src/**'
+      - 'ext/**'
+      - 'test/**'
+      - 'lib/**'
+      - 'Project.toml'
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+env:
+  JULIA_NUM_THREADS: '4'
+  OPENBLAS_NUM_THREADS: '1'
+  OMP_NUM_THREADS: '1'
+
+jobs:
+  core:
+    name: Core / Julia ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.10', '1']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          show-versioninfo: true
+          version: ${{ matrix.version }}
+      - uses: julia-actions/cache@v3
+      - name: Instantiate core test environment
+        run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Run core suite
+        run: julia --project=test test/runtests.jl --jobs=4
+
+  certification:
+    name: Certification / Julia 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          show-versioninfo: true
+          version: '1'
+      - uses: julia-actions/cache@v3
+      - name: Instantiate certification test environment
+        run: >-
+          julia --project=lib/HomotopyContinuationNextCertification/test -e
+          'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."),
+          Pkg.PackageSpec(path="lib/HomotopyContinuationNextCertification")]); Pkg.instantiate()'
+      - name: Run certification suite
+        run: julia --project=lib/HomotopyContinuationNextCertification/test -t 4 lib/HomotopyContinuationNextCertification/test/runtests.jl

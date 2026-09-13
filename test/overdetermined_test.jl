@@ -6,12 +6,8 @@ using HomotopyContinuationNext: System, RandomizedSystem, SystemEvaluator,
     solve, TotalDegree, Polyhedral, Continuation, Serial, Threaded,
     nsolutions, solutions, real_solutions, nresults, results, nsingular,
     nexcess_solutions, nat_infinity, is_excess_solution, is_success,
-    ExcessSolutionChecker, check_excess_solution
+    ExcessSolutionChecker, check_excess_solution, FSVec, FSMat
 using DynamicPolynomials: @polyvar
-using FixedSizeArrays: FixedSizeArray
-
-const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
-const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 include("minors_polys.jl")
 

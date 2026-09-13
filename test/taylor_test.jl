@@ -9,10 +9,8 @@ using HomotopyContinuationNext:
     taylor_op_add3, taylor_op_add4, taylor_op_mul3, taylor_op_mul4,
     taylor_op_mulmuladd, taylor_op_mulmulsub,
     taylor_op_exp, taylor_op_sinh, taylor_op_cosh, taylor_op_tan, taylor_op_tanh,
-    taylor_op_asin, taylor_op_acos, taylor_op_pow
+    taylor_op_asin, taylor_op_acos, taylor_op_pow, FSMat
 using HomotopyContinuationNext: OpType, op_call
-using FixedSizeArrays: FixedSizeArray
-const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 @testset "TruncatedTaylorSeries" begin
     @testset "construction" begin

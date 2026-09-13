@@ -63,7 +63,7 @@ function Homotopy(
     )
     return Homotopy(
         polynomials(F), declared_vars, t, params,
-        equation_scales(F), F.evaluator, compile,
+        equation_scales(F), F.evaluator, F.compile_mode,
     )
 end
 

@@ -212,16 +212,20 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
     ]
 
     @testset "membership" begin
-        W = solve(System(F), Witness(; codim = 2, show_progress = false))
+        seed = UInt32(0x5eed)
+        W = solve(System(F), Witness(; codim = 2, seed = seed, show_progress = false))
 
         pt = randn(3)
         q0 = solutions(W)[1]
+        alg = Membership(; seed = seed, show_progress = false)
 
-        @test !membership(pt, W, Membership(; show_progress = false))
-        @test membership(q0, W, Membership(; show_progress = false))
-        a = membership([pt, q0], W, Membership(; show_progress = false))
+        @test !membership(pt, W, alg)
+        @test membership(q0, W, alg)
+        a = membership([pt, q0], W, alg)
         @test a == [false, true]
-        @test membership([pt, q0], W, Membership(; show_progress = true)) == [false, true]
+        @test membership(
+            [pt, q0], W, Membership(; seed = seed, show_progress = true),
+        ) == [false, true]
     end
 
     @testset "intersect" begin

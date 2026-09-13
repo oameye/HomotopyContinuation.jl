@@ -6,12 +6,10 @@ using LinearAlgebra: LinearAlgebra, I, norm, ldiv!, diagm
 
 using HomotopyContinuationNext
 using HomotopyContinuation
+using HomotopyContinuationNext: FSVec
 
 const Next = HomotopyContinuationNext
 const HC = HomotopyContinuation
-
-using FixedSizeArrays: FixedSizeArray
-const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
 
 @testset "Compare v2: DoubleF64" begin
     @testset "arithmetic matches" begin

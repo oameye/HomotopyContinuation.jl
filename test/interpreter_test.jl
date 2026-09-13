@@ -4,11 +4,7 @@ using HomotopyContinuationNext: Interpreter, InstructionSequence, Instruction,
     OpType, execute!, execute_taylor!,
     compile_to_instructions, SExpr, SExprT, cse,
     TruncatedTaylorSeries, TaylorVector,
-    DoubleF64, ComplexDF64
-using FixedSizeArrays: FixedSizeArray
-
-const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
-const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
+    DoubleF64, ComplexDF64, FSVec, FSMat
 
 # Helper: f(x1,x2) = x1*x2 + x1
 function make_test_sequence()
