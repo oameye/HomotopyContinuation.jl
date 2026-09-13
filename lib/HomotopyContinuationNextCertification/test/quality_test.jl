@@ -14,18 +14,13 @@ const Cert = HomotopyContinuationNextCertification
 
 @testset "Quality" begin
     @testset "Aqua" begin
-        # HomotopyContinuationNext is an intra-repo dev dependency with no
-        # [compat] entry (its version is a prerelease), so skip it in the compat
-        # check. Everything else is checked.
-        # `monodromy_certified_solutions` is core's extension point for the
-        # certified duplicate check: core declares it and this package is the
-        # implementer, so its method carries only core's argument types.
         Aqua.test_all(
             Cert;
             deps_compat = (; ignore = [:HomotopyContinuationNext]),
             piracies = (;
                 treat_as_own = [monodromy_certified_solutions],
             ),
+            persistent_tasks = VERSION >= v"1.11",
         )
     end
 
