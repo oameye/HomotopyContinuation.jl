@@ -557,4 +557,53 @@ end
         @test !explicit.equivalence_classes
         @test explicit.group_actions !== nothing
     end
+
+    @testset "a group action never reduces witness cardinality" begin
+        # Regeneration counts witness points, not orbits, so a caller's group
+        # action must not reach the deduplication that fixes witness
+        # cardinality.  `collapse_to_first` is degenerate on purpose: it maps
+        # every point to the first point it is ever shown, so any surviving
+        # quotient collapses a whole witness set onto one point.
+        # Two equations, so regeneration reaches its monodromy fill-up: a conic
+        # cut out of a sphere by a plane, of degree 2.
+        @var a b c
+        F = System([a^2 + b^2 + c^2 - 4, a + b + c]; variables = [a, b, c])
+
+        seen = Ref{Union{Nothing, Vector{ComplexF64}}}(nothing)
+        function collapse_to_first(p)
+            seen[] === nothing && (seen[] = collect(ComplexF64, p))
+            return (seen[]::Vector{ComplexF64},)
+        end
+
+        plain = MonodromyOptions(; trace_test = true)
+        symmetric = MonodromyOptions(;
+            trace_test = true, group_action = collapse_to_first,
+            equivalence_classes = true,
+        )
+        # The caller's own configuration is left alone; only its reach is.
+        @test symmetric.equivalence_classes
+        @test symmetric.group_actions !== nothing
+
+        expected = degree.(
+            solve(
+                F,
+                Regeneration(;
+                    monodromy = plain, seed = UInt32(0x1234), show_progress = false,
+                ),
+            )
+        )
+        @test expected == [2]
+
+        seen[] = nothing
+        got = degree.(
+            solve(
+                F,
+                Regeneration(;
+                    monodromy = symmetric, seed = UInt32(0x1234),
+                    show_progress = false,
+                ),
+            )
+        )
+        @test got == expected
+    end
 end
