@@ -2,14 +2,10 @@ using Test
 import HomotopyContinuationNext as Next
 using HomotopyContinuationNext:
     Expression, System, CompileMode, @var, differentiate, subs,
-    TaylorVector, ComplexDF64
-using FixedSizeArrays: FixedSizeArray
+    TaylorVector, ComplexDF64, FSVec, FSMat
 
-const LogFSVec{T} = FixedSizeArray{T, 1, Memory{T}}
-const LogFSMat{T} = FixedSizeArray{T, 2, Memory{T}}
-
-log_fsv(v) = LogFSVec{ComplexF64}(collect(ComplexF64, v))
-log_fsm(m) = LogFSMat{ComplexF64}(collect(ComplexF64, m))
+log_fsv(v) = FSVec{ComplexF64}(collect(ComplexF64, v))
+log_fsm(m) = FSMat{ComplexF64}(collect(ComplexF64, m))
 
 @testset "Principal logarithm" begin
     @var x
@@ -38,8 +34,8 @@ log_fsm(m) = LogFSMat{ComplexF64}(collect(ComplexF64, m))
             @test u[1] ≈ truth rtol = 1.0e-12
             @test U[1, 1] ≈ jac_truth rtol = 1.0e-12
 
-            u_df64 = LogFSVec{ComplexDF64}(zeros(ComplexDF64, 1))
-            x_df64 = LogFSVec{ComplexDF64}(ComplexDF64[x0])
+            u_df64 = FSVec{ComplexDF64}(zeros(ComplexDF64, 1))
+            x_df64 = FSVec{ComplexDF64}(ComplexDF64[x0])
             Next.evaluate!(u_df64, F.evaluator, x_df64, log_fsv(ComplexF64[]))
             @test ComplexF64(u_df64[1]) ≈ truth rtol = 1.0e-12
 
@@ -48,7 +44,7 @@ log_fsm(m) = LogFSMat{ComplexF64}(collect(ComplexF64, m))
             d1 = 0.2 - 0.1im
             d2 = -0.05 + 0.03im
             d3 = 0.01 + 0.02im
-            xdata = LogFSMat{ComplexF64}(reshape(ComplexF64[x0, d1, d2, d3], 4, 1))
+            xdata = FSMat{ComplexF64}(reshape(ComplexF64[x0, d1, d2, d3], 4, 1))
             taylor_out = log_fsv(zeros(1))
             Next.taylor!(
                 taylor_out, Val(3), F.evaluator,
