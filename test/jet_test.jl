@@ -23,6 +23,12 @@ using HomotopyContinuationNext
             contains(msg, "may be undefined") && contains(msg, "##") && return false
             # Filter Moshi @derive Hash/Eq generated code (false positive union split)
             contains(msg, "variant_getfield") && return false
+            # `FixedParameterHomotopy` forwards to the parameter-aware protocol
+            # (`evaluate!(u, H, x, t, p)` and friends), which is a documented
+            # extension point implemented by user homotopies, not by this package.
+            # The wrapped homotopy is abstract here, so JET cannot resolve it.
+            contains(msg, "FixedParameterHomotopy") &&
+                contains(msg, "AbstractHomotopy") && return false
             return true
         end
         @test length(real_reports) == 0
