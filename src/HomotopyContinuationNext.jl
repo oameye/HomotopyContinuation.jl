@@ -52,7 +52,10 @@ export winding_number, condition_jacobian, last_path_point
 export path_number, start_solution, valuation
 export TrackerOptions, EndgameOptions, EndgameTracker
 export iterator, path_info, PathInfo, PathStep, path_table
+export AbstractHomotopy
 export ParameterHomotopy, Homotopy, expressions, equation_scales
+export nvariables, nparameters, variables, parameters, variable_groups
+export evaluate!, evaluate_and_jacobian!, taylor!, set_solution!, get_solution!
 export GroupActions, SymmetricGroup
 export UniquePoints, search_in_radius, add!, multiplicities, unique_points
 export satisfies_triangle_inequality, InfNorm, EuclideanNorm

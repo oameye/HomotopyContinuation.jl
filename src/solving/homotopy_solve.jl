@@ -150,8 +150,9 @@ Start points are in `H`'s own coordinates, except for an
 [`AffineChartHomotopy`](@ref), which takes projective representatives.
 
 Anything but `Serial()` rebuilds `H` per task, since it owns the buffers it
-evaluates through. Any homotopy can be rebuilt; a `_clone_homotopy` method for
-your own type makes it cheaper by sharing its read-only data.
+evaluates through. Custom homotopies use `deepcopy` by default. If a type cannot
+be deep-copied safely or cheaply, use `solve(build_homotopy, starts, alg, exec)`
+to construct one independent homotopy per worker.
 
 # Example
 ```julia
