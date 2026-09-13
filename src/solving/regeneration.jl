@@ -487,6 +487,16 @@ _check_front_end(F::System, expression::Bool)::Nothing =
         ),
     )
 
+# Witness points and linear subspaces are stored in ordered ambient coordinates.
+# Equal dimension is therefore insufficient: positional renaming would silently
+# reinterpret a witness set built in a different coordinate system.
+_check_same_ambient_variables(F::System, G::System)::Nothing =
+    variables(F) == variables(G) ? nothing : throw(
+        ArgumentError(
+            "witness sets must use the same ambient variables in the same order.",
+        ),
+    )
+
 # Number of roots of unity the u-homotopy starts from.
 _u_degree(h::MP.AbstractPolynomialLike, ::AbstractVector)::Int = MP.maxdegree(h)
 _u_degree(h::Expression, vars::AbstractVector{Expression})::Int =
@@ -1027,6 +1037,7 @@ function Base.intersect(
     size(system(W))[2] == size(system(H))[2] ||
         throw(ArgumentError("Witness sets must be in the same ambient space."))
     _check_front_end(system(H), _is_expression_front_end(system(W)))
+    _check_same_ambient_variables(system(W), system(H))
     _check_regeneration_input(system(W), "`intersect`")
     _check_regeneration_input(system(H), "`intersect`")
 
@@ -1043,11 +1054,9 @@ function Base.intersect(
     )
     projective = W.projective
 
-    # W's and H's equations, both expressed in W's variables `vars`.
+    # The ambient-variable guard above makes positional renaming unnecessary.
     eqs = _regeneration_equations(system(W))
-    heqs = _rename_variables(
-        _regeneration_equations(system(H)), variables(system(H)), vars,
-    )
+    heqs = _regeneration_equations(system(H))
     h = heqs[1]
     ℓ_coeffs = projective ? randn(rng, length(vars)) : Float64[]
     ℓ = _linear_form([eqs; h], vars, ℓ_coeffs)
