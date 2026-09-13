@@ -1,7 +1,8 @@
 using Test, Random
 using HomotopyContinuationNext
 using HomotopyContinuationNext: TrackerOptions, MonodromyOptions, linear_subspace,
-    is_linear, dim
+    is_linear, dim, EquationSorting, _regeneration_sortperm,
+    _regeneration_monodromy_options
 using DynamicPolynomials: @polyvar
 import MultivariatePolynomials as MP
 
@@ -506,5 +507,103 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         by = t -> (round(real(t[1]); digits = 8), round(imag(t[1]); digits = 8))
         @test sort(solutions(M1); by = by) ≈ sort(solutions(M2); by = by)
         @test !advances_ambient(mono)
+    end
+end
+
+@testset "Regeneration ordering and tolerances" begin
+    @testset "degree ordering policy" begin
+        @polyvar x y
+        L = LinearSubspace(zeros(ComplexF64, 0, 2), ComplexF64[])
+        F = System([x]; variables = [x, y])
+        H = [
+            WitnessSet(F, L, [ComplexF64[0, 0] for _ in 1:n])
+                for n in (3, 1, 2)
+        ]
+        @test _regeneration_sortperm(H, EquationSorting.UNSORTED) == [1, 2, 3]
+        @test _regeneration_sortperm(H, EquationSorting.BY_DEGREE) == [2, 3, 1]
+        @test _regeneration_sortperm(H, EquationSorting.RANDOMIZED) == [1, 3, 2]
+    end
+
+    @testset "outer algorithm owns witness-point identity" begin
+        @polyvar u v
+        G = System([u]; variables = [u, v])
+        L = LinearSubspace(zeros(ComplexF64, 0, 2), ComplexF64[])
+        W = WitnessSet(G, L, [ComplexF64[0, 0]])
+
+        # Standalone monodromy keeps its concrete absolute default and adaptive
+        # endpoint-relative default.
+        default_m = MonodromyOptions()
+        @test default_m.unique_points_atol == 1.0e-14
+        @test default_m.unique_points_rtol === nothing
+
+        inherited = _regeneration_monodromy_options(default_m, W, 2.0e-9, 3.0e-7)
+        @test inherited.unique_points_atol == 2.0e-9
+        @test inherited.unique_points_rtol == 3.0e-7
+
+        # Once monodromy is used as an internal regeneration engine, the outer
+        # algorithm's identity tolerance is authoritative.  Nested monodromy
+        # uniqueness settings must not create a second notion of witness identity.
+        explicit_m = MonodromyOptions(;
+            unique_points_atol = 7.0e-12,
+            unique_points_rtol = 8.0e-10,
+            group_action = x -> -x,
+            equivalence_classes = true,
+        )
+        explicit = _regeneration_monodromy_options(explicit_m, W, 2.0e-9, 3.0e-7)
+        @test explicit.unique_points_atol == 2.0e-9
+        @test explicit.unique_points_rtol == 3.0e-7
+        @test explicit.distance === explicit_m.distance
+        @test explicit.triangle_inequality == explicit_m.triangle_inequality
+        @test !explicit.equivalence_classes
+        @test explicit.group_actions !== nothing
+    end
+
+    @testset "a group action never reduces witness cardinality" begin
+        # Regeneration counts witness points, not orbits, so a caller's group
+        # action must not reach the deduplication that fixes witness
+        # cardinality.  `collapse_to_first` is degenerate on purpose: it maps
+        # every point to the first point it is ever shown, so any surviving
+        # quotient collapses a whole witness set onto one point.
+        # Two equations, so regeneration reaches its monodromy fill-up: a conic
+        # cut out of a sphere by a plane, of degree 2.
+        @var a b c
+        F = System([a^2 + b^2 + c^2 - 4, a + b + c]; variables = [a, b, c])
+
+        seen = Ref{Union{Nothing, Vector{ComplexF64}}}(nothing)
+        function collapse_to_first(p)
+            seen[] === nothing && (seen[] = collect(ComplexF64, p))
+            return (seen[]::Vector{ComplexF64},)
+        end
+
+        plain = MonodromyOptions(; trace_test = true)
+        symmetric = MonodromyOptions(;
+            trace_test = true, group_action = collapse_to_first,
+            equivalence_classes = true,
+        )
+        # The caller's own configuration is left alone; only its reach is.
+        @test symmetric.equivalence_classes
+        @test symmetric.group_actions !== nothing
+
+        expected = degree.(
+            solve(
+                F,
+                Regeneration(;
+                    monodromy = plain, seed = UInt32(0x1234), show_progress = false,
+                ),
+            )
+        )
+        @test expected == [2]
+
+        seen[] = nothing
+        got = degree.(
+            solve(
+                F,
+                Regeneration(;
+                    monodromy = symmetric, seed = UInt32(0x1234),
+                    show_progress = false,
+                ),
+            )
+        )
+        @test got == expected
     end
 end
