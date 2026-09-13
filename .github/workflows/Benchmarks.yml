@@ -1,0 +1,229 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [v3]
+    paths:
+      - '.github/workflows/Benchmarks.yml'
+      - 'src/**'
+      - 'ext/**'
+      - 'benchmark/**'
+      - 'Project.toml'
+  pull_request:
+    branches: [v3]
+    paths:
+      - '.github/workflows/Benchmarks.yml'
+      - 'src/**'
+      - 'ext/**'
+      - 'benchmark/**'
+      - 'Project.toml'
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: write
+
+env:
+  JULIA_NUM_THREADS: '1'
+  OPENBLAS_NUM_THREADS: '1'
+  OMP_NUM_THREADS: '1'
+
+jobs:
+  benchmark:
+    name: Benchmark tracking / Julia 1.13
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    if: ${{ !github.event.pull_request.draft }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          show-versioninfo: true
+          version: '1.13'
+          arch: x64
+      - uses: julia-actions/cache@v3
+      - name: Restore benchmark history
+        id: benchmark-history
+        uses: actions/cache/restore@v4
+        with:
+          path: .benchmark-history/steady.json
+          key: steady-v3-${{ runner.os }}-julia-1.13-${{ github.event.pull_request.base.sha || github.sha }}
+          restore-keys: |
+            steady-v3-${{ runner.os }}-julia-1.13-
+      - name: Run benchmarks
+        run: |
+          cd benchmark
+          julia --project --threads=1 --gcthreads=1 --color=yes -e '
+            using Pkg
+            Pkg.develop(PackageSpec(path=joinpath(pwd(), "..")))
+            Pkg.instantiate()
+            include("runbenchmarks.jl")'
+      - name: Prepare benchmark history directory
+        run: mkdir -p .benchmark-history
+      - name: Compare benchmark results on PR
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: HomotopyContinuationNext v3
+          tool: julia
+          output-file-path: benchmark/benchmarks_output.json
+          external-data-json-path: .benchmark-history/steady.json
+          save-data-file: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          alert-threshold: '130%'
+          fail-threshold: '170%'
+          comment-on-alert: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          comment-always: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          summary-always: true
+          fail-on-alert: true
+      - name: Update benchmark history on v3
+        if: ${{ github.event_name == 'push' }}
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: HomotopyContinuationNext v3
+          tool: julia
+          output-file-path: benchmark/benchmarks_output.json
+          external-data-json-path: .benchmark-history/steady.json
+          save-data-file: true
+          alert-threshold: '130%'
+          fail-on-alert: false
+          summary-always: true
+      - name: Save benchmark history
+        if: ${{ github.event_name == 'push' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .benchmark-history/steady.json
+          key: steady-v3-${{ runner.os }}-julia-1.13-${{ github.sha }}
+
+  ttfx:
+    name: TTFX tracking / Julia 1.13
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    if: ${{ !github.event.pull_request.draft }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          show-versioninfo: true
+          version: '1.13'
+          arch: x64
+      - uses: julia-actions/cache@v3
+      - name: Restore TTFX history
+        id: ttfx-history
+        uses: actions/cache/restore@v4
+        with:
+          path: .benchmark-history/ttfx.json
+          key: ttfx-v3-${{ runner.os }}-julia-1.13-${{ github.event.pull_request.base.sha || github.sha }}
+          restore-keys: |
+            ttfx-v3-${{ runner.os }}-julia-1.13-
+      - name: Prepare v3 environment
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using HomotopyContinuationNext'
+      - name: Run representative first-call latency workloads
+        env:
+          TTFX_THREADS: '1'
+          TTFX_REPEATS: '3'
+        run: |
+          set -o pipefail
+          julia --project=. benchmark/runttfx.jl \
+            total_degree_interpreted_serial \
+            total_degree_compiled_all_serial \
+            polyhedral_interpreted_serial \
+            polyhedral_compiled_all_serial \
+            parameter_interpreted_serial \
+            overdetermined_total_degree \
+            singular_endgame \
+            newton_standard \
+            witness_set_build \
+            parameter_sweep \
+            result_iterator_lazy \
+            monodromy_serial \
+            | tee ttfx_output.txt
+      - name: Prepare TTFX history directory
+        run: mkdir -p .benchmark-history
+      - name: Compare TTFX on PR
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: HomotopyContinuationNext v3 TTFX
+          tool: customSmallerIsBetter
+          output-file-path: ttfx_benchmark.json
+          external-data-json-path: .benchmark-history/ttfx.json
+          save-data-file: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          alert-threshold: '130%'
+          comment-on-alert: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          comment-always: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          summary-always: true
+          fail-on-alert: false
+      - name: Update TTFX history on v3
+        if: ${{ github.event_name == 'push' }}
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: HomotopyContinuationNext v3 TTFX
+          tool: customSmallerIsBetter
+          output-file-path: ttfx_benchmark.json
+          external-data-json-path: .benchmark-history/ttfx.json
+          save-data-file: true
+          alert-threshold: '130%'
+          fail-on-alert: false
+          summary-always: true
+      - name: Save TTFX history
+        if: ${{ github.event_name == 'push' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .benchmark-history/ttfx.json
+          key: ttfx-v3-${{ runner.os }}-julia-1.13-${{ github.sha }}
+      - name: Upload TTFX results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ttfx-julia-1.13
+          path: |
+            ttfx_output.txt
+            ttfx_output.json
+            ttfx_benchmark.json
+          if-no-files-found: warn
+
+  ttfx-full:
+    name: TTFX full inventory / Julia 1.13
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          show-versioninfo: true
+          version: '1.13'
+          arch: x64
+      - uses: julia-actions/cache@v3
+      - name: Prepare v3 environment
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using HomotopyContinuationNext'
+      - name: Run complete first-call latency inventory
+        env:
+          TTFX_THREADS: '1'
+          TTFX_REPEATS: '1'
+        run: |
+          set -o pipefail
+          julia --project=. benchmark/runttfx.jl | tee ttfx_full_output.txt
+      - name: Upload complete TTFX inventory
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ttfx-full-julia-1.13
+          path: |
+            ttfx_full_output.txt
+            ttfx_output.json
+            ttfx_benchmark.json
+          if-no-files-found: warn

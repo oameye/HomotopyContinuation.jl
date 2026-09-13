@@ -309,18 +309,15 @@ thunk. The thunk is the only place a stage holds its system, which is what keeps
 `CompositionStage` one concrete type at any composition depth.
 """
 _stage_system(stage::CompositionStage)::System =
-    _unwrap_cloner(stage.factory.obj).system
+    _unwrap_cloner(stage.factory[]).system
 
-# A `FunctionWrapper` keeps its callable as whatever `Base.cconvert(Ref{objT},
-# obj)` produced, which for an immutable cloner is a `RefValue`.
 _unwrap_cloner(cloner::_SystemCloner)::_SystemCloner = cloner
-_unwrap_cloner(ref::Base.RefValue{<:_SystemCloner})::_SystemCloner = ref[]
 
 function _fold_composition(stages::Vector{CompositionStage})::SystemEvaluator
-    evaluator = stages[1].factory()
+    evaluator = (stages[1].factory[])()::SystemEvaluator
     for k in 2:length(stages)
         evaluator = _composition_evaluator(
-            stages[k].factory(), evaluator, stages[k - 1].scales,
+            (stages[k].factory[])()::SystemEvaluator, evaluator, stages[k - 1].scales,
         )
     end
     return evaluator

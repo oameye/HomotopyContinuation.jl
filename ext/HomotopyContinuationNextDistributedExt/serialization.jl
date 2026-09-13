@@ -13,19 +13,15 @@ const AbstractSer = Serialization.AbstractSerializer
 # data, so ship that and call it. This is how a homotopy reaches another process.
 function Serialization.serialize(s::AbstractSer, ev::HCN.SystemEvaluator)
     Serialization.serialize_type(s, HCN.SystemEvaluator)
-    Serialization.serialize(s, ev._clone.obj)
+    Serialization.serialize(s, ev._clone[])
     return nothing
 end
 
 function Serialization.deserialize(
         s::AbstractSer, ::Type{HCN.SystemEvaluator},
     )::HCN.SystemEvaluator
-    return _cloner(Serialization.deserialize(s))()::HCN.SystemEvaluator
+    return Serialization.deserialize(s)()::HCN.SystemEvaluator
 end
-
-# `FunctionWrapper` keeps an immutable callable behind a `Ref`, a mutable one bare.
-_cloner(obj::Base.RefValue) = obj[]
-_cloner(obj) = obj
 
 function _compile_strategy(mode::HCN.CompileMode.T)
     mode === HCN.CompileMode.INTERPRETED && return HCN.InterpretedCompile()

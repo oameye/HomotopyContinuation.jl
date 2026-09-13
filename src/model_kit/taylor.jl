@@ -8,6 +8,14 @@
 
 struct TruncatedTaylorSeries{N, T}
     val::NTuple{N, T}
+
+    function TruncatedTaylorSeries{N, T}(val::Tuple{T, Vararg{T}}) where {N, T}
+        return new{N, T}(val)
+    end
+
+    function TruncatedTaylorSeries(val::Tuple{T, Vararg{T}}) where {T}
+        return new{length(val), T}(val)
+    end
 end
 const TTS{N, T} = TruncatedTaylorSeries{N, T}
 

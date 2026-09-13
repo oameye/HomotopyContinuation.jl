@@ -7,12 +7,8 @@ using HomotopyContinuationNext: System, StraightLineHomotopy, HomotopyEvaluator,
     Predictor, PredictionMethod,
     Jacobian, MatrixWorkspace, WeightedNorm,
     TaylorVector, EndgameTracker, EndgameCode, EndgameOptions,
-    EndgameState, Valuation
+    EndgameState, Valuation, FSVec, FSMat
 using DynamicPolynomials: @polyvar
-using FixedSizeArrays: FixedSizeArray
-
-const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
-const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 # ---------------------------------------------------------------------------
 # Helper: filter out known FunctionWrappers false positives

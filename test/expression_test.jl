@@ -57,6 +57,25 @@ using LinearAlgebra: det, dot
         @test x * y == y * x
     end
 
+    @testset "equal expressions hash alike" begin
+        @var x y
+        # A coefficient picks up whichever sign of zero the arithmetic that built
+        # it produced: `-(y^2)` carries `-1.0 + 0.0im`, while expanding the same
+        # term multiplies through to `-1.0 - 0.0im`. The two compare equal, so
+        # they have to hash equal as well, or `Dict{Expression}` and the
+        # hash-ordered term sort disagree about which terms are the same.
+        minus_one_plus = Expression(ComplexF64(-1.0, 0.0))
+        minus_one_minus = Expression(ComplexF64(-1.0, -0.0))
+        @test minus_one_plus == minus_one_minus
+        @test hash(minus_one_plus) == hash(minus_one_minus)
+        @test hash(minus_one_plus * y^2) == hash(minus_one_minus * y^2)
+
+        # The payoff: expansion is canonical, so it does not depend on how the
+        # expression it is handed was built.
+        @test Next.expand((x + y) * (x - y)) == x^2 - y^2
+        @test Next.expand(x^2 - y^2) == x^2 - y^2
+    end
+
     @testset "arithmetic promotes numbers" begin
         @var x
         @test x + 1 == 1 + x

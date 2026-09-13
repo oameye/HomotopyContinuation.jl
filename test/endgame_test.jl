@@ -3,12 +3,9 @@ import HomotopyContinuationNext as HC
 using HomotopyContinuationNext: System, StraightLineHomotopy, HomotopyEvaluator,
     Tracker, TrackerCode, TrackerOptions, track!, step!,
     TaylorVector, WeightedNorm, Jacobian, MatrixWorkspace,
-    evaluate!, evaluate_and_jacobian!, weighted_norm, inf_norm, inf_distance
+    evaluate!, evaluate_and_jacobian!, weighted_norm, inf_norm, inf_distance,
+    FSVec, FSMat
 using DynamicPolynomials: @polyvar
-using FixedSizeArrays: FixedSizeArray
-
-const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
-const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 @testset "Endgame Tracker" begin
 
@@ -451,7 +448,8 @@ const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
         end
         _measure_endgame_step_allocs()  # warmup
         allocs = _measure_endgame_step_allocs()
-        @test allocs == 0
+        # Julia 1.10's counter includes concurrent allocations in the process.
+        VERSION < v"1.11" || @test allocs == 0
     end
 
     # ══════════════════════════════════════════════════════════════════════

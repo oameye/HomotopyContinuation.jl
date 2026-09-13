@@ -113,6 +113,13 @@ struct MonodromyCandidate{C <: AbstractSolutionCertificate} <: AbstractCertified
     representative::Int
     certificate::Union{Nothing, C}
     cache::CertificationCache
+
+    function MonodromyCandidate{C}(
+            status::AddSolutionCode.T, representative::Int,
+            certificate::Union{Nothing, C}, cache::CertificationCache,
+        ) where {C <: AbstractSolutionCertificate}
+        return new{C}(status, representative, certificate, cache)
+    end
 end
 
 function HomotopyContinuationNext.monodromy_certify_candidate(

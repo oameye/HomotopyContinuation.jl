@@ -8,12 +8,8 @@ using HomotopyContinuationNext:
     _instruction_sequence_to_taylor_expr,
     _instruction_sequence_to_taylor_param_expr,
     execute!, evaluate!, evaluate_and_jacobian!,
-    execute_taylor!, TaylorVector, TruncatedTaylorSeries, taylor!
+    execute_taylor!, TaylorVector, TruncatedTaylorSeries, taylor!, FSVec, FSMat
 using DynamicPolynomials: @polyvar
-using FixedSizeArrays: FixedSizeArray
-
-const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
-const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 _rgf(expr) = RuntimeGeneratedFunctions.RuntimeGeneratedFunction(HC, HC, expr)
 
