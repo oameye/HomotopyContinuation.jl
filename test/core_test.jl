@@ -8,13 +8,9 @@ using HomotopyContinuationNext: AbstractSystem, AbstractHomotopy,
     System,
     StraightLineHomotopy, CoefficientHomotopy,
     TaylorVector, TruncatedTaylorSeries, DoubleF64, ComplexDF64,
-    execute!, execute_taylor!
+    execute!, execute_taylor!, FSVec, FSMat
 using DynamicPolynomials: @polyvar
 using MultivariatePolynomials: differentiate as mp_diff
-using FixedSizeArrays: FixedSizeArray
-
-const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
-const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Test AbstractSystem for wrapping via HomotopyEvaluator

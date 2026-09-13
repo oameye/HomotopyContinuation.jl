@@ -57,6 +57,12 @@ const SysTaylor3ParamFW = FunctionWrapper{
     },
 }
 
+# A `FunctionWrapper{SystemEvaluator, Tuple{}}` here would make `SystemEvaluator`
+# hold a `cfunction` returning itself. Julia 1.10 compiles a `cfunction` target
+# by re-entering codegen, so that cycle recurses until the native stack is gone.
+# A type-erased box costs one dynamic call per clone, which is once per task.
+const SystemFactory = Base.RefValue{Any}
+
 """
     SystemEvaluator
 
@@ -77,18 +83,17 @@ struct SystemEvaluator
     _taylor_3_param!::SysTaylor3ParamFW
     _size::Tuple{Int, Int}
     _nparameters::Int
-    _clone::FunctionWrapper{SystemEvaluator, Tuple{}}
+    _clone::SystemFactory
 end
 
-const SystemFactory = FunctionWrapper{SystemEvaluator, Tuple{}}
-
 # An evaluator equal to `S` with its own tapes, usable from another task.
-_clone_system_evaluator(S::SystemEvaluator)::SystemEvaluator = S._clone()
+_clone_system_evaluator(S::SystemEvaluator)::SystemEvaluator =
+    (S._clone[])()::SystemEvaluator
 
 # A copied `FunctionWrapper` keeps a raw pointer to the original closure, so a
 # copied evaluator would silently run the original tapes. Rebuild instead.
 Base.deepcopy_internal(S::SystemEvaluator, stackdict::IdDict)::SystemEvaluator =
-    get!(() -> S._clone(), stackdict, S)
+    get!(() -> (S._clone[])()::SystemEvaluator, stackdict, S)
 
 struct _EvaluatorCloner{F <: AbstractSystem}
     system::F

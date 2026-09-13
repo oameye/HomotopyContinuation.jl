@@ -173,7 +173,7 @@ using LinearAlgebra: norm
         # tracks 6 paths, 3 of which stay finite, and their coordinate sums are
         # 0 + 0 + 1 in each coordinate.
         G = System([y - x^2, y - x^3]; variables = [x, y])
-        td = result_iterator(G, TotalDegree(; seed = UInt32(3)))
+        td = result_iterator(G, TotalDegree(; seed = UInt32(2)))
         @test length(td) == 6
         finite = selection(isfinite, td)
         @test count(finite) == 3

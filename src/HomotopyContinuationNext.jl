@@ -11,7 +11,7 @@ using Moshi.Derive: @derive
 using MultivariatePolynomials: MultivariatePolynomials
 import MultivariatePolynomials: coefficients, degree, differentiate, monomials
 using DynamicPolynomials: DynamicPolynomials, @polyvar
-using FixedSizeArrays: FixedSizeArray
+using FixedSizeArrays: FixedSizeArrays
 import FunctionWrappers: FunctionWrapper
 using CommonSolve: CommonSolve
 using MixedSubdivisions: MixedSubdivisions
@@ -85,10 +85,13 @@ export write_solutions, read_solutions, write_parameters, read_parameters
 # minimal; load the subpackage to certify.
 
 const MP = MultivariatePolynomials
-# Concrete type aliases — FixedSizeVector{T} alone is NOT concrete because
-# the Mem parameter is free. On Julia 1.11+ the backing is Memory{T}.
-const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
-const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
+@static if VERSION < v"1.11"
+    const FSVec{T} = Vector{T}
+    const FSMat{T} = Matrix{T}
+else
+    const FSVec{T} = FixedSizeArrays.FixedSizeVectorDefault{T}
+    const FSMat{T} = FixedSizeArrays.FixedSizeMatrixDefault{T}
+end
 
 include("primitives/double_f64.jl")
 include("utils.jl")

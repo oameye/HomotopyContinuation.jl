@@ -1,17 +1,14 @@
 using Test
 using LinearAlgebra: LinearAlgebra, diagm, opnorm
 using Random: Random
-using FixedSizeArrays: FixedSizeArray
 using HomotopyContinuationNext:
     MatrixWorkspace, updated!, factorize!,
     skeel_row_scaling!, apply_row_scaling!,
     mixed_precision_iterative_refinement!,
     residual!, inverse_inf_norm_est, _scaled_cond,
-    Jacobian, WeightedNorm, init!
+    Jacobian, WeightedNorm, init!, FSVec, FSMat
 
 const LA = LinearAlgebra
-const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
-const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
 
 @testset "MatrixWorkspace" begin
     @testset "construction" begin
@@ -225,7 +222,9 @@ end
         WS.factorized = false
         LA.ldiv!(x, WS, b)  # warmup
         WS.factorized = false
-        @test (@allocated LA.ldiv!(x, WS, b)) == 0
+        allocs = @allocated LA.ldiv!(x, WS, b)
+        # Julia 1.10's counter includes concurrent allocations in the process.
+        VERSION < v"1.11" || @test allocs == 0
     end
 end
 

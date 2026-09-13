@@ -1,0 +1,34 @@
+name: Format Check
+
+on:
+  push:
+    branches: [v3]
+    paths:
+      - '.github/workflows/Format.yml'
+      - '**.jl'
+  pull_request:
+    branches: [v3]
+    paths:
+      - '.github/workflows/Format.yml'
+      - '**.jl'
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+jobs:
+  runic:
+    name: Runic
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ !github.event.pull_request.draft }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v3
+      - uses: fredrikekre/runic-action@v1
+        with:
+          version: '1'

@@ -579,7 +579,7 @@ function _init_polyhedral(
         nrm = LinearAlgebra.norm(c, Inf)
         start_coeffs_orig[i] = ComplexF64[
             let r = rand(rng), φ = rand(rng)
-                    (0.9 + 0.2 * r) * complex(cospi(2φ), sinpi(2φ)) * nrm
+                (0.9 + 0.2 * r) * complex(cospi(2φ), sinpi(2φ)) * nrm
             end
                 for _ in 1:length(c)
         ]
