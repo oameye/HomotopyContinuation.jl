@@ -12,7 +12,7 @@ using DynamicPolynomials: @polyvar
         F = System([x]; variables = [x, y])
         H = [
             WitnessSet(F, L, [ComplexF64[0, 0] for _ in 1:n])
-            for n in (3, 1, 2)
+                for n in (3, 1, 2)
         ]
         @test _regeneration_sortperm(H, EquationSorting.UNSORTED) == [1, 2, 3]
         @test _regeneration_sortperm(H, EquationSorting.BY_DEGREE) == [2, 3, 1]
