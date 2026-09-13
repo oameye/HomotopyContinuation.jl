@@ -661,4 +661,44 @@ end
     @test opts.unique_points_atol == alg.atol
     @test opts.unique_points_rtol == alg.rtol
     @test !opts.equivalence_classes
+
+    # Splitting counts witness points, not orbits, so a caller's group action
+    # must not reach the persistent point identity.  `collapse_to_first` is
+    # degenerate on purpose: it maps every point to the first point it is ever
+    # shown, so any surviving quotient merges the whole identity index and the
+    # components stop separating.
+    @var a b c
+    F = System([a * (a^2 + b^2 + c^2 - 1)])  # a plane and a sphere
+
+    seen = Ref{Union{Nothing, Vector{ComplexF64}}}(nothing)
+    function collapse_to_first(p)
+        seen[] === nothing && (seen[] = collect(ComplexF64, p))
+        return (seen[]::Vector{ComplexF64},)
+    end
+
+    plain = MonodromyOptions(; trace_test = true)
+    symmetric = MonodromyOptions(;
+        trace_test = true, group_action = collapse_to_first,
+        equivalence_classes = true,
+    )
+    # The caller's own configuration is left alone; only its reach is.
+    @test symmetric.equivalence_classes
+    @test symmetric.group_actions !== nothing
+
+    N_plain = solve(
+        F, Decomposition(;
+            monodromy = plain, seed = UInt32(0x1234), show_progress = false,
+        ),
+    )
+    @test ncomponents(N_plain) == 2
+    @test degrees(N_plain) == Dict(2 => [2, 1])
+
+    seen[] = nothing
+    N_symmetric = solve(
+        F, Decomposition(;
+            monodromy = symmetric, seed = UInt32(0x1234), show_progress = false,
+        ),
+    )
+    @test ncomponents(N_symmetric) == ncomponents(N_plain)
+    @test degrees(N_symmetric) == degrees(N_plain)
 end
