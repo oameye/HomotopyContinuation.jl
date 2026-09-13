@@ -88,10 +88,18 @@ function _fold_expr_hash(seed, args)::UInt
     return h
 end
 
+# `-0.0 == 0.0` but `hash(-0.0) != hash(0.0)`, and arithmetic on coefficients
+# produces either sign of zero: `-1 * (0.0)` is `-0.0`. Literals are compared
+# with `==`, so both zeros have to hash alike or two equal expressions get two
+# hashes, which breaks every `Dict{Expression}` keyed on them.
+@inline _canonical_zeros(v::ComplexF64)::ComplexF64 =
+    complex(_canonical_zero(real(v)), _canonical_zero(imag(v)))
+@inline _canonical_zero(x::Float64)::Float64 = iszero(x) ? zero(Float64) : x
+
 function Base.hash(e::Expression, h::UInt)::UInt
     storage = expr_storage(e)
     if storage isa ENumStorage
-        return hash(storage.val, hash(:ENum, h))
+        return hash(_canonical_zeros(storage.val), hash(:ENum, h))
     elseif storage isa EVarStorage
         return hash(storage.name, hash(:EVar, h))
     elseif storage isa EAddStorage

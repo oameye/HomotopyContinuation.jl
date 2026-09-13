@@ -35,6 +35,9 @@ const QUALIFIED_ACCESS_IGNORE = (
     # Base.SizeUnknown is the documented `IteratorSize` trait for an iterator
     # whose length is not known ahead of time, but is not declared public:
     :SizeUnknown,
+    # Documented thread-safe condition and lazy iterator filter. Julia 1.11
+    # does not declare these names public:
+    :Condition, :filter,
     # Deliberate construction-time compiler barrier used to isolate
     # mutually exclusive TTFX-heavy backends:
     :inferencebarrier,
@@ -81,41 +84,45 @@ const QUALIFIED_ACCESS_IGNORE = (
 
     @test check_no_implicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing
     @test check_all_explicit_imports_via_owners(HomotopyContinuationNext) == nothing
-    # FunctionWrapper is the only public API of FunctionWrappers.jl but it is not
-    # declared `public` in the package — ignore it here.
-    @test check_all_explicit_imports_are_public(
-        HomotopyContinuationNext;
-        ignore = (
-            :FunctionWrapper,
-            Symbol("@data"),
-            Symbol("@derive"),
-            Symbol("@RuntimeGeneratedFunction"),
-        ),
-    ) == nothing
+    @static if VERSION >= v"1.11"
+        # FunctionWrapper is the only public API of FunctionWrappers.jl but it is not
+        # declared `public` in the package — ignore it here.
+        @test check_all_explicit_imports_are_public(
+            HomotopyContinuationNext;
+            ignore = (
+                :FunctionWrapper,
+                Symbol("@data"),
+                Symbol("@derive"),
+                Symbol("@RuntimeGeneratedFunction"),
+            ),
+        ) == nothing
+    end
     @test check_no_stale_explicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing
     @test check_all_qualified_accesses_via_owners(HomotopyContinuationNext) == nothing
     # The check's own filter chain, minus the extension's accesses into its parent:
     # `allow_internal_accesses` does not cover extensions and `ignore` cannot
     # exclude one, so `check_all_qualified_accesses_are_public` cannot be used here.
-    @testset "qualified accesses are public" begin
-        offenders = Tuple{Symbol, Symbol, Module}[]
-        for (submodule, rows) in ExplicitImports.improper_qualified_accesses(
-                HomotopyContinuationNext, pathof(HomotopyContinuationNext); skip = (),
-            )
-            for row in rows
-                row.name in QUALIFIED_ACCESS_IGNORE && continue
-                row.self_qualified && continue
-                row.public_access && continue
-                # The check's own default `skip = (Base => Core,)`.
-                row.accessing_from === Base &&
-                    ExplicitImports.public_or_exported(Core, row.name) && continue
-                _is_extension(submodule) &&
-                    row.accessing_from === HomotopyContinuationNext && continue
-                push!(offenders, (nameof(submodule), row.name, row.accessing_from))
+    @static if VERSION >= v"1.11"
+        @testset "qualified accesses are public" begin
+            offenders = Tuple{Symbol, Symbol, Module}[]
+            for (submodule, rows) in ExplicitImports.improper_qualified_accesses(
+                    HomotopyContinuationNext, pathof(HomotopyContinuationNext); skip = (),
+                )
+                for row in rows
+                    row.name in QUALIFIED_ACCESS_IGNORE && continue
+                    row.self_qualified && continue
+                    row.public_access && continue
+                    # The check's own default `skip = (Base => Core,)`.
+                    row.accessing_from === Base &&
+                        ExplicitImports.public_or_exported(Core, row.name) && continue
+                    _is_extension(submodule) &&
+                        row.accessing_from === HomotopyContinuationNext && continue
+                    push!(offenders, (nameof(submodule), row.name, row.accessing_from))
+                end
             end
+            isempty(offenders) || foreach(println, offenders)
+            @test isempty(offenders)
         end
-        isempty(offenders) || foreach(println, offenders)
-        @test isempty(offenders)
     end
 
     @test check_no_self_qualified_accesses(HomotopyContinuationNext) == nothing
@@ -125,7 +132,9 @@ const QUALIFIED_ACCESS_IGNORE = (
         @test DISTRIBUTED_EXT !== nothing
         @test check_no_implicit_imports(DISTRIBUTED_EXT) == nothing
         @test check_no_stale_explicit_imports(DISTRIBUTED_EXT) == nothing
-        @test check_all_explicit_imports_are_public(DISTRIBUTED_EXT) == nothing
+        @static if VERSION >= v"1.11"
+            @test check_all_explicit_imports_are_public(DISTRIBUTED_EXT) == nothing
+        end
         @test check_all_explicit_imports_via_owners(DISTRIBUTED_EXT) == nothing
         @test check_all_qualified_accesses_via_owners(DISTRIBUTED_EXT) == nothing
         @test check_no_self_qualified_accesses(DISTRIBUTED_EXT) == nothing

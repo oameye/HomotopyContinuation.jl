@@ -7,11 +7,7 @@ using HomotopyContinuationNext: Expression, System, CompileMode, @var, @polyvar,
     Continuation, Monodromy, Witness, Regeneration, Decomposition, Intersection,
     TaylorVector, ComplexDF64, HomotopyEvaluator, StraightLineHomotopy,
     Interpreter, execute!, expand,
-    fix_parameters
-using FixedSizeArrays: FixedSizeArray
-
-const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
-const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}
+    fix_parameters, FSVec, FSMat
 
 fsv(v) = FSVec{ComplexF64}(collect(ComplexF64, v))
 fsm(m) = FSMat{ComplexF64}(collect(ComplexF64, m))

@@ -138,6 +138,18 @@ end
 # ── Recorded instruction counts ──────────────────────────────────────────────
 # These are the current eval instruction counts. Tests fail if we regress.
 # If you improve the pipeline, lower these numbers.
+#
+# Each number is the largest count over the Julia versions we support, because
+# the count is not the same on all of them. `_eadd` and `_emul` put a sum or
+# product in canonical order with `sort!(collected; lt = _expr_lt)`, and
+# `_expr_lt` compares `hash`. `hash(::ComplexF64)` changed between 1.11 and
+# 1.13, so systems with complex coefficients reach CSE with their terms in a
+# different order and come out a few instructions apart: 13 of the 26 below
+# differ across those two versions, in both directions.
+#
+# So lower a number only once the smaller count holds on the oldest supported
+# Julia, not just on the newest. Making `_expr_lt` order on something stable
+# across Julia versions would remove the split, and is worth doing separately.
 
 const _MAX_EVAL_INSTRS = Dict(
     # Cyclic (real integer coefficients)
@@ -154,21 +166,21 @@ const _MAX_EVAL_INSTRS = Dict(
     "chain_7" => 39,
     # Dense quadratic (complex coefficients)
     "dense_quad_3" => 28,
-    "dense_quad_4" => 52,
+    "dense_quad_4" => 53,
     "dense_quad_5" => 92,
-    "dense_quad_6" => 138,
+    "dense_quad_6" => 140,
     # Random sparse 6×6 (complex coefficients, degree 2–4)
-    "sparse6_1" => 83,
+    "sparse6_1" => 95,
     "sparse6_2" => 96,
     "sparse6_3" => 91,
-    "sparse6_4" => 82,
-    "sparse6_5" => 85,
+    "sparse6_4" => 85,
+    "sparse6_5" => 86,
     "sparse6_6" => 96,
-    "sparse6_7" => 87,
-    "sparse6_8" => 90,
+    "sparse6_7" => 90,
+    "sparse6_8" => 93,
     # Random sparse 8×8 (complex coefficients, degree 2–4)
-    "sparse8_1" => 162,
-    "sparse8_2" => 168,
+    "sparse8_1" => 170,
+    "sparse8_2" => 170,
     "sparse8_3" => 170,
     "sparse8_4" => 170,
 )

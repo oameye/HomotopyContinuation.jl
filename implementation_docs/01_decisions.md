@@ -4,7 +4,18 @@
 
 ### FixedSizeVector{T} is NOT concrete
 
-`FixedSizeVector{T}` and `FixedSizeMatrix{T}` have a free `Mem` parameter (`isconcretetype` returns `false`). Using them as struct fields costs ~30x. Use `FSVec{T} = FixedSizeArray{T,1,Memory{T}}` / `FSMat{T} = FixedSizeArray{T,2,Memory{T}}`.
+`FixedSizeVector{T}` and `FixedSizeMatrix{T}` have a free `Mem` parameter (`isconcretetype` returns `false`). Using them as struct fields costs ~30x. Use the package's `FSVec{T}` / `FSMat{T}` aliases. They resolve to `Vector{T}` / `Matrix{T}` on Julia 1.10 and to the concrete FixedSizeArrays default aliases backed by `Memory{T}` on Julia 1.11+.
+
+The split is a performance one. Julia 1.10 has no `Memory`, so the FixedSizeArrays default there wraps a `Vector`, adding a layer without the backing that pays for it: end-to-end solves measure ~10% slower than plain arrays on 1.10. Both sides of the split are concrete, so neither pays the ~30x field cost.
+
+### The evaluator's clone factory is not a `FunctionWrapper`
+
+`SystemEvaluator._clone` is a type-erased box, not a
+`FunctionWrapper{SystemEvaluator, Tuple{}}`. A `cfunction` whose return type is
+the struct that owns it makes codegen re-enter itself, which exhausts the native
+stack on Julia 1.10 and kills `Distributed` workers. See the comment above
+`SystemFactory` in `src/core/system_evaluator.jl` for the cycle. The box costs one
+dynamic call per clone, which is once per task.
 
 ### Scratch slot namespace
 

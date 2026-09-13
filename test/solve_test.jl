@@ -7,9 +7,8 @@ using HomotopyContinuationNext: TotalDegree, Polyhedral, Result, PathResult,
     total_degree_count, SolveCache, PolyhedralSolveCache,
     Serial, Threaded,
     _clone_system_evaluator, TrackingWorkerState, PolyhedralWorkerState,
-    StraightLineBuilder, ParameterBuilder, PolyhedralBuilder
+    StraightLineBuilder, ParameterBuilder, PolyhedralBuilder, FSVec, FSMat
 using DynamicPolynomials: @polyvar
-using FixedSizeArrays: FixedSizeArray
 using CommonSolve: CommonSolve
 
 @testset "Solve" begin
@@ -475,26 +474,26 @@ using CommonSolve: CommonSolve
         cloned = _clone_system_evaluator(F)
 
         n = 2
-        x_test = FixedSizeArray{ComplexF64, 1}(ComplexF64[1.0 + 0.5im, 2.0 - 0.3im])
-        p_empty = FixedSizeArray{ComplexF64, 1}(ComplexF64[])
+        x_test = FSVec{ComplexF64}(ComplexF64[1.0 + 0.5im, 2.0 - 0.3im])
+        p_empty = FSVec{ComplexF64}(ComplexF64[])
 
         # evaluate!
-        u_orig = FixedSizeArray{ComplexF64, 1}(zeros(ComplexF64, n))
-        u_clone = FixedSizeArray{ComplexF64, 1}(zeros(ComplexF64, n))
+        u_orig = FSVec{ComplexF64}(zeros(ComplexF64, n))
+        u_clone = FSVec{ComplexF64}(zeros(ComplexF64, n))
         original._evaluate!(u_orig, x_test, p_empty)
         cloned._evaluate!(u_clone, x_test, p_empty)
         @test u_orig ≈ u_clone
 
         # evaluate_and_jacobian!
-        U_orig = FixedSizeArray{ComplexF64, 2}(zeros(ComplexF64, n, n))
-        U_clone = FixedSizeArray{ComplexF64, 2}(zeros(ComplexF64, n, n))
+        U_orig = FSMat{ComplexF64}(zeros(ComplexF64, n, n))
+        U_clone = FSMat{ComplexF64}(zeros(ComplexF64, n, n))
         original._evaluate_and_jacobian!(u_orig, U_orig, x_test, p_empty)
         cloned._evaluate_and_jacobian!(u_clone, U_clone, x_test, p_empty)
         @test u_orig ≈ u_clone
         @test U_orig ≈ U_clone
 
         # Independence: calling one does not affect the other
-        x_test2 = FixedSizeArray{ComplexF64, 1}(ComplexF64[3.0, 4.0])
+        x_test2 = FSVec{ComplexF64}(ComplexF64[3.0, 4.0])
         original._evaluate!(u_orig, x_test2, p_empty)
         cloned._evaluate!(u_clone, x_test, p_empty)  # different input
         @test !(u_orig ≈ u_clone)
@@ -509,17 +508,17 @@ using CommonSolve: CommonSolve
         cloned = _clone_system_evaluator(F)
 
         n = 2
-        x_test = FixedSizeArray{ComplexF64, 1}(ComplexF64[1.0 + 0.5im, 2.0 - 0.3im])
-        p_empty = FixedSizeArray{ComplexF64, 1}(ComplexF64[])
+        x_test = FSVec{ComplexF64}(ComplexF64[1.0 + 0.5im, 2.0 - 0.3im])
+        p_empty = FSVec{ComplexF64}(ComplexF64[])
 
-        u_orig = FixedSizeArray{ComplexF64, 1}(zeros(ComplexF64, n))
-        u_clone = FixedSizeArray{ComplexF64, 1}(zeros(ComplexF64, n))
+        u_orig = FSVec{ComplexF64}(zeros(ComplexF64, n))
+        u_clone = FSVec{ComplexF64}(zeros(ComplexF64, n))
         original._evaluate!(u_orig, x_test, p_empty)
         cloned._evaluate!(u_clone, x_test, p_empty)
         @test u_orig ≈ u_clone
 
-        U_orig = FixedSizeArray{ComplexF64, 2}(zeros(ComplexF64, n, n))
-        U_clone = FixedSizeArray{ComplexF64, 2}(zeros(ComplexF64, n, n))
+        U_orig = FSMat{ComplexF64}(zeros(ComplexF64, n, n))
+        U_clone = FSMat{ComplexF64}(zeros(ComplexF64, n, n))
         original._evaluate_and_jacobian!(u_orig, U_orig, x_test, p_empty)
         cloned._evaluate_and_jacobian!(u_clone, U_clone, x_test, p_empty)
         @test u_orig ≈ u_clone
@@ -535,17 +534,17 @@ using CommonSolve: CommonSolve
         cloned = _clone_system_evaluator(F)
 
         n = 2
-        x_test = FixedSizeArray{ComplexF64, 1}(ComplexF64[1.0 + 0.5im, 2.0 - 0.3im])
-        p_empty = FixedSizeArray{ComplexF64, 1}(ComplexF64[])
+        x_test = FSVec{ComplexF64}(ComplexF64[1.0 + 0.5im, 2.0 - 0.3im])
+        p_empty = FSVec{ComplexF64}(ComplexF64[])
 
-        u_orig = FixedSizeArray{ComplexF64, 1}(zeros(ComplexF64, n))
-        u_clone = FixedSizeArray{ComplexF64, 1}(zeros(ComplexF64, n))
+        u_orig = FSVec{ComplexF64}(zeros(ComplexF64, n))
+        u_clone = FSVec{ComplexF64}(zeros(ComplexF64, n))
         original._evaluate!(u_orig, x_test, p_empty)
         cloned._evaluate!(u_clone, x_test, p_empty)
         @test u_orig ≈ u_clone
 
-        U_orig = FixedSizeArray{ComplexF64, 2}(zeros(ComplexF64, n, n))
-        U_clone = FixedSizeArray{ComplexF64, 2}(zeros(ComplexF64, n, n))
+        U_orig = FSMat{ComplexF64}(zeros(ComplexF64, n, n))
+        U_clone = FSMat{ComplexF64}(zeros(ComplexF64, n, n))
         original._evaluate_and_jacobian!(u_orig, U_orig, x_test, p_empty)
         cloned._evaluate_and_jacobian!(u_clone, U_clone, x_test, p_empty)
         @test u_orig ≈ u_clone
@@ -560,17 +559,17 @@ using CommonSolve: CommonSolve
         cloned = _clone_system_evaluator(F)
 
         n = 2
-        x_test = FixedSizeArray{ComplexF64, 1}(ComplexF64[1.0 + 0.5im, 2.0 - 0.3im])
-        p_test = FixedSizeArray{ComplexF64, 1}(ComplexF64[3.0, 0.7 + 0.1im])
+        x_test = FSVec{ComplexF64}(ComplexF64[1.0 + 0.5im, 2.0 - 0.3im])
+        p_test = FSVec{ComplexF64}(ComplexF64[3.0, 0.7 + 0.1im])
 
-        u_orig = FixedSizeArray{ComplexF64, 1}(zeros(ComplexF64, n))
-        u_clone = FixedSizeArray{ComplexF64, 1}(zeros(ComplexF64, n))
+        u_orig = FSVec{ComplexF64}(zeros(ComplexF64, n))
+        u_clone = FSVec{ComplexF64}(zeros(ComplexF64, n))
         original._evaluate!(u_orig, x_test, p_test)
         cloned._evaluate!(u_clone, x_test, p_test)
         @test u_orig ≈ u_clone
 
-        U_orig = FixedSizeArray{ComplexF64, 2}(zeros(ComplexF64, n, n))
-        U_clone = FixedSizeArray{ComplexF64, 2}(zeros(ComplexF64, n, n))
+        U_orig = FSMat{ComplexF64}(zeros(ComplexF64, n, n))
+        U_clone = FSMat{ComplexF64}(zeros(ComplexF64, n, n))
         original._evaluate_and_jacobian!(u_orig, U_orig, x_test, p_test)
         cloned._evaluate_and_jacobian!(u_clone, U_clone, x_test, p_test)
         @test u_orig ≈ u_clone

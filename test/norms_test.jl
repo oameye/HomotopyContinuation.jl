@@ -1,12 +1,9 @@
 using Test
-using FixedSizeArrays: FixedSizeArray
 using HomotopyContinuationNext:
     WeightedNorm, inf_norm, weighted_norm, inf_distance, weighted_distance,
     init!, update!, fast_abs, DoubleF64, ComplexDF64,
     InfNorm, EuclideanNorm, euclidean_norm, euclidean_distance,
-    satisfies_triangle_inequality, _vt_distance
-
-const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
+    satisfies_triangle_inequality, _vt_distance, FSVec
 
 @testset "Norms" begin
     @testset "inf_norm and inf_distance" begin
