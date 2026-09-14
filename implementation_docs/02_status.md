@@ -42,15 +42,12 @@ PR #12 performs the release-identity transition:
 - UUID: temporary rewrite UUID -> registered HomotopyContinuation UUID
   `f213a82b-91d6-5c5d-acf7-10f1c761b327`;
 - development version: `3.0.0-DEV`;
-- extension modules: `HomotopyContinuationDistributedExt` and
-  `HomotopyContinuationSemialgebraicSetsExt`;
+- extension modules: `DistributedExt` and `SemialgebraicSetsExt`;
 - certification package: `HomotopyContinuationCertification`;
+- executable source, tests, benchmarks and certification use the restored package identities
+  directly; the temporary compatibility packages and old backing source trees are gone;
 - JET, Aqua, explicit-import, concrete-struct and TTFX gates target the renamed production module
   directly.
-
-Temporary `test/compat/` forwarding packages exist only to avoid turning the identity migration
-into a mechanical rewrite of every behavioral test in the same PR. They are test infrastructure,
-not part of the production package or public API.
 
 This does **not** yet mean that the branch is release-frozen. Remaining work is release hardening
 and v3-specific cleanup, not v2 feature parity.
