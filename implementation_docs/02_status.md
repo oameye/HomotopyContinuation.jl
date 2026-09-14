@@ -2,18 +2,23 @@
 
 Last updated: 2026-09-14.
 
-This file is the current implementation-status snapshot for HomotopyContinuationNext.jl (v3).
-The detailed development history remains available in git history and in `01_decisions.md`; the
-September 2026 parity-freeze audit is recorded in `09_v2_parity_freeze.md`.
+This file is the current implementation-status snapshot for HomotopyContinuation.jl v3. The
+rewrite used the temporary package name `HomotopyContinuationNext` while v2 and v3 had to coexist
+in one Julia environment. The release-facing v3 package has now restored the registered
+`HomotopyContinuation` name and UUID; the September 2026 parity-freeze audit is recorded in
+`09_v2_parity_freeze.md`.
 
 ## Reproduce
 
 - `make test` — core plus certification test suites
 - `make test-cert` — certification subpackage only
 - `make benchmark` — steady-state timings
-- `make compare` — v3/v2 benchmark ratios
 - `make ttfx` — first-use workload inventory
-- `julia --project=benchmark benchmark/compare/tracking.jl` — end-to-end solve comparison
+
+The old same-process `make compare` harness is intentionally disabled after package-identity
+restoration. v2 and v3 now have the same registered package name and UUID, so a live comparison
+must run them in isolated Julia environments/processes. The fixed v2 parity regressions remain in
+the ordinary suite.
 
 The permanent GitHub Actions matrix on `v3` covers core and certification on Julia 1.10 and
 current Julia, JET, Runic formatting, steady-state benchmark tracking, representative TTFX
@@ -24,15 +29,31 @@ tracking, and the full TTFX workload inventory on pushes to `v3`.
 **Feature/capability parity with upstream HomotopyContinuation.jl v2.22.4 is complete.**
 
 The original rewrite, the July/August testset-by-testset parity audit, and the September late-v2
-catch-up are all closed. There is no known v2 subsystem or post-audit v2 capability that still
-needs to be ported.
+catch-up are closed. There is no known v2 subsystem or post-audit v2 capability that still needs
+to be ported.
 
 The integrated `v3` tree after the September catch-up tranche was validated as one combined tree,
 not only as isolated PR heads. The permanent CI matrix was green for core, certification, JET,
 formatting, benchmark tracking, TTFX tracking, and the full TTFX inventory.
 
-This does **not** mean that the branch is release-frozen. Remaining work is release hardening and
-v3-specific cleanup, not v2 feature parity.
+PR #12 performs the release-identity transition:
+
+- root package/module: `HomotopyContinuationNext` -> `HomotopyContinuation`;
+- UUID: temporary rewrite UUID -> registered HomotopyContinuation UUID
+  `f213a82b-91d6-5c5d-acf7-10f1c761b327`;
+- development version: `3.0.0-DEV`;
+- extension modules: `HomotopyContinuationDistributedExt` and
+  `HomotopyContinuationSemialgebraicSetsExt`;
+- certification package: `HomotopyContinuationCertification`;
+- JET, Aqua, explicit-import, concrete-struct and TTFX gates target the renamed production module
+  directly.
+
+Temporary `test/compat/` forwarding packages exist only to avoid turning the identity migration
+into a mechanical rewrite of every behavioral test in the same PR. They are test infrastructure,
+not part of the production package or public API.
+
+This does **not** yet mean that the branch is release-frozen. Remaining work is release hardening
+and v3-specific cleanup, not v2 feature parity.
 
 ## Capability summary
 
@@ -51,7 +72,7 @@ At or beyond v2 parity:
 - lossless unresolved NID output: unresolved witness orbits are retained with
   `Irreducibility.UNKNOWN` instead of being discarded;
 - Krawczyk certification with Arb fallback and low-memory `ResultIterator` certification in the
-  separate `HomotopyContinuationNextCertification` subpackage;
+  separate `HomotopyContinuationCertification` package;
 - polynomial, rational and transcendental expression input, including principal-branch `log` and
   the complete interpreter/Taylor/certification lowering used by those expressions;
 - multi-homogeneous variable groups;
@@ -116,10 +137,10 @@ inapplicable. Failed paths remain excluded and raw path duplicates are still not
 
 ## Performance status
 
-The last documented v2 comparison showed total-degree solving about 1.8–3.6x faster than v2 and
-polyhedral solving within noise (roughly 0.95–1.01x). Cold load + construction + first solve was
-about 10.6 s versus roughly 45 s for v2's default compiled path. These numbers are historical
-measurements, not release guarantees; use the benchmark and TTFX commands above for current data.
+The last documented v2 comparison showed total-degree solving about 1.8-3.6x faster than v2 and
+polyhedral solving within noise (roughly 0.95-1.01x). Cold load + construction + first solve was
+about 10.6 s versus roughly 45 s for v2's default compiled path. These are historical development
+measurements, not release guarantees.
 
 The performance architecture remains the central v3 distinction: system-specific compiled code is
 hidden behind a monomorphic `SystemEvaluator` / `HomotopyEvaluator` firewall, so a new polynomial
@@ -129,24 +150,26 @@ system does not create a new tracker/endgame/solver type chain.
 
 These are **not v2 feature gaps**.
 
-1. **Public API contract.** Decide the supported downstream surface explicitly. The current
-   implementation exports a broad usable API, but `export` alone still conflates convenience
-   exports with names that are stable public extension points. The existing proposal is to use a
-   public-interface marker (for example SciMLPublic / `Base.ispublic`) and then test that surface.
+1. **Certify PR #12 as one integrated rename tree.** Core/certification, JET, Runic, benchmark and
+   TTFX gates must all be green on the final exact head before the identity transition is merged.
 
-2. **Release-facing documentation.** The implementation docs are now current after the September
-   parity update, but user documentation still needs a release pass for the final public API,
-   migration examples, certification split, and v2→v3 differences.
+2. **Public API contract.** Decide the supported downstream surface explicitly. `export` alone
+   still conflates convenience exports with stable public extension points.
 
-3. **v3-specific executor consistency.** `DistributedExecutor` exceeds v2, but it does not yet
+3. **Release-facing documentation.** User documentation needs a release pass for the final public
+   API, migration examples, certification split, and v2->v3 differences.
+
+4. **Live v2 comparison harness.** Rebuild the optional benchmark/parity harness around isolated
+   v2/v3 environments now that both versions correctly share one package identity. Do not restore
+   a same-process comparison under aliases.
+
+5. **v3-specific executor consistency.** `DistributedExecutor` exceeds v2, but it does not yet
    penetrate every internal witness move, u-homotopy intersection and membership operation.
-   This is architecture debt, not a v2 parity blocker.
 
-4. **Direct compile-mode characterization.** A clean v3 `COMPILED_ALL` versus v2 `:all` benchmark
-   and fresh-session first-solve comparison would complete the performance record. Benchmark CI
-   itself is now implemented.
+6. **Direct compile-mode characterization.** A clean v3 `COMPILED_ALL` versus v2 `:all` benchmark
+   and fresh-session first-solve comparison would complete the performance record.
 
-5. **General cleanup.** Consolidate duplicated path-map loops/progress idioms where worthwhile,
+7. **General cleanup.** Consolidate duplicated path-map loops/progress idioms where worthwhile,
    formalize the wrapper-system interface, and resolve the small items in `TODO.md` without
    changing solver semantics.
 
@@ -154,15 +177,15 @@ These are **not v2 feature gaps**.
 
 The project should no longer track work under a "v2 parity" umbrella.
 
-The phase transition is:
-
 ```
 rewrite
   -> v2 capability parity
   -> late-v2 catch-up
-  -> feature-complete freeze
+  -> package identity restoration
   -> API stabilization / release preparation
 ```
 
-As of 2026-09-14 the first three stages are complete. New work should be classified as a bug,
-release/API hardening, documentation, performance work, or a genuinely new v3 feature.
+As of 2026-09-14 the first three stages are complete; the package-identity restoration is the
+subject of PR #12 and is complete only once that exact final tree is green. New work should be
+classified as a bug, release/API hardening, documentation, performance work, or a genuinely new
+v3 feature.
