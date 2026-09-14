@@ -6,8 +6,6 @@ SHELL := /bin/bash
 
 # Certification lives in a separate subpackage so Arblib stays out of core.
 CERT := lib/HomotopyContinuationCertification
-CORE_COMPAT := test/compat/HomotopyContinuationNext
-CERT_COMPAT := test/compat/HomotopyContinuationNextCertification
 
 TEST_LOG ?= test-run.log
 CERT_LOG ?= test-cert.log
@@ -54,11 +52,11 @@ format: ## Format all Julia files with Runic
 
 deps: ## Instantiate all environments
 	$(JULIA) --project -e 'using Pkg; Pkg.instantiate()'
-	$(JULIA) --project=test -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="$(CORE_COMPAT)")]); Pkg.instantiate()'
+	$(JULIA) --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
 	$(JULIA) --project=$(CERT) -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
-	$(JULIA) --project=$(CERT)/test -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="$(CERT)"), Pkg.PackageSpec(path="$(CORE_COMPAT)"), Pkg.PackageSpec(path="$(CERT_COMPAT)")]); Pkg.instantiate()'
-	$(JULIA) --project=test/extensive -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="$(CERT)"), Pkg.PackageSpec(path="$(CORE_COMPAT)"), Pkg.PackageSpec(path="$(CERT_COMPAT)")]); Pkg.instantiate()'
-	$(JULIA) --project=benchmark -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="$(CORE_COMPAT)")]); Pkg.instantiate()'
+	$(JULIA) --project=$(CERT)/test -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="$(CERT)")]); Pkg.instantiate()'
+	$(JULIA) --project=test/extensive -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="$(CERT)")]); Pkg.instantiate()'
+	$(JULIA) --project=benchmark -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
 
 update: ## Update all environments
 	$(JULIA) --project -e 'using Pkg; Pkg.update()'
