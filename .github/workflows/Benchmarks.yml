@@ -62,10 +62,7 @@ jobs:
           cd benchmark
           julia --project --threads=1 --gcthreads=1 --color=yes -e '
             using Pkg
-            Pkg.develop([
-              PackageSpec(path=joinpath(pwd(), "..")),
-              PackageSpec(path=joinpath(pwd(), "..", "test", "compat", "HomotopyContinuationNext")),
-            ])
+            Pkg.develop(PackageSpec(path=joinpath(pwd(), "..")))
             Pkg.instantiate()
             include("runbenchmarks.jl")'
       - name: Prepare benchmark history directory
@@ -129,10 +126,7 @@ jobs:
           restore-keys: |
             ttfx-v3-${{ runner.os }}-julia-1.13-
       - name: Prepare v3 environment
-        run: >-
-          julia --project=. -e
-          'using Pkg; Pkg.develop(path="test/compat/HomotopyContinuationNext");
-          Pkg.instantiate(); Pkg.precompile(); using HomotopyContinuation'
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using HomotopyContinuation'
       - name: Run representative first-call latency workloads
         env:
           TTFX_THREADS: '1'
@@ -215,10 +209,7 @@ jobs:
           arch: x64
       - uses: julia-actions/cache@v3
       - name: Prepare v3 environment
-        run: >-
-          julia --project=. -e
-          'using Pkg; Pkg.develop(path="test/compat/HomotopyContinuationNext");
-          Pkg.instantiate(); Pkg.precompile(); using HomotopyContinuation'
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using HomotopyContinuation'
       - name: Run complete first-call latency inventory
         env:
           TTFX_THREADS: '1'
