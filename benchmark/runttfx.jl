@@ -16,7 +16,7 @@ const BENCHMARK_OUTPUT_FILE = joinpath(dirname(@__DIR__), "ttfx_benchmark.json")
 # Child mode: measure package loading, workload-definition setup, and first call.
 if !isempty(ARGS) && first(ARGS) == "--child"
     name = Symbol(ARGS[2])
-    package_load = @elapsed @eval using HomotopyContinuationNext
+    package_load = @elapsed @eval using HomotopyContinuation
     setup = @elapsed include(WORKLOAD_FILE)
     first_call = @elapsed TTFXWorkloads.run(name)
     println(RESULT_PREFIX, " ", name, " ", package_load, " ", setup, " ", first_call)
