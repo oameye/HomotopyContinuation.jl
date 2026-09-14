@@ -10,42 +10,38 @@ The exact assertion count is not an invariant: several loops assert over discove
 the number can vary with stochastic endpoint discovery. Correctness is pinned through counts,
 classifications, numerical comparisons and deterministic regressions.
 
-## Package-identity transition
+## Package identity
 
 PR #12 restores the production package from the temporary rewrite identity
-`HomotopyContinuationNext` to the registered `HomotopyContinuation` name and UUID.
+`HomotopyContinuationNext` to the registered `HomotopyContinuation` name and UUID. Executable
+source, tests, benchmarks, extensions and certification now use the restored identity directly;
+there is no old-name forwarding package in the active tree.
 
-The package-level gates exercise the renamed production module directly:
+The package-level gates exercise the production module directly:
 
 - `aqua_test.jl` -> `Aqua.test_all(HomotopyContinuation)`;
 - `jet_test.jl` -> `JET.report_package(HomotopyContinuation)`;
 - `explicit_imports_test.jl` -> imports/public-access checks on `HomotopyContinuation` and
-  `HomotopyContinuationDistributedExt`;
+  `DistributedExt`;
 - `concrete_structs_test.jl` -> types whose parent module is `HomotopyContinuation`;
 - TTFX package-load timing -> `using HomotopyContinuation`.
 
-The large behavioral test corpus still contains many pre-rename import prefixes. Temporary
-forwarding packages under `test/compat/` make those tests execute the real renamed implementation
-without adding an old-name module to production. They are transitional test infrastructure only.
-
-Three historical direct comparison files are deliberately excluded from ordinary discovery after
-the identity restoration:
+The three historical same-process comparison tests were removed from the executable suite:
 
 - `compare_v2_primitives_test.jl`;
 - `compare_v2_solve_counts_test.jl`;
 - `compare_v2_solve_match_test.jl`.
 
-Those files relied on installing/loading v2 and v3 as distinct packages in one Julia environment.
-That model becomes invalid once both correctly share the registered name and UUID; naively keeping
-them could turn the oracle into a v3-v3 self-comparison. Live comparisons must be rebuilt around
-isolated environments/processes. Fixed parity regressions such as `v2_parity_test.jl` and
-`monodromy_v2_parity_test.jl` remain active.
+They relied on loading v2 and v3 as distinct packages in one Julia environment. That model is
+invalid once both correctly share the registered name and UUID; retaining it could turn the oracle
+into a v3-v3 self-comparison. Live comparisons must use isolated environments/processes. Fixed
+parity regressions such as `v2_parity_test.jl` and `monodromy_v2_parity_test.jl` remain active.
 
 ## Core coverage
 
 | Category | Representative files | Coverage |
 |---|---|---|
-| Quality gates | `aqua_test.jl`, `jet_test.jl`, `explicit_imports_test.jl`, `concrete_structs_test.jl` | package/API hygiene on the renamed production module, inference, concrete fields |
+| Quality gates | `aqua_test.jl`, `jet_test.jl`, `explicit_imports_test.jl`, `concrete_structs_test.jl` | package/API hygiene on the production module, inference, concrete fields |
 | Allocation | `alloc_check_test.jl` | zero-allocation hot paths for norms, LA, predictor/Newton/tracker/endgame and wrappers |
 | Primitives | `double_f64_test.jl`, `norms_test.jl`, `linear_algebra_test.jl`, `operations_test.jl`, `taylor_test.jl` | DoubleF64/ComplexDF64, norms, custom LA, scalar ops and Taylor recurrences |
 | Model/evaluation | `interpreter_test.jl`, `codegen_test.jl`, `instruction_count_test.jl`, `polynomial_input_test.jl`, `expression_test.jl`, `symbolic_utils_test.jl` | tape execution, RGF lowering, CSE/instruction regressions, polynomial/expression front ends |
@@ -118,14 +114,11 @@ zero-padded incomplete permutation histories.
 
 ## Certification package
 
-`HomotopyContinuationCertification` has its own environment and covers rectangular interval
-arithmetic, Acb precision refinement, Krawczyk/Arb fallback, distinct-certificate deduplication,
-certified monodromy admission, low-memory iterator certification, transcendental branch behavior,
-and `certify(F, ::Result)` candidate semantics.
-
-The new test runner explicitly loads both `HomotopyContinuation` and
-`HomotopyContinuationCertification` before executing the retained certification test bodies, so a
-packaging/module rename failure cannot be hidden solely by the temporary forwarding modules.
+`HomotopyContinuationCertification` has its own environment and its tests live directly under
+`lib/HomotopyContinuationCertification/test/`. They cover rectangular interval arithmetic, Acb
+precision refinement, Krawczyk/Arb fallback, distinct-certificate deduplication, certified
+monodromy admission, low-memory iterator certification, transcendental branch behavior, and
+`certify(F, ::Result)` candidate semantics.
 
 ## Extensive suite
 
@@ -158,7 +151,7 @@ Every v2 feature-bearing test family has a v3 counterpart or a documented archit
 reason why the original test is inapplicable. The principal intentionally unported family is v2's
 global compiled-cache locking because v3 has no corresponding global compile table.
 
-The three disabled direct-v2 files are a tooling limitation caused by restoring the correct package
+The removed direct-v2 files are a tooling limitation caused by restoring the correct package
 identity, not a reduction in fixed regression coverage. A future live comparison harness must run
 v2 and v3 in isolated environments.
 
