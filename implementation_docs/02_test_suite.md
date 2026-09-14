@@ -2,175 +2,164 @@
 
 Last updated: 2026-09-14.
 
-`make test` runs the core suite through ParallelTestRunner and then the certification subpackage;
-`make test-cert` runs the certification subpackage alone. `test/extensive/` remains outside the
-normal test discovery and is run with `make test-extensive`.
+`make test` runs the core suite through ParallelTestRunner and then the
+`HomotopyContinuationCertification` package; `make test-cert` runs certification alone.
+`test/extensive/` remains outside normal discovery and is run with `make test-extensive`.
 
-The exact assertion count is intentionally not treated as an invariant: several loops assert over
-discovered solutions, so the number of assertions can vary when a stochastic solve finds a
-different number of endpoints. Correctness is pinned through solution counts, classifications,
-numerical comparisons and dedicated deterministic regressions instead.
+The exact assertion count is not an invariant: several loops assert over discovered solutions, so
+the number can vary with stochastic endpoint discovery. Correctness is pinned through counts,
+classifications, numerical comparisons and deterministic regressions.
+
+## Package-identity transition
+
+PR #12 restores the production package from the temporary rewrite identity
+`HomotopyContinuationNext` to the registered `HomotopyContinuation` name and UUID.
+
+The package-level gates exercise the renamed production module directly:
+
+- `aqua_test.jl` -> `Aqua.test_all(HomotopyContinuation)`;
+- `jet_test.jl` -> `JET.report_package(HomotopyContinuation)`;
+- `explicit_imports_test.jl` -> imports/public-access checks on `HomotopyContinuation` and
+  `HomotopyContinuationDistributedExt`;
+- `concrete_structs_test.jl` -> types whose parent module is `HomotopyContinuation`;
+- TTFX package-load timing -> `using HomotopyContinuation`.
+
+The large behavioral test corpus still contains many pre-rename import prefixes. Temporary
+forwarding packages under `test/compat/` make those tests execute the real renamed implementation
+without adding an old-name module to production. They are transitional test infrastructure only.
+
+Three historical direct comparison files are deliberately excluded from ordinary discovery after
+the identity restoration:
+
+- `compare_v2_primitives_test.jl`;
+- `compare_v2_solve_counts_test.jl`;
+- `compare_v2_solve_match_test.jl`.
+
+Those files relied on installing/loading v2 and v3 as distinct packages in one Julia environment.
+That model becomes invalid once both correctly share the registered name and UUID; naively keeping
+them could turn the oracle into a v3-v3 self-comparison. Live comparisons must be rebuilt around
+isolated environments/processes. Fixed parity regressions such as `v2_parity_test.jl` and
+`monodromy_v2_parity_test.jl` remain active.
 
 ## Core coverage
 
 | Category | Representative files | Coverage |
 |---|---|---|
-| Quality gates | `aqua_test.jl`, `jet_test.jl`, `explicit_imports_test.jl`, `concrete_structs_test.jl` | API/package hygiene, inference/static analysis, concrete fields |
-| Allocation | `alloc_check_test.jl` | zero-allocation hot paths for norms, linear algebra, predictor/Newton/tracker/endgame and wrapper-system paths |
-| Primitives | `double_f64_test.jl`, `norms_test.jl`, `linear_algebra_test.jl`, `operations_test.jl`, `taylor_test.jl` | DoubleF64/ComplexDF64, norms, custom LA, scalar op and Taylor recurrences |
+| Quality gates | `aqua_test.jl`, `jet_test.jl`, `explicit_imports_test.jl`, `concrete_structs_test.jl` | package/API hygiene on the renamed production module, inference, concrete fields |
+| Allocation | `alloc_check_test.jl` | zero-allocation hot paths for norms, LA, predictor/Newton/tracker/endgame and wrappers |
+| Primitives | `double_f64_test.jl`, `norms_test.jl`, `linear_algebra_test.jl`, `operations_test.jl`, `taylor_test.jl` | DoubleF64/ComplexDF64, norms, custom LA, scalar ops and Taylor recurrences |
 | Model/evaluation | `interpreter_test.jl`, `codegen_test.jl`, `instruction_count_test.jl`, `polynomial_input_test.jl`, `expression_test.jl`, `symbolic_utils_test.jl` | tape execution, RGF lowering, CSE/instruction regressions, polynomial/expression front ends |
-| Non-polynomial | `nonpolynomial_test.jl`, `log_test.jl` | rational/transcendental evaluation, Jacobian/DF64/Taylor paths, principal-branch `log`, branch behavior |
-| Core systems | `core_test.jl`, `composition_test.jl`, `fixed_parameter_test.jl`, `fixed_parameter_homotopy_test.jl`, `linear_subspace_test.jl` | system wrappers, composition, fixed parameters, custom fixed-parameter homotopies, subspace endpoint dimensions/promotion |
-| Homotopies | `parameter_homotopy_test.jl`, `symbolic_homotopy_test.jl`, `homotopy_solve_test.jl`, `subspace_homotopy_test.jl`, `affine_chart_test.jl` | parameter/symbolic/custom homotopies, cloning, explicit solve routes, affine/projective wrappers |
+| Non-polynomial | `nonpolynomial_test.jl`, `log_test.jl` | rational/transcendental evaluation, Jacobian/DF64/Taylor, principal-branch `log` |
+| Core systems | `core_test.jl`, `composition_test.jl`, `fixed_parameter_test.jl`, `fixed_parameter_homotopy_test.jl`, `linear_subspace_test.jl` | wrappers, composition, fixed parameters/homotopies, subspace endpoints/promotion |
+| Homotopies | `parameter_homotopy_test.jl`, `symbolic_homotopy_test.jl`, `homotopy_solve_test.jl`, `subspace_homotopy_test.jl`, `affine_chart_test.jl` | parameter/symbolic/custom homotopies, cloning and affine/projective wrappers |
 | Tracking | `tracking_test.jl`, `endgame_test.jl`, `newton_test.jl`, `tracker_warmstart_test.jl`, `valuation_test.jl`, `tracker_regression_test.jl` | predictor/corrector, endgame, precision escalation, valuation, trust-region regressions |
-| Solving | `solve_test.jl`, `binomial_system_test.jl`, `polyhedral_regression_test.jl`, `overdetermined_test.jl`, `result_clustering_test.jl`, `path_diagnostics_test.jl`, `progress_test.jl` | algorithms, path/result classification, excess filtering, clustering, progress and early stop |
+| Solving | `solve_test.jl`, `binomial_system_test.jl`, `polyhedral_regression_test.jl`, `overdetermined_test.jl`, `result_clustering_test.jl`, `path_diagnostics_test.jl`, `progress_test.jl` | algorithms, classifications, excess filtering, clustering, progress/early stop |
 | Subspaces/sweeps | `sliced_solve_test.jl`, `subspace_solve_test.jl`, `many_targets_test.jl`, `result_iterator_test.jl` | slices, subspace continuation, many targets, lazy tracking |
 | Distributed | `distributed_test.jl` | process execution against serial, batching, serialization and failure propagation |
-| Monodromy | `monodromy_test.jl`, `monodromy_v2_parity_test.jl`, `voronoi_tree_test.jl`, `group_actions_test.jl` | serial/threaded/distributed semantics, endpoint admission, permutations, trace, group actions, v2 cases |
-| Witness/NID | `witness_set_test.jl`, `nid_test.jl` | affine/projective, zero-dimensional, parametric/rational input, regeneration, decomposition, unresolved outputs |
-| v2 comparison | `compare_v2_primitives_test.jl`, `compare_v2_solve_counts_test.jl`, `compare_v2_solve_match_test.jl`, `v2_parity_test.jl` | primitive, count and solution-value parity |
+| Monodromy | `monodromy_test.jl`, `monodromy_v2_parity_test.jl`, `voronoi_tree_test.jl`, `group_actions_test.jl` | executor semantics, endpoint admission, permutations, trace, group actions, v2 cases |
+| Witness/NID | `witness_set_test.jl`, `nid_test.jl` | affine/projective, zero-dimensional, parametric/rational input, regeneration/decomposition/unresolved output |
+| Fixed v2 parity | `v2_parity_test.jl`, `monodromy_v2_parity_test.jl` and ported cases throughout suite | known v2 numerical/count behavior without loading a second package identity |
 | Integration | `semialgebraic_sets_test.jl`, `utils_test.jl` | SemialgebraicSets and solution/parameter I/O |
 
 ## Final parity-tranche regressions
 
-The September 2026 catch-up PRs added or strengthened regressions for the late-v2 changes. These
-are now part of the ordinary suite and should be treated as release invariants.
+The September 2026 catch-up PRs added or strengthened regressions that are release invariants.
 
 ### Predictor trust radius
 
-`tracker_regression_test.jl` covers a zero crossing where no derivative-derived trust radius is
-available. The fallback must be finite and positive, while an available derivative-based radius
-remains authoritative. Regular and Hermite predictor modes reject non-finite/non-positive radii.
+`tracker_regression_test.jl` covers a zero crossing with no derivative-derived trust radius. The
+fallback must be finite and positive, while an available derivative radius remains authoritative.
 
 ### LinearSubspace endpoint dimensions and promotion
 
-`linear_subspace_test.jl` covers:
-
-- `dim == 0` and `dim == ambient_dim`;
-- `codim == 0` and `codim == ambient_dim`;
-- affine point slices;
-- rejection of a zero-dimensional linear subspace through a nonzero point;
-- `rand_subspace!` with a zero point and `affine = false`;
-- translating a real-coefficient subspace by a complex displacement without mutating the source.
+`linear_subspace_test.jl` covers `dim/codim == 0/n`, affine point slices, rejection of a
+zero-dimensional linear subspace through a nonzero point, safe `rand_subspace!` at zero, and
+real->complex coefficient promotion under translation without source mutation.
 
 ### Certification candidates from Result
 
-`lib/HomotopyContinuationNextCertification/test/result_candidate_certification_test.jl` pins the
-semantic distinction between tracker classification and rigorous certification: a successful
-regular root manually labelled numerically singular is hidden by `solutions(result)` but still
-appears as one successful cluster representative to `certify(F, result)` and certifies.
-
-Failed paths remain excluded and raw duplicates remain collapsed by the `Result` cluster
-partition.
+`lib/HomotopyContinuationCertification/test/` executes the candidate-selection regression: a
+successful regular root manually labelled numerically singular is hidden by `solutions(result)`
+but remains one successful cluster representative for `certify(F, result)` and certifies.
+Failed paths stay excluded and raw duplicates remain clustered.
 
 ### Principal-branch log
 
-`test/log_test.jl` and `lib/.../test/log_test.jl` cover `log` through:
-
-- `Expression` / `SExpr` lowering;
-- interpreted and compiled evaluation;
-- symbolic differentiation;
-- DoubleF64 / ComplexDF64;
-- generated Taylor recurrences;
-- interval and Acb certification;
-- principal-branch/negative-real-axis rejection where a box or ball crosses the cut.
+Core and certification log tests cover expression lowering, interpreted/compiled evaluation,
+symbolic differentiation, DoubleF64/ComplexDF64, Taylor recurrences, interval/Acb certification,
+and negative-real-axis branch-cut rejection.
 
 ### Witness ambient-coordinate contract
 
-Witness intersection tests require exact ordered ambient variables. Two witness sets that use a
-different variable set or a different variable order are rejected instead of being silently
-renamed positionally.
+Witness intersection tests require exact ordered ambient variables; different variable identities
+or order are rejected rather than silently renamed positionally.
 
 ### Regeneration ownership of point identity
 
-`nid_test.jl` covers the final regeneration semantics:
-
-- `EquationSorting.BY_DEGREE` means increasing degree;
-- `EquationSorting.RANDOMIZED` retains its decreasing-degree pre-order before triangular
-  randomization;
-- outer `atol`/`rtol` propagate through internal monodromy and final deduplication;
-- internal monodromy runs with `equivalence_classes = false`;
-- the final `unique_points` pass does not receive group actions, so symmetry cannot quotient
-  witness cardinality.
+`nid_test.jl` pins increasing `BY_DEGREE`, randomized pre-order, outer tolerance ownership,
+`equivalence_classes = false` for internal monodromy, and final deduplication without group-action
+quotienting.
 
 ### Lossless unresolved decomposition
 
-NID regressions verify that witness points discovered during trace-test monodromy are absorbed into
-persistent point identity, and that an iteration-budget exhaustion returns unresolved orbits as
-`WitnessSet(...; irreducibility = Irreducibility.UNKNOWN)` rather than dropping them.
-
-The public result surface includes `irreducible_components`, `unresolved_witness_sets` and
-`unresolved_degree`; `ncomponents` and `degrees` describe proven irreducible components only.
+NID regressions verify persistent identity for points discovered during trace-test monodromy and
+return unresolved orbits as `Irreducibility.UNKNOWN` rather than dropping them.
 
 ### Hardened monodromy endpoint admission
 
-`monodromy_test.jl` covers:
-
-- rejecting singular loop endpoints before they become future starts;
-- base-problem revalidation of genuinely new heuristic endpoints;
-- no redundant revalidation of already-known duplicates;
-- preservation of the certified-duplicate path;
-- the same driver-owned identity semantics across serial/threaded/distributed execution;
-- zero-padding incomplete permutation histories when the solution set grows.
+`monodromy_test.jl` covers singular-endpoint rejection, base-problem revalidation of genuinely new
+heuristic endpoints, certified duplicate admission, cross-executor identity semantics and
+zero-padded incomplete permutation histories.
 
 ### Fixed-parameter custom homotopies
 
-`fixed_parameter_homotopy_test.jl` defines a custom parameterized `AbstractHomotopy` and checks
-binding through `FixedParameterHomotopy`: value, Jacobian, DoubleF64, Taylor coefficients,
-metadata, cloning and an actual solve all pass through the ordinary v3 homotopy evaluator path.
+`fixed_parameter_homotopy_test.jl` exercises a parameterized `AbstractHomotopy` through
+`FixedParameterHomotopy`: values, Jacobian, DoubleF64, Taylor, metadata, cloning and an actual solve.
 
-## Certification subpackage
+## Certification package
 
-The certification package has its own test environment and covers:
+`HomotopyContinuationCertification` has its own environment and covers rectangular interval
+arithmetic, Acb precision refinement, Krawczyk/Arb fallback, distinct-certificate deduplication,
+certified monodromy admission, low-memory iterator certification, transcendental branch behavior,
+and `certify(F, ::Result)` candidate semantics.
 
-- rectangular interval arithmetic and sampled soundness;
-- the Acb interpreter and precision refinement;
-- Krawczyk certification and Arb fallback;
-- `DistinctCertifiedSolutions` and collision/dedup behavior;
-- certified monodromy duplicate admission;
-- low-memory `ResultIterator` certification;
-- principal-branch transcendental operations, including `log`;
-- the candidate-selection semantics of `certify(F, ::Result)`.
-
-The extensive iterator-certification test and the 3264-conic data remain outside the ordinary
-suite.
+The new test runner explicitly loads both `HomotopyContinuation` and
+`HomotopyContinuationCertification` before executing the retained certification test bodies, so a
+packaging/module rename failure cannot be hidden solely by the temporary forwarding modules.
 
 ## Extensive suite
 
-`make test-extensive` covers the large reference problems in `test/extensive/`:
+`make test-extensive` covers:
 
 - lines on a quintic surface;
 - 3264 conics tangent to five conics;
-- the low-memory iterator-certification route on the large conic problem.
+- low-memory iterator certification on the large conic problem.
 
-These runs are intentionally separated from the ordinary CI-sized suite because they are long
-numerical workloads rather than unit/regression tests.
+These are long numerical reference workloads rather than ordinary CI-sized regressions.
 
 ## Permanent CI
 
-The development CI introduced in PRs #10/#11 is now part of the parity claim. On pushes to `v3`
-and relevant pull requests it supplies:
+The permanent matrix supplies:
 
-- **Core tests** on Julia 1.10 and current Julia;
-- **Certification tests** on Julia 1.10 and current Julia;
-- **JET** package-level static analysis;
-- **Runic** formatting;
-- **Benchmark tracking** on pinned Julia 1.13 with a cached baseline and fatal regression
-  threshold;
-- **TTFX tracking** for representative fresh-process workloads;
-- **TTFX full inventory** on `v3` pushes.
+- core tests on Julia 1.10 and current Julia;
+- certification tests on Julia 1.10 and current Julia;
+- JET package-level static analysis;
+- Runic formatting;
+- benchmark tracking on pinned Julia 1.13 with a cached baseline and fatal regression threshold;
+- representative fresh-process TTFX tracking;
+- full TTFX inventory on `v3` pushes.
 
-After the final catch-up PRs were merged, the exact integrated `v3` tree passed all of these gates.
-This is important: feature completion is certified on the combined tree rather than inferred from
-individually green PR branches.
+The September parity tree passed all of these after integration. PR #12 must independently make the
+same standard true for the restored package identity: only the exact final rename head counts.
 
 ## v2 suite coverage
 
-Every v2 feature-bearing test file has a v3 counterpart or a documented architecture-specific
-reason why the test itself is inapplicable. The principal intentionally unported test family is
-v2's compiled-cache locking: v3 has no global system-specific compile table, so there is no cache
-whose locks need the corresponding test.
+Every v2 feature-bearing test family has a v3 counterpart or a documented architecture-specific
+reason why the original test is inapplicable. The principal intentionally unported family is v2's
+global compiled-cache locking because v3 has no corresponding global compile table.
 
-The remaining differences are name/API architecture differences and release-surface decisions,
-not missing numerical capabilities. See `02_status.md`, `03_v3_vs_v2.md`, and
-`09_v2_parity_freeze.md`.
+The three disabled direct-v2 files are a tooling limitation caused by restoring the correct package
+identity, not a reduction in fixed regression coverage. A future live comparison harness must run
+v2 and v3 in isolated environments.
+
+See `02_status.md`, `03_v3_vs_v2.md`, and `09_v2_parity_freeze.md`.
