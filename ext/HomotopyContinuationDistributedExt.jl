@@ -6,7 +6,7 @@ using Random: Random
 using MixedSubdivisions: MixedSubdivisions
 
 using HomotopyContinuation: HomotopyContinuation
-const HC = HomotopyContinuation
+const HCN = HomotopyContinuation
 
 include("HomotopyContinuationDistributedExt/serialization.jl")
 include("HomotopyContinuationDistributedExt/distributed_map.jl")
