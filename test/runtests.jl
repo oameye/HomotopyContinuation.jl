@@ -1,14 +1,6 @@
-using Preferences: set_preferences!
-
-# DispatchDoctor is a production no-op by default. Tests turn the package-wide
-# stability contract into a hard error before HomotopyContinuation is loaded.
-set_preferences!(
-    "HomotopyContinuation",
-    "dispatch_doctor_mode" => "error",
-    "dispatch_doctor_codegen_level" => "min";
-    force = true,
-)
-
+# The ordinary suite runs the production configuration. DispatchDoctor's hard-error
+# instrumentation is exercised independently by the Quality workflow so static
+# analyzers such as AllocCheck and JET inspect package code, not instrumentation.
 using HomotopyContinuation
 using ParallelTestRunner: ParallelTestRunner, find_tests
 
