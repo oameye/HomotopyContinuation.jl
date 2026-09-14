@@ -37,21 +37,20 @@ version = 3.0.0-DEV
 ```
 
 The temporary `HomotopyContinuationNext` name and UUID were development scaffolding only. The core
-entrypoint is now `src/HomotopyContinuation.jl`, the extension modules use the
-`HomotopyContinuation*Ext` prefix, and the split certification package is named
+entrypoint is now `src/HomotopyContinuation.jl`, the extension modules are `DistributedExt` and
+`SemialgebraicSetsExt`, and the split certification package is named
 `HomotopyContinuationCertification`.
 
 This changes the comparison topology. v2 and v3 now intentionally share one package identity, so
 they cannot be installed as two package dependencies in one Julia environment. The historical
-same-process comparison files are therefore excluded from ordinary CI instead of being naively
-renamed: doing so could resolve both sides to v3 and produce a false parity result. Live v2/v3
-comparisons must use isolated Julia processes/environments.
+same-process comparison files were removed rather than naively renamed: doing so could resolve
+both sides to v3 and produce a false parity result. Live v2/v3 comparisons must use isolated Julia
+processes/environments.
 
 The fixed parity regressions (`v2_parity_test.jl`, `monodromy_v2_parity_test.jl`, and the many
-ported v2 cases in ordinary tests) remain active. Temporary forwarding packages under
-`test/compat/` exist only to migrate the large behavioral test corpus without coupling this
-identity change to a mechanical import-prefix rewrite. JET, Aqua, explicit-import,
-concrete-struct and TTFX gates exercise the real renamed production module directly.
+ported v2 cases in ordinary tests) remain active. The executable source, tests, benchmarks,
+extensions and certification package all use the restored identities directly; no old-name
+forwarding package or backing source tree remains in the active repository.
 
 ## Final PR tranche
 
