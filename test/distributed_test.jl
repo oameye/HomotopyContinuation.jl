@@ -147,7 +147,7 @@ end
     # and the fallbacks are reachable only through the hooks.
     @testset "extension hooks" begin
         @test Base.get_extension(
-            HomotopyContinuation, :HomotopyContinuationDistributedExt,
+            HomotopyContinuation, :DistributedExt,
         ) !== nothing
         @test_throws ArgumentError _distributed_solve!(nothing)
         @test_throws ArgumentError _distributed_sweep_entries(
