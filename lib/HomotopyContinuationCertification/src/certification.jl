@@ -1,1 +1,1563 @@
-include(joinpath(@__DIR__, "..", "..", "HomotopyContinuationNextCertification", "src", "certification.jl"))
+## Solution certification via the Krawczyk method (interval arithmetic).
+##
+## `certify` proves that an approximate solution corresponds to a unique true
+## solution contained in an explicit complex-interval box, following
+## Breiding, Rose, Timme, "Certifying zeros of polynomial systems using interval
+## arithmetic" (arXiv:2011.05000) and Moore's test.
+##
+## The Float64 path computes with `IComplex{Float64}` through the generic tape
+## interpreter. When it fails, the arbitrary-precision Arb fallback retries at
+## increasing precision (see certification_arb.jl).
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Certificate types
+# ─────────────────────────────────────────────────────────────────────────────
+
+"""
+    Certification(; max_precision, refine_solution, extended_certificate, show_progress)
+
+Options for [`certify`](@ref).
+
+`max_precision` bounds the bit precision of the Arb fallback,
+`refine_solution` refines each solution before certifying it, and
+`extended_certificate` additionally stores the Krawczyk operator data.
+
+Certification carries no tracker, endgame or seed: it evaluates interval
+arithmetic at given solutions rather than tracking paths.
+"""
+struct Certification
+    max_precision::Int
+    refine_solution::Bool
+    extended_certificate::Bool
+    show_progress::Bool
+end
+
+Certification(;
+    max_precision::Int = 256,
+    refine_solution::Bool = true,
+    extended_certificate::Bool = false,
+    show_progress::Bool = true,
+) = Certification(
+    max_precision, refine_solution, extended_certificate, show_progress,
+)
+
+abstract type AbstractSolutionCertificate end
+
+"""
+    SolutionCertificate
+
+Result of [`certify`](@ref) for a single solution. Holds the solution candidate
+and, if certification succeeded, an `Arblib.AcbMatrix` of complex intervals that
+contains a unique zero of the system.
+"""
+struct SolutionCertificate <: AbstractSolutionCertificate
+    solution_candidate::Vector{ComplexF64}
+    certified::Bool
+    real::Bool
+    complex::Bool
+    index::Int
+    prec::Int
+    # Enclosure of the unique zero. A `0×0` sentinel marks an uncertified
+    # certificate; the public accessors return `nothing` in that case. Keeping
+    # the field concrete (rather than `Union{Nothing,AcbMatrix}`) preserves the
+    # fully-typed struct layout.
+    I::AcbMatrix
+    # Double-precision midpoint of the certified interval, the best available
+    # estimate of the true solution (empty when uncertified).
+    solution::Vector{ComplexF64}
+end
+
+"""
+    ExtendedSolutionCertificate
+
+Like [`SolutionCertificate`](@ref) but also stores the Krawczyk operator data
+(`I`, `I′` with `I′ ⊊ I`, the refined point `x̃`, and the approximate inverse `Y`).
+"""
+struct ExtendedSolutionCertificate <: AbstractSolutionCertificate
+    solution_candidate::Vector{ComplexF64}
+    certified::Bool
+    real::Bool
+    complex::Bool
+    index::Int
+    prec::Int
+    # `0×0` sentinels mark an uncertified certificate (see `SolutionCertificate`).
+    I::AcbMatrix
+    I′::AcbMatrix
+    x̃::AcbMatrix
+    Y::AcbMatrix
+    solution::Vector{ComplexF64}
+end
+
+# Sentinel enclosure marking an uncertified certificate.
+_empty_acb() = AcbMatrix(0, 0)
+_is_empty_acb(A::AcbMatrix) = size(A, 1) == 0
+
+"""
+    solution_candidate(certificate::AbstractSolutionCertificate)
+
+Return the provided solution candidate.
+"""
+solution_candidate(C::AbstractSolutionCertificate) = C.solution_candidate
+
+"""
+    is_certified(certificate::AbstractSolutionCertificate)
+
+Return `true` if `certificate` proves that its solution interval contains a
+unique zero.
+"""
+is_certified(C::AbstractSolutionCertificate)::Bool = C.certified
+
+"""
+    is_real(certificate::AbstractSolutionCertificate)
+
+Return `true` if `certificate` certifies that its solution interval contains a
+true real zero. A `false` result does not prove the zero is non-real.
+"""
+is_real(C::AbstractSolutionCertificate)::Bool = C.real
+
+"""
+    is_complex(certificate::AbstractSolutionCertificate)
+
+Return `true` if `certificate` certifies that its solution interval contains a
+non-real complex zero.
+"""
+is_complex(C::AbstractSolutionCertificate)::Bool = C.complex
+
+"""
+    is_positive(certificate::AbstractSolutionCertificate)
+
+Return `true` if the certified unique zero is real and positive in every coordinate.
+"""
+function is_positive(C::AbstractSolutionCertificate)::Bool
+    (is_certified(C) && is_real(C)) || return false
+    I = C.I
+    return all(i -> Arblib.is_positive(real(Arblib.ref(I, i, 1))), 1:size(I, 1))
+end
+
+"""
+    is_positive(certificate::AbstractSolutionCertificate, i::Integer)
+
+Return `true` if the `i`-th coordinate of the certified unique zero is real and positive.
+"""
+function is_positive(C::AbstractSolutionCertificate, i::Integer)::Bool
+    (is_certified(C) && is_real(C)) || return false
+    return Arblib.is_positive(real(Arblib.ref(C.I, i, 1)))
+end
+
+"""
+    certified_solution_interval(certificate::AbstractSolutionCertificate)
+
+Return the `Arblib.AcbMatrix` of complex intervals containing a unique zero, or
+`nothing` if `is_certified(certificate)` is `false`.
+"""
+certified_solution_interval(C::AbstractSolutionCertificate) = is_certified(C) ? C.I : nothing
+
+"""
+    certified_solution_interval_after_krawczyk(certificate::ExtendedSolutionCertificate)
+
+Return the enclosure `I′` obtained by applying the Krawczyk operator to the
+certified interval, or `nothing` if the certificate is not certified.
+"""
+certified_solution_interval_after_krawczyk(C::ExtendedSolutionCertificate) =
+    is_certified(C) ? C.I′ : nothing
+
+"""
+    certificate_index(certificate::AbstractSolutionCertificate)
+
+Return the index of the solution candidate this certificate was produced from.
+"""
+certificate_index(C::AbstractSolutionCertificate)::Int = C.index
+
+# The same certificate under another index, for a caller that learns the index only
+# after certifying. The enclosures are shared, not copied.
+_with_index(C::AbstractSolutionCertificate, index::Int) =
+    _with_fields(C, (index = index,))
+
+"""
+    precision(certificate::AbstractSolutionCertificate)
+
+Return the maximal bit precision used to produce this certificate.
+"""
+Base.precision(C::AbstractSolutionCertificate)::Int = C.prec
+
+"""
+    solution_approximation(certificate::AbstractSolutionCertificate)
+
+Return the midpoint of the certified interval as a `Vector{ComplexF64}`, or
+`nothing` if the certificate is not certified.
+"""
+solution_approximation(C::AbstractSolutionCertificate) = is_certified(C) ? C.solution : nothing
+
+"""
+    krawczyk_operator_parameters(cert::ExtendedSolutionCertificate)
+
+Return `(x = x̃, Y = Y)`, the Krawczyk operator parameters.
+"""
+krawczyk_operator_parameters(C::ExtendedSolutionCertificate) = (x = C.x̃, Y = C.Y)
+
+function Base.show(
+        io::IO,
+        cert::AbstractSolutionCertificate;
+        digits::Int = 16,
+        more::Bool = false,
+    )
+    println(io, "SolutionCertificate:")
+    println(io, "solution_candidate = [")
+    for z in solution_candidate(cert)
+        println(io, "  ", z, ",")
+    end
+    println(io, "]")
+    print(io, "is_certified = ", is_certified(cert))
+    if !isnothing(certified_solution_interval(cert))
+        println(io)
+        println(io, "certified_solution_interval = [")
+        for z in certified_solution_interval(cert)
+            println(io, "  ", string(z; digits = digits, more = more), ",")
+        end
+        println(io, "]")
+        println(io, "precision = ", cert.prec)
+        print(io, "is_real = ", is_real(cert))
+    end
+    if cert.index != 0
+        println(io)
+        print(io, "index = ", cert.index)
+    end
+    return
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CertificationResult
+# ─────────────────────────────────────────────────────────────────────────────
+
+"""
+    CertificationResult
+
+The result of [`certify`](@ref) for multiple solutions. Holds the individual
+[`SolutionCertificate`](@ref)s and groups of certificates that share a true solution.
+"""
+struct CertificationResult{C <: AbstractSolutionCertificate}
+    certificates::Vector{C}
+    duplicates::Vector{Vector{Int}}
+    # The instruction sequence (straight-line program) of the certified system,
+    # used by `show_straight_line_program`.
+    slp::InstructionSequence
+end
+
+"""
+    certificates(R::CertificationResult)
+
+Return the stored [`SolutionCertificate`](@ref)s.
+"""
+certificates(R::CertificationResult) = R.certificates
+
+"""
+    distinct_certificates(R::CertificationResult)
+
+Return one certificate per distinct certified solution interval.
+"""
+function distinct_certificates(R::CertificationResult)
+    cs = certificates(R)
+    isempty(R.duplicates) && return cs
+    keep = trues(length(cs))
+    for d in R.duplicates, k in 2:length(d)
+        keep[d[k]] = false
+    end
+    return cs[keep]
+end
+
+"""
+    distinct_solutions(R::CertificationResult)
+
+Return the midpoint approximations of the distinct certified solution intervals.
+"""
+distinct_solutions(R::CertificationResult) = solution_approximation.(distinct_certificates(R))
+
+"""
+    ncandidates(R::CertificationResult)
+
+Return the number of solution candidates that were given to [`certify`](@ref).
+"""
+ncandidates(R::CertificationResult)::Int = length(R.certificates)
+
+"""
+    ncertified(R::CertificationResult)
+
+Return the number of certified solutions.
+"""
+ncertified(R::CertificationResult)::Int = count(is_certified, R.certificates)
+
+"""
+    nreal_certified(R::CertificationResult)
+
+Return the number of certified real solutions.
+"""
+nreal_certified(R::CertificationResult)::Int =
+    count(r -> is_certified(r) && is_real(r), R.certificates)
+
+"""
+    ncomplex_certified(R::CertificationResult)
+
+Return the number of certified non-real complex solutions.
+"""
+ncomplex_certified(R::CertificationResult)::Int =
+    count(r -> is_certified(r) && is_complex(r), R.certificates)
+
+"""
+    ndistinct_certified(R::CertificationResult)
+
+Return the number of distinct certified solutions.
+"""
+function ndistinct_certified(R::CertificationResult)::Int
+    ncert = ncertified(R)
+    isempty(R.duplicates) && return ncert
+    return ncert - sum(length, R.duplicates) + length(R.duplicates)
+end
+
+"""
+    ndistinct_real_certified(R::CertificationResult)
+
+Return the number of distinct certified real solutions.
+"""
+function ndistinct_real_certified(R::CertificationResult)::Int
+    ncert = nreal_certified(R)
+    isempty(R.duplicates) && return ncert
+    return ncert - sum(R.duplicates) do dup
+        is_real(R.certificates[dup[1]]) ? length(dup) - 1 : 0
+    end
+end
+
+"""
+    ndistinct_complex_certified(R::CertificationResult)
+
+Return the number of distinct certified non-real complex solutions.
+"""
+function ndistinct_complex_certified(R::CertificationResult)::Int
+    ncert = ncomplex_certified(R)
+    isempty(R.duplicates) && return ncert
+    return ncert - sum(R.duplicates) do dup
+        is_complex(R.certificates[dup[1]]) ? length(dup) - 1 : 0
+    end
+end
+
+"""
+    show_straight_line_program([io::IO], R::CertificationResult)
+
+Print the straight-line program (instruction sequence) of the certified system,
+i.e. the interpreter tape that `certify` evaluated.
+"""
+show_straight_line_program(R::CertificationResult) = show_straight_line_program(stdout, R)
+function show_straight_line_program(io::IO, R::CertificationResult)
+    seq = R.slp
+    println(io, "Straight-line program (", length(seq), " instructions):")
+    for instr in seq.instructions
+        op = instruction_op(instr)
+        op == OpType.OP_STOP && continue
+        args = String[]
+        for k in 1:arity(op)
+            v = instr.input[k]
+            push!(args, should_use_index_not_reference(op, k) ? string(v) : string("#", v))
+        end
+        println(io, "  #", instruction_output(instr), " = ", op_call(op), "(", join(args, ", "), ")")
+    end
+    return
+end
+
+Base.show(io::IO, R::CertificationResult) = print(
+    io, "CertificationResult with ", ndistinct_certified(R),
+    " distinct certified solutions",
+)
+
+function Base.show(io::IO, ::MIME"text/plain", R::CertificationResult)
+    println(io, "CertificationResult")
+    println(io, "===================")
+    println(io, "• $(ncandidates(R)) solution candidates given")
+    ncert = ncertified(R)
+    print(io, "• $ncert certified solution intervals")
+    nreal = nreal_certified(R)
+    ncomplex = ncomplex_certified(R)
+    print(io, " ($nreal real, $ncomplex complex")
+    if nreal + ncomplex < ncert
+        println(io, ", $(ncert - (nreal + ncomplex)) undecided)")
+    else
+        println(io, ")")
+    end
+    ndist = ndistinct_certified(R)
+    print(io, "• $ndist distinct certified solution intervals")
+    ndist_real = ndistinct_real_certified(R)
+    ndist_complex = ndistinct_complex_certified(R)
+    print(io, " ($ndist_real real, $ndist_complex complex")
+    if ndist_real + ndist_complex < ndist
+        print(io, ", $(ndist - (ndist_real + ndist_complex)) undecided)")
+    else
+        print(io, ")")
+    end
+    return
+end
+
+"""
+    save(filename, R::CertificationResult)
+
+Write a text representation of the certification result to disk.
+"""
+function save(filename, R::CertificationResult)
+    open(filename, "w") do f
+        println(f, "## Summary")
+        show(f, R)
+        println(f, "\n\n## Certificates")
+        for cert in certificates(R)
+            show(f, cert)
+            println(f)
+        end
+    end
+    return filename
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Distinct-solution deduplication (interval tree keyed by squared distance)
+# ─────────────────────────────────────────────────────────────────────────────
+
+function squared_distance_interval(
+        cert::AbstractSolutionCertificate,
+        reference_point::Vector{ComplexF64},
+    )
+    a, b = Arblib.Arf(; prec = 53), Arblib.Arf(; prec = 53)
+    I = cert.I::AcbMatrix
+    n = length(reference_point)
+    d = zero(Interval{Float64})
+    for i in 1:n
+        yᵢ = IComplexF64(Arblib.ref(I, i, 1), a, b)
+        d +=
+            sqr(real(yᵢ) - real(reference_point[i])) +
+            sqr(imag(yᵢ) - imag(reference_point[i]))
+    end
+    return IntervalTrees.Interval(d.lo, d.hi)
+end
+function squared_distance_interval(
+        candidate::AbstractVector{ComplexF64},
+        reference_point::Vector{ComplexF64},
+    )
+    n = length(candidate)
+    d = zero(Interval{Float64})
+    for i in 1:n
+        yᵢ = IComplexF64(candidate[i])
+        d +=
+            sqr(real(yᵢ) - real(reference_point[i])) +
+            sqr(imag(yᵢ) - imag(reference_point[i]))
+    end
+    return IntervalTrees.Interval(d.lo, d.hi)
+end
+
+# Certificates are bucketed per interval key: two distinct certificates can share
+# a `squared_distance_interval` key, and a one-per-key map would drop one of them.
+struct DistinctSolutionCertificates{S <: AbstractSolutionCertificate}
+    reference_point::Vector{ComplexF64}
+    distinct_tree::IntervalTrees.IntervalMap{Float64, Vector{S}}
+    acb_solution_candidate::AcbMatrix
+end
+
+function DistinctSolutionCertificates(
+        reference_point::Vector{ComplexF64};
+        extended_certificate::Bool = false,
+    )
+    S = extended_certificate ? ExtendedSolutionCertificate : SolutionCertificate
+    return DistinctSolutionCertificates(
+        reference_point,
+        IntervalTrees.IntervalMap{Float64, Vector{S}}(),
+        AcbMatrix(length(reference_point), 1),
+    )
+end
+DistinctSolutionCertificates(dim::Integer; kwargs...) =
+    DistinctSolutionCertificates(randn(ComplexF64, dim); kwargs...)
+
+Base.length(d::DistinctSolutionCertificates) =
+    sum(length, Base.values(d.distinct_tree); init = 0)
+
+# Every stored certificate, bucket order flattened.
+all_certificates(d::DistinctSolutionCertificates{S}) where {S} =
+    collect(Iterators.flatten(Base.values(d.distinct_tree)))::Vector{S}
+Base.show(io::IO, d::DistinctSolutionCertificates) =
+    print(io, "DistinctSolutionCertificates with $(length(d)) certificates")
+
+"""
+    add_certificate!(distinct_sols, cert)
+
+Insert `cert` into the interval tree unless an existing certificate's interval
+overlaps it (a duplicate). Returns `(is_distinct, certificate)`.
+"""
+function add_certificate!(
+        distinct_sols::DistinctSolutionCertificates{S},
+        cert::S,
+    ) where {S <: AbstractSolutionCertificate}
+    d = squared_distance_interval(cert, distinct_sols.reference_point)
+    bucket_for_d = nothing
+    for match in intersect(distinct_sols.distinct_tree, d)
+        bucket = IntervalTrees.value(match)
+        for certᵢ in bucket
+            if Bool(Arblib.overlaps(cert.I, certᵢ.I))
+                return (false, certᵢ)
+            end
+        end
+        if first(match) == first(d) && last(match) == last(d)
+            bucket_for_d = bucket
+        end
+    end
+    if isnothing(bucket_for_d)
+        distinct_sols.distinct_tree[d] = S[cert]
+    else
+        push!(bucket_for_d, cert)
+    end
+    return (true, cert)
+end
+
+"""
+    guaranteed_duplicate_certificate(distinct_sols, s)
+
+Return the stored certificate whose interval provably contains the point `s`, so
+`s` certifies a solution already accounted for, and `nothing` when there is
+none. Used to skip certifying candidates that are guaranteed duplicates.
+"""
+function guaranteed_duplicate_certificate(
+        distinct_sols::DistinctSolutionCertificates{S},
+        s::AbstractVector{ComplexF64},
+    ) where {S}
+    d = squared_distance_interval(s, distinct_sols.reference_point)
+    assigned = false
+    for match in intersect(distinct_sols.distinct_tree, d)
+        if !assigned
+            for (i, xᵢ) in enumerate(s)
+                distinct_sols.acb_solution_candidate[i] = xᵢ
+            end
+            assigned = true
+        end
+        for certᵢ in IntervalTrees.value(match)
+            if Bool(Arblib.contains(certᵢ.I, distinct_sols.acb_solution_candidate))
+                return certᵢ
+            end
+        end
+    end
+    return nothing
+end
+
+"""
+    is_solution_candidate_guaranteed_duplicate(distinct_sols, s)
+
+Return `true` when the point `s` is provably contained in the interval of an
+already-stored certificate, so it certifies a solution already accounted for.
+"""
+is_solution_candidate_guaranteed_duplicate(
+    distinct_sols::DistinctSolutionCertificates,
+    s::AbstractVector{ComplexF64},
+) = !isnothing(guaranteed_duplicate_certificate(distinct_sols, s))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Certification parameters
+# ─────────────────────────────────────────────────────────────────────────────
+
+struct CertificationParameters
+    params::Vector{ComplexF64}
+    interval_params::Vector{IComplexF64}
+    arb_interval_params::AcbRefVector
+end
+
+function CertificationParameters(p::AbstractVector; prec::Int = 256)
+    arb_ip = AcbRefVector(length(p); prec = prec)
+    for (i, pᵢ) in enumerate(p)
+        arb_ip[i][] = pᵢ
+    end
+    return CertificationParameters(
+        convert(Vector{ComplexF64}, p),
+        convert(Vector{IComplexF64}, p),
+        arb_ip,
+    )
+end
+
+certification_parameters(p::AbstractVector; prec::Int = 256) =
+    CertificationParameters(p; prec = prec)
+certification_parameters(::Nothing; prec::Int = 256) = nothing
+
+complexF64_params(C::CertificationParameters) = C.params
+complexF64_interval_params(C::CertificationParameters) = C.interval_params
+arb_interval_params(C::CertificationParameters) = C.arb_interval_params
+complexF64_params(::Nothing) = ComplexF64[]
+complexF64_interval_params(::Nothing) = IComplexF64[]
+arb_interval_params(::Nothing) = nothing
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Arb (arbitrary-precision) certification cache
+# ─────────────────────────────────────────────────────────────────────────────
+
+"""
+    AcbCertCache(F::System; prec = 128)
+
+Pre-allocated Arb state for the extended-precision Krawczyk fallback. The
+working precision grows during certification, so the buffers (and the tape views
+inside the interpreters) are re-created at higher precision via
+[`set_arb_precision!`](@ref); this is why the struct is mutable and the buffers
+are not `const`.
+"""
+mutable struct AcbCertCache
+    prec::Int
+    const eval_interpreter::AcbInterpreter
+    const jac_interpreter::AcbInterpreter
+    C::AcbRefMatrix
+    r₀::AcbRefMatrix
+    Δx₀::AcbRefMatrix
+    x̃₀::AcbRefMatrix
+    x₀::AcbRefMatrix
+    x₁::AcbRefMatrix
+    J_x₀::AcbRefMatrix
+    M::AcbRefMatrix
+    δx::AcbRefMatrix
+    const mag::Mag
+end
+
+function AcbCertCache(
+        seq_eval::InstructionSequence, seq_jac::InstructionSequence, m::Int; prec::Int = 128,
+    )
+    eval_interpreter = AcbInterpreter(seq_eval; prec = prec)
+    jac_interpreter = AcbInterpreter(seq_jac; prec = prec)
+    return AcbCertCache(
+        prec,
+        eval_interpreter,
+        jac_interpreter,
+        AcbRefMatrix(m, m; prec = prec),
+        AcbRefMatrix(m, 1; prec = prec),
+        AcbRefMatrix(m, 1; prec = prec),
+        AcbRefMatrix(m, 1; prec = prec),
+        AcbRefMatrix(m, 1; prec = prec),
+        AcbRefMatrix(m, 1; prec = prec),
+        AcbRefMatrix(m, m; prec = prec),
+        AcbRefMatrix(m, m; prec = prec),
+        AcbRefMatrix(m, 1; prec = prec),
+        Mag(),
+    )
+end
+AcbCertCache(F::System; prec::Int = 128) =
+    AcbCertCache(F._interp_f64.sequence, F._interp_jac.sequence, first(size(F)); prec = prec)
+
+# Re-view an `AcbRefMatrix` at a new working precision, sharing the underlying data.
+_setprec(A::AcbRefMatrix, p::Int) = Base.setprecision(A, p)
+
+"""
+    set_arb_precision!(cache::AcbCertCache, p::Int)
+
+Raise the working precision of every Arb buffer and interpreter tape to `p`.
+"""
+function set_arb_precision!(cache::AcbCertCache, p::Int)
+    cache.prec == p && return cache
+    cache.prec = p
+    cache.C = _setprec(cache.C, p)
+    cache.r₀ = _setprec(cache.r₀, p)
+    cache.Δx₀ = _setprec(cache.Δx₀, p)
+    cache.x̃₀ = _setprec(cache.x̃₀, p)
+    cache.x₀ = _setprec(cache.x₀, p)
+    cache.x₁ = _setprec(cache.x₁, p)
+    cache.J_x₀ = _setprec(cache.J_x₀, p)
+    cache.M = _setprec(cache.M, p)
+    cache.δx = _setprec(cache.δx, p)
+    setprecision!(cache.eval_interpreter, p)
+    setprecision!(cache.jac_interpreter, p)
+    return cache
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Certification cache
+# ─────────────────────────────────────────────────────────────────────────────
+
+"""
+    CertificationCache(F::System)
+
+Pre-allocated data structures for [`certify`](@ref). The Float64 Krawczyk path
+uses interval interpreters built from `F`'s cached instruction sequences.
+"""
+mutable struct CertificationCache
+    # Private evaluator clone so refinement newton never touches `F`'s shared
+    # interpreter tapes; this makes the cache safe to use from its own task.
+    const system_evaluator::SystemEvaluator
+    const eval_interpreter_F64::Interpreter{Vector{IComplexF64}}
+    const jac_interpreter_F64::Interpreter{Vector{IComplexF64}}
+    const jac_interpreter_C64::Interpreter{Vector{ComplexF64}}
+    const newton_cache::NewtonCache
+    # Krawczyk Float64 buffers
+    const J_C64::Matrix{ComplexF64}
+    const C_C64::Matrix{ComplexF64}   # in-place approximate inverse of J_C64
+    const u_C64::Vector{ComplexF64}
+    const r₀::Vector{IComplexF64}
+    const Δx₀::Vector{IComplexF64}
+    const ix̃₀::Vector{IComplexF64}
+    const u_scratch::Vector{IComplexF64}
+    const Jx₀::Matrix{IComplexF64}
+    const M::Matrix{IComplexF64}
+    const δx::Vector{IComplexF64}
+    const x₀::Vector{IComplexF64}
+    const x₁::Vector{IComplexF64}
+    # Instruction sequences + size, kept so `arb` can be built lazily.
+    const seq_eval::InstructionSequence
+    const seq_jac::InstructionSequence
+    const m::Int
+    # Arbitrary-precision fallback state, initialized lazily (see `_arb`).
+    arb::AcbCertCache
+
+    function CertificationCache(
+            system_evaluator, eval_F64, jac_F64, jac_C64, newton_cache,
+            J_C64, C_C64, u_C64, r₀, Δx₀, ix̃₀, u_scratch, Jx₀, M, δx, x₀, x₁,
+            seq_eval, seq_jac, m,
+        )
+        # `arb` is intentionally left undefined here (lazy).
+        return new(
+            system_evaluator, eval_F64, jac_F64, jac_C64, newton_cache,
+            J_C64, C_C64, u_C64, r₀, Δx₀, ix̃₀, u_scratch, Jx₀, M, δx, x₀, x₁,
+            seq_eval, seq_jac, m,
+        )
+    end
+end
+
+function CertificationCache(F::System)
+    m, n = size(F)
+    m == n || throw(ArgumentError("We can only certify solutions to square systems."))
+    seq_eval = F._interp_f64.sequence
+    seq_jac = F._interp_jac.sequence
+    return CertificationCache(
+        _clone_system_evaluator(F),
+        Interpreter(Vector{IComplexF64}, seq_eval),
+        Interpreter(Vector{IComplexF64}, seq_jac),
+        Interpreter(Vector{ComplexF64}, seq_jac),
+        NewtonCache(F),
+        zeros(ComplexF64, m, m),
+        zeros(ComplexF64, m, m),
+        zeros(ComplexF64, m),
+        zeros(IComplexF64, m),
+        zeros(IComplexF64, m),
+        zeros(IComplexF64, m),
+        zeros(IComplexF64, m),
+        zeros(IComplexF64, m, m),
+        zeros(IComplexF64, m, m),
+        zeros(IComplexF64, m),
+        zeros(IComplexF64, m),
+        zeros(IComplexF64, m),
+        seq_eval,
+        seq_jac,
+        m,
+    )
+end
+
+"""
+    _arb(cache::CertificationCache) -> AcbCertCache
+
+Return the arbitrary-precision fallback state, building it on first use. Each
+`CertificationCache` is used by a single task, so this lazy initialization is
+not shared across threads.
+"""
+function _arb(cache::CertificationCache)::AcbCertCache
+    isdefined(cache, :arb) || (cache.arb = AcbCertCache(cache.seq_eval, cache.seq_jac, cache.m))
+    return cache.arb
+end
+
+# `ntasks` caches, one per task, since `certify_solution` mutates a cache's
+# buffers. The caller's own cache is reused as the first rather than discarded.
+function _cache_set(
+        F::System, cache::CertificationCache, ntasks::Int,
+    )::Vector{CertificationCache}
+    caches = CertificationCache[cache]
+    for _ in 2:ntasks
+        push!(caches, CertificationCache(F))
+    end
+    return caches
+end
+
+# A task takes whichever cache is free rather than owning one by index, so they are
+# handed out through a channel. Cheap enough to rebuild per threaded region, which
+# is what lets one cache set serve several of them.
+function _cache_pool(caches::Vector{CertificationCache})::Channel{CertificationCache}
+    pool = Channel{CertificationCache}(length(caches))
+    for cache in caches
+        put!(pool, cache)
+    end
+    return pool
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Krawczyk operator (Float64)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Matrix multiply via muladd; faster than generic `*` for interval elements.
+function sqr_mul!(C::AbstractVecOrMat{<:Number}, A::AbstractMatrix{<:Number}, B::AbstractVecOrMat{<:Number})
+    n = size(A, 1)
+    C .= zero(eltype(C))
+    @inbounds for j in 1:size(B, 2)
+        for k in 1:n
+            bkj = B[k, j]
+            for i in 1:n
+                C[i, j] = muladd(A[i, k], bkj, C[i, j])
+            end
+        end
+    end
+    return C
+end
+
+function all2(f::F, a::AbstractVector, b::AbstractVector) where {F}
+    @inbounds for i in eachindex(a, b)
+        f(a[i], b[i]) || return false
+    end
+    return true
+end
+
+# Evaluate an interval interpreter with correct parameter arity.
+Base.@propagate_inbounds function _exec_eval!(
+        u, I::Interpreter, x, p::AbstractVector,
+    )
+    return isempty(I.sequence.parameters_range) ? execute!(u, I, x) : execute!(u, I, x, p)
+end
+Base.@propagate_inbounds function _exec_jac!(
+        u, U, I::Interpreter, x, p::AbstractVector,
+    )
+    return isempty(I.sequence.parameters_range) ? execute!(u, U, I, x) :
+        execute!(u, U, I, x, p)
+end
+
+"""
+    ε_inflation_krawczyk(x̃₀, p, C, cert_cache)
+
+Apply the ε-inflation Krawczyk operator around the refined point `x̃₀` with
+approximate inverse `C`. Returns `(certified, x₁, x₀, is_real)`.
+"""
+function ε_inflation_krawczyk(
+        x̃₀::AbstractVector,
+        p::Union{Nothing, CertificationParameters},
+        C::Matrix{ComplexF64},
+        cert_cache::CertificationCache,
+    )
+    r₀ = cert_cache.r₀
+    Δx₀ = cert_cache.Δx₀
+    ix̃₀ = cert_cache.ix̃₀
+    J_x₀ = cert_cache.Jx₀
+    M = cert_cache.M
+    δx = cert_cache.δx
+    x₀ = cert_cache.x₀
+    x₁ = cert_cache.x₁
+    ip = complexF64_interval_params(p)
+
+    ix̃₀ .= IComplexF64.(x̃₀)
+    # r₀ = F(ix̃₀)
+    _exec_eval!(r₀, cert_cache.eval_interpreter_F64, ix̃₀, ip)
+    # Δx₀ = C * r₀
+    sqr_mul!(Δx₀, C, r₀)
+
+    # ε-inflation with a per-coordinate εᵢ (matches the weighted-norm strategy).
+    @inbounds for i in eachindex(x̃₀)
+        x̃₀_i = x̃₀[i]
+        εᵢ = 512 * max(mag(Δx₀[i]), eps())
+        x₀[i] = complex(
+            Interval(real(x̃₀_i) - εᵢ, real(x̃₀_i) + εᵢ),
+            Interval(imag(x̃₀_i) - εᵢ, imag(x̃₀_i) + εᵢ),
+        )
+    end
+
+    _exec_jac!(cert_cache.u_scratch, J_x₀, cert_cache.jac_interpreter_F64, x₀, ip)
+
+    # x₁ = (x̃₀ - Δx₀) - (C * J(x₀) - I) * (x₀ - x̃₀)
+    sqr_mul!(M, C, J_x₀)
+    @inbounds for i in 1:size(M, 1)
+        M[i, i] -= 1
+    end
+    # Necessary condition ‖M‖ < 1/√2, lower-bounded by 0.7071.
+    if inf_norm_bound(M) < 0.7071
+        @inbounds for i in eachindex(x₀, x̃₀)
+            δx[i] = x₀[i] - x̃₀[i]
+        end
+        sqr_mul!(x₁, M, δx)
+        @inbounds for i in eachindex(x₁)
+            x₁[i] = (x̃₀[i] - Δx₀[i]) - x₁[i]
+        end
+        certified = all2(isinterior, x₁, x₀)
+        is_real =
+            certified ? all2((a, b) -> isinterior(conj(a), b), x₁, x₀) : false
+    else
+        certified = false
+        is_real = false
+    end
+    return certified, x₁, x₀, is_real
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Certificate builders
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# The certificate type (`SolutionCertificate` vs `ExtendedSolutionCertificate`)
+# is threaded through the whole pipeline as a type parameter so that every
+# certification function returns a *concrete* type. Dispatching the builders on
+# `::Type{CertT}` replaces the former runtime `extended_certificate::Bool`
+# branch, which forced a `Union` return and broke inference.
+
+# Build a certified Float64 certificate from Krawczyk data at 53-bit precision.
+function _float64_certificate(
+        ::Type{SolutionCertificate},
+        candidate::Vector{ComplexF64}, is_real::Bool, is_complex_sol::Bool, index::Int,
+        x₀::Vector{IComplexF64}, x₁::Vector{IComplexF64}, x̃₀::AbstractVector,
+        C::Matrix{ComplexF64},
+    )
+    return SolutionCertificate(
+        candidate, true, is_real, is_complex_sol, index, 53,
+        AcbMatrix(x₁; prec = 53), collect(mid.(x₁)),
+    )
+end
+function _float64_certificate(
+        ::Type{ExtendedSolutionCertificate},
+        candidate::Vector{ComplexF64}, is_real::Bool, is_complex_sol::Bool, index::Int,
+        x₀::Vector{IComplexF64}, x₁::Vector{IComplexF64}, x̃₀::AbstractVector,
+        C::Matrix{ComplexF64},
+    )
+    return ExtendedSolutionCertificate(
+        candidate, true, is_real, is_complex_sol, index, 53,
+        AcbMatrix(x₀; prec = 53), AcbMatrix(x₁; prec = 53),
+        AcbMatrix(x̃₀; prec = 53), AcbMatrix(C; prec = 53), collect(mid.(x₁)),
+    )
+end
+
+# Build a certified Arb certificate. `x̃₀_ref`/`C_ref` are only copied into an
+# `AcbMatrix` for the extended variant, so the plain variant pays nothing.
+function _arb_certificate(
+        ::Type{SolutionCertificate},
+        candidate::Vector{ComplexF64}, is_real::Bool, is_complex_sol::Bool, index::Int,
+        prec::Int, x₀::AcbMatrix, x₁::AcbMatrix,
+        x̃₀_ref::AcbRefMatrix, C_ref::AcbRefMatrix, sol::Vector{ComplexF64},
+    )
+    return SolutionCertificate(
+        candidate, true, is_real, is_complex_sol, index, prec, x₁, sol,
+    )
+end
+function _arb_certificate(
+        ::Type{ExtendedSolutionCertificate},
+        candidate::Vector{ComplexF64}, is_real::Bool, is_complex_sol::Bool, index::Int,
+        prec::Int, x₀::AcbMatrix, x₁::AcbMatrix,
+        x̃₀_ref::AcbRefMatrix, C_ref::AcbRefMatrix, sol::Vector{ComplexF64},
+    )
+    return ExtendedSolutionCertificate(
+        candidate, true, is_real, is_complex_sol, index, prec,
+        x₀, x₁, AcbMatrix(x̃₀_ref), AcbMatrix(C_ref), sol,
+    )
+end
+
+# Build an uncertified (failed) certificate with sentinel enclosures.
+_uncertified_certificate(::Type{SolutionCertificate}, candidate::Vector{ComplexF64}, index::Int, prec::Int) =
+    SolutionCertificate(candidate, false, false, false, index, prec, _empty_acb(), ComplexF64[])
+_uncertified_certificate(::Type{ExtendedSolutionCertificate}, candidate::Vector{ComplexF64}, index::Int, prec::Int) =
+    ExtendedSolutionCertificate(
+    candidate, false, false, false, index, prec,
+    _empty_acb(), _empty_acb(), _empty_acb(), _empty_acb(), ComplexF64[],
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-solution certification
+# ─────────────────────────────────────────────────────────────────────────────
+
+function certify_solution(
+        F::System,
+        solution_candidate::AbstractVector,
+        cert_params::Union{Nothing, CertificationParameters},
+        cert_cache::CertificationCache,
+        index::Int,
+        is_real_system::Bool,
+        ::Type{CertT},
+        # Positional, not keywords: this runs once per solution candidate, and a
+        # keyword call there neither specializes nor stays allocation-free. The
+        # keywords live on `Certification` at the API boundary.
+        max_precision::Int,
+        refine_solution::Bool,
+    ) where {CertT <: AbstractSolutionCertificate}
+    candidate = convert(Vector{ComplexF64}, solution_candidate)
+    params_c64 = complexF64_params(cert_params)
+
+    # Refine to machine precision. Use the cache's private evaluator clone (not
+    # `F.evaluator`) so concurrent certification tasks never share tape state.
+    if refine_solution
+        res = _newton(
+            cert_cache.system_evaluator,
+            cert_cache.newton_cache,
+            candidate,
+            FSVec{ComplexF64}(params_c64),
+            0.0,          # atol
+            8 * eps(),    # rtol
+            8,            # max_iters
+            true,         # extended_precision
+            1.0,          # contraction_factor
+            typemax(Int), # min_contraction_iters
+            Inf,          # max_abs_norm_first_update
+            Inf,          # max_rel_norm_first_update
+        )
+        x̃₀ = solution(res)
+    else
+        x̃₀ = candidate
+    end
+
+    # C ≈ J(x̃₀)⁻¹, computed in place into the pre-allocated `C_C64` buffer
+    # (`inv(J)` would allocate a fresh matrix per solution).
+    _exec_jac!(cert_cache.u_C64, cert_cache.J_C64, cert_cache.jac_interpreter_C64, x̃₀, params_c64)
+    C = cert_cache.C_C64
+    copyto!(C, cert_cache.J_C64)
+    J_lu = LinearAlgebra.lu!(C; check = false)
+    # Krawczyk needs an approximate inverse of the Jacobian, so a candidate with a
+    # numerically singular one is not certifiable rather than an error. A caller
+    # handing over every endpoint of a solve, not only the nonsingular ones, hits
+    # this: an endpoint at a condition number past 1/eps has an exact zero pivot.
+    LinearAlgebra.issuccess(J_lu) ||
+        return _uncertified_certificate(CertT, candidate, index, 53)
+    LinearAlgebra.inv!(J_lu)
+
+    certified, x₁, x₀, is_real = ε_inflation_krawczyk(x̃₀, cert_params, C, cert_cache)
+    is_real_system || (is_real = false)
+
+    if certified
+        is_complex_sol = any(xi -> !(0.0 in imag(xi)), x₁)
+        is_complex_sol && (is_real = false)
+        return _float64_certificate(
+            CertT, candidate, is_real, is_complex_sol, index, x₀, x₁, x̃₀, C,
+        )
+    end
+
+    # Float64 certification failed: retry in extended precision.
+    return extended_prec_certify_solution(
+        F, candidate, x̃₀, C, cert_params, cert_cache, index, is_real_system, CertT,
+        max_precision,
+    )
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Driver
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Boundary: resolve the runtime `extended_certificate` flag to a concrete
+# certificate type once, then dispatch to the type-stable implementation.
+function _certify(
+        F::System,
+        solution_candidates::AbstractVector{<:AbstractVector{<:Number}},
+        p::Union{Nothing, CertificationParameters},
+        cache::CertificationCache,
+        alg::Certification,
+        exec::Union{Serial, Threaded},
+    )
+    CertT = alg.extended_certificate ? ExtendedSolutionCertificate :
+        SolutionCertificate
+    return _certify_impl(F, solution_candidates, p, cache, CertT, alg, exec)
+end
+
+function _certify_impl(
+        F::System,
+        solution_candidates::AbstractVector{<:AbstractVector{<:Number}},
+        p::Union{Nothing, CertificationParameters},
+        cache::CertificationCache,
+        ::Type{CertT},
+        alg::Certification,
+        exec::Union{Serial, Threaded},
+    ) where {CertT <: AbstractSolutionCertificate}
+    show_progress = alg.show_progress
+    max_precision = alg.max_precision
+    refine_solution = alg.refine_solution
+    m, n = size(F)
+    m == n || throw(ArgumentError("We can only certify solutions to square systems."))
+    if isnothing(p) && nparameters(F) > 0
+        throw(ArgumentError("The given system expects parameters but none are given."))
+    end
+
+    N = length(solution_candidates)
+    is_real_system = is_real(F)
+    certs = Vector{CertT}(undef, N)
+
+    progress = make_progress(N, show_progress; desc = "Certifying $N solutions... ")
+
+    if exec isa Threaded && exec.ntasks > 1 && N > 1
+        plock = ReentrantLock()
+        nt = min(exec.ntasks, N)
+        pool = _cache_pool(_cache_set(F, cache, nt))
+        @tasks for i in 1:N
+            @set ntasks = nt
+            @local task_cache = take!(pool)
+            certs[i] = certify_solution(
+                F, solution_candidates[i], p, task_cache, i, is_real_system, CertT,
+                max_precision, refine_solution,
+            )
+            progress === nothing || (@lock plock ProgressMeter.next!(progress))
+        end
+    else
+        for i in 1:N
+            certs[i] = certify_solution(
+                F, solution_candidates[i], p, cache, i, is_real_system, CertT,
+                max_precision, refine_solution,
+            )
+            progress === nothing || ProgressMeter.next!(progress)
+        end
+    end
+
+    # Group certificates that certify the same true solution.
+    distinct_sols = DistinctSolutionCertificates(
+        n; extended_certificate = (CertT === ExtendedSolutionCertificate),
+    )
+    duplicates_dict = Dict{Int, Vector{Int}}()
+    for cert in certs
+        is_certified(cert) || continue
+        is_distinct, distinct_cert = add_certificate!(distinct_sols, cert)
+        is_distinct && continue
+        key = distinct_cert.index
+        if haskey(duplicates_dict, key)
+            push!(duplicates_dict[key], cert.index)
+        else
+            duplicates_dict[key] = [key, cert.index]
+        end
+    end
+    duplicates = isempty(duplicates_dict) ? Vector{Int}[] : collect(values(duplicates_dict))
+
+    return CertificationResult(certs, duplicates, F._interp_f64.sequence)
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Public `certify` entry points
+# ─────────────────────────────────────────────────────────────────────────────
+
+"""
+    certify(F, solutions, [p], alg = Certification(), exec = Threaded(); cache)
+    certify(F, result, [p], alg = Certification(), exec = Threaded(); cache)
+
+Attempt to certify that the approximate `solutions` correspond to true solutions
+of the square polynomial system `F(x; p)` using interval arithmetic and the
+Krawczyk method. Returns a [`CertificationResult`](@ref).
+
+`p` is enclosed to `max_precision` bits, so what is certified is `F` at an
+enclosure of `p`. This is a stronger statement than
+`certify(fix_parameters(F, p), solutions)`, which certifies the substituted
+system, whose coefficients are already-rounded `ComplexF64` products of `p`.
+
+See [`Certification`](@ref) for the options. `exec` is [`Serial`](@ref) or
+[`Threaded`](@ref); certificates hold Arb data, which does not cross processes.
+
+A `ResultIterator` is certified by its own method, which never holds every
+certificate at once; see [`IteratorCertification`](@ref).
+"""
+function certify end
+
+# Canonical entry point. The other overloads normalize their input to a vector
+# of solution vectors and delegate here. Keyword arguments are named and
+# forwarded explicitly (never splatted) so inference is not blocked.
+function certify(
+        F::System,
+        X::AbstractVector{<:AbstractVector{<:Number}},
+        # Not `fix_parameters(F, p)`: substituting would round the coefficients,
+        # and the enclosure has to be of `p` itself.
+        p::Union{Nothing, AbstractArray} = nothing,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
+    )
+    cert_params = certification_parameters(p; prec = alg.max_precision)
+    return _certify(F, X, cert_params, cache, alg, exec)
+end
+
+function certify(
+        F::System,
+        x::AbstractVector{<:Number},
+        p::Union{Nothing, AbstractArray} = nothing,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
+    )
+    return certify(
+        F, [convert(Vector{ComplexF64}, x)], p, alg, exec; cache = cache,
+    )
+end
+
+function certify(
+        F::System,
+        X::Result,
+        p::Union{Nothing, AbstractArray} = nothing,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
+    )
+    return certify(
+        F, solution.(results(X)), p, alg, exec; cache = cache,
+    )
+end
+
+function certify(
+        F::System,
+        r::PathResult,
+        p::Union{Nothing, AbstractArray} = nothing,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
+    )
+    return certify(
+        F, [solution(r)], p, alg, exec; cache = cache,
+    )
+end
+
+function certify(
+        F::System,
+        r::AbstractVector{<:PathResult},
+        p::Union{Nothing, AbstractArray} = nothing,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
+    )
+    return certify(
+        F, solution.(r), p, alg, exec; cache = cache,
+    )
+end
+
+function certify(
+        F::System,
+        X::MonodromyResult,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
+    )
+    return certify(
+        F, solutions(X), parameters(X), alg, exec; cache = cache,
+    )
+end
+
+# A parameter-free system takes no `p` slot at all, so the algorithm may sit
+# where `p` would.
+for XT in (
+        :(AbstractVector{<:AbstractVector{<:Number}}), :(AbstractVector{<:Number}),
+        :(AbstractVector{<:PathResult}), :Result, :PathResult,
+    )
+    @eval certify(
+        F::System, X::$XT, alg::Certification,
+        exec::Union{Serial, Threaded} = Threaded();
+        cache::CertificationCache = CertificationCache(F),
+    ) = certify(F, X, nothing, alg, exec; cache = cache)
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Streaming distinct-certified-solution accumulator
+# ─────────────────────────────────────────────────────────────────────────────
+
+"""
+    DistinctCertifiedSolutions
+
+Accumulate distinct certified solutions of a system on the fly. Unlike
+[`certify`](@ref), which keeps a certificate per input solution, this keeps only
+the distinct certified ones, which is useful when merging several large solution
+sets into a single deduplicated set.
+
+The struct is immutable; the interval tree of distinct certificates mutates in
+place, guarded by `access_lock` so [`add_solution!`](@ref) is thread-safe.
+"""
+struct DistinctCertifiedSolutionStats
+    processed::Threads.Atomic{Int}
+    duplicates::Threads.Atomic{Int}
+    not_certified::Threads.Atomic{Int}
+end
+
+DistinctCertifiedSolutionStats() = DistinctCertifiedSolutionStats(
+    Threads.Atomic{Int}(0), Threads.Atomic{Int}(0), Threads.Atomic{Int}(0),
+)
+
+struct DistinctCertifiedSolutions{
+        S <: System,
+        P <: Union{Nothing, CertificationParameters},
+        C <: AbstractSolutionCertificate,
+    }
+    system::S
+    parameters::P
+    cache::CertificationCache
+    is_real_system::Bool
+    access_lock::ReentrantLock
+    # The certificate type `C` records whether this is an extended accumulator,
+    # so no separate `extended_certificate` flag is stored.
+    distinct::DistinctSolutionCertificates{C}
+    stats::DistinctCertifiedSolutionStats
+end
+
+"""
+    DistinctCertifiedSolutions(F::System, params; extended_certificate = false, max_precision = 256, reference_point = nothing)
+
+Create an empty accumulator for the (parametric) system `F` at parameters
+`params` (`nothing` for a parameter-free `F`). Distinctness is decided by
+distance to a random `reference_point`, which may be given explicitly.
+"""
+function DistinctCertifiedSolutions(
+        F::System,
+        params;
+        extended_certificate::Bool = false,
+        max_precision::Int = 256,
+        reference_point::Union{Nothing, AbstractVector{ComplexF64}} = nothing,
+    )
+    m, n = size(F)
+    m == n || throw(ArgumentError("We can only certify solutions to square systems."))
+    if isnothing(params) && nparameters(F) > 0
+        throw(ArgumentError("The given system expects parameters but none are given."))
+    end
+    if !isnothing(reference_point) && length(reference_point) != n
+        throw(ArgumentError("`reference_point` must have $n entries, got $(length(reference_point))."))
+    end
+    cert_params = certification_parameters(params; prec = max_precision)
+    distinct = isnothing(reference_point) ?
+        DistinctSolutionCertificates(n; extended_certificate = extended_certificate) :
+        DistinctSolutionCertificates(
+            convert(Vector{ComplexF64}, reference_point);
+            extended_certificate = extended_certificate,
+        )
+    return DistinctCertifiedSolutions(
+        F,
+        cert_params,
+        CertificationCache(F),
+        is_real(F),
+        ReentrantLock(),
+        distinct,
+        DistinctCertifiedSolutionStats(),
+    )
+end
+
+Base.length(d::DistinctCertifiedSolutions) = length(d.distinct)
+Base.show(io::IO, d::DistinctCertifiedSolutions) =
+    print(io, "DistinctCertifiedSolutions with ", length(d), " distinct solutions")
+
+"""
+    ncertified_distinct(d::DistinctCertifiedSolutions)
+
+Return the number of distinct certified solutions stored in `d`.
+"""
+ncertified_distinct(d::DistinctCertifiedSolutions) = length(d)
+
+"""
+    nprocessed(d::DistinctCertifiedSolutions)
+
+Return the number of solution candidates `d` has been offered.
+"""
+nprocessed(d::DistinctCertifiedSolutions) = d.stats.processed[]
+
+"""
+    nduplicates(d::DistinctCertifiedSolutions)
+
+Return the number of candidates rejected as duplicates of a stored solution.
+"""
+nduplicates(d::DistinctCertifiedSolutions) = d.stats.duplicates[]
+
+"""
+    nnotcertified(d::DistinctCertifiedSolutions)
+
+Return the number of candidates that could not be certified.
+"""
+nnotcertified(d::DistinctCertifiedSolutions) = d.stats.not_certified[]
+
+"""
+    stats(d::DistinctCertifiedSolutions)
+
+Return a named tuple with the counters for processed candidates,
+certified-distinct solutions, duplicates, and non-certified candidates.
+"""
+stats(d::DistinctCertifiedSolutions) = (
+    processed = nprocessed(d),
+    certified_distinct = ncertified_distinct(d),
+    duplicates = nduplicates(d),
+    not_certified = nnotcertified(d),
+)
+
+function _record_add_solution!(
+        d::DistinctCertifiedSolutions, status::AddSolutionCode.T,
+    )
+    Threads.atomic_add!(d.stats.processed, 1)
+    if status == AddSolutionCode.DUPLICATE
+        Threads.atomic_add!(d.stats.duplicates, 1)
+    elseif status == AddSolutionCode.NOT_CERTIFIED
+        Threads.atomic_add!(d.stats.not_certified, 1)
+    end
+    return nothing
+end
+
+"""
+    add_solution!(d::DistinctCertifiedSolutions, sol, index = 0; max_precision = 256, refine_solution = true)
+
+Certify `sol` and store it if it is a new distinct certified solution. Returns
+`(added, status, representative, certified_solution)`. `status` is an
+[`AddSolutionCode`](@ref) value; `representative` is the index carried by the
+stored certificate `sol` was matched to, or `0` when there is none;
+`certified_solution` is the midpoint of the certified interval when `added` is
+`true` and `nothing` otherwise.
+"""
+function add_solution!(
+        d::DistinctCertifiedSolutions,
+        sol::AbstractVector{<:Number},
+        index::Integer = 0;
+        max_precision::Int = 256,
+        refine_solution::Bool = true,
+    )
+    return add_solution!(
+        d, sol, index, d.cache;
+        max_precision = max_precision, refine_solution = refine_solution,
+    )
+end
+
+function add_solution!(
+        d::DistinctCertifiedSolutions,
+        sol::AbstractVector{<:Number},
+        index::Integer,
+        cache::CertificationCache;
+        max_precision::Int = 256,
+        refine_solution::Bool = true,
+    )
+    added, status, representative, cert = _add_solution!(
+        d, sol, index, cache, max_precision, refine_solution,
+    )
+    return (added, status, representative, isnothing(cert) ? nothing : solution_approximation(cert))
+end
+
+# Returns the matched certificate rather than its midpoint: the bulk routes
+# discard it, and `solution_approximation` allocates a vector per call. The two
+# options are positional: this runs once per solution, and the keywords belong to
+# the `add_solution!` boundary above.
+function _add_solution!(
+        d::DistinctCertifiedSolutions{S, P, C},
+        sol::AbstractVector{<:Number},
+        index::Integer,
+        cache::CertificationCache,
+        max_precision::Int,
+        refine_solution::Bool,
+    ) where {S, P, C}
+    status, representative, cert = _certify_candidate!(
+        d, convert(Vector{ComplexF64}, sol), cache, index, max_precision, refine_solution,
+    )
+    status == AddSolutionCode.CERTIFIED_DISTINCT ||
+        return (false, status, representative, nothing)
+    status, representative, stored = _file_certificate!(d, cert::C, index)
+    return (status == AddSolutionCode.CERTIFIED_DISTINCT, status, representative, stored)
+end
+
+# The two halves of `_add_solution!`, split at the certification so that a caller
+# holding a lock of its own can certify outside it and file the result inside it.
+# Such a caller learns the index only at filing and certifies under `0`; one that
+# knows it up front passes it here and files without a rewrite.
+function _certify_candidate!(
+        d::DistinctCertifiedSolutions{S, P, C},
+        s::Vector{ComplexF64},
+        cache::CertificationCache,
+        index::Integer,
+        max_precision::Int,
+        refine_solution::Bool,
+    ) where {S, P, C}
+    Base.@lock d.access_lock begin
+        certᵢ = guaranteed_duplicate_certificate(d.distinct, s)
+        if !isnothing(certᵢ)
+            _record_add_solution!(d, AddSolutionCode.DUPLICATE)
+            return (AddSolutionCode.DUPLICATE, certificate_index(certᵢ), nothing)
+        end
+    end
+    # `C` is the concrete certificate type of this accumulator; pass it so
+    # `certify_solution` returns a concrete type instead of a `Union`.
+    cert = certify_solution(
+        d.system, s, d.parameters, cache, Int(index), d.is_real_system, C,
+        max_precision, refine_solution,
+    )
+    if !is_certified(cert)
+        _record_add_solution!(d, AddSolutionCode.NOT_CERTIFIED)
+        return (AddSolutionCode.NOT_CERTIFIED, 0, nothing)
+    end
+    return (AddSolutionCode.CERTIFIED_DISTINCT, 0, cert)
+end
+
+function _file_certificate!(
+        d::DistinctCertifiedSolutions{S, P, C}, cert::C, index::Integer,
+    ) where {S, P, C}
+    stored = certificate_index(cert) == index ? cert : _with_index(cert, Int(index))
+    Base.@lock d.access_lock begin
+        added, certⱼ = add_certificate!(d.distinct, stored)
+        _record_add_solution!(
+            d, added ? AddSolutionCode.CERTIFIED_DISTINCT : AddSolutionCode.DUPLICATE,
+        )
+        return added ?
+            (AddSolutionCode.CERTIFIED_DISTINCT, Int(index), stored) :
+            (AddSolutionCode.DUPLICATE, certificate_index(certⱼ), nothing)
+    end
+end
+
+"""
+    certificates(d::DistinctCertifiedSolutions)
+
+Return the vector of stored distinct solution certificates.
+"""
+certificates(d::DistinctCertifiedSolutions) = all_certificates(d.distinct)
+
+"""
+    solutions(d::DistinctCertifiedSolutions)
+
+Return the midpoint approximations of the stored distinct certified solutions.
+"""
+solutions(d::DistinctCertifiedSolutions) = map(solution_approximation, certificates(d))
+
+"""
+    merge!(dest::DistinctCertifiedSolutions, src::DistinctCertifiedSolutions)
+
+Add every certificate stored in `src` to `dest`, keeping only the ones distinct
+from what `dest` already holds, and return `dest`. Both accumulators must store
+the same certificate type.
+"""
+function Base.merge!(
+        dest::DistinctCertifiedSolutions{S₁, P₁, C},
+        src::DistinctCertifiedSolutions{S₂, P₂, C},
+    ) where {S₁, P₁, S₂, P₂, C}
+    for cert in certificates(src)
+        Base.@lock dest.access_lock begin
+            added, _ = add_certificate!(dest.distinct, cert)
+            _record_add_solution!(
+                dest,
+                added ? AddSolutionCode.CERTIFIED_DISTINCT : AddSolutionCode.DUPLICATE,
+            )
+        end
+    end
+    return dest
+end
+
+"""
+    distinct_certified_solutions(F, S, p = nothing, alg = Certification(), exec = Threaded())
+
+Certify the solutions `S` of the (parametric) system `F` and return a
+[`DistinctCertifiedSolutions`](@ref) holding only the distinct certified ones.
+"""
+function distinct_certified_solutions(
+        F::System,
+        S::AbstractVector{<:AbstractVector{<:Number}},
+        p = nothing,
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded(),
+    )
+    d = DistinctCertifiedSolutions(
+        F, p;
+        extended_certificate = alg.extended_certificate,
+        max_precision = alg.max_precision,
+    )
+    return distinct_certified_solutions!(d, S, alg, exec)
+end
+
+"""
+    distinct_certified_solutions!(d::DistinctCertifiedSolutions, S, alg = Certification(), exec = Threaded())
+
+Add every solution in `S` to `d`, keeping only distinct certified ones.
+"""
+function distinct_certified_solutions!(
+        d::DistinctCertifiedSolutions,
+        S::AbstractVector{<:AbstractVector{<:Number}},
+        alg::Certification = Certification(),
+        exec::Union{Serial, Threaded} = Threaded(),
+    )
+    show_progress = alg.show_progress
+    max_precision = alg.max_precision
+    refine_solution = alg.refine_solution
+    progress = make_progress(
+        length(S), show_progress; desc = "Certifying $(length(S)) solutions... ",
+    )
+    if exec isa Threaded && exec.ntasks > 1
+        plock = ReentrantLock()
+        @tasks for i in eachindex(S)
+            @local cache = CertificationCache(d.system)
+            _add_solution!(d, S[i], i, cache, max_precision, refine_solution)
+            progress === nothing || (@lock plock ProgressMeter.next!(progress))
+        end
+    else
+        for (i, sol) in enumerate(S)
+            _add_solution!(d, sol, i, d.cache, max_precision, refine_solution)
+            progress === nothing || ProgressMeter.next!(progress)
+        end
+    end
+    return d
+end
