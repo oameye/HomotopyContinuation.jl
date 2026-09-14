@@ -1,0 +1,118 @@
+name: One-shot package rename cleanup
+
+on:
+  push:
+    branches: [v3-update-implementation-docs]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Finish package identity migration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+
+          old_cert = Path("lib/HomotopyContinuationNextCertification/test")
+          new_cert = Path("lib/HomotopyContinuationCertification/test")
+          new_cert.mkdir(parents=True, exist_ok=True)
+
+          for src in old_cert.glob("*.jl"):
+              shutil.copy2(src, new_cert / src.name)
+          if (old_cert / "data").exists():
+              shutil.copytree(old_cert / "data", new_cert / "data", dirs_exist_ok=True)
+
+          replacements = (
+              ("HomotopyContinuationNextCertification", "HomotopyContinuationCertification"),
+              ("HomotopyContinuationNext", "HomotopyContinuation"),
+          )
+          roots = [
+              Path("src"), Path("ext"), Path("test"), Path("benchmark"),
+              Path("lib/HomotopyContinuationCertification"),
+          ]
+          for root in roots:
+              if not root.exists():
+                  continue
+              for path in root.rglob("*"):
+                  if not path.is_file() or path.suffix not in {".jl", ".toml"}:
+                      continue
+                  text = path.read_text()
+                  new = text
+                  for old, final in replacements:
+                      new = new.replace(old, final)
+                  if new != text:
+                      path.write_text(new)
+
+          # The extensive environment used the temporary core UUID but the final
+          # certification UUID. Restore both dependency identities explicitly.
+          extensive_project = Path("test/extensive/Project.toml")
+          if extensive_project.exists():
+              text = extensive_project.read_text()
+              text = text.replace(
+                  'HomotopyContinuation = "ec87e138-eaf4-4d78-a098-49d58d8a59d7"',
+                  'HomotopyContinuation = "f213a82b-91d6-5c5d-acf7-10f1c761b327"',
+              )
+              extensive_project.write_text(text)
+
+          # ParallelTestRunner must receive the production module itself.
+          Path("test/runtests.jl").write_text('''using HomotopyContinuation\nusing ParallelTestRunner: ParallelTestRunner, find_tests\n\ntestsuite = find_tests(@__DIR__)\nfilter!(entry -> !startswith(first(entry), "extensive/"), testsuite)\nParallelTestRunner.runtests(HomotopyContinuation, ARGS; testsuite = testsuite)\n''')
+
+          # Remove executable infrastructure that exists only for the temporary
+          # coexistence identity or same-process v2/v3 loading.
+          for path in (
+              Path("test/compat"),
+              Path("lib/HomotopyContinuationNextCertification"),
+              Path("benchmark/compare"),
+          ):
+              if path.exists():
+                  shutil.rmtree(path)
+          for name in (
+              "compare_v2_primitives_test.jl",
+              "compare_v2_solve_counts_test.jl",
+              "compare_v2_solve_match_test.jl",
+          ):
+              path = Path("test") / name
+              if path.exists():
+                  path.unlink()
+
+          # Current documentation should not describe a compatibility layer that
+          # no longer exists. Historical/archive documentation is left untouched.
+          agents = Path("AGENTS.md")
+          if agents.exists():
+              text = agents.read_text()
+              text = text.replace(
+                  "`test/compat/HomotopyContinuationNext*` contains temporary test-only forwarding packages used while the behavioral test corpus is migrated to the restored package identity. They are not production modules and must not be used as public API.\n\n",
+                  "",
+              )
+              agents.write_text(text)
+
+          for docname in ("implementation_docs/02_test_suite.md", "implementation_docs/02_status.md"):
+              path = Path(docname)
+              if path.exists():
+                  text = path.read_text().replace(
+                      "lib/HomotopyContinuationNextCertification/",
+                      "lib/HomotopyContinuationCertification/",
+                  )
+                  path.write_text(text)
+          PY
+
+          rm .github/workflows/RenameCleanup.yml
+
+          if grep -R -n "HomotopyContinuationNext" src ext test benchmark lib/HomotopyContinuationCertification \
+              --include='*.jl' --include='*.toml'; then
+            echo 'stale executable HomotopyContinuationNext reference remains' >&2
+            exit 1
+          fi
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git diff --cached --quiet || git commit -m 'chore: finish HomotopyContinuation package rename cleanup'
+          git push
