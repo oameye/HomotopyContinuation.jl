@@ -4,7 +4,7 @@ using LinearAlgebra: LinearAlgebra
 using Random: Random
 using Printf: Printf
 using ProgressMeter: ProgressMeter
-using DispatchDoctor: @stable, @unstable
+using DispatchDoctor: @stable
 
 using EnumX: @enumx
 using Moshi.Data: @data, variant_storage, variant_storage_type
