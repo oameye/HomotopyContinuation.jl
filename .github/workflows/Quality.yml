@@ -1,0 +1,84 @@
+name: Quality
+
+on:
+  push:
+    branches: [v3]
+    paths:
+      - '.github/workflows/Quality.yml'
+      - 'JuliaLint.toml'
+      - 'Project.toml'
+      - 'src/**'
+      - 'ext/**'
+      - 'test/**'
+      - 'lib/**'
+      - 'benchmark/**'
+      - 'quality/**'
+  pull_request:
+    branches: [v3]
+    paths:
+      - '.github/workflows/Quality.yml'
+      - 'JuliaLint.toml'
+      - 'Project.toml'
+      - 'src/**'
+      - 'ext/**'
+      - 'test/**'
+      - 'lib/**'
+      - 'benchmark/**'
+      - 'quality/**'
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+jobs:
+  lint:
+    name: JuliaLint / strict
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ !github.event.pull_request.draft }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Run strict Julia lint
+        uses: julia-actions/julia-lint@faa241baf82b0a8d909ec23c8d18e7c514bb5cd0
+        with:
+          max-warnings: '0'
+          fail-on-errors: true
+      - name: Upload lint results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: julia-lint-results
+          path: lint-results.sarif
+          if-no-files-found: ignore
+
+  strict-mode:
+    name: StrictMode / Julia 1.13
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    if: ${{ !github.event.pull_request.draft }}
+    permissions:
+      actions: write
+      contents: read
+    env:
+      JULIA_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          show-versioninfo: true
+          version: '1.13'
+          arch: x64
+      - uses: julia-actions/cache@v3
+      - name: Instantiate quality environment
+        run: julia --project=quality -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Prove compiled type stability
+        run: julia --project=quality --threads=1 --color=yes quality/strict_mode.jl
