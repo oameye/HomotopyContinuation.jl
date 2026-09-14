@@ -1,94 +1,66 @@
 using Test
 using ExplicitImports
-using HomotopyContinuationNext
+using HomotopyContinuation
 using Distributed: Distributed
 using Serialization: Serialization
 
 const DISTRIBUTED_EXT = Base.get_extension(
-    HomotopyContinuationNext, :HomotopyContinuationNextDistributedExt,
+    HomotopyContinuation, :HomotopyContinuationDistributedExt,
 )
 
 # An extension reaches into its parent by design, and whether one is loaded here
 # depends on what else the worker imported, so the rules below must not turn on it.
 _is_extension(m::Module)::Bool =
-    Base.get_extension(HomotopyContinuationNext, nameof(m)) === m
+    Base.get_extension(HomotopyContinuation, nameof(m)) === m
 
 # Allow non-public but necessary accesses:
-# - Base.RefValue: used for mutable cache scalars in immutable structs
-# - Base.decompose: required for DoubleF64 <: AbstractFloat
-# - LinearAlgebra.qrfactUnblocked!: needed for custom QR (LAPACK qr! returns QRCompactWY)
-# - Base.literal_pow: extended so `expr^2` builds an EPow instead of a product
 const QUALIFIED_ACCESS_IGNORE = (
     :RefValue, :decompose, :qrfactUnblocked!, :literal_pow, :TwicePrecision,
-    # model_kit internal uses of non-public Base APIs:
     Symbol("@_inline_meta"), Symbol("@_propagate_inbounds_meta"),
     :FastMath, :div_fast, :inv_fast, :power_by_squaring,
-    # CommonSolve interface (not declared public in CommonSolve.jl):
     :init, Symbol("solve!"), :solve,
-    # Checked arithmetic for HNF in binomial_system.jl:
     :checked_add, :checked_mul,
-    # Base.broadcastable is the documented broadcast customization
-    # hook but is not declared public in Base:
     :broadcastable,
-    # Base.deepcopy_internal is the documented `deepcopy` customization hook:
     :deepcopy_internal,
-    # Base.SizeUnknown is the documented `IteratorSize` trait for an iterator
-    # whose length is not known ahead of time, but is not declared public:
     :SizeUnknown,
-    # Documented thread-safe condition and lazy iterator filter. Julia 1.11
-    # does not declare these names public:
     :Condition, :filter,
-    # Deliberate construction-time compiler barrier used to isolate
-    # mutually exclusive TTFX-heavy backends:
     :inferencebarrier,
-    # MixedSubdivisions 1.2.x has no public "already normalized"
-    # iterator constructor. The polyhedral canonical-support fast path
-    # deliberately mirrors its iterator setup to avoid recompiling
-    # normalize_supports for System's cached nonnegative Int32 data.
     :RegenerationTraverser, :CayleyIndexing, :cayley,
     :MixedCellTable, :MixedCellTableTraverser,
     :LexicographicOrdering,
-    # Distributed extension. Asking whether a worker process has the package
-    # loaded has no public spelling, and a custom `Serialization.serialize` method
-    # has to write the type tag itself:
     :PkgId, :root_module_exists, :serialize_type,
-    # SemialgebraicSets extension. The solver interface a backend has to subtype
-    # and extend, none of it declared public by SemialgebraicSets:
     :AbstractAlgebraicSolver, :NoAlgorithm, :promote_for,
     Symbol("default_gröbner_basis_algorithm"),
 )
 
 @testset "ExplicitImports" begin
-    # OpType and SFuncKind modules created by @enumx are not analyzable by ExplicitImports
     allow_unanalyzable = (
-        HomotopyContinuationNext.OpType,
-        HomotopyContinuationNext.SFuncKind,
-        HomotopyContinuationNext.NewtonCode,
-        HomotopyContinuationNext.NewtonReturnCode,
-        HomotopyContinuationNext.PredictionMethod,
-        HomotopyContinuationNext.TrackerCode,
-        HomotopyContinuationNext.PathResultCode,
-        HomotopyContinuationNext.CompileMode,  # @enumx module
-        HomotopyContinuationNext.SExpr,  # Moshi @data module
-        HomotopyContinuationNext.SUnaryKind,  # @enumx module
-        HomotopyContinuationNext.SymExpr,  # Moshi @data module
-        HomotopyContinuationNext.ExecInstruction,  # Moshi @data module
-        HomotopyContinuationNext.EndgameCode,  # @enumx module
-        HomotopyContinuationNext.MonodromyCode,  # @enumx module
-        HomotopyContinuationNext.ReuseLoops,  # @enumx module
-        HomotopyContinuationNext.DuplicateCheck,  # @enumx module
-        HomotopyContinuationNext.AddSolutionCode,  # @enumx module
-        HomotopyContinuationNext.Irreducibility,  # @enumx module
-        HomotopyContinuationNext.EquationSorting,  # @enumx module
+        HomotopyContinuation.OpType,
+        HomotopyContinuation.SFuncKind,
+        HomotopyContinuation.NewtonCode,
+        HomotopyContinuation.NewtonReturnCode,
+        HomotopyContinuation.PredictionMethod,
+        HomotopyContinuation.TrackerCode,
+        HomotopyContinuation.PathResultCode,
+        HomotopyContinuation.CompileMode,
+        HomotopyContinuation.SExpr,
+        HomotopyContinuation.SUnaryKind,
+        HomotopyContinuation.SymExpr,
+        HomotopyContinuation.ExecInstruction,
+        HomotopyContinuation.EndgameCode,
+        HomotopyContinuation.MonodromyCode,
+        HomotopyContinuation.ReuseLoops,
+        HomotopyContinuation.DuplicateCheck,
+        HomotopyContinuation.AddSolutionCode,
+        HomotopyContinuation.Irreducibility,
+        HomotopyContinuation.EquationSorting,
     )
 
-    @test check_no_implicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing
-    @test check_all_explicit_imports_via_owners(HomotopyContinuationNext) == nothing
+    @test check_no_implicit_imports(HomotopyContinuation; allow_unanalyzable) == nothing
+    @test check_all_explicit_imports_via_owners(HomotopyContinuation) == nothing
     @static if VERSION >= v"1.11"
-        # FunctionWrapper is the only public API of FunctionWrappers.jl but it is not
-        # declared `public` in the package — ignore it here.
         @test check_all_explicit_imports_are_public(
-            HomotopyContinuationNext;
+            HomotopyContinuation;
             ignore = (
                 :FunctionWrapper,
                 Symbol("@data"),
@@ -97,26 +69,22 @@ const QUALIFIED_ACCESS_IGNORE = (
             ),
         ) == nothing
     end
-    @test check_no_stale_explicit_imports(HomotopyContinuationNext; allow_unanalyzable) == nothing
-    @test check_all_qualified_accesses_via_owners(HomotopyContinuationNext) == nothing
-    # The check's own filter chain, minus the extension's accesses into its parent:
-    # `allow_internal_accesses` does not cover extensions and `ignore` cannot
-    # exclude one, so `check_all_qualified_accesses_are_public` cannot be used here.
+    @test check_no_stale_explicit_imports(HomotopyContinuation; allow_unanalyzable) == nothing
+    @test check_all_qualified_accesses_via_owners(HomotopyContinuation) == nothing
     @static if VERSION >= v"1.11"
         @testset "qualified accesses are public" begin
             offenders = Tuple{Symbol, Symbol, Module}[]
             for (submodule, rows) in ExplicitImports.improper_qualified_accesses(
-                    HomotopyContinuationNext, pathof(HomotopyContinuationNext); skip = (),
+                    HomotopyContinuation, pathof(HomotopyContinuation); skip = (),
                 )
                 for row in rows
                     row.name in QUALIFIED_ACCESS_IGNORE && continue
                     row.self_qualified && continue
                     row.public_access && continue
-                    # The check's own default `skip = (Base => Core,)`.
                     row.accessing_from === Base &&
                         ExplicitImports.public_or_exported(Core, row.name) && continue
                     _is_extension(submodule) &&
-                        row.accessing_from === HomotopyContinuationNext && continue
+                        row.accessing_from === HomotopyContinuation && continue
                     push!(offenders, (nameof(submodule), row.name, row.accessing_from))
                 end
             end
@@ -125,9 +93,8 @@ const QUALIFIED_ACCESS_IGNORE = (
         end
     end
 
-    @test check_no_self_qualified_accesses(HomotopyContinuationNext) == nothing
+    @test check_no_self_qualified_accesses(HomotopyContinuation) == nothing
 
-    # Every other rule still applies to the extension.
     @testset "Distributed extension" begin
         @test DISTRIBUTED_EXT !== nothing
         @test check_no_implicit_imports(DISTRIBUTED_EXT) == nothing
