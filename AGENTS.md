@@ -1,8 +1,8 @@
-# CLAUDE.md — HomotopyContinuationNext.jl
+# CLAUDE.md — HomotopyContinuation.jl v3
 
 ## What is this?
 
-A ground-up rewrite of HomotopyContinuation.jl for solving polynomial systems via homotopy continuation. The design prioritizes type stability, minimal TTFX, and zero runtime dispatch on hot paths.
+A ground-up rewrite of HomotopyContinuation.jl for solving polynomial systems via homotopy continuation. The design prioritizes type stability, minimal TTFX, and zero runtime dispatch on hot paths. The temporary `HomotopyContinuationNext` development identity has been retired; v3 uses the registered `HomotopyContinuation` package name and UUID.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ Key design decisions:
 ## Package layout
 
 ```
-src/HomotopyContinuationNext.jl     # Main module (core, Arblib-free)
+src/HomotopyContinuation.jl         # Main module (core, Arblib-free)
 src/primitives/                      # DoubleF64, norms, linear algebra
 src/model_kit/                       # SExpr, Expression, CSE, tape compiler, interpreter, Taylor
 src/core/                            # AbstractSystem/Homotopy, SystemEvaluator, homotopy types
@@ -28,22 +28,23 @@ src/tracking/                        # Predictor, Newton, Tracker
 src/solving/                         # solve(), total degree, polyhedral, subspaces, sweeps, result types
 src/utils.jl                         # SegmentStepper, _stable_sort!, fast_abs, etc.
 
-lib/HomotopyContinuationNextCertification/   # Certification subpackage
+lib/HomotopyContinuationCertification/      # Certification package
   src/interval_arithmetic.jl, interval_arblib.jl   # Interval / IComplexF64 + Arb bridge
   src/acb_interpreter.jl                            # arbitrary-precision tape interpreter
   src/certification.jl, certification_arb.jl        # certify(), Krawczyk + Arb fallback
 ```
 
-**Certification is a separate subpackage.** It depends on Arblib (a heavy binary
-dep), so keeping it out of core is what makes core TTFX minimal (core load
-dropped from ~1.6s to ~0.77s). Every certificate type embeds an `AcbMatrix`, so
-a package extension is not possible (extensions cannot define/export types); a
-subpackage is the correct isolation. To certify:
+**Certification is a separate package.** It depends on Arblib (a heavy binary
+dep), so keeping it out of core is what makes core TTFX minimal. Every certificate
+type embeds an `AcbMatrix`, so a package extension is not possible (extensions cannot
+define/export types); a separate package is the correct isolation. To certify:
 
 ```julia
-using HomotopyContinuationNext, HomotopyContinuationNextCertification
+using HomotopyContinuation, HomotopyContinuationCertification
 certify(F, solutions)
 ```
+
+`test/compat/HomotopyContinuationNext*` contains temporary test-only forwarding packages used while the behavioral test corpus is migrated to the restored package identity. They are not production modules and must not be used as public API.
 
 ## Git policy
 
@@ -54,54 +55,46 @@ certify(F, solutions)
 All common tasks go through the Makefile:
 
 ```sh
-make test          # run core tests in parallel (ParallelTestRunner, 10 jobs), then the certification subpackage
-make test-cert     # run only the certification subpackage suite (threaded)
-make test-extensive # run the large solves (~4 min, not part of `make test`)
-make test-serial   # run all tests serially (for debugging)
-make benchmark     # run TTFX + steady-state benchmarks
-make compare       # compare primitives against HomotopyContinuation v2
-make format        # format all Julia files with Runic
-make deps          # instantiate all environments
-make update        # update all environments
-make help          # show all available targets
+make test           # core tests in parallel, then certification
+make test-cert      # certification package only
+make test-extensive # large reference solves
+make test-serial    # serial debugging run
+make benchmark      # steady-state benchmarks
+make ttfx           # first-use workload inventory
+make format         # Runic
+make deps           # instantiate environments
+make update         # update environments
+make help           # list targets
 ```
+
+The old same-process `make compare` harness is intentionally disabled after restoring the registered HomotopyContinuation identity. v2 and v3 have the same package name and UUID; live comparisons must run in isolated Julia environments/processes. Never re-enable the old harness through aliases, because that can silently compare v3 against itself.
 
 ### Test structure
 
-Tests run via ParallelTestRunner — each file is self-contained and runs in its own worker:
+Tests run via ParallelTestRunner — each file is self-contained and runs in its own worker.
 
-- `test/aqua_test.jl` — Aqua.jl: unbound args, undefined exports, stale deps, compat, piracy
-- `test/jet_test.jl` — JET.jl: `report_package` for type error and optimization analysis
-- `test/explicit_imports_test.jl` — ExplicitImports.jl: no implicit imports, no stale imports, qualified access
+- `test/aqua_test.jl` — Aqua package hygiene on `HomotopyContinuation`
+- `test/jet_test.jl` — JET `report_package(HomotopyContinuation)`
+- `test/explicit_imports_test.jl` — ExplicitImports checks on the production package and extensions
+- `test/concrete_structs_test.jl` — concrete-field audit on production types
 
-`test/test_systems.jl` and `test/minors_polys.jl` hold shared polynomial system data; they define no
-tests and are `include`d by the files that need them. Add new systems to `TEST_SYSTEM_COLLECTION` to
-get them covered by the evaluation sweep in `test/system_sweep_test.jl`.
+`test/test_systems.jl` and `test/minors_polys.jl` hold shared polynomial system data; they define no tests and are `include`d by the files that need them. Add new systems to `TEST_SYSTEM_COLLECTION` to get them covered by the evaluation sweep in `test/system_sweep_test.jl`.
 
-`test/extensive/` holds solves that take minutes each (the 15625-path Fano quintic, the 27072-path
-3264 problem). It has its own environment because it certifies, runs threaded through a plain
-`runtests.jl`, and is filtered out of `make test` discovery: `make test-extensive`.
+`test/extensive/` holds solves that take minutes each (the 15625-path Fano quintic, the 27072-path 3264 problem). It has its own environment because it certifies, runs threaded through a plain `runtests.jl`, and is filtered out of `make test` discovery.
 
-**Never pipe a suite run through `tail`/`head`/`grep` as its only sink.** A full run takes ~3
-minutes. A failure whose name and stacktrace went into a lossy pipe cannot be diagnosed without
-paying for another run, and an intermittent one may not come back at all. `make test` and
-`make test-serial` already `tee` to `test-run.log` (and `test-cert.log`), so read the log with
-`grep -E "Test Failed|Error During Test" -A8 test-run.log` instead of re-running. When invoking the
-runner directly, `tee` it yourself.
+The historical same-process direct-v2 files `compare_v2_primitives_test.jl`, `compare_v2_solve_counts_test.jl`, and `compare_v2_solve_match_test.jl` are excluded after package-identity restoration. Fixed parity regressions remain active. A future live oracle must use isolated environments.
 
-**Run the affected test files, not the whole suite.** Iterate with
-`julia --project=test -t 8 test/runtests.jl NAME...`, which filters by name; `--list` shows the
-names and `--quickfail` stops at the first error. Pick the files the change touches plus the quality
-gates (`aqua`, `jet`, `explicit_imports`, `concrete_structs`). Use plenty of threads and jobs
-(`-t 8`, `JOBS=10`); the machine can take it. Reserve one full `make test` for the end.
+**Never pipe a suite run through `tail`/`head`/`grep` as its only sink.** A full run takes minutes. `make test` and `make test-serial` already `tee` to logs; diagnose those logs instead of paying for a second run.
+
+**Run the affected test files, not the whole suite.** Iterate with `julia --project=test -t 8 test/runtests.jl NAME...`; use the quality gates plus touched tests, then reserve one full `make test` for the end.
 
 ### Quick debugging with Julia MCP
 
-Use the `julia-mcp` MCP server (tools: `julia_eval`, `julia_list_sessions`, `julia_restart`) for quick debugging and testing small snippets — e.g., checking a type, evaluating an expression, or verifying a method signature. Prefer this over spinning up a full test run when you just need a quick answer.
+Use the `julia-mcp` MCP server (`julia_eval`, `julia_list_sessions`, `julia_restart`) for quick debugging and small snippets when available.
 
 ### Formatting
 
-Code is formatted with [Runic.jl](https://github.com/fredrikekre/Runic.jl) (available as `runic` CLI):
+Code is formatted with Runic.jl:
 
 ```sh
 make format
@@ -110,65 +103,57 @@ make format
 ### Quality gates
 
 Before merging any PR:
-1. `make test` passes (all 3 quality test suites + any unit tests)
-2. JET reports zero issues on the package
-3. TTFX benchmark: first `solve(F)` < 5s
-4. No `Any`-typed fields in any struct
-5. Every `mutable struct` has documented justification and `const` on fixed fields
+1. `make test` passes
+2. JET reports zero issues on `HomotopyContinuation`
+3. benchmark/TTFX workloads complete without regression failures
+4. no `Any`-typed fields in structs
+5. every `mutable struct` has documented justification and `const` on fixed fields
+6. for package-identity changes, Aqua/import/extension loading must exercise the real production module, not only a compatibility alias
 
 ## Coding rules
 
 ### Function signatures
 
-- **Use the most restrictive signature type possible.** This lets JET catch unintended errors. When prototyping it's fine to start loose, but committed code should have tight type declarations. When AI agents suggest code, make sure argument types are clearly specified. When in doubt, use the most restrictive type you can think of.
-- **Explicit `;` for keyword arguments.** Always use an explicit semicolon before keyword arguments for clarity:
-  ```julia
-  # Good
-  Position(; line = i - 1, character = m.match.offset - 1)
-  # Bad
-  Position(line = i - 1, character = m.match.offset - 1)
-  ```
+- **Use the most restrictive signature type possible.** This lets JET catch unintended errors.
+- **Explicit `;` for keyword arguments.** Always use an explicit semicolon before keyword arguments.
 
 ### Type system
 
 - **No abstract-typed fields on hot paths.** Every struct field must be concretely typed.
-- **`const` on buffer fields in mutable structs.** If a field holds a pre-allocated buffer (FSVec, FSMat, TaylorVector) that is never reassigned, mark it `const`.
-- **`RefValue` for cache scalars in immutable structs.** Homotopy types are immutable; use `Base.RefValue{T}` for cached values that need mutation.
-- **`NTuple{N,T}` for small fixed-size collections.** When the count is known at compile time and small (e.g., `tx_norm::NTuple{4,Float64}`).
-- **Enums over Symbols.** Use `EnumX.@enumx` for return codes and state machine states — scoped (`MyEnum.Value`), type-safe, faster than Symbol comparison.
-- **`FSVec{T}` / `FSMat{T}` for pre-allocated buffers.** Defined as `FixedSizeArray{T,1,Memory{T}}` / `FixedSizeArray{T,2,Memory{T}}` — same concrete type regardless of size, cannot be resized. **WARNING:** `FixedSizeVector{T}` and `FixedSizeMatrix{T}` are NOT concrete types (the `Mem` parameter is free). Always use `FSVec{T}` / `FSMat{T}` from the main module for struct fields, never `FixedSizeVector{T}` directly.
-- **`AbstractVector` / `AbstractMatrix` only where truly needed.** Use them in the `AbstractSystem`/`AbstractHomotopy` interface contracts (so users don't need to import FixedSizeArrays) and in public `execute!` methods that must accept both `Vector` and `FSVec`. Prefer concrete types everywhere else.
-- **Moshi `@data` for tagged unions.** Use `variant_storage(expr)` for pattern dispatch, never `isa` on the ADT module variants directly. Access the concrete type via `typeof(Module.Variant(...))` alias (e.g., `SExprT`, `ExecInstructionT`).
+- **`const` on buffer fields in mutable structs.** If a field holds a pre-allocated buffer that is never reassigned, mark it `const`.
+- **`RefValue` for cache scalars in immutable structs.** Use `Base.RefValue{T}` for cached values that need mutation.
+- **`NTuple{N,T}` for small fixed-size collections.**
+- **Enums over Symbols.** Use `EnumX.@enumx` for return codes and state-machine states.
+- **`FSVec{T}` / `FSMat{T}` for pre-allocated buffers.** Never use `FixedSizeVector{T}` / `FixedSizeMatrix{T}` directly as struct-field types because their memory parameter is free.
+- **`AbstractVector` / `AbstractMatrix` only where truly needed.** Use them in public extension contracts; prefer concrete types internally.
+- **Moshi `@data` for tagged unions.** Use `variant_storage(expr)` for pattern dispatch.
 
 ### Performance
 
-For full reference, see the `julia-perf` skill (`.claude/skills/julia-perf/`) and the `julia-ttfx` skill (`.claude/skills/julia-ttfx/`) for TTFX/invalidation diagnosis.
+For full reference, see `.claude/skills/julia-perf/` and `.claude/skills/julia-ttfx/`.
 
-- **Zero allocations on hot paths.** The tracker step, Newton corrector, and predictor must not allocate. Pre-allocate all buffers at construction time and mutate in-place via `!` functions.
-- **Column-major access.** First index varies fastest. Inner loops over `i` (rows), outer loops over `j` (columns): `for j in 1:n, i in 1:m`.
-- **No kwargs in hot paths.** Keyword arguments prevent specialization and can allocate. Expose kwargs at the API boundary (`solve(F; tol=1e-8)`), forward to positional-arg inner functions (`_solve(F, tol)`).
-- **No kwargs splatting.** Never forward `kwargs...` — it blocks inference. Explicitly name and forward each keyword.
-- **Fuse broadcasts.** Use `@.` or dot syntax to avoid temporary arrays. Use in-place fused assignment: `y .= @. 3x^2 + 4x`.
-- **`@views` for slices.** Array slicing copies; use `@view` or `@views` to avoid allocation.
-- **`@inbounds` with `eachindex`.** Use `@inbounds` only when indices are provably valid. Prefer `eachindex(x)` over `1:length(x)`.
-- **`@fastmath` where safe.** Acceptable in custom LU pivot selection, norm computation, and other places where IEEE edge cases (inf/nan) are handled separately. Never in certification or interval arithmetic.
-- **`abs2(z)` over `abs(z)^2`.** Avoids intermediate allocation for complex numbers. Similarly use `fld`, `cld`, `div` over `floor(x/y)` etc.
-- **Avoid string interpolation in I/O.** Use `println(file, a, " ", b)` not `println(file, "$a $b")`.
+- **Zero allocations on hot paths.** Pre-allocate and mutate via `!` functions.
+- **Column-major access.** Inner loops over rows, outer loops over columns.
+- **No kwargs in hot paths.** Expose kwargs at API boundaries and forward to positional inner functions.
+- **No kwargs splatting.** Explicitly name and forward each keyword.
+- **Fuse broadcasts.** Avoid temporaries.
+- **`@views` for slices.**
+- **`@inbounds` only when provably valid; prefer `eachindex`.**
+- **`@fastmath` only where IEEE edge cases are handled separately; never in certification/interval arithmetic.**
+- **`abs2(z)` over `abs(z)^2`.**
+- **Avoid string interpolation in hot/structured I/O.**
 
 ### Imports and style
 
-- **No `using X` without explicit imports.** Use `using X: func1, func2` or `import X`. ExplicitImports.jl enforces this.
-- **Format with Runic.** Run `make format` before committing.
+- **No broad `using X` for implementation dependencies.** Use explicit imports or `import X`.
+- **Format with Runic.** Run `make format` before merging.
 
 ### Comments
 
-- **Comments and docstrings describe the code as it is, never its history.** No references to v2 / HomotopyContinuation.jl, "ported from", "the analog of", prototypes, review findings, or plan/status narration in `src/` or `test/`. State the behavior and the constraint that motivates it. The v2-parity mapping and porting status live in `implementation_docs/`, not in code. Sole exception: tests that literally load v2 as a comparison oracle (`compare_v2_*`, `v2_parity_test`).
-
-- **A docstring is public. No internals in it.** What the thing is and how to call it, in terms a caller can reach. No private bindings (leading underscore), no unexported helper types, no internal contracts or invariants, and never `@ref` a private name. Those belong in a `#` comment at the code, or in `implementation_docs/`. Unexported does not mean private: `?name` still shows the docstring.
-
-- **Nothing between a docstring and its definition.** A comment line or a blank line silently detaches it, leaving the binding undocumented with no warning. Put such comments above the docstring, or inside the body. Applies to every definition form. Check with `Base.Docs.doc(Base.Docs.Binding(HomotopyContinuationNext, :name))`, not `@doc T` on a type object (that reports `DataType`'s docstring and looks fine either way).
-
-- **Default to no comment; be terse when you do write one.** Comment only what the code cannot say: a non-obvious constraint or invariant, a unit, a trap, why not the obvious alternative. One line where one line does. Never restate the next line, narrate what a function does, or open a multi-line block above a definition to explain the design; design rationale goes in `implementation_docs/`, not `src/`.
+- **Comments/docstrings describe the code as it is, never its development history.** v2 parity/history belongs in `implementation_docs/`.
+- **A docstring is public. No private internals in public docstrings.**
+- **Nothing between a docstring and its definition.** Check with `Base.Docs.doc(Base.Docs.Binding(HomotopyContinuation, :name))` when needed.
+- **Default to no comment; be terse when a comment is necessary.** Record design rationale in `implementation_docs/`.
 
 ## Dependencies
 
@@ -176,10 +161,10 @@ For full reference, see the `julia-perf` skill (`.claude/skills/julia-perf/`) an
 |---------|---------|
 | CommonSolve | `init`/`solve!` interface |
 | DynamicPolynomials | `@polyvar`, concrete polynomial types |
-| EnumX | Scoped enums (TrackerCode, PathResultCode, etc.) |
-| FixedSizeArrays | Non-resizable vectors/matrices (size not in type parameter) |
-| FunctionWrappers | Type-stable function erasure for SystemEvaluator/HomotopyEvaluator |
+| EnumX | Scoped enums |
+| FixedSizeArrays | Non-resizable vectors/matrices with runtime size |
+| FunctionWrappers | Type-stable function erasure for evaluator firewalls |
 | LinearAlgebra | stdlib |
-| MixedSubdivisions | BKK mixed volume computation for polyhedral start system |
-| Moshi | `@data` tagged unions for SExpr and ExecInstruction |
+| MixedSubdivisions | BKK mixed-volume computation |
+| Moshi | `@data` tagged unions for SExpr/ExecInstruction |
 | MultivariatePolynomials | Abstract polynomial interface, differentiation, exponent access |
