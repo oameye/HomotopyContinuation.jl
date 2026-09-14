@@ -5,7 +5,7 @@ using Distributed: Distributed
 using Serialization: Serialization
 
 const DISTRIBUTED_EXT = Base.get_extension(
-    HomotopyContinuation, :HomotopyContinuationDistributedExt,
+    HomotopyContinuation, :DistributedExt,
 )
 
 # An extension reaches into its parent by design, and whether one is loaded here
