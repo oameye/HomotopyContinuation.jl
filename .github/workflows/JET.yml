@@ -41,9 +41,6 @@ jobs:
           version: '1'
       - uses: julia-actions/cache@v3
       - name: Instantiate test environment
-        run: >-
-          julia --project=test -e
-          'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."),
-          Pkg.PackageSpec(path="test/compat/HomotopyContinuationNext")]); Pkg.instantiate()'
+        run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
       - name: Run JET analysis
         run: julia --project=test test/jet_test.jl
