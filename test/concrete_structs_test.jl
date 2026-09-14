@@ -1,7 +1,7 @@
 using Test
 using CheckConcreteStructs: all_concrete
-using HomotopyContinuationNext
-using HomotopyContinuationNext: Interpreter, TaylorVector, TruncatedTaylorSeries,
+using HomotopyContinuation
+using HomotopyContinuation: Interpreter, TaylorVector, TruncatedTaylorSeries,
     DoubleF64, ComplexDF64
 
 # Types from other packages (e.g. FunctionWrapper aliases) are filtered by parentmodule.
@@ -9,16 +9,16 @@ const _CONCRETE_SKIP = Set{Symbol}()
 
 @testset "CheckConcreteStructs" begin
     # Non-parametric structs
-    for name in names(HomotopyContinuationNext; all = true)
+    for name in names(HomotopyContinuation; all = true)
         name in _CONCRETE_SKIP && continue
-        isdefined(HomotopyContinuationNext, name) || continue
-        T = getfield(HomotopyContinuationNext, name)
+        isdefined(HomotopyContinuation, name) || continue
+        T = getfield(HomotopyContinuation, name)
         T isa Type || continue
         isabstracttype(T) && continue
         T isa UnionAll && continue
         isstructtype(T) || continue
         # Skip types defined in other packages (e.g. FunctionWrapper aliases)
-        parentmodule(T) === HomotopyContinuationNext || continue
+        parentmodule(T) === HomotopyContinuation || continue
         @testset "$name" begin
             @test all_concrete(T; verbose = false)
         end
@@ -43,15 +43,15 @@ const _CONCRETE_SKIP = Set{Symbol}()
     @testset "RegenerationState concrete phase" begin
         system_type = System{
             Int, Int, CompileMode.INTERPRETED,
-            HomotopyContinuationNext.SquareShape,
+            HomotopyContinuation.SquareShape,
         }
-        state_type = HomotopyContinuationNext.RegenerationState{Int, Int, system_type}
+        state_type = HomotopyContinuation.RegenerationState{Int, Int, system_type}
         @test all_concrete(state_type; verbose = false)
     end
     @testset "NumericalIrreducibleDecomposition concrete result" begin
         system_type = System{
             Int, Int, CompileMode.INTERPRETED,
-            HomotopyContinuationNext.SquareShape,
+            HomotopyContinuation.SquareShape,
         }
         witness_type = WitnessSet{system_type}
         @test all_concrete(
