@@ -5,7 +5,7 @@
 using BenchmarkTools
 using DynamicPolynomials: @polyvar
 using FixedSizeArrays: FixedSizeArray
-using HomotopyContinuationNext:
+using HomotopyContinuation:
     System, evaluate!, evaluate_and_jacobian!, CompileMode
 
 const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
@@ -125,7 +125,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     end
 
     println("\n── End-to-end solve ──")
-    using HomotopyContinuationNext: solve, nsolutions
+    using HomotopyContinuation: solve, nsolutions
     for n in [3, 4, 5]
         @polyvar kv[1:(n + 1)]
         F = _katsura(kv, n)
@@ -138,7 +138,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     end
 
     println("\n── Taylor through SystemEvaluator ──")
-    using HomotopyContinuationNext: taylor!, TaylorVector
+    using HomotopyContinuation: taylor!, TaylorVector
     for n in [3, 5, 7]
         @polyvar kv[1:(n + 1)]
         F = _katsura(kv, n)

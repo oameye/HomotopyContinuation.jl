@@ -1,5 +1,5 @@
 using Test
-using HomotopyContinuationNext: System, degrees, nparameters, is_polynomial,
+using HomotopyContinuation: System, degrees, nparameters, is_polynomial,
     evaluate, to_number, @var, dense_poly
 using Random: MersenneTwister
 

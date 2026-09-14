@@ -1,7 +1,7 @@
 module TTFXWorkloads
 
-using HomotopyContinuationNext
-using HomotopyContinuationNext:
+using HomotopyContinuation
+using HomotopyContinuation:
     AffineChartHomotopy,
     EndgameTracker,
     ExtrinsicSubspaceHomotopy,

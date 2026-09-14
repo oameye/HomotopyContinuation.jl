@@ -1,6 +1,6 @@
 using Test
-using HomotopyContinuationNext
-import HomotopyContinuationNext:
+using HomotopyContinuation
+import HomotopyContinuation:
     evaluate!, evaluate_and_jacobian!, taylor!, parameters, variables, variable_groups
 
 @var ξ α

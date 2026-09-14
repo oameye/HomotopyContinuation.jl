@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: AbstractSystem, AbstractHomotopy,
+import HomotopyContinuation as HC
+using HomotopyContinuation: AbstractSystem, AbstractHomotopy,
     evaluate!, evaluate_and_jacobian!, taylor!,
     nparameters, set_solution!, get_solution!,
     start_parameters!, target_parameters!,

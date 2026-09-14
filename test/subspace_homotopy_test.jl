@@ -1,7 +1,7 @@
 using Test, Random
 using LinearAlgebra
-using HomotopyContinuationNext
-using HomotopyContinuationNext: IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy,
+using HomotopyContinuation
+using HomotopyContinuation: IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy,
     set_subspaces!, target_parameters!, intrinsic_coordinates!, ambient_coordinates!,
     rand_subspace, extrinsic, intrinsic, LinearSubspace, GEODESIC_CACHE_CAPACITY,
     HomotopyEvaluator, Tracker, TrackerCode, track!, evaluate!, evaluate_and_jacobian!,
@@ -279,7 +279,7 @@ end
     @test taylor_constant_path(H, Val(3), v1, t0) ≈ taylor_oracle(H, v1, t0, 3) rtol = 1.0e-7
 end
 
-using HomotopyContinuationNext: EndgameTracker, EndgameOptions, EndgameCode, PathResult,
+using HomotopyContinuation: EndgameTracker, EndgameOptions, EndgameCode, PathResult,
     is_success, solution
 
 @testset "subspace homotopies between perpendicular spaces" begin
@@ -336,7 +336,7 @@ using HomotopyContinuationNext: EndgameTracker, EndgameOptions, EndgameCode, Pat
     end
 end
 
-using HomotopyContinuationNext: AffineChartHomotopy, AffineChartSystem, on_affine_chart,
+using HomotopyContinuation: AffineChartHomotopy, AffineChartSystem, on_affine_chart,
     on_chart!, linear_subspace_homotopy, SystemEvaluator
 
 @testset "affine chart" begin

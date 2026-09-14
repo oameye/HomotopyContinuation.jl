@@ -5,7 +5,7 @@
 using BenchmarkTools
 using DynamicPolynomials: @polyvar
 using FixedSizeArrays: FixedSizeArray
-using HomotopyContinuationNext:
+using HomotopyContinuation:
     System, evaluate!, evaluate_and_jacobian!, taylor!,
     StraightLineHomotopy, HomotopyEvaluator,
     TaylorVector, TruncatedTaylorSeries,

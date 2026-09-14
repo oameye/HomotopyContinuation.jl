@@ -2,8 +2,8 @@
 # tracker regression cases. Each entry returns `(polys, variables, parameters)`.
 using DynamicPolynomials: @polyvar, subs, monomials
 using DynamicPolynomials: differentiate as mp_differentiate
-using HomotopyContinuationNext: @var, System, dense_poly, to_dict, horner, differentiate
-using HomotopyContinuationNext: subs as hc_subs
+using HomotopyContinuation: @var, System, dense_poly, to_dict, horner, differentiate
+using HomotopyContinuation: subs as hc_subs
 using MultivariatePolynomials: variables as mp_variables
 
 # Cyclic roots: n sparse equations of degree n in n variables.

@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: PathResult, PathResultCode, _cluster_solutions,
+import HomotopyContinuation as HC
+using HomotopyContinuation: PathResult, PathResultCode, _cluster_solutions,
     _orbit_merge!, GroupActions, SymmetricGroup, Result, recluster, multiplicity,
     clusters, cluster_of
 using Random: MersenneTwister

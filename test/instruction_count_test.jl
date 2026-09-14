@@ -6,7 +6,7 @@
 
 using Test
 using Random: MersenneTwister
-import HomotopyContinuationNext as Next
+import HomotopyContinuation as Next
 using DynamicPolynomials: @polyvar
 using MultivariatePolynomials: differentiate as mp_diff
 

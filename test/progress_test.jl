@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: solve, System, TotalDegree, Serial, path_results
+import HomotopyContinuation as HC
+using HomotopyContinuation: solve, System, TotalDegree, Serial, path_results
 using DynamicPolynomials: @polyvar
 
 # ProgressMeter writes to `stdout`, which `redirect_stdout` can only capture via

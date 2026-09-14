@@ -2,8 +2,8 @@
 # Each test section references the v2 test file it was ported from.
 
 using Test
-using HomotopyContinuationNext
-using HomotopyContinuationNext: TotalDegree, Polyhedral, Result, PathResult,
+using HomotopyContinuation
+using HomotopyContinuation: TotalDegree, Polyhedral, Result, PathResult,
     PathResultCode, TrackerOptions, EndgameOptions,
     solutions, real_solutions, nsolutions, nreal, nresults, results,
     nsingular, nnonsingular, nat_infinity, multiplicity,

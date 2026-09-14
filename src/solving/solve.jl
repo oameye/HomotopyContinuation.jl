@@ -428,7 +428,7 @@ directly and returns the full [`Result`](@ref), and
 [`real_solutions`](@ref) takes a set and a solver.
 
 ```julia
-using HomotopyContinuationNext, SemialgebraicSets
+using HomotopyContinuation, SemialgebraicSets
 @polyvar x y
 collect(SemialgebraicSets.@set x^2 == 1 && y^2 == 2 SemialgebraicSetsHCSolver())
 ```

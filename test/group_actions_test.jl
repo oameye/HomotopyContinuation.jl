@@ -1,6 +1,6 @@
 using Test, Random
-using HomotopyContinuationNext
-using HomotopyContinuationNext: GroupActions, SymmetricGroup, apply_actions
+using HomotopyContinuation
+using HomotopyContinuation: GroupActions, SymmetricGroup, apply_actions
 
 @testset "GroupActions" begin
     # Single swap action; the orbit is asserted as a SET since element order
@@ -40,7 +40,7 @@ end
     @test all(p -> sort(p) == [1, 2, 3], perms)
 end
 
-using HomotopyContinuationNext: UniquePoints, multiplicities, unique_points,
+using HomotopyContinuation: UniquePoints, multiplicities, unique_points,
     search_in_radius, add!
 
 @testset "UniquePoints with group actions" begin

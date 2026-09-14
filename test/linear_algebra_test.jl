@@ -1,7 +1,7 @@
 using Test
 using LinearAlgebra: LinearAlgebra, diagm, opnorm
 using Random: Random
-using HomotopyContinuationNext:
+using HomotopyContinuation:
     MatrixWorkspace, updated!, factorize!,
     skeel_row_scaling!, apply_row_scaling!,
     mixed_precision_iterative_refinement!,

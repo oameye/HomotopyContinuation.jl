@@ -1,5 +1,5 @@
 using Test
-using HomotopyContinuationNext: DoubleF64, ComplexDF64, wide_add, wide_sub, wide_mul, wide_div
+using HomotopyContinuation: DoubleF64, ComplexDF64, wide_add, wide_sub, wide_mul, wide_div
 
 @testset "DoubleF64" begin
     @testset "construction and conversion" begin

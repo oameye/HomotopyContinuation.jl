@@ -1,5 +1,5 @@
 using Test
-using HomotopyContinuationNext:
+using HomotopyContinuation:
     TruncatedTaylorSeries, TaylorVector, vectors,
     taylor_op_add, taylor_op_sub, taylor_op_mul, taylor_op_div,
     taylor_op_neg, taylor_op_identity, taylor_op_inv, taylor_op_inv_not_zero,
@@ -10,7 +10,7 @@ using HomotopyContinuationNext:
     taylor_op_mulmuladd, taylor_op_mulmulsub,
     taylor_op_exp, taylor_op_log, taylor_op_sinh, taylor_op_cosh, taylor_op_tan,
     taylor_op_tanh, taylor_op_asin, taylor_op_acos, taylor_op_pow, FSMat
-using HomotopyContinuationNext: OpType, op_call
+using HomotopyContinuation: OpType, op_call
 
 @testset "TruncatedTaylorSeries" begin
     @testset "construction" begin

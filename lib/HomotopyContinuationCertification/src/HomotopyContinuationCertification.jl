@@ -1,11 +1,11 @@
-module HomotopyContinuationNextCertification
+module HomotopyContinuationCertification
 
 # Solution certification (Krawczyk / interval arithmetic + Arb fallback) for
-# HomotopyContinuationNext. This is a separate package so the heavy Arblib
+# HomotopyContinuation. This is a separate package so the heavy Arblib
 # binary dependency stays out of the core package (which keeps core TTFX
 # minimal). Load this package to certify:
 #
-#     using HomotopyContinuationNext, HomotopyContinuationNextCertification
+#     using HomotopyContinuation, HomotopyContinuationCertification
 #     certify(F, solutions)
 
 using Printf: Printf
@@ -21,41 +21,29 @@ using IntervalTrees: IntervalTrees
 using OhMyThreads: @tasks, @set, @local
 using Moshi.Data: variant_storage_type
 
-# Core (HomotopyContinuationNext) internals the certification code builds on.
+# Core HomotopyContinuation internals the certification code builds on.
 # These are accessed via qualified imports; certification is intimately coupled
 # to the tape interpreter, so it reaches non-exported names by design.
-using HomotopyContinuationNext:
-    HomotopyContinuationNext,
-    # systems / evaluators
+using HomotopyContinuation:
+    HomotopyContinuation,
     System, SystemEvaluator, FSVec,
     nparameters, parameters, is_real,
-    # tape interpreter + ADT internals (for the Acb interpreter)
     Interpreter, InstructionSequence, ExecInstruction, ExecInstructionT,
     OpType, op_call, arity, should_use_index_not_reference,
     instruction_op, instruction_output,
     _EXEC_INSTRUCTION_SPECS, nested_ifs, exec_instruction_storage,
     _compile_exec_instructions, execute!,
-    # newton refinement
     NewtonCache, _newton, _clone_system_evaluator, solution,
-    # rebuild-a-struct-by-field-name helper
     _with_fields,
-    # results consumed by the certify entry points
     Result, PathResult, MonodromyResult, CertifiedEndpoint, results,
-    # the monodromy seam: core names the accumulator and candidate supertypes
     AbstractCertifiedSolutions, AbstractCertifiedCandidate,
-    # lazy path tracking, for certification of a `ResultIterator`
     ResultIterator, selection, restrict, is_success,
     _foreach_path, _replay_ntasks, _path_workers,
-    # progress bar helper
     make_progress,
-    # the status code of `add_solution!`, declared in core for the monodromy seam
     AddSolutionCode,
-    # executors: certification is Serial/Threaded only, see `Certification`
     Serial, Threaded
 
-# Core functions extended with methods on certification types. `nstart_solutions`
-# and `ntracked` are also called on a `ResultIterator`, which an import allows.
-import HomotopyContinuationNext: is_real, solutions, nstart_solutions, ntracked,
+import HomotopyContinuation: is_real, solutions, nstart_solutions, ntracked,
     ncertified_distinct
 
 include("interval_arithmetic.jl")

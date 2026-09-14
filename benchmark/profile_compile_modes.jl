@@ -6,7 +6,7 @@
 
 using Profile
 using DynamicPolynomials: @polyvar
-using HomotopyContinuationNext: System, solve, CompileMode, TotalDegree, Serial
+using HomotopyContinuation: System, solve, CompileMode, TotalDegree, Serial
 
 function _katsura(vars, n)
     lin = vars[1] + sum(2vars[i] for i in 2:(n + 1)) - 1

@@ -64,11 +64,11 @@ threaded. Requires `Distributed`:
 ```julia
 using Distributed
 addprocs(4)
-@everywhere using HomotopyContinuationNext
+@everywhere using HomotopyContinuation
 solve(F, TotalDegree(), DistributedExecutor())
 ```
 
-Every process must have `HomotopyContinuationNext` loaded, hence the
+Every process must have `HomotopyContinuation` loaded, hence the
 `@everywhere`.
 
 Paths are handed out in batches through a channel, so a process that draws a
@@ -125,7 +125,7 @@ DistributedExecutor(;
         ArgumentError(
             "`DistributedExecutor` needs the Distributed extension. Run " *
                 "`using Distributed` (and `@everywhere using " *
-                "HomotopyContinuationNext` on the worker processes).",
+                "HomotopyContinuation` on the worker processes).",
         ),
     )
 end

@@ -5,15 +5,13 @@ JULIA ?= julia
 SHELL := /bin/bash
 
 # Certification lives in a separate subpackage so Arblib stays out of core.
-CERT := lib/HomotopyContinuationNextCertification
+CERT := lib/HomotopyContinuationCertification
 
-# Every suite run writes its complete output here. A run whose stdout went
-# through a lossy pipe cannot be diagnosed afterwards without running it again.
 TEST_LOG ?= test-run.log
 CERT_LOG ?= test-cert.log
 EXTENSIVE_LOG ?= test-extensive.log
 
-.PHONY: test test-serial test-cert test-extensive benchmark ttfx format deps update help
+.PHONY: test test-serial test-cert test-extensive benchmark ttfx format deps update help compare
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}'
@@ -43,19 +41,22 @@ benchmark: ## Run benchmarks
 ttfx: ## Measure first-call latency per workload, one fresh session each
 	$(JULIA) --project=benchmark benchmark/runttfx.jl $(WORKLOADS)
 
-compare: ## Compare all categories against HomotopyContinuation v2
-	$(JULIA) --project=benchmark benchmark/compare/runcompare.jl
+compare: ## Explain how v2/v3 comparisons move after package-identity restoration
+	@echo 'HomotopyContinuation v2 and v3 now share the registered package name and UUID.'
+	@echo 'The old same-process comparison harness is intentionally disabled; use isolated environments.'
+	@echo 'See implementation_docs/09_v2_parity_freeze.md.'
+	@exit 2
 
 format: ## Format all Julia files with Runic
 	runic --inplace src/ ext/ test/ benchmark/ $(CERT)/src/ $(CERT)/test/
 
 deps: ## Instantiate all environments
 	$(JULIA) --project -e 'using Pkg; Pkg.instantiate()'
-	$(JULIA) --project=test -e 'using Pkg; Pkg.instantiate()'
+	$(JULIA) --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
 	$(JULIA) --project=$(CERT) -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
 	$(JULIA) --project=$(CERT)/test -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="$(CERT)")]); Pkg.instantiate()'
 	$(JULIA) --project=test/extensive -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="$(CERT)")]); Pkg.instantiate()'
-	$(JULIA) --project=benchmark -e 'using Pkg; Pkg.instantiate()'
+	$(JULIA) --project=benchmark -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
 
 update: ## Update all environments
 	$(JULIA) --project -e 'using Pkg; Pkg.update()'

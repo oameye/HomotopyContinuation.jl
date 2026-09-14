@@ -1,7 +1,7 @@
 using Test, Random
 using LinearAlgebra: norm
-using HomotopyContinuationNext
-using HomotopyContinuationNext: FSVec, FSMat, TaylorVector, ComplexDF64, DoubleF64,
+using HomotopyContinuation
+using HomotopyContinuation: FSVec, FSMat, TaylorVector, ComplexDF64, DoubleF64,
     evaluate!, evaluate_and_jacobian!, taylor!, equation_scales, nparameters,
     nvariables, variables, parameters, subs, newton, NewtonReturnCode,
     find_start_pair, degrees, is_homogeneous,

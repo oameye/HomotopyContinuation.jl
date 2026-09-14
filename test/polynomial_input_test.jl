@@ -1,9 +1,9 @@
 using Test
-import HomotopyContinuationNext
+import HomotopyContinuation
 using DynamicPolynomials: @polyvar
 using MultivariatePolynomials: differentiate as mp_diff
 using LinearAlgebra: norm
-using HomotopyContinuationNext: System, execute!, execute_taylor!,
+using HomotopyContinuation: System, execute!, execute_taylor!,
     TaylorVector, TruncatedTaylorSeries, DoubleF64, ComplexDF64, OpType, instruction_op,
     Interpreter, _build_instruction_sequence_direct, _build_instruction_sequence_via_sexpr,
     _prefer_direct_polynomial_lowering, _effective_variables, _empty_vars

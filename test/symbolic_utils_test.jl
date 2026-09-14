@@ -1,5 +1,5 @@
 using Test
-using HomotopyContinuationNext: Expression, System, @var, subs, variables, degree,
+using HomotopyContinuation: Expression, System, @var, subs, variables, degree,
     expand, to_dict, horner, monomials, dense_poly, rand_poly, coefficients,
     coeffs_as_dense_poly, exponents_coefficients, poly_from_exponents_coefficients,
     to_number, evaluate, jacobian, is_real, compose

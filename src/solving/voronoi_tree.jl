@@ -73,7 +73,7 @@ that violates it can discard genuine near-duplicates. Add a method for a custom
 metric:
 
 ```julia
-HomotopyContinuationNext.satisfies_triangle_inequality(::MyMetric) = true
+HomotopyContinuation.satisfies_triangle_inequality(::MyMetric) = true
 ```
 """
 satisfies_triangle_inequality(_)::Bool = false

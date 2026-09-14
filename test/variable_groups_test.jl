@@ -1,7 +1,7 @@
 using Test
 using Random: MersenneTwister
-using HomotopyContinuationNext
-using HomotopyContinuationNext: TotalDegree, Polyhedral, Serial, Threaded,
+using HomotopyContinuation
+using HomotopyContinuation: TotalDegree, Polyhedral, Serial, Threaded,
     solutions, nsolutions, nexcess_solutions, is_success, is_homogeneous,
     variables, variable_groups, multi_degrees, degrees, fix_parameters,
     paths_to_track, rand_subspace, LinearSubspace, CompileMode,

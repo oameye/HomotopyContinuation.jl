@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: BinomialSystemSolver, _hnf!, _hnf_big!, solve_binomial!
+import HomotopyContinuation as HC
+using HomotopyContinuation: BinomialSystemSolver, _hnf!, _hnf_big!, solve_binomial!
 using LinearAlgebra: det
 
 @testset "BinomialSystemSolver" begin

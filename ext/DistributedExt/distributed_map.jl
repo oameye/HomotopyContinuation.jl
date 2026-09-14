@@ -41,8 +41,8 @@ function _check_pids(pids::Vector{Int})::Nothing
         pid == me && continue
         _transport_query(Base.root_module_exists, pid, id) || throw(
             ArgumentError(
-                "process $pid does not have HomotopyContinuationNext loaded. Run " *
-                    "`@everywhere using HomotopyContinuationNext` before solving " *
+                "process $pid does not have HomotopyContinuation loaded. Run " *
+                    "`@everywhere using HomotopyContinuation` before solving " *
                     "with `DistributedExecutor`.",
             ),
         )

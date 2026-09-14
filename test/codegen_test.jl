@@ -1,7 +1,7 @@
 using Test
 using RuntimeGeneratedFunctions: RuntimeGeneratedFunctions
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext:
+import HomotopyContinuation as HC
+using HomotopyContinuation:
     System, Interpreter, InstructionSequence, CompileMode,
     _instruction_sequence_to_eval_expr,
     _instruction_sequence_to_jac_expr,

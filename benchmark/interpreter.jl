@@ -3,7 +3,7 @@
 
 using BenchmarkTools
 using DynamicPolynomials: @polyvar
-using HomotopyContinuationNext:
+using HomotopyContinuation:
     System, Interpreter, InstructionSequence,
     execute!, execute_taylor!, TaylorVector,
     TruncatedTaylorSeries

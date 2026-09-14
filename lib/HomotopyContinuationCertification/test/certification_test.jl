@@ -1,9 +1,9 @@
 using Test
-import HomotopyContinuationNext as HCN
-using HomotopyContinuationNext:
+import HomotopyContinuation as HCN
+using HomotopyContinuation:
     @polyvar, @var, System, solve, solutions, is_real, path_results,
     nsolutions, Expression, differentiate, TotalDegree, Monodromy, Serial
-using HomotopyContinuationNextCertification:
+using HomotopyContinuationCertification:
     Certification, certify, certificates, is_certified, is_complex, is_positive, ncertified,
     nreal_certified, ncomplex_certified, ndistinct_certified,
     ndistinct_real_certified, ndistinct_complex_certified,
@@ -380,8 +380,8 @@ end
         # path defers to. Drive it directly through its internal entry point on
         # well-conditioned roots so the test is deterministic (the public path
         # only reaches it on ill-conditioned inputs).
-        import HomotopyContinuationNext as HCN
-        import HomotopyContinuationNextCertification as HCNC
+        import HomotopyContinuation as HCN
+        import HomotopyContinuationCertification as HCNC
         @polyvar x y
 
         # Seed the Arb path exactly as the Float64 driver does: refine the
@@ -451,7 +451,7 @@ end
     end
 
     @testset "non-polynomial input" begin
-        import HomotopyContinuationNextCertification as HCNC
+        import HomotopyContinuationCertification as HCNC
         @var x y a b
 
         Fr = System([x / y - 2, x^2 + y^2 - 5])

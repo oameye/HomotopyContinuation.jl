@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as Next
-using HomotopyContinuationNext: Interpreter, InstructionSequence, Instruction,
+import HomotopyContinuation as Next
+using HomotopyContinuation: Interpreter, InstructionSequence, Instruction,
     OpType, execute!, execute_taylor!,
     compile_to_instructions, SExpr, SExprT, cse,
     TruncatedTaylorSeries, TaylorVector,

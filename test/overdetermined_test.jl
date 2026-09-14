@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: System, RandomizedSystem, SystemEvaluator,
+import HomotopyContinuation as HC
+using HomotopyContinuation: System, RandomizedSystem, SystemEvaluator,
     evaluate!, evaluate_and_jacobian!, taylor!, nparameters,
     TaylorVector, TruncatedTaylorSeries, ComplexDF64,
     solve, TotalDegree, Polyhedral, Continuation, Serial, Threaded,

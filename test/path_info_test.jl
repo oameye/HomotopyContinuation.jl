@@ -1,5 +1,5 @@
 using Test
-using HomotopyContinuationNext: System, ParameterHomotopy, StraightLineHomotopy,
+using HomotopyContinuation: System, ParameterHomotopy, StraightLineHomotopy,
     HomotopyEvaluator, Tracker, TrackerOptions, TrackerCode, @var,
     iterator, path_info, PathInfo, PathStep, path_table, track!, solution,
     steps, accepted_steps, rejected_steps

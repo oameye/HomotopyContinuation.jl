@@ -1,11 +1,11 @@
 using Test, Random
 using LinearAlgebra
-using HomotopyContinuationNext
-using HomotopyContinuationNext: find_start_pair, permutations,
+using HomotopyContinuation
+using HomotopyContinuation: find_start_pair, permutations,
     is_heuristic_stop, verify_solution_completeness, parameters, trace,
     SymmetricGroup, multiplicities, InfNorm
 using DynamicPolynomials: @polyvar, subs, differentiate, monomials, coefficient
-using HomotopyContinuationNext: FSVec, FSMat, evaluate!, evaluate_and_jacobian!,
+using HomotopyContinuation: FSVec, FSMat, evaluate!, evaluate_and_jacobian!,
     nparameters
 
 include("test_systems.jl")

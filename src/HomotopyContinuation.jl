@@ -1,4 +1,4 @@
-module HomotopyContinuationNext
+module HomotopyContinuation
 
 using LinearAlgebra: LinearAlgebra
 using Random: Random
@@ -84,7 +84,7 @@ export Serial, Threaded, DistributedExecutor
 export SemialgebraicSetsHCSolver
 export write_solutions, read_solutions, write_parameters, read_parameters
 # Certification (certify, SolutionCertificate, …) lives in the
-# HomotopyContinuationNextCertification subpackage (lib/), which depends on
+# HomotopyContinuationCertification subpackage (lib/), which depends on
 # Arblib. Keeping Arblib out of this core package is what makes core TTFX
 # minimal; load the subpackage to certify.
 

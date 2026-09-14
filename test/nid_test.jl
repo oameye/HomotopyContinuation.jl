@@ -1,6 +1,6 @@
 using Test, Random
-using HomotopyContinuationNext
-using HomotopyContinuationNext: TrackerOptions, MonodromyOptions, linear_subspace,
+using HomotopyContinuation
+using HomotopyContinuation: TrackerOptions, MonodromyOptions, linear_subspace,
     is_linear, dim, EquationSorting, _regeneration_sortperm,
     _regeneration_monodromy_options
 using DynamicPolynomials: @polyvar
@@ -106,7 +106,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             distance = metric, triangle_inequality = false,
             unique_points_atol = 2.0e-12, unique_points_rtol = 3.0e-9,
         )
-        copied_options = HomotopyContinuationNext._decompose_monodromy_options(
+        copied_options = HomotopyContinuation._decompose_monodromy_options(
             identity_options, 1.0e-10, 1.0e-8,
         )
         @test copied_options.distance === metric
@@ -121,13 +121,13 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         identity_points = UniquePoints(
             2; distance = zero_metric, triangle_inequality = false,
         )
-        identity = HomotopyContinuationNext.DecompositionPointIdentity(
+        identity = HomotopyContinuation.DecompositionPointIdentity(
             identity_points, Vector{Vector{ComplexF64}}(), Int[], BitVector(),
         )
-        @test HomotopyContinuationNext._point_identity!(
+        @test HomotopyContinuation._point_identity!(
             identity, ComplexF64[0, 0], 1.0e-14, 1.0e-8,
         ) == 1
-        @test HomotopyContinuationNext._point_identity!(
+        @test HomotopyContinuation._point_identity!(
             identity, ComplexF64[10, 10], 1.0e-14, 1.0e-8,
         ) == 1
         @test length(identity.master) == 1
@@ -644,7 +644,7 @@ end
 end
 
 @testset "Decomposition owns point-identity tolerances" begin
-    nested = HomotopyContinuationNext.MonodromyOptions(;
+    nested = HomotopyContinuation.MonodromyOptions(;
         unique_points_atol = 7.0e-12,
         unique_points_rtol = 8.0e-10,
         group_action = x -> -x,
@@ -657,7 +657,7 @@ end
     )
     @test alg.atol == 2.0e-9
     @test alg.rtol == 3.0e-7
-    opts = HomotopyContinuationNext._decompose_monodromy_options(alg.monodromy, alg.atol, alg.rtol)
+    opts = HomotopyContinuation._decompose_monodromy_options(alg.monodromy, alg.atol, alg.rtol)
     @test opts.unique_points_atol == alg.atol
     @test opts.unique_points_rtol == alg.rtol
     @test !opts.equivalence_classes

@@ -1,6 +1,6 @@
 using Test
-using HomotopyContinuationNext
-using HomotopyContinuationNext: TotalDegree, Polyhedral, Result, PathResult,
+using HomotopyContinuation
+using HomotopyContinuation: TotalDegree, Polyhedral, Result, PathResult,
     PathResultCode, TrackerOptions,
     solutions, real_solutions, nsolutions, nreal, is_success, is_real,
     nexcess_solutions, is_homogeneous, fix_parameters, FixedParameterSystem,
@@ -454,8 +454,8 @@ using CommonSolve: CommonSolve
     end
 
     @testset "Executor types" begin
-        @test Serial() isa HomotopyContinuationNext.AbstractExecutor
-        @test Threaded() isa HomotopyContinuationNext.AbstractExecutor
+        @test Serial() isa HomotopyContinuation.AbstractExecutor
+        @test Threaded() isa HomotopyContinuation.AbstractExecutor
         @test Threaded().ntasks == Threads.nthreads()
         @test Threaded(1).ntasks == 1
         # Cannot exceed available threads
@@ -617,8 +617,8 @@ using CommonSolve: CommonSolve
         @polyvar x y
         F_interp = System([x^2 - 1, y - 2])
         @test F_interp.compile_mode == CompileMode.INTERPRETED
-        @test HomotopyContinuationNext.system_shape(F_interp) isa
-            HomotopyContinuationNext.SquareShape
+        @test HomotopyContinuation.system_shape(F_interp) isa
+            HomotopyContinuation.SquareShape
 
         F_compiled = System([x^2 - 1, y - 2]; compile = CompileMode.COMPILED)
         @test F_compiled.compile_mode == CompileMode.COMPILED
@@ -626,10 +626,10 @@ using CommonSolve: CommonSolve
 
         F_under = System([x + y])
         F_over = System([x^2 - 1, y - 2, x + y - 3])
-        @test HomotopyContinuationNext.system_shape(F_under) isa
-            HomotopyContinuationNext.UnderdeterminedShape
-        @test HomotopyContinuationNext.system_shape(F_over) isa
-            HomotopyContinuationNext.OverdeterminedShape
+        @test HomotopyContinuation.system_shape(F_under) isa
+            HomotopyContinuation.UnderdeterminedShape
+        @test HomotopyContinuation.system_shape(F_over) isa
+            HomotopyContinuation.OverdeterminedShape
         @test typeof(F_interp) != typeof(F_under)
         @test typeof(F_interp) != typeof(F_over)
     end

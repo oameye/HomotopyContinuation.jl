@@ -33,7 +33,7 @@ end
 @noinline _certification_required() = throw(
     ArgumentError(
         "`duplicate_check = DuplicateCheck.CERTIFIED` needs Krawczyk certification: run " *
-            "`using HomotopyContinuationNextCertification`.",
+            "`using HomotopyContinuationCertification`.",
     ),
 )
 
@@ -42,7 +42,7 @@ end
 
 Supertype of the accumulator of certified-distinct solutions that
 `duplicate_check = DuplicateCheck.CERTIFIED` files monodromy endpoints into.
-`HomotopyContinuationNextCertification` provides the implementation.
+`HomotopyContinuationCertification` provides the implementation.
 """
 abstract type AbstractCertifiedSolutions end
 
@@ -2357,7 +2357,7 @@ hand to another process as to track.
   that certifies as neither; the accepted solutions are the certified interval
   midpoints, so [`solutions`](@ref) returns certified approximations, and
   [`ncertified_distinct`](@ref) and [`ndiscarded_uncertified`](@ref) report the
-  counts. Needs `using HomotopyContinuationNextCertification`.
+  counts. Needs `using HomotopyContinuationCertification`.
 * `certification_max_precision = 256`: Maximal precision used when certifying,
   under `duplicate_check = DuplicateCheck.CERTIFIED`.
 * `certification_refine_solution = true`: Whether to refine an endpoint with

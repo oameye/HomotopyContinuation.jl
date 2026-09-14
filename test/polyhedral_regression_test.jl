@@ -5,8 +5,8 @@
 
 using Test
 
-using HomotopyContinuationNext
-using HomotopyContinuationNext:
+using HomotopyContinuation
+using HomotopyContinuation:
     ToricHomotopy, CoefficientHomotopy, HomotopyEvaluator,
     SystemEvaluator, System, FSVec, FSMat, TaylorVector, PathResultCode,
     update_weights!, evaluate!, evaluate_and_jacobian!, taylor!,
@@ -23,7 +23,7 @@ using Random: MersenneTwister
 @testset "Polyhedral regression" begin
 
     @testset "canonical support fast path matches MixedSubdivisions" begin
-        MS = HomotopyContinuationNext.MixedSubdivisions
+        MS = HomotopyContinuation.MixedSubdivisions
 
         # Fresh, deterministic sampler drawing from a seeded rng, so the public
         # API and the canonical reconstruction see identical lifting streams.

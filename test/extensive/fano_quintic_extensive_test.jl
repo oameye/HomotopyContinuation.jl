@@ -1,6 +1,6 @@
 using Test
-using HomotopyContinuationNext
-using HomotopyContinuationNextCertification: certify, ndistinct_certified
+using HomotopyContinuation
+using HomotopyContinuationCertification: certify, ndistinct_certified
 using Random: MersenneTwister
 
 isdefined(@__MODULE__, :fano_quintic_system) || include("../test_systems.jl")

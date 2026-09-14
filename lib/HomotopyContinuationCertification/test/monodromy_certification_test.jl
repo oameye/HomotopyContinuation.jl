@@ -1,11 +1,11 @@
 using Test
-using HomotopyContinuationNext:
+using HomotopyContinuation:
     @polyvar, System, Monodromy, MonodromyOptions, MonodromySolver, Serial, Threaded,
     solve, solutions, nsolutions, nresults, results, is_success, is_singular,
     winding_number, slice, parameters, LinearSubspace, PathResult, PathResultCode,
     DuplicateCheck, ncertified_distinct, ndiscarded_uncertified, add!,
     accuracy, residual, condition_jacobian, path_results
-using HomotopyContinuationNextCertification:
+using HomotopyContinuationCertification:
     Certification, certify, ndistinct_certified
 using DynamicPolynomials: differentiate
 

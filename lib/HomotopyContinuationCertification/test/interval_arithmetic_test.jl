@@ -1,6 +1,6 @@
 using Test
 using Random: MersenneTwister
-using HomotopyContinuationNextCertification:
+using HomotopyContinuationCertification:
     Interval, IComplex, IComplexF64, interval, mid, diam, rad, mig, mag, hull,
     isinterior, sqr, inf_norm_bound
 

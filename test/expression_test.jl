@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as Next
-using HomotopyContinuationNext: Expression, System, @var, @unique_var, @polyvar,
+import HomotopyContinuation as Next
+using HomotopyContinuation: Expression, System, @var, @unique_var, @polyvar,
     differentiate, subs, num_den, variable, unique_variable, expression_to_sexpr,
     SExprT
 using DynamicPolynomials: DynamicPolynomials

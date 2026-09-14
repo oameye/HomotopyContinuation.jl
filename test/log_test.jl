@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as Next
-using HomotopyContinuationNext:
+import HomotopyContinuation as Next
+using HomotopyContinuation:
     Expression, System, CompileMode, @var, differentiate, subs,
     TaylorVector, ComplexDF64, FSVec, FSMat
 

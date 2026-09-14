@@ -1,5 +1,5 @@
 using Test
-using HomotopyContinuationNext: System, ParameterHomotopy, HomotopyEvaluator,
+using HomotopyContinuation: System, ParameterHomotopy, HomotopyEvaluator,
     Tracker, TrackerCode, track!
 
 include("test_systems.jl")

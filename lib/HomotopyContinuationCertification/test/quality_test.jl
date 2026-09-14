@@ -1,8 +1,8 @@
 using Test
-using HomotopyContinuationNextCertification: HomotopyContinuationNextCertification,
+using HomotopyContinuationCertification: HomotopyContinuationCertification,
     Interval, IComplex, CertificationResult, DistinctSolutionCertificates,
     SolutionCertificate, ExtendedSolutionCertificate, DistinctCertifiedSolutions
-using HomotopyContinuationNext: @polyvar, System, monodromy_certified_solutions
+using HomotopyContinuation: @polyvar, System, monodromy_certified_solutions
 using Aqua: Aqua
 using JET: JET
 using ExplicitImports:
@@ -10,13 +10,13 @@ using ExplicitImports:
     check_all_explicit_imports_via_owners, check_all_qualified_accesses_via_owners
 using CheckConcreteStructs: all_concrete
 
-const Cert = HomotopyContinuationNextCertification
+const Cert = HomotopyContinuationCertification
 
 @testset "Quality" begin
     @testset "Aqua" begin
         Aqua.test_all(
             Cert;
-            deps_compat = (; ignore = [:HomotopyContinuationNext]),
+            deps_compat = (; ignore = [:HomotopyContinuation]),
             piracies = (;
                 treat_as_own = [monodromy_certified_solutions],
             ),

@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: System, newton, NewtonResult, NewtonCache, is_success
+import HomotopyContinuation as HC
+using HomotopyContinuation: System, newton, NewtonResult, NewtonCache, is_success
 using DynamicPolynomials: @polyvar
 
 @testset "Standalone newton(F, x₀)" begin

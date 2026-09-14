@@ -1,6 +1,6 @@
 using Test
-using HomotopyContinuationNext
-using HomotopyContinuationNextCertification:
+using HomotopyContinuation
+using HomotopyContinuationCertification:
     IteratorCertification, certify, ncertified, ndistinct_certified, nnotcertified,
     ntracked, nleaves, max_leaf_size, oversized_leaves, unsplittable_leaves,
     ncandidates

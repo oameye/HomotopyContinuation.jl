@@ -1,6 +1,6 @@
 using Test
 
-@testset "HomotopyContinuationNextCertification" begin
+@testset "HomotopyContinuationCertification" begin
     include("interval_arithmetic_test.jl")
     include("acb_interpreter_test.jl")
     include("log_test.jl")
