@@ -84,6 +84,8 @@ jobs:
           julia --project=lib/HomotopyContinuationCertification/test -e
           'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."),
           Pkg.PackageSpec(path="lib/HomotopyContinuationCertification"),
-          Pkg.PackageSpec(path="test/compat/HomotopyContinuationNext")]); Pkg.instantiate()'
+          Pkg.PackageSpec(path="test/compat/HomotopyContinuationNext"),
+          Pkg.PackageSpec(path="test/compat/HomotopyContinuationNextCertification")]);
+          Pkg.instantiate()'
       - name: Run certification suite
         run: julia --project=lib/HomotopyContinuationCertification/test -t 4 lib/HomotopyContinuationCertification/test/runtests.jl
