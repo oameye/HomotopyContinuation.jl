@@ -1,7 +1,7 @@
 using Test
 using Aqua
-using HomotopyContinuationNext
+using HomotopyContinuation
 
 @testset "Aqua.jl" begin
-    Aqua.test_all(HomotopyContinuationNext)
+    Aqua.test_all(HomotopyContinuation)
 end
