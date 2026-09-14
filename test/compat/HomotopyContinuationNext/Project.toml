@@ -1,6 +1,0 @@
-name = "HomotopyContinuationNext"
-uuid = "ec87e138-eaf4-4d78-a098-49d58d8a59d7"
-version = "0.0.0"
-
-[deps]
-HomotopyContinuation = "f213a82b-91d6-5c5d-acf7-10f1c761b327"

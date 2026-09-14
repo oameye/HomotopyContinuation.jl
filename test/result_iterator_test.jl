@@ -1,6 +1,6 @@
 using Test
-using HomotopyContinuationNext
-using HomotopyContinuationNext: Serial, Result, PathResult, TotalDegree, Polyhedral,
+using HomotopyContinuation
+using HomotopyContinuation: Serial, Result, PathResult, TotalDegree, Polyhedral,
     solution, is_success, is_real, seed, path_results, nsolutions, solutions,
     nexcess_solutions, path_number, start_solution, total_degree_start_solutions,
     System, Continuation, trace
@@ -207,7 +207,7 @@ using LinearAlgebra: norm
         include("test_systems.jl")
         polys, vars, _ = cyclic_system(5)
         F = System(polys; variables = vars)
-        d = HomotopyContinuationNext.degrees(F)
+        d = HomotopyContinuation.degrees(F)
         S = total_degree_start_solutions(d)
         @test length(S) == 120
 

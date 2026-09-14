@@ -1,5 +1,5 @@
 using Test
-using HomotopyContinuationNext:
+using HomotopyContinuation:
     WeightedNorm, inf_norm, weighted_norm, inf_distance, weighted_distance,
     init!, update!, fast_abs, DoubleF64, ComplexDF64,
     InfNorm, EuclideanNorm, euclidean_norm, euclidean_distance,

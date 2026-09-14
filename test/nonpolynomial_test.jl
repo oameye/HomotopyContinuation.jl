@@ -1,7 +1,7 @@
 using Test
 using Random: Random, MersenneTwister, randn, rand
-import HomotopyContinuationNext as Next
-using HomotopyContinuationNext: Expression, System, CompileMode, @var, @polyvar,
+import HomotopyContinuation as Next
+using HomotopyContinuation: Expression, System, CompileMode, @var, @polyvar,
     differentiate, solve, solutions, nsolutions,
     verify_solution_completeness, Serial, TotalDegree, Polyhedral,
     Continuation, Monodromy, Witness, Regeneration, Decomposition, Intersection,

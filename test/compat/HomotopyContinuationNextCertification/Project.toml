@@ -1,6 +1,0 @@
-name = "HomotopyContinuationNextCertification"
-uuid = "7a8f6f0a-3e2e-4e66-9e6a-1f0d8a2c4b77"
-version = "0.0.0"
-
-[deps]
-HomotopyContinuationCertification = "c5a0faa6-2749-4b24-8533-d01374868c85"

@@ -30,7 +30,7 @@ _distinct_accumulator(
     F::System, p::Union{Nothing, Vector{ComplexF64}}, max_precision::Int,
 ) = DistinctCertifiedSolutions(F, p; max_precision = max_precision)
 
-function HomotopyContinuationNext.monodromy_certified_solutions(
+function HomotopyContinuation.monodromy_certified_solutions(
         F::System, p::Union{Nothing, Vector{ComplexF64}}, max_precision::Int,
         refine_solution::Bool,
     )
@@ -62,7 +62,7 @@ function _initial_caches(first::CertificationCache)
     return caches
 end
 
-function HomotopyContinuationNext.monodromy_size_caches!(
+function HomotopyContinuation.monodromy_size_caches!(
         d::MonodromyCertifiedSolutions, ntasks::Int,
     )
     Base.@lock d.caches_lock begin
@@ -75,7 +75,7 @@ end
 
 function _task_cache(d::MonodromyCertifiedSolutions, tid::Int)::CertificationCache
     tid <= length(d.caches) ||
-        HomotopyContinuationNext.monodromy_size_caches!(d, tid)
+        HomotopyContinuation.monodromy_size_caches!(d, tid)
     cache = d.caches[tid]
     cache === nothing || return cache
     fresh = CertificationCache(d.distinct.system)
@@ -122,7 +122,7 @@ struct MonodromyCandidate{C <: AbstractSolutionCertificate} <: AbstractCertified
     end
 end
 
-function HomotopyContinuationNext.monodromy_certify_candidate(
+function HomotopyContinuation.monodromy_certify_candidate(
         d::MonodromyCertifiedSolutions{P, D}, sol::Vector{ComplexF64}, tid::Int,
     ) where {P, C, D <: DistinctCertifiedSolutions{<:System, <:Any, C}}
     cache = _task_cache(d, tid)
@@ -135,7 +135,7 @@ end
 # The diagnostics are measured here rather than when the candidate was certified:
 # only a candidate that files as distinct is ever reported, and the others outnumber
 # it once the run saturates.
-function HomotopyContinuationNext.monodromy_file_certified!(
+function HomotopyContinuation.monodromy_file_certified!(
         d::MonodromyCertifiedSolutions{P, D}, candidate::MonodromyCandidate{C},
         index::Int,
     ) where {P, C, D <: DistinctCertifiedSolutions{<:System, <:Any, C}}

@@ -1,6 +1,6 @@
 using Test
-using HomotopyContinuationNext: @polyvar, @var, System, Expression
-using HomotopyContinuationNextCertification: AcbInterpreter, acb_execute!, setprecision!,
+using HomotopyContinuation: @polyvar, @var, System, Expression
+using HomotopyContinuationCertification: AcbInterpreter, acb_execute!, setprecision!,
     acb_op_exp!, acb_op_sinh!, acb_op_cosh!, acb_op_tan!, acb_op_tanh!, acb_op_asin!,
     acb_op_acos!, acb_op_pow!, acb_op_sqrt!
 import DynamicPolynomials as DP

@@ -7,11 +7,11 @@
 using BenchmarkTools
 using DynamicPolynomials: @polyvar
 using FixedSizeArrays: FixedSizeArray
-using HomotopyContinuationNext:
+using HomotopyContinuation:
     System, solve, CompileMode, TotalDegree, Serial,
     StraightLineHomotopy, HomotopyEvaluator,
     evaluate!, evaluate_and_jacobian!, taylor!, TaylorVector
-import HomotopyContinuationNext as HC
+import HomotopyContinuation as HC
 
 const FSVec{T} = FixedSizeArray{T, 1, Memory{T}}
 const FSMat{T} = FixedSizeArray{T, 2, Memory{T}}

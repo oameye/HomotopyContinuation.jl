@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as Next
-using HomotopyContinuationNext: OpType, arity, op_call,
+import HomotopyContinuation as Next
+using HomotopyContinuation: OpType, arity, op_call,
     op_add, op_sub, op_mul, op_div, op_neg,
     op_sqr, op_cb, op_sqrt, op_inv, op_invsqr,
     op_muladd, op_mulsub, op_submul,

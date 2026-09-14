@@ -1,6 +1,6 @@
 using Test, Random
-using HomotopyContinuationNext
-using HomotopyContinuationNext: VoronoiTree, search_in_radius, add!, InfNorm, inf_distance
+using HomotopyContinuation
+using HomotopyContinuation: VoronoiTree, search_in_radius, add!, InfNorm, inf_distance
 
 # Brute-force oracle: first id within tol, or nothing.
 function brute_search(pts::Vector{Vector{ComplexF64}}, ids::Vector{Int}, v, tol)

@@ -1,7 +1,7 @@
 using Test
 using AllocCheck: check_allocs
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: System, StraightLineHomotopy, HomotopyEvaluator,
+import HomotopyContinuation as HC
+using HomotopyContinuation: System, StraightLineHomotopy, HomotopyEvaluator,
     Tracker, TrackerCode, TrackerOptions,
     NewtonCorrector, NewtonCode, NewtonCorrectorResult,
     Predictor, PredictionMethod,

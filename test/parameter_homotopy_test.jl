@@ -1,9 +1,9 @@
 using Test, Random
-using HomotopyContinuationNext
-using HomotopyContinuationNext: HomotopyEvaluator, ParameterHomotopy, parameters!,
+using HomotopyContinuation
+using HomotopyContinuation: HomotopyEvaluator, ParameterHomotopy, parameters!,
     evaluate!, evaluate_and_jacobian!, taylor!, FSVec, FSMat, TaylorVector,
     start_parameters!, target_parameters!
-using HomotopyContinuationNext: Tracker, TrackerCode, track!
+using HomotopyContinuation: Tracker, TrackerCode, track!
 using DynamicPolynomials: @polyvar, subs, differentiate
 
 @testset "ParameterHomotopy" begin

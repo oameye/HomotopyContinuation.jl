@@ -1,7 +1,7 @@
 using Test
-using HomotopyContinuationNext
-using HomotopyContinuationNext: CONSERVATIVE_TRACKER_OPTIONS
-using HomotopyContinuationNextCertification: certify, ncertified, ndistinct_certified,
+using HomotopyContinuation
+using HomotopyContinuation: CONSERVATIVE_TRACKER_OPTIONS
+using HomotopyContinuationCertification: certify, ncertified, ndistinct_certified,
     ndistinct_real_certified
 using Random: MersenneTwister
 

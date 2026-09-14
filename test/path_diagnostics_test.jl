@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: solve, System, TotalDegree,
+import HomotopyContinuation as HC
+using HomotopyContinuation: solve, System, TotalDegree,
     solution, accuracy, residual, steps, accepted_steps, rejected_steps,
     winding_number, condition_jacobian, last_path_point, path_results,
     is_success, is_failed, is_finite, is_at_infinity, is_real,

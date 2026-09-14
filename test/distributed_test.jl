@@ -1,13 +1,13 @@
 using Test
-using HomotopyContinuationNext
-using HomotopyContinuationNext: Serial, Threaded, DistributedExecutor, Result,
+using HomotopyContinuation
+using HomotopyContinuation: Serial, Threaded, DistributedExecutor, Result,
     PathResult, TotalDegree, Polyhedral, System, CompileMode
-using HomotopyContinuationNext: _SupportSystem, _stage_system, evaluate!, FSVec,
+using HomotopyContinuation: _SupportSystem, _stage_system, evaluate!, FSVec,
     nparameters, _distributed_solve!, _distributed_sweep_entries,
     _distributed_monodromy_solve!
-using HomotopyContinuationNext: permutations, trace, is_success,
+using HomotopyContinuation: permutations, trace, is_success,
     MonodromyCode
-using HomotopyContinuationNext: variable_groups, multi_degrees, is_homogeneous
+using HomotopyContinuation: variable_groups, multi_degrees, is_homogeneous
 using DynamicPolynomials: @polyvar
 using Distributed: Distributed, addprocs, rmprocs, workers, remotecall_eval
 using Serialization: serialize, deserialize
@@ -147,7 +147,7 @@ end
     # and the fallbacks are reachable only through the hooks.
     @testset "extension hooks" begin
         @test Base.get_extension(
-            HomotopyContinuationNext, :HomotopyContinuationNextDistributedExt,
+            HomotopyContinuation, :HomotopyContinuationDistributedExt,
         ) !== nothing
         @test_throws ArgumentError _distributed_solve!(nothing)
         @test_throws ArgumentError _distributed_sweep_entries(
@@ -178,7 +178,7 @@ end
     pids = addprocs(
         2; exeflags = ["--project=$(Base.active_project())", "-t2"],
     )
-    remotecall_eval(Main, pids, :(using HomotopyContinuationNext))
+    remotecall_eval(Main, pids, :(using HomotopyContinuation))
 
     try
         # One process running one task sees the paths in the same order a serial
@@ -446,7 +446,7 @@ end
                     e
                 end
                 @test err isa ArgumentError
-                @test occursin("does not have HomotopyContinuationNext loaded", err.msg)
+                @test occursin("does not have HomotopyContinuation loaded", err.msg)
             finally
                 rmprocs(bare)
             end

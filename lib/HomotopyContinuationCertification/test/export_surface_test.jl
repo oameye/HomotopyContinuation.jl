@@ -1,13 +1,13 @@
 # Regression test guarding the public export surface. The other tests reach
 # certification names via explicit `using ...: name` imports, so they never
 # notice when a public name is defined but not exported. This test asserts
-# membership in `names(HomotopyContinuationNextCertification)` directly.
+# membership in `names(HomotopyContinuationCertification)` directly.
 
 using Test
-using HomotopyContinuationNextCertification: HomotopyContinuationNextCertification
+using HomotopyContinuationCertification: HomotopyContinuationCertification
 
 @testset "Export surface" begin
-    Cert = HomotopyContinuationNextCertification
+    Cert = HomotopyContinuationCertification
     exported = Set(names(Cert))
 
     # The public certification API.

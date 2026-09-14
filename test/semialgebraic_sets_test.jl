@@ -1,8 +1,8 @@
 using Test
-using HomotopyContinuationNext: SemialgebraicSetsHCSolver, System, TotalDegree,
+using HomotopyContinuation: SemialgebraicSetsHCSolver, System, TotalDegree,
     Polyhedral, Serial, CompileMode, nsolutions, nexcess_solutions, real_solutions,
     excess_residual_tol
-using HomotopyContinuationNext: solve as hc_solve
+using HomotopyContinuation: solve as hc_solve
 using SemialgebraicSets: SemialgebraicSets, @set, algebraicset
 using DynamicPolynomials: @polyvar
 

@@ -1,5 +1,5 @@
 using Test
-using HomotopyContinuationNext:
+using HomotopyContinuation:
     fast_abs, nanmin, nanmax, nthroot, _stable_sort!, _stable_sort_by!,
     SegmentStepper, reinit!, propose_step!, step_success!, is_done, dist_to_target,
     write_solutions, read_solutions, write_parameters, read_parameters

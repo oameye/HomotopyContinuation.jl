@@ -1,10 +1,10 @@
 using Test, Random
-using HomotopyContinuationNext: System, FixedParameterSystem, fix_parameters, CompileMode,
+using HomotopyContinuation: System, FixedParameterSystem, fix_parameters, CompileMode,
     TotalDegree, Polyhedral, Serial, Threaded, compose,
     solve, solutions, nsolutions, nexcess_solutions, path_results, steps,
     evaluate!, evaluate_and_jacobian!, taylor!,
     TaylorVector, ComplexDF64, FSVec, FSMat, nparameters, SystemEvaluator
-import HomotopyContinuationNext as Next
+import HomotopyContinuation as Next
 using DynamicPolynomials: @polyvar
 using MultivariatePolynomials: MultivariatePolynomials as MP
 using CommonSolve: CommonSolve

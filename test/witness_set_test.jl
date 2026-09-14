@@ -1,7 +1,7 @@
 using Test, Random
 using LinearAlgebra
-using HomotopyContinuationNext
-using HomotopyContinuationNext: corank, extrinsic, TrackerOptions,
+using HomotopyContinuation
+using HomotopyContinuation: corank, extrinsic, TrackerOptions,
     IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy,
     EndgameTracker, Tracker, HomotopyEvaluator, PathResult,
     intrinsic_coordinates!, ambient_coordinates!, track!, is_success, FSVec,
@@ -150,7 +150,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test degree(W) == 2
         @test dim(W) == 1
         # the stored system is parameter-free (parameters substituted)
-        @test HomotopyContinuationNext.nparameters(system(W)) == 0
+        @test HomotopyContinuation.nparameters(system(W)) == 0
         @test trace_test(W) < 1.0e-8
 
         # the fixed witness set moves like any other
@@ -300,7 +300,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             track!(eg, u)
             pr = PathResult(eg; path_number = 0, start_solution = ComplexF64.(s))
             if is_success(pr)
-                ambient_coordinates!(amb, Hom, HomotopyContinuationNext.solution(pr), complex(0.0))
+                ambient_coordinates!(amb, Hom, HomotopyContinuation.solution(pr), complex(0.0))
                 norm(l2(amb)) < 1.0e-10 && (moved += 1)
             end
         end
@@ -318,11 +318,11 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
 
         # the sliced system is [F; A x − b]
         Ls = rand_subspace(3; dim = 1)
-        G = HomotopyContinuationNext._sliced_system([S, P], [a1, a2, a3], Ls)
+        G = HomotopyContinuation._sliced_system([S, P], [a1, a2, a3], Ls)
         @test size(G) == (4, 3)
         xr = randn(ComplexF64, 3)
         u_out = FSVec{ComplexF64}(zeros(ComplexF64, 4))
-        HomotopyContinuationNext.evaluate!(
+        HomotopyContinuation.evaluate!(
             u_out, G.evaluator, FSVec{ComplexF64}(xr), FSVec{ComplexF64}(ComplexF64[]),
         )
         E = extrinsic(Ls)
@@ -424,9 +424,9 @@ end
     H = System([z]; variables = [x, z])
     R = System([x]; variables = [y, x])
 
-    @test isnothing(HomotopyContinuationNext._check_same_ambient_variables(F, G))
-    @test_throws ArgumentError HomotopyContinuationNext._check_same_ambient_variables(F, H)
-    @test_throws ArgumentError HomotopyContinuationNext._check_same_ambient_variables(F, R)
+    @test isnothing(HomotopyContinuation._check_same_ambient_variables(F, G))
+    @test_throws ArgumentError HomotopyContinuation._check_same_ambient_variables(F, H)
+    @test_throws ArgumentError HomotopyContinuation._check_same_ambient_variables(F, R)
 
     L = LinearSubspace(zeros(ComplexF64, 0, 2), ComplexF64[])
     empty_points = Vector{Vector{ComplexF64}}()

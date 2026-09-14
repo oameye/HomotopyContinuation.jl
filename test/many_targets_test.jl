@@ -1,6 +1,6 @@
 using Test
-using HomotopyContinuationNext
-using HomotopyContinuationNext: Serial, Threaded, Result, TotalDegree, ParameterHomotopy,
+using HomotopyContinuation
+using HomotopyContinuation: Serial, Threaded, Result, TotalDegree, ParameterHomotopy,
     TrackerOptions, AmbientWorkerState, IntrinsicWorkerState, ExtrinsicSubspaceHomotopy
 using DynamicPolynomials: @polyvar
 using LinearAlgebra: norm
@@ -147,13 +147,13 @@ using Random: seed!
     @testset "retargets instead of rebuilding" begin
         # The homotopy handle in the worker state is the one the tracker uses, so a
         # retarget is visible through the FunctionWrapper firewall.
-        cache = HomotopyContinuationNext._init_parameter_sweep(
+        cache = HomotopyContinuation._init_parameter_sweep(
             F, S₀, params[1], Serial(), p₀, UInt32(1),
             TrackerOptions(), EndgameOptions(), false,
         )
         H = cache.worker.homotopy
         @test H isa ParameterHomotopy
-        HomotopyContinuationNext._retarget!(cache.worker, ComplexF64.(params[2]))
+        HomotopyContinuation._retarget!(cache.worker, ComplexF64.(params[2]))
         @test Vector(H.target_p) ≈ ComplexF64.(params[2])
         @test cache.worker.homotopy === H
     end
@@ -258,7 +258,7 @@ using Random: seed!
     end
 
     @testset "target subspaces of the wrong dimension are rejected" begin
-        full = HomotopyContinuationNext._full_subspace(2)
+        full = HomotopyContinuation._full_subspace(2)
         for intrinsic in (true, false)
             @test_throws ArgumentError solve(
                 f,

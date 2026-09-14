@@ -1,7 +1,7 @@
 using Test
-using HomotopyContinuationNext
-import HomotopyContinuationNext as HCN
-using HomotopyContinuationNext: Serial, Threaded, System, TotalDegree, is_homogeneous,
+using HomotopyContinuation
+import HomotopyContinuation as HCN
+using HomotopyContinuation: Serial, Threaded, System, TotalDegree, is_homogeneous,
     ParameterHomotopy, StraightLineHomotopy, AffineChartHomotopy, AbstractHomotopy,
     HomotopyEvaluator, _clone_system_evaluator, _clone_homotopy, fix_parameters,
     FixedParameterSystem, path_results, result_iterator, on_affine_chart, evaluate!,

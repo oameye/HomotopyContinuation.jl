@@ -1,7 +1,7 @@
 using Test, Random
 using LinearAlgebra
-using HomotopyContinuationNext
-using HomotopyContinuationNext: UniquePoints, GroupActions, add!, multiplicities,
+using HomotopyContinuation
+using HomotopyContinuation: UniquePoints, GroupActions, add!, multiplicities,
     unique_points, InfNorm, EuclideanNorm, satisfies_triangle_inequality
 
 @testset "UniquePoints" begin

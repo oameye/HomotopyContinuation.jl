@@ -1,9 +1,9 @@
 using Test
-using HomotopyContinuationNext:
+using HomotopyContinuation:
     @var, System, Polyhedral, Serial, Threaded, fix_parameters, result_iterator,
     restrict, selection, is_success, solve, solutions, slice, rand_subspace,
     ParameterHomotopy
-using HomotopyContinuationNextCertification:
+using HomotopyContinuationCertification:
     IteratorCertification, IteratorCertificationResult, BSPPartition,
     Certification, certify, bsp, ntracked, nstart_solutions,
     ncandidates, ncertified,

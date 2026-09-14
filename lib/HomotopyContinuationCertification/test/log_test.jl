@@ -1,6 +1,6 @@
 using Test
-using HomotopyContinuationNext: @var, System
-using HomotopyContinuationNextCertification:
+using HomotopyContinuation: @var, System
+using HomotopyContinuationCertification:
     AcbInterpreter, acb_execute!, acb_op_log!,
     Certification, certify, ncertified, is_certified, certificates
 import Arblib

@@ -1,19 +1,19 @@
 using Test, Random
 using LinearAlgebra
-using HomotopyContinuationNext
-using HomotopyContinuationNext: find_start_pair
+using HomotopyContinuation
+using HomotopyContinuation: find_start_pair
 using DynamicPolynomials: @polyvar, subs
 
-using HomotopyContinuationNext: _trace_step, _with_solution, _conditioned_chart,
+using HomotopyContinuation: _trace_step, _with_solution, _conditioned_chart,
     _chart_alignment, _monodromy_starts, PathResult, solution,
     MonodromySolver, track_start!, add_tracked_result!, permutations
 
-using HomotopyContinuationNext: MonodromySolver, MonodromyWorkerState, track_loop!,
+using HomotopyContinuation: MonodromySolver, MonodromyWorkerState, track_loop!,
     track_start!, set_loop_segment!, reset_trace!, trace_colinearity, trace_complete,
     is_success
-using HomotopyContinuationNext: verify_solution_completeness, parameters
-using HomotopyContinuationNext: _accumulate_trace!, _trace_dropped!
-using HomotopyContinuationNext: DuplicateCheck
+using HomotopyContinuation: verify_solution_completeness, parameters
+using HomotopyContinuation: _accumulate_trace!, _trace_dropped!
+using HomotopyContinuation: DuplicateCheck
 
 @testset "find_start_pair" begin
     Random.seed!(0xf00d)
@@ -46,7 +46,7 @@ using HomotopyContinuationNext: DuplicateCheck
     @test abs(pair3[1][1]^2 - 4) < 1.0e-8
 end
 
-using HomotopyContinuationNext: MonodromyOptions, MonodromyLoop, MonodromyStatistics,
+using HomotopyContinuation: MonodromyOptions, MonodromyLoop, MonodromyStatistics,
     MonodromyCode, ReuseLoops, independent_normal, loops_no_change, loop_finished!,
     rand_subspace, translate, extrinsic
 
@@ -171,7 +171,7 @@ end
     @test maximum(residual) < 1.0e-8
 end
 
-using HomotopyContinuationNext: MonodromyResult, permutations,
+using HomotopyContinuation: MonodromyResult, permutations,
     is_heuristic_stop, nsolutions, solutions, trace
 
 @testset "monodromy: oracle expectations (serial)" begin

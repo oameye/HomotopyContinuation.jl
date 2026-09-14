@@ -1,6 +1,6 @@
 using Test
-using HomotopyContinuationNext
-using HomotopyContinuationNext: Serial, Threaded, Result, PathResult, TotalDegree,
+using HomotopyContinuation
+using HomotopyContinuation: Serial, Threaded, Result, PathResult, TotalDegree,
     solution, is_success, path_results, steps, nparameters, is_homogeneous,
     AmbientWorkerState, IntrinsicWorkerState, IntrinsicSubspaceHomotopy,
     ExtrinsicSubspaceHomotopy, AffineChartHomotopy, WorkerSolveCache, _to_ambient,
@@ -142,7 +142,7 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         L = rand_subspace(2; codim = 1)
         starts = [[1.0 + 0im, 2.0 + 0im]]
         # different dimension: the geodesic connects one Grassmannian to itself
-        full = HomotopyContinuationNext._full_subspace(2)
+        full = HomotopyContinuation._full_subspace(2)
         for intrinsic in (true, false)
             @test_throws ArgumentError solve(
                 F,

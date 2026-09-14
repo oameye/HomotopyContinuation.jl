@@ -1,7 +1,7 @@
 using Test, Random
 using LinearAlgebra
-using HomotopyContinuationNext
-using HomotopyContinuationNext: LinearSubspace, rand_subspace, rand_subspace!, dim,
+using HomotopyContinuation
+using HomotopyContinuation: LinearSubspace, rand_subspace, rand_subspace!, dim,
     codim, ambient_dim,
     intrinsic, extrinsic, coord_change, translate, geodesic, geodesic_distance,
     Intrinsic, Extrinsic, IntrinsicDescription, ExtrinsicDescription, is_linear

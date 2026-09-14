@@ -1,8 +1,8 @@
 using Test
-import HomotopyContinuationNext as HCN
-using HomotopyContinuationNext: @polyvar, System, Result, TotalDegree, solve, solutions,
+import HomotopyContinuation as HCN
+using HomotopyContinuation: @polyvar, System, Result, TotalDegree, solve, solutions,
     path_results
-using HomotopyContinuationNextCertification: Certification, certify, ncandidates, ncertified
+using HomotopyContinuationCertification: Certification, certify, ncandidates, ncertified
 
 @testset "Result certification does not trust numerical singular labels" begin
     @polyvar x

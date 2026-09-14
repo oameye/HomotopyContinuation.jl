@@ -1,6 +1,6 @@
 using Test
-using HomotopyContinuationNext
-using HomotopyContinuationNext: CompileMode, TotalDegree, Polyhedral, Result,
+using HomotopyContinuation
+using HomotopyContinuation: CompileMode, TotalDegree, Polyhedral, Result,
     Serial, Threaded, nparameters, nvariables, is_homogeneous, polynomials,
     variables, parameters, _sliced_solve_system, _sliced_solve_setup,
     _init_sliced_total_degree, _rebuild_sliced, _sliced_evaluator, SlicedSystem,

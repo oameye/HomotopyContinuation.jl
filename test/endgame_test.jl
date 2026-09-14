@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: System, StraightLineHomotopy, HomotopyEvaluator,
+import HomotopyContinuation as HC
+using HomotopyContinuation: System, StraightLineHomotopy, HomotopyEvaluator,
     Tracker, TrackerCode, TrackerOptions, track!, step!,
     TaylorVector, WeightedNorm, Jacobian, MatrixWorkspace,
     evaluate!, evaluate_and_jacobian!, weighted_norm, inf_norm, inf_distance,
@@ -10,7 +10,7 @@ using DynamicPolynomials: @polyvar
 @testset "Endgame Tracker" begin
 
     @testset "Valuation" begin
-        using HomotopyContinuationNext: Valuation, estimate_winding_number
+        using HomotopyContinuation: Valuation, estimate_winding_number
 
         @testset "Valuation: construction" begin
             val = Valuation(3)
@@ -99,7 +99,7 @@ using DynamicPolynomials: @polyvar
     end
 
     @testset "EndgameTracker construction" begin
-        using HomotopyContinuationNext: EndgameTracker, EndgameOptions, EndgameCode, EndgameState
+        using HomotopyContinuation: EndgameTracker, EndgameOptions, EndgameCode, EndgameState
 
         @polyvar x y
         G = System([x - 1, y - 1])
@@ -123,7 +123,7 @@ using DynamicPolynomials: @polyvar
     end
 
     @testset "EndgameTracker: init! and track! (regular paths)" begin
-        using HomotopyContinuationNext: EndgameTracker, EndgameOptions, EndgameCode
+        using HomotopyContinuation: EndgameTracker, EndgameOptions, EndgameCode
 
         @testset "init!: valid start" begin
             @polyvar x y
@@ -180,7 +180,7 @@ using DynamicPolynomials: @polyvar
     end
 
     @testset "check_finite!" begin
-        using HomotopyContinuationNext: EndgameTracker, EndgameOptions, EndgameCode, Valuation
+        using HomotopyContinuation: EndgameTracker, EndgameOptions, EndgameCode, Valuation
 
         @testset "returns false for regular path (m=1, all valuations near zero)" begin
             @polyvar x y
@@ -230,7 +230,7 @@ using DynamicPolynomials: @polyvar
     end
 
     @testset "check_at_infinity!" begin
-        using HomotopyContinuationNext: EndgameTracker, EndgameOptions, EndgameCode
+        using HomotopyContinuation: EndgameTracker, EndgameOptions, EndgameCode
 
         @testset "returns false for finite path" begin
             @polyvar x y
@@ -368,7 +368,7 @@ using DynamicPolynomials: @polyvar
     end
 
     @testset "PathResult from EndgameTracker" begin
-        using HomotopyContinuationNext: EndgameTracker, EndgameCode, PathResult,
+        using HomotopyContinuation: EndgameTracker, EndgameCode, PathResult,
             PathResultCode
 
         @testset "regular success" begin
@@ -428,7 +428,7 @@ using DynamicPolynomials: @polyvar
     end
 
     @testset "EndgameTracker: zero allocations in step!" begin
-        using HomotopyContinuationNext: EndgameTracker, EndgameCode
+        using HomotopyContinuation: EndgameTracker, EndgameCode
 
         # Measure allocations inside a function barrier to avoid
         # global-scope type inference artifacts in @allocated
@@ -457,7 +457,7 @@ using DynamicPolynomials: @polyvar
     # ══════════════════════════════════════════════════════════════════════
 
     @testset "Integration: (x-10)^d singular roots" begin
-        using HomotopyContinuationNext: solve, TotalDegree, nsingular, nresults, multiplicity
+        using HomotopyContinuation: solve, TotalDegree, nsingular, nresults, multiplicity
 
         @testset "d=2" begin
             @polyvar x
@@ -484,7 +484,7 @@ using DynamicPolynomials: @polyvar
     end
 
     @testset "Integration: at-infinity detection" begin
-        using HomotopyContinuationNext: solve, TotalDegree, nat_infinity
+        using HomotopyContinuation: solve, TotalDegree, nat_infinity
 
         # "Beyond Polyhedral Homotopy" example:
         # 2 finite solutions, 2 paths diverge to infinity
@@ -498,7 +498,7 @@ using DynamicPolynomials: @polyvar
     end
 
     @testset "Integration: winding number family" begin
-        using HomotopyContinuationNext: solve, TotalDegree
+        using HomotopyContinuation: solve, TotalDegree
 
         for d in 2:2:6
             @testset "d=$d" begin
@@ -513,7 +513,7 @@ using DynamicPolynomials: @polyvar
     end
 
     @testset "Integration: Hyperbolic 6,6" begin
-        using HomotopyContinuationNext: solve, TotalDegree, nsingular, nresults
+        using HomotopyContinuation: solve, TotalDegree, nsingular, nresults
 
         # Two roots of multiplicity 6 at the hyperplane y=0
         # Each root has winding number 3 (set y=1 to dehomogenize)
@@ -537,7 +537,7 @@ using DynamicPolynomials: @polyvar
     end
 
     @testset "Integration: singular system with multiplicity 3" begin
-        using HomotopyContinuationNext: solve, TotalDegree, nsingular, nnonsingular, nresults
+        using HomotopyContinuation: solve, TotalDegree, nsingular, nnonsingular, nresults
 
         # 1 singular + 1 nonsingular solution (dehomogenized: z=1)
         @polyvar x y
@@ -555,7 +555,7 @@ using DynamicPolynomials: @polyvar
     end
 
     @testset "Integration: cyclic 7 has 924 solutions" begin
-        using HomotopyContinuationNext: solve, TotalDegree, Polyhedral, nsolutions,
+        using HomotopyContinuation: solve, TotalDegree, Polyhedral, nsolutions,
             ntracked, mixed_volume
 
         include("test_systems.jl")

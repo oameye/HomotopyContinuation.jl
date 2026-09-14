@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: System, StraightLineHomotopy, HomotopyEvaluator,
+import HomotopyContinuation as HC
+using HomotopyContinuation: System, StraightLineHomotopy, HomotopyEvaluator,
     evaluate!, evaluate_and_jacobian!, taylor!,
     NewtonCorrector, NewtonCode, NewtonCorrectorResult, newton!, init_newton!,
     Predictor, PredictionMethod, predict!, update!, compute_local_error!,

@@ -1,5 +1,5 @@
 using Test, Random
-using HomotopyContinuationNext: System, CompileMode, HomotopyEvaluator,
+using HomotopyContinuation: System, CompileMode, HomotopyEvaluator,
     StraightLineHomotopy, evaluate!, evaluate_and_jacobian!, taylor!,
     TaylorVector, ComplexDF64, FSVec, FSMat, _total_degree_startevaluator
 using DynamicPolynomials: @polyvar, subs

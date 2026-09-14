@@ -1,6 +1,6 @@
 using Test
 using DynamicPolynomials: @polyvar
-using HomotopyContinuationNext: Homotopy, Expression, System, ParameterHomotopy,
+using HomotopyContinuation: Homotopy, Expression, System, ParameterHomotopy,
     @var, solve, solutions, nsolutions, fix_parameters, variables, parameters,
     nvariables, nparameters, expressions, evaluate, jacobian, Serial, Threaded,
     CompileMode

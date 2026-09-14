@@ -1,6 +1,6 @@
 using Test, Random
-using HomotopyContinuationNext
-using HomotopyContinuationNext: HomotopyEvaluator, ParameterHomotopy, Tracker,
+using HomotopyContinuation
+using HomotopyContinuation: HomotopyEvaluator, ParameterHomotopy, Tracker,
     TrackerCode, track!, EndgameCode
 using DynamicPolynomials: @polyvar
 

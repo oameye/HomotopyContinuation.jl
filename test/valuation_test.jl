@@ -1,6 +1,6 @@
 using Test
-import HomotopyContinuationNext as HC
-using HomotopyContinuationNext: System, StraightLineHomotopy, HomotopyEvaluator,
+import HomotopyContinuation as HC
+using HomotopyContinuation: System, StraightLineHomotopy, HomotopyEvaluator,
     Tracker, TrackerCode, TrackerOptions, track!, Valuation,
     CONSERVATIVE_TRACKER_OPTIONS, _total_degree_startevaluator,
     total_degree_start_solutions

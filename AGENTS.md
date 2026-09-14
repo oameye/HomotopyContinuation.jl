@@ -44,8 +44,6 @@ using HomotopyContinuation, HomotopyContinuationCertification
 certify(F, solutions)
 ```
 
-`test/compat/HomotopyContinuationNext*` contains temporary test-only forwarding packages used while the behavioral test corpus is migrated to the restored package identity. They are not production modules and must not be used as public API.
-
 ## Git policy
 
 **Never commit or push.** Neither Claude nor any subagent may run `git commit`, `git push`, or any git command that modifies history. All commits are made by the user. Claude's job is to write code, run tests, and report results — the user decides when to commit.

@@ -2,8 +2,8 @@
 # Only benchmarks that measure distinct codepaths or meaningful scaling.
 
 using BenchmarkTools
-using HomotopyContinuationNext
-using HomotopyContinuationNext: DoubleF64, MatrixWorkspace, updated!, inf_norm
+using HomotopyContinuation
+using HomotopyContinuation: DoubleF64, MatrixWorkspace, updated!, inf_norm
 using FixedSizeArrays: FixedSizeArray
 using LinearAlgebra: LinearAlgebra
 

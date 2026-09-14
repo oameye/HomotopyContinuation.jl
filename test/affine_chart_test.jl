@@ -1,5 +1,5 @@
 using Test, Random
-using HomotopyContinuationNext: System, AffineChartSystem, AffineChartHomotopy,
+using HomotopyContinuation: System, AffineChartSystem, AffineChartHomotopy,
     StraightLineHomotopy, HomotopyEvaluator, on_affine_chart, on_chart!,
     evaluate!, evaluate_and_jacobian!, taylor!,
     TaylorVector, ComplexDF64, FSVec, FSMat, nparameters, vectors
