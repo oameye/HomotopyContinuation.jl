@@ -26,8 +26,8 @@ SemialgebraicSets = "8e049039-38e8-557d-ae3a-bc521ccf6204"
 Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 
 [extensions]
-HomotopyContinuationDistributedExt = ["Distributed", "Serialization"]
-HomotopyContinuationSemialgebraicSetsExt = "SemialgebraicSets"
+DistributedExt = ["Distributed", "Serialization"]
+SemialgebraicSetsExt = "SemialgebraicSets"
 
 [compat]
 CommonSolve = "0.2.6"
