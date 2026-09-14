@@ -5,6 +5,7 @@ authors = ["Orjan Ameye"]
 
 [deps]
 CommonSolve = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
+DispatchDoctor = "8d63f2c5-f18a-4cf2-ba9d-b3f60fc568c8"
 DynamicPolynomials = "7c1d4256-1411-5781-91ec-d7bc3513ac07"
 EnumX = "4e289a0a-7415-4d19-859d-a7e5c4648b56"
 FixedSizeArrays = "3821ddf9-e5b5-40d5-8e25-6813ab96b5e2"
@@ -31,6 +32,7 @@ SemialgebraicSetsExt = "SemialgebraicSets"
 
 [compat]
 CommonSolve = "0.2.6"
+DispatchDoctor = "0.4.28"
 Distributed = "1"
 DynamicPolynomials = "0.6"
 EnumX = "1"
