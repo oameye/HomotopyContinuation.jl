@@ -8,9 +8,9 @@ using MixedSubdivisions: MixedSubdivisions
 using HomotopyContinuation: HomotopyContinuation
 const HCN = HomotopyContinuation
 
-include("HomotopyContinuationNextDistributedExt/serialization.jl")
-include("HomotopyContinuationNextDistributedExt/distributed_map.jl")
-include("HomotopyContinuationNextDistributedExt/solve.jl")
-include("HomotopyContinuationNextDistributedExt/monodromy.jl")
+include("DistributedExt/serialization.jl")
+include("DistributedExt/distributed_map.jl")
+include("DistributedExt/solve.jl")
+include("DistributedExt/monodromy.jl")
 
 end
