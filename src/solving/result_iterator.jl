@@ -332,7 +332,8 @@ result_iterator(F::System, alg::TotalDegree = TotalDegree())::ResultIterator =
 result_iterator(F::System, alg::Polyhedral)::ResultIterator =
     ResultIterator(CommonSolve.init(F, _quiet(alg), Serial()))
 
-result_iterator(
+# Wraps the erased `init` above.
+@unstable result_iterator(
     F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree(),
 )::ResultIterator = ResultIterator(CommonSolve.init(F, L, _quiet(alg), Serial()))
 

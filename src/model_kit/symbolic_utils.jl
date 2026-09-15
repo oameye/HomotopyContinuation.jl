@@ -132,51 +132,63 @@ function _multiply_expr_terms(a::_ExprTerms, b::_ExprTerms)::_ExprTerms
     return out
 end
 
-# `nothing` when `e` is not polynomial in the indexed variables.
+# `found` and not an empty dict: cancellation can legitimately leave no terms at
+# all, since `_clean_terms!` drops zero coefficients, so emptiness cannot double
+# as the failure marker.
+struct ExprTerms
+    found::Bool
+    terms::_ExprTerms
+end
+
+const _NOT_POLYNOMIAL_TERMS = ExprTerms(false, _ExprTerms())
+_polynomial_terms(t::_ExprTerms)::ExprTerms = ExprTerms(true, t)
+
+# `found` is `false` when `e` is not polynomial in the indexed variables.
 function _expr_terms(
         e::Expression, var_to_idx::Dict{Symbol, Int}, n::Int,
-    )::Union{Nothing, _ExprTerms}
+    )::ExprTerms
     storage = expr_storage(e)
     if storage isa ENumStorage
-        return _ExprTerms(zeros(Int, n) => e)
+        return _polynomial_terms(_ExprTerms(zeros(Int, n) => e))
     elseif storage isa EVarStorage
         idx = get(var_to_idx, storage.name, 0)
-        idx == 0 && return _ExprTerms(zeros(Int, n) => e)
+        idx == 0 && return _polynomial_terms(_ExprTerms(zeros(Int, n) => e))
         m = zeros(Int, n)
         m[idx] = 1
-        return _ExprTerms(m => one(Expression))
+        return _polynomial_terms(_ExprTerms(m => one(Expression)))
     elseif storage isa EAddStorage
         acc = _ExprTerms()
         for a in storage_args(storage)
             terms = _expr_terms(a, var_to_idx, n)
-            terms === nothing && return nothing
-            _add_expr_terms!(acc, terms)
+            terms.found || return _NOT_POLYNOMIAL_TERMS
+            _add_expr_terms!(acc, terms.terms)
         end
-        return acc
+        return _polynomial_terms(acc)
     elseif storage isa EMulStorage
         acc = _ExprTerms(zeros(Int, n) => one(Expression))
         for a in storage_args(storage)
             terms = _expr_terms(a, var_to_idx, n)
-            terms === nothing && return nothing
-            acc = _multiply_expr_terms(acc, terms)
+            terms.found || return _NOT_POLYNOMIAL_TERMS
+            acc = _multiply_expr_terms(acc, terms.terms)
         end
-        return acc
+        return _polynomial_terms(acc)
     elseif storage isa EPowStorage
-        _depends_on(e, var_to_idx) || return _ExprTerms(zeros(Int, n) => e)
-        storage.exp > 0 || return nothing
+        _depends_on(e, var_to_idx) ||
+            return _polynomial_terms(_ExprTerms(zeros(Int, n) => e))
+        storage.exp > 0 || return _NOT_POLYNOMIAL_TERMS
         base = _expr_terms(storage_base(storage), var_to_idx, n)
-        base === nothing && return nothing
+        base.found || return _NOT_POLYNOMIAL_TERMS
         acc = _ExprTerms(zeros(Int, n) => one(Expression))
         for _ in 1:(storage.exp)
-            acc = _multiply_expr_terms(acc, base)
+            acc = _multiply_expr_terms(acc, base.terms)
         end
-        return acc
+        return _polynomial_terms(acc)
     elseif storage isa ERPowStorage
-        _depends_on(storage_base(storage), var_to_idx) && return nothing
-        return _ExprTerms(zeros(Int, n) => e)
+        _depends_on(storage_base(storage), var_to_idx) && return _NOT_POLYNOMIAL_TERMS
+        return _polynomial_terms(_ExprTerms(zeros(Int, n) => e))
     else
-        _depends_on(storage_arg(storage), var_to_idx) && return nothing
-        return _ExprTerms(zeros(Int, n) => e)
+        _depends_on(storage_arg(storage), var_to_idx) && return _NOT_POLYNOMIAL_TERMS
+        return _polynomial_terms(_ExprTerms(zeros(Int, n) => e))
     end
 end
 
@@ -192,10 +204,10 @@ end
 
 function _terms_or_throw(f::Expression, vars::AbstractVector{Expression})::_ExprTerms
     terms = _expr_terms(f, _var_index(vars), length(vars))
-    terms === nothing && throw(
+    terms.found || throw(
         ArgumentError("`" * string(f) * "` is not polynomial in the given variables"),
     )
-    return _clean_terms!(terms)
+    return _clean_terms!(terms.terms)
 end
 
 """
@@ -248,13 +260,13 @@ function _numeric_coefficients(c::Vector{Expression})::Vector{ComplexF64}
     out = Vector{ComplexF64}(undef, length(c))
     for (i, e) in enumerate(c)
         v = expr_number(e)
-        v === nothing && throw(
+        v.found || throw(
             ArgumentError(
                 "the coefficient `" * string(e) *
                     "` is not a number; use `to_dict` for symbolic coefficients",
             ),
         )
-        out[i] = v
+        out[i] = v.val
     end
     return out
 end
@@ -455,10 +467,10 @@ function coeffs_as_dense_poly(
         c = get(terms, e, nothing)
         c === nothing && continue
         v = expr_number(c)
-        v === nothing && throw(
+        v.found || throw(
             ArgumentError("the coefficient `" * string(c) * "` is not a number"),
         )
-        out[i] = v
+        out[i] = v.val
         delete!(terms, e)
     end
     isempty(terms) || throw(
@@ -563,8 +575,8 @@ function horner(
         f::Expression, vars::AbstractVector{Expression} = variables(f),
     )::Expression
     raw = _expr_terms(f, _var_index(vars), length(vars))
-    raw === nothing && return f
-    terms = _clean_terms!(raw)
+    raw.found || return f
+    terms = _clean_terms!(raw.terms)
     isempty(terms) && return zero(Expression)
     exponents, c = _sorted_terms(terms)
     return _multivariate_horner(_exponent_matrix(Int, exponents, length(vars)), c, vars)
@@ -581,9 +593,8 @@ The value of `e`, which must carry no variables.
 """
 function to_number(e::Expression)::ComplexF64
     v = expr_number(e)
-    v === nothing &&
-        throw(ArgumentError("`" * string(e) * "` is not a number"))
-    return v
+    v.found || throw(ArgumentError("`" * string(e) * "` is not a number"))
+    return v.val
 end
 
 # `Expression <: Number`, so `convert(Number, e)` must stay the identity `Base.convert`

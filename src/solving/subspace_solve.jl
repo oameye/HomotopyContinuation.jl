@@ -120,7 +120,7 @@ end
 @noinline _solve_worker_serial_with_progress(cache::WorkerSolveCache{Serial}) =
     _track_all_serial(
     cache.worker, cache.start_solutions, cache.seed,
-    make_progress(length(cache.start_solutions), true), cache.early_stop,
+    make_progress(length(cache.start_solutions)), cache.early_stop,
 )
 
 function CommonSolve.solve!(cache::WorkerSolveCache{Threaded})::Result
@@ -134,7 +134,7 @@ end
 @noinline _solve_worker_threaded_without_progress(cache::WorkerSolveCache{Threaded}) =
     _track_all_threaded(cache, nothing)
 @noinline _solve_worker_threaded_with_progress(cache::WorkerSolveCache{Threaded}) =
-    _track_all_threaded(cache, make_progress(length(cache.start_solutions), true))
+    _track_all_threaded(cache, make_progress(length(cache.start_solutions)))
 
 CommonSolve.solve!(cache::WorkerSolveCache{DistributedExecutor})::Result =
     _distributed_solve!(cache)
@@ -196,7 +196,9 @@ function _init_intrinsic_subspace(
     )
 end
 
-function _init_extrinsic_subspace(
+# An empty chart means the affine route; a chart wraps the homotopy. The two
+# builders are different concrete types by design.
+@unstable function _init_extrinsic_subspace(
         G::System, starts::Vector{Vector{ComplexF64}},
         L_start::LinearSubspace, L_target::LinearSubspace,
         chart::Vector{ComplexF64}, gamma::ComplexF64,
@@ -255,7 +257,7 @@ function CommonSolve.init(
         exec::AbstractExecutor = Threaded(),
     )
     seed = _seed(alg)
-    intrinsic = alg.intrinsic === nothing ? _default_intrinsic(L_start) : alg.intrinsic
+    intrinsic = _use_intrinsic(alg.coords, L_start)
     G, points, chart, gamma = _subspace_solve_setup(
         F, starts, L_start, L_target, seed,
     )

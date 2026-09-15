@@ -323,19 +323,19 @@ function _subspace_sweep_problem()
     return F, starts, L₀, targets
 end
 
-function _subspace_sweep(intrinsic::Bool)
+function _subspace_sweep(coords::SubspaceCoords.T)
     F, starts, L₀, targets = _subspace_sweep_problem()
     return solve(
         F, starts, L₀, targets,
         Sweep(;
-            intrinsic = intrinsic, seed = UInt32(0x1234), show_progress = false,
+            coords = coords, seed = UInt32(0x1234), show_progress = false,
         ),
         Serial(),
     )
 end
 
-run(::Val{:subspace_sweep_intrinsic}) = _subspace_sweep(true)
-run(::Val{:subspace_sweep_extrinsic}) = _subspace_sweep(false)
+run(::Val{:subspace_sweep_intrinsic}) = _subspace_sweep(SubspaceCoords.INTRINSIC)
+run(::Val{:subspace_sweep_extrinsic}) = _subspace_sweep(SubspaceCoords.EXTRINSIC)
 
 function run(::Val{:result_iterator_lazy})
     F, L = _conic_and_line()

@@ -320,9 +320,10 @@ end
             ),
         )
 
-        @testset "subspace to subspace, intrinsic = $intr" for intr in (false, true)
+        @testset "subspace to subspace, coords = $intr" for intr in
+            (SubspaceCoords.EXTRINSIC, SubspaceCoords.INTRINSIC)
             @test length(starts_V) == 2
-            opts = (; intrinsic = intr, seed = UInt32(8), show_progress = false)
+            opts = (; coords = intr, seed = UInt32(8), show_progress = false)
             serial = solve(F_curve, starts_V, V, W, Continuation(; opts...), Serial())
             @test same_paths(
                 serial, solve(F_curve, starts_V, V, W, Continuation(; opts...), DistributedExecutor()),
@@ -413,7 +414,7 @@ end
                     r = solve(Q, Monodromy(; q_opts...), exec)
                     @test nsolutions(r) == 2
                     @test is_success(r)
-                    @test trace(r) !== nothing && trace(r) < 1.0e-10
+                    @test !isnan(trace(r)) && trace(r) < 1.0e-10
                 end
             end
 

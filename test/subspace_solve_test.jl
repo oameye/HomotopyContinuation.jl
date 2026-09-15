@@ -21,7 +21,11 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         S₁ = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
         @test length(S₁) == 2
         # `NamedTuple()` exercises the computed default.
-        for kw in (NamedTuple(), (; intrinsic = true), (; intrinsic = false))
+        for kw in (
+                NamedTuple(),
+                (; coords = SubspaceCoords.INTRINSIC),
+                (; coords = SubspaceCoords.EXTRINSIC),
+            )
             res = solve(F, S₁, L₁, L₂, Continuation(; kw..., show_progress = false))
             @test nsolutions(res) == 2
             for s in solutions(res)
@@ -48,7 +52,7 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         @test cache2.worker isa AmbientWorkerState{ExtrinsicSubspaceHomotopy}
 
         forced = CommonSolve.init(
-            G, starts, K, K, Continuation(; intrinsic = true), Serial(),
+            G, starts, K, K, Continuation(; coords = SubspaceCoords.INTRINSIC), Serial(),
         )
         @test forced.worker isa IntrinsicWorkerState
     end
@@ -60,7 +64,11 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         K₂ = rand_subspace(3; dim = 2)
         S = solutions(solve(F, K₁, TotalDegree(; show_progress = false)))
         @test length(S) == 4
-        for kw in (NamedTuple(), (; intrinsic = true), (; intrinsic = false))
+        for kw in (
+                NamedTuple(),
+                (; coords = SubspaceCoords.INTRINSIC),
+                (; coords = SubspaceCoords.EXTRINSIC),
+            )
             res = solve(F, S, K₁, K₂, Continuation(; kw..., show_progress = false))
             @test nsolutions(res) == 4
             @test maximum(s -> subspace_residual(K₂, s), solutions(res)) < 1.0e-10
@@ -74,7 +82,11 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         L₁ = rand_subspace(3; codim = 1, affine = false)
         L₂ = rand_subspace(3; codim = 1, affine = false)
         S = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
-        for kw in (NamedTuple(), (; intrinsic = true), (; intrinsic = false))
+        for kw in (
+                NamedTuple(),
+                (; coords = SubspaceCoords.INTRINSIC),
+                (; coords = SubspaceCoords.EXTRINSIC),
+            )
             res = solve(F, S, L₁, L₂, Continuation(; kw..., show_progress = false))
             @test nsolutions(res) == 2
             for s in solutions(res)
@@ -84,7 +96,7 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
             end
         end
         cache = CommonSolve.init(
-            F, S, L₁, L₂, Continuation(; intrinsic = false), Serial(),
+            F, S, L₁, L₂, Continuation(; coords = SubspaceCoords.EXTRINSIC), Serial(),
         )
         @test cache.worker isa
             AmbientWorkerState{AffineChartHomotopy{ExtrinsicSubspaceHomotopy}}
@@ -108,14 +120,14 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
         S = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
-        for intrinsic in (true, false)
+        for coords in (SubspaceCoords.INTRINSIC, SubspaceCoords.EXTRINSIC)
             serial = solve(
                 F,
                 S,
                 L₁,
                 L₂,
                 Continuation(;
-                    intrinsic = intrinsic, seed = UInt32(7), show_progress = false,
+                    coords = coords, seed = UInt32(7), show_progress = false,
                 ),
                 Serial(),
             )
@@ -125,7 +137,7 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
                 L₁,
                 L₂,
                 Continuation(;
-                    intrinsic = intrinsic, seed = UInt32(7), show_progress = false,
+                    coords = coords, seed = UInt32(7), show_progress = false,
                 ),
                 Threaded(),
             )
@@ -143,13 +155,13 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         starts = [[1.0 + 0im, 2.0 + 0im]]
         # different dimension: the geodesic connects one Grassmannian to itself
         full = HomotopyContinuation._full_subspace(2)
-        for intrinsic in (true, false)
+        for coords in (SubspaceCoords.INTRINSIC, SubspaceCoords.EXTRINSIC)
             @test_throws ArgumentError solve(
                 F,
                 starts,
                 L,
                 full,
-                Continuation(; intrinsic = intrinsic, show_progress = false),
+                Continuation(; coords = coords, show_progress = false),
             )
         end
         # different ambient dimension
@@ -184,7 +196,7 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         F = System([x^2 + y^2 + z^2 - 1]; variables = [x, y, z])
         L = rand_subspace(3; codim = 1)
         starts = [[1.0 + 0im, 0.0 + 0im, 0.0 + 0im]]
-        @test_throws ArgumentError solve(F, starts, L, L, Continuation(; intrinsic = false, show_progress = false))
+        @test_throws ArgumentError solve(F, starts, L, L, Continuation(; coords = SubspaceCoords.EXTRINSIC, show_progress = false))
     end
 
     @testset "intrinsic results are ambient, diagnostics are not converted" begin
@@ -193,7 +205,7 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
         S = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
-        res = solve(F, S, L₁, L₂, Continuation(; intrinsic = true, show_progress = false))
+        res = solve(F, S, L₁, L₂, Continuation(; coords = SubspaceCoords.INTRINSIC, show_progress = false))
         for pr in path_results(res)
             @test length(solution(pr)) == 2            # ambient
             @test length(start_solution(pr)) == 2      # the caller's ambient point

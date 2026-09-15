@@ -177,7 +177,7 @@ function _orbit_merge!(
         tol = max(atol, rtol * norms[j])
         apply_actions(acts, path_results[success_idx[j]].solution) do w
             l = search_in_radius(tree, w, tol)
-            if l !== nothing && l != j
+            if !iszero(l) && l != j
                 do_union!(j, l)
             end
             return false

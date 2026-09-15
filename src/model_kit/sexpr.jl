@@ -155,7 +155,10 @@ const _EMPTY_SEXPR_VEC = SExprT[]
 @inline SExpr.SFuncSym(kind::SFuncKind.T, args::AbstractVector{<:SExprT}) =
     invoke(SExpr.SFuncSym, Tuple{Any, Any}, kind, _owned_args(args))
 
-@inline sexpr_storage(expr::SExprT) = variant_storage(expr)
+# A `@data` variant accessor is a tagged union by construction: its return type is
+# the union of every variant's storage. Callers `isa`-split it, so the union never
+# reaches a dynamic dispatch. Concretizing it would mean abandoning the ADT.
+@unstable @inline sexpr_storage(expr::SExprT) = variant_storage(expr)
 
 # A self-referential `@data` field is widened to `Any`; without the assertion every
 # recursive walk dispatches dynamically and boxes its result.

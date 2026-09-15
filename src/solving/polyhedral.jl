@@ -510,7 +510,9 @@ homogeneous system is put on an affine chart, a composition is substituted out.
 Reading the support off this is what keeps `paths_to_track` from drifting away
 from the paths a solve actually tracks.
 """
-function _polyhedral_system(F::System, alg::Polyhedral)::System
+# Returns the widened `System` of the erased builder: chart/composition rewrites
+# pick a different concrete parameterization per input.
+@unstable function _polyhedral_system(F::System, alg::Polyhedral)::System
     _check_parameter_free(F, "`Polyhedral`")
     _check_polynomial(F, "`Polyhedral`")
     if is_homogeneous(F)
@@ -543,7 +545,7 @@ _padded_support(A::Matrix{Int32}, only_torus::Bool)::Matrix{Int32} =
     only_torus ? A .- minimum(A; dims = 2) :
     has_zero_column(A) ? A : hcat(A, zeros(Int32, size(A, 1)))
 
-function CommonSolve.init(
+@unstable function CommonSolve.init(
         F::System, alg::Polyhedral,
         exec::AbstractExecutor = Threaded(),
     )::PolyhedralSolveCache
@@ -767,7 +769,7 @@ end
 @noinline _solve_polyhedral_serial_without_progress(cache::PolyhedralSolveCache{Serial}) =
     _solve_polyhedral_serial(cache, nothing)
 @noinline _solve_polyhedral_serial_with_progress(cache::PolyhedralSolveCache{Serial}) =
-    _solve_polyhedral_serial(cache, make_progress(length(cache.start_solutions), true))
+    _solve_polyhedral_serial(cache, make_progress(length(cache.start_solutions)))
 
 # One two-phase path: toric phase from the mixed cell, then the coefficient homotopy.
 function _track_polyhedral_path!(
@@ -852,7 +854,7 @@ end
 @noinline _solve_polyhedral_threaded_without_progress(cache::PolyhedralSolveCache{Threaded}) =
     _solve_polyhedral_threaded(cache, nothing)
 @noinline _solve_polyhedral_threaded_with_progress(cache::PolyhedralSolveCache{Threaded}) =
-    _solve_polyhedral_threaded(cache, make_progress(length(cache.start_solutions), true))
+    _solve_polyhedral_threaded(cache, make_progress(length(cache.start_solutions)))
 
 function _solve_polyhedral_threaded(cache::PolyhedralSolveCache{Threaded}, progress)::Result
     nt = cache.executor.ntasks

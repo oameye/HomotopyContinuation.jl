@@ -54,6 +54,8 @@ const QUALIFIED_ACCESS_IGNORE = (
         HomotopyContinuation.AddSolutionCode,
         HomotopyContinuation.Irreducibility,
         HomotopyContinuation.EquationSorting,
+        HomotopyContinuation.Completeness,
+        HomotopyContinuation.SubspaceCoords,
     )
 
     @test check_no_implicit_imports(HomotopyContinuation; allow_unanalyzable) == nothing

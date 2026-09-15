@@ -33,8 +33,9 @@ function _showvalues(stats::ProgressStats, ntracked::Int)
     )
 end
 
-function make_progress(n::Int, show::Bool; delay::Float64 = 0.3, desc::String = "Tracking $n paths... ")
-    show || return nothing
+function make_progress(
+        n::Int; delay::Float64 = 0.3, desc::String = "Tracking $n paths... ",
+    )::ProgressMeter.Progress
     # `barlen` is left unset so ProgressMeter auto-sizes the bar to the terminal
     # width (avoids depending on the internal `tty_width`).
     progress = ProgressMeter.Progress(n; dt = 0.2, desc = desc, output = stdout)
@@ -42,8 +43,7 @@ function make_progress(n::Int, show::Bool; delay::Float64 = 0.3, desc::String = 
     return progress
 end
 
-function make_many_progress(n::Int, show::Bool; delay::Float64 = 0.3)
-    show || return nothing
+function make_many_progress(n::Int; delay::Float64 = 0.3)::ProgressMeter.Progress
     progress = ProgressMeter.Progress(
         n; dt = 0.2, desc = "Solving for $n targets... ", output = stdout,
     )
@@ -68,5 +68,11 @@ function update_progress!(
     )::Nothing
     record!(stats, r)
     ProgressMeter.update!(progress, ntracked; showvalues = _showvalues(stats, ntracked))
+    return nothing
+end
+
+next_progress!(::Nothing)::Nothing = nothing
+function next_progress!(progress::ProgressMeter.Progress)::Nothing
+    ProgressMeter.next!(progress)
     return nothing
 end

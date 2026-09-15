@@ -6,7 +6,7 @@ using DynamicPolynomials: @polyvar, subs
 
 using HomotopyContinuation: _trace_step, _with_solution, _conditioned_chart,
     _chart_alignment, _monodromy_starts, PathResult, solution,
-    MonodromySolver, track_start!, add_tracked_result!, permutations
+    MonodromySolver, track_start!, add_tracked_result!, permutations, NoCandidate
 
 using HomotopyContinuation: MonodromySolver, MonodromyWorkerState, track_loop!,
     track_start!, set_loop_segment!, reset_trace!, trace_colinearity, trace_complete,
@@ -21,8 +21,8 @@ using HomotopyContinuation: DuplicateCheck
     @polyvar y[1:2] p[1:2]
     F = System([y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]]; variables = y, parameters = p)
     pair = find_start_pair(F)
-    @test pair !== nothing
-    x0, p0 = pair
+    @test pair.found
+    x0, p0 = pair.x, pair.p
     residual = [abs(ComplexF64(f(y => x0, p => p0))) for f in F.polys]
     @test maximum(residual) < 1.0e-10
 
@@ -33,8 +33,8 @@ using HomotopyContinuation: DuplicateCheck
         variables = y, parameters = q,
     )
     pair2 = find_start_pair(G)
-    @test pair2 !== nothing
-    x2, p2 = pair2
+    @test pair2.found
+    x2, p2 = pair2.x, pair2.p
     residual2 = [abs(ComplexF64(f(y => x2, q => p2))) for f in G.polys]
     @test maximum(residual2) < 1.0e-8
 
@@ -42,8 +42,8 @@ using HomotopyContinuation: DuplicateCheck
     @polyvar u
     P = System([u^2 - 4]; variables = [u])
     pair3 = find_start_pair(P)
-    @test pair3 !== nothing && pair3[2] === nothing
-    @test abs(pair3[1][1]^2 - 4) < 1.0e-8
+    @test pair3.found && isempty(pair3.p)
+    @test abs(pair3.x[1]^2 - 4) < 1.0e-8
 end
 
 using HomotopyContinuation: MonodromyOptions, MonodromyLoop, MonodromyStatistics,
@@ -149,7 +149,8 @@ end
     Random.seed!(31)
     @polyvar y[1:2] p[1:2]
     F = System([y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]]; variables = y, parameters = p)
-    x0, p0 = find_start_pair(F)
+    start_pair = find_start_pair(F)
+    x0, p0 = start_pair.x, start_pair.p
     MS = MonodromySolver(F, ComplexF64.(p0))
     ws = MS.workers[1]
     @test ws.homotopy.system === F.evaluator
@@ -231,7 +232,7 @@ end
     r = solve(Q, Monodromy(; dim = 2, seed = UInt32(99), show_progress = false), Serial())
     @test nsolutions(r) == 2
     @test is_success(r)                # via trace test
-    @test trace(r) !== nothing && trace(r) < 1.0e-10
+    @test !isnan(trace(r)) && trace(r) < 1.0e-10
 
     # overstated component dimension raises an actionable error, not an assertion
     @test_throws ArgumentError solve(Q, Monodromy(; dim = 1, seed = UInt32(99), show_progress = false), Serial())
@@ -299,7 +300,7 @@ end
         Serial(),
     )
     ok = verify_solution_completeness(F, r, Monodromy(; show_progress = false))
-    @test ok === true
+    @test ok == Completeness.COMPLETE
 
     # a strict subset is detected as incomplete
     incomplete = verify_solution_completeness(
@@ -308,7 +309,7 @@ end
         Vector(parameters(r)),
         Monodromy(; show_progress = false),
     )
-    @test incomplete === false || incomplete === nothing
+    @test incomplete != Completeness.COMPLETE
 end
 
 @testset "trace discrimination (prototype 11 magnitudes)" begin
@@ -384,14 +385,14 @@ end
     # x = 0 is not a solution of x² - 1 and has a singular Newton derivative.
     # It must not become a stored monodromy start merely because it looks new.
     invalid = _with_solution(base, ComplexF64[0])
-    id, added, _ = add_tracked_result!(MS, invalid, 1, nothing, 1)
+    id, added, _ = add_tracked_result!(MS, invalid, 1, NoCandidate(), 1)
     @test id == 0
     @test !added
     @test length(MS.unique_points) == 0
 
     # A genuinely new approximate endpoint is revalidated/refined at the base.
     approximate = _with_solution(base, ComplexF64[1.01])
-    id, added, accepted = add_tracked_result!(MS, approximate, 1, nothing, 1)
+    id, added, accepted = add_tracked_result!(MS, approximate, 1, NoCandidate(), 1)
     @test id == 1
     @test added
     @test abs(solution(accepted)[1]^2 - 1) < 1.0e-10

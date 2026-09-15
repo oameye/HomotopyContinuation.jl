@@ -50,20 +50,21 @@ end
     search_in_radius(unique_points, v, tol)
 
 Search whether `unique_points` contains a point with distance at most `tol`
-from `v` or from any of its orbit images. Returns `nothing` if no point exists,
-otherwise the identifier of the found point.
+from `v` or from any of its orbit images. Returns the identifier of the found
+point, or `0` if no point exists. Identifiers are 1-based, so `0` is
+unambiguous.
 """
 function search_in_radius(
         UP::UniquePoints{T, M, GA}, v::AbstractVector, tol::Real,
-    ) where {T, M, GA}
+    )::Int where {T, M, GA}
     id = search_in_radius(UP.tree, v, tol)
-    if id === nothing && UP.group_actions !== nothing
+    if iszero(id) && UP.group_actions !== nothing
         # Ref against closure boxing (id would be reassigned inside the closure).
-        id_ref = Ref{Union{Nothing, Int}}(nothing)
+        id_ref = Ref(0)
         let actions = UP.group_actions::GA
             apply_actions(actions, v) do w
                 id′ = search_in_radius(UP.tree, w, tol)
-                if id′ !== nothing
+                if !iszero(id′)
                     id_ref[] = id′
                     return true
                 end
@@ -87,11 +88,11 @@ images. If so, the identifier of that point and `false` is returned. Otherwise
 function add!(UP::UniquePoints{T, M, GA}, v::AbstractVector, id::Int, tol::Real) where {T, M, GA}
     # search_in_radius(UP, ...) already checks the tree and every orbit image.
     found_id = search_in_radius(UP, v, tol)
-    if found_id === nothing
+    if iszero(found_id)
         insert!(UP.tree, v, id)
         return (id, true)
     else
-        return (found_id::Int, false)
+        return (found_id, false)
     end
 end
 

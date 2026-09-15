@@ -4,7 +4,7 @@ using LinearAlgebra: LinearAlgebra
 using Random: Random
 using Printf: Printf
 using ProgressMeter: ProgressMeter
-using DispatchDoctor: @stable
+using DispatchDoctor: @stable, @unstable
 
 using EnumX: @enumx
 using Moshi.Data: @data, variant_storage, variant_storage_type
@@ -61,11 +61,12 @@ export GroupActions, SymmetricGroup
 export UniquePoints, search_in_radius, add!, multiplicities, unique_points
 export satisfies_triangle_inequality, InfNorm, EuclideanNorm
 export LinearSubspace, ExtrinsicDescription, IntrinsicDescription, Intrinsic, Extrinsic
-export intrinsic, extrinsic, is_linear, dim, codim, ambient_dim
+export intrinsic, extrinsic, is_linear, dim, codim, ambient_dim, SubspaceCoords
 export rand_subspace, rand_subspace!, translate, geodesic, geodesic_distance, coord_change
 export IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy, set_subspaces!
 export AffineChartHomotopy, on_affine_chart, linear_subspace_homotopy
-export find_start_pair, verify_solution_completeness
+export find_start_pair, StartPair, is_parameterized
+export verify_solution_completeness, Completeness
 export MonodromyOptions, MonodromyResult, is_heuristic_stop, permutations, trace
 export ReuseLoops, DuplicateCheck, ncertified_distinct, ndiscarded_uncertified
 export independent_normal, weighted_normal
@@ -185,7 +186,7 @@ end
     include("solving/regeneration.jl")
     include("solving/nid.jl")
     # include("precompile.jl")
-    include("precompile_signatures.jl")
+    # include("precompile_signatures.jl")
 end
 
 end # module

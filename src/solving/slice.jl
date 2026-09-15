@@ -35,18 +35,18 @@ end
 # equation `c·x − 1` is appended so the system is square.
 function _sliced_system(
         polys::AbstractVector, vars::AbstractVector, L::LinearSubspace;
-        chart::Union{Nothing, AbstractVector} = nothing,
+        chart::AbstractVector = [],
         params::AbstractVector = empty(vars),
         compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
     lin = _linear_equations(L, vars)
     eqs = vcat(collect(polys), lin)
-    chart !== nothing && push!(eqs, _chart_equation(chart, vars))
+    isempty(chart) || push!(eqs, _chart_equation(chart, vars))
     return System(eqs; parameters = params, variables = vars, compile = compile)
 end
 
 """
-    slice(F::System, L::LinearSubspace; chart = nothing) -> System
+    slice(F::System, L::LinearSubspace; chart = []) -> System
 
 Return the system whose zero set is `V(F) ∩ L`, namely `F` with the linear
 equations `A x − b` of `L` appended. The variables, parameters and compile mode
@@ -66,7 +66,7 @@ G = slice(F, L)   # square system with the two linear equations appended
 """
 function slice(
         F::System{P, V, M}, L::LinearSubspace;
-        chart::Union{Nothing, AbstractVector} = nothing,
+        chart::AbstractVector = [],
     )::System where {P, V, M}
     ambient_dim(L) == nvariables(F) || throw(
         ArgumentError(
@@ -116,7 +116,7 @@ end
 # and tape construction entirely. An under- or overdetermined slice falls back to
 # rebuilding the polynomial system, so the shape check and the square-up
 # machinery (excess-solution checker) apply unchanged.
-function _init_sliced_total_degree(
+@unstable function _init_sliced_total_degree(
         G::System, L::LinearSubspace, chart::Vector{ComplexF64},
         alg::TotalDegree, exec::AbstractExecutor,
     )
@@ -141,7 +141,8 @@ function _init_sliced_total_degree(
     )
 end
 
-function CommonSolve.init(
+# Sliced route setup; erased like the other `init` methods.
+@unstable function CommonSolve.init(
         F::System, L::LinearSubspace, alg::TotalDegree,
         exec::AbstractExecutor = Threaded(),
     )

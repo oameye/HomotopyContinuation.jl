@@ -180,8 +180,9 @@ using Random: seed!
     # "auto" passes no keyword, so it exercises the computed default.
     @testset "target subspaces, $label" for (label, kw) in
         (
-            ("auto", NamedTuple()), ("intrinsic", (; intrinsic = true)),
-            ("extrinsic", (; intrinsic = false)),
+            ("auto", NamedTuple()),
+            ("intrinsic", (; coords = SubspaceCoords.INTRINSIC)),
+            ("extrinsic", (; coords = SubspaceCoords.EXTRINSIC)),
         )
         for exec in (Serial(), Threaded())
             res = solve(f, S, L₀, subspaces, Sweep(; show_progress = false, kw...), exec)
@@ -201,10 +202,11 @@ using Random: seed!
 
     @testset "target subspaces, threaded matches serial for $n target(s)" for n in
         (1, 2, 30)
-        for intrinsic in (true, false), nt in TASK_COUNTS
+        for coords in (SubspaceCoords.INTRINSIC, SubspaceCoords.EXTRINSIC),
+                nt in TASK_COUNTS
             tg = subspaces[1:n]
             opts = (;
-                intrinsic = intrinsic, seed = UInt32(0x5EED), show_progress = false,
+                coords = coords, seed = UInt32(0x5EED), show_progress = false,
             )
             rs = solve(f, S, L₀, tg, Sweep(; opts...), Serial())
             rt = solve(f, S, L₀, tg, Sweep(; opts...), Threaded(nt))
@@ -224,10 +226,10 @@ using Random: seed!
     # reversing the order reproduces every endpoint. The seed is fixed because it
     # picks γ, and a different γ is a different homotopy.
     @testset "target subspaces, order independent" begin
-        for intrinsic in (true, false)
+        for coords in (SubspaceCoords.INTRINSIC, SubspaceCoords.EXTRINSIC)
             tg = subspaces[1:6]
             opts = (;
-                intrinsic = intrinsic, seed = UInt32(0x5EED), show_progress = false,
+                coords = coords, seed = UInt32(0x5EED), show_progress = false,
             )
             fwd = solve(f, S, L₀, tg, Sweep(; opts...), Serial())
             rev = reverse(solve(f, S, L₀, reverse(tg), Sweep(; opts...), Serial()))
@@ -259,13 +261,13 @@ using Random: seed!
 
     @testset "target subspaces of the wrong dimension are rejected" begin
         full = HomotopyContinuation._full_subspace(2)
-        for intrinsic in (true, false)
+        for coords in (SubspaceCoords.INTRINSIC, SubspaceCoords.EXTRINSIC)
             @test_throws ArgumentError solve(
                 f,
                 S,
                 L₀,
                 [subspaces[1], full],
-                Sweep(; intrinsic = intrinsic, show_progress = false),
+                Sweep(; coords = coords, show_progress = false),
                 Serial(),
             )
         end
@@ -289,14 +291,14 @@ using Random: seed!
 
     @testset "subspace sweep agrees with single moves" begin
         pair = subspaces[1:2]
-        sweep = solve(f, S, L₀, pair, Sweep(; intrinsic = false, show_progress = false), Serial())
+        sweep = solve(f, S, L₀, pair, Sweep(; coords = SubspaceCoords.EXTRINSIC, show_progress = false), Serial())
         for (k, L) in enumerate(pair)
             single = solve(
                 f,
                 S,
                 L₀,
                 L,
-                Continuation(; intrinsic = false, show_progress = false),
+                Continuation(; coords = SubspaceCoords.EXTRINSIC, show_progress = false),
                 Serial(),
             )
             a1 = sort(solutions(first(sweep[k])); by = real ∘ first)

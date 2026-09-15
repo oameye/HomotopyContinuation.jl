@@ -119,11 +119,18 @@ _expr_lt(a::Expression, b::Expression)::Bool = hash(a) < hash(b)
 
 ## ── Predicates and accessors ────────────────────────────────────────────────
 
-"""Numeric value of `e`, or `nothing` when `e` is not a literal."""
-@inline function expr_number(e::Expression)::Union{Nothing, ComplexF64}
+# `found` and not a sentinel value: any `ComplexF64`, `NaN` included, is a legal
+# literal, so there is nothing left over to mean "not a literal".
+struct ExprNumber
+    found::Bool
+    val::ComplexF64
+end
+
+"""Numeric value of `e`; `found` is `false` when `e` is not a literal."""
+@inline function expr_number(e::Expression)::ExprNumber
     storage = expr_storage(e)
-    storage isa ENumStorage && return storage.val
-    return nothing
+    storage isa ENumStorage && return ExprNumber(true, storage.val)
+    return ExprNumber(false, zero(ComplexF64))
 end
 
 is_number(e::Expression)::Bool = expr_storage(e) isa ENumStorage
@@ -325,10 +332,10 @@ function _emul(args::Vector{Expression})::Expression
         iszero(k) && continue
         @inbounds p = _erpow(bases[i], k)
         v = expr_number(p)
-        if v === nothing
+        if !v.found
             push!(kept, p)
         else
-            coeff *= v
+            coeff *= v.val
         end
     end
     iszero(coeff) && return zero(Expression)
@@ -360,7 +367,7 @@ function _erpow(base::Expression, r::ComplexF64)::Expression
     # and power-collection paths all read.
     iszero(imag(r)) && isinteger(real(r)) && return _epow(base, Int(real(r)))
     v = expr_number(base)
-    v === nothing || return SymExpr.ENum(v^r)
+    v.found && return SymExpr.ENum(v.val^r)
     return SymExpr.ERPow(base, r)
 end
 
@@ -380,7 +387,7 @@ end
 
 function _efn(kind::SUnaryKind.T, arg::Expression)::Expression
     v = expr_number(arg)
-    v === nothing || return SymExpr.ENum(apply_unary(kind, v))
+    v.found && return SymExpr.ENum(apply_unary(kind, v.val))
     return SymExpr.EFn(kind, arg)
 end
 
@@ -417,8 +424,8 @@ Base.:^(a::Expression, r::Rational)::Expression = _erpow(a, ComplexF64(r))
 # The exponent has to be numeric: the tape has no instruction for a symbolic one.
 function Base.:^(a::Expression, b::Expression)::Expression
     v = expr_number(b)
-    v === nothing && throw(ArgumentError("only numeric exponents are supported, got $(b)"))
-    return _erpow(a, v)
+    v.found || throw(ArgumentError("only numeric exponents are supported, got $(b)"))
+    return _erpow(a, v.val)
 end
 
 ## ── Linear algebra ──────────────────────────────────────────────────────────
@@ -838,8 +845,8 @@ function _den_powers(d::Expression)::Tuple{ComplexF64, Dict{Expression, Int}}
     factors = storage isa EMulStorage ? storage_args(storage) : Expression[d]
     for f in factors
         v = expr_number(f)
-        if v !== nothing
-            coeff *= v
+        if v.found
+            coeff *= v.val
             continue
         end
         (base, k) = _split_power(f)
@@ -915,24 +922,26 @@ end
 ## ── Degrees and polynomiality ───────────────────────────────────────────────
 
 # Structural degree bound under `weights`, which gives the degree of each
-# variable and leaves every unlisted symbol at 0. `nothing` marks an expression
-# that is not polynomial in those variables, or that uses one of unknown
-# (negative) weight.
+# variable and leaves every unlisted symbol at 0. `_NOT_POLYNOMIAL` marks an
+# expression that is not polynomial in those variables, or that uses one of
+# unknown (negative) weight; real bounds are non-negative.
+const _NOT_POLYNOMIAL = (-1, -1)
+
 function _degree_bounds(
         e::Expression, weights::Dict{Symbol, Int},
-    )::Union{Nothing, Tuple{Int, Int}}
+    )::Tuple{Int, Int}
     storage = expr_storage(e)
     if storage isa ENumStorage
         return (0, 0)
     elseif storage isa EVarStorage
         w = get(weights, storage.name, 0)
-        return w < 0 ? nothing : (w, w)
+        return w < 0 ? _NOT_POLYNOMIAL : (w, w)
     elseif storage isa EAddStorage
         lo = typemax(Int)
         hi = 0
         for a in storage_args(storage)
             bounds = _degree_bounds(a, weights)
-            bounds === nothing && return nothing
+            bounds == _NOT_POLYNOMIAL && return _NOT_POLYNOMIAL
             lo = min(lo, bounds[1])
             hi = max(hi, bounds[2])
         end
@@ -942,25 +951,25 @@ function _degree_bounds(
         hi = 0
         for a in storage_args(storage)
             bounds = _degree_bounds(a, weights)
-            bounds === nothing && return nothing
+            bounds == _NOT_POLYNOMIAL && return _NOT_POLYNOMIAL
             lo += bounds[1]
             hi += bounds[2]
         end
         return (lo, hi)
     elseif storage isa EPowStorage
         bounds = _degree_bounds(storage_base(storage), weights)
-        bounds === nothing && return nothing
+        bounds == _NOT_POLYNOMIAL && return _NOT_POLYNOMIAL
         bounds == (0, 0) && return (0, 0)
-        storage.exp < 0 && return nothing
+        storage.exp < 0 && return _NOT_POLYNOMIAL
         return (storage.exp * bounds[1], storage.exp * bounds[2])
     elseif storage isa ERPowStorage
         bounds = _degree_bounds(storage_base(storage), weights)
-        bounds === nothing && return nothing
-        return bounds == (0, 0) ? (0, 0) : nothing
+        bounds == _NOT_POLYNOMIAL && return _NOT_POLYNOMIAL
+        return bounds == (0, 0) ? (0, 0) : _NOT_POLYNOMIAL
     else # EFnStorage
         bounds = _degree_bounds(storage_arg(storage), weights)
-        bounds === nothing && return nothing
-        return bounds == (0, 0) ? (0, 0) : nothing
+        bounds == _NOT_POLYNOMIAL && return _NOT_POLYNOMIAL
+        return bounds == (0, 0) ? (0, 0) : _NOT_POLYNOMIAL
     end
 end
 
@@ -970,7 +979,7 @@ end
 Whether `f` is a polynomial in `vars`.
 """
 is_polynomial(f::Expression, vars::AbstractVector{Expression})::Bool =
-    _degree_bounds(f, _unit_weights(vars)) !== nothing
+    _degree_bounds(f, _unit_weights(vars)) != _NOT_POLYNOMIAL
 
 _unit_weights(vars::AbstractVector{Expression})::Dict{Symbol, Int} =
     Dict{Symbol, Int}(Symbol(v) => 1 for v in vars)
@@ -983,7 +992,7 @@ polynomial in `vars`.
 """
 function degree(f::Expression, vars::AbstractVector{Expression})::Int
     bounds = _degree_bounds(f, _unit_weights(vars))
-    bounds === nothing && return -1
+    bounds == _NOT_POLYNOMIAL && return -1
     return bounds[2]
 end
 
@@ -999,7 +1008,7 @@ function _weighted_degrees(
     homogeneous = true
     for i in eachindex(exprs)
         bounds = _degree_bounds(exprs[i], weights)
-        if bounds === nothing
+        if bounds == _NOT_POLYNOMIAL
             degs[i] = -1
             homogeneous = false
         else

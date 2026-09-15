@@ -64,7 +64,9 @@ end
 # Identity when the eltype already matches: convert may return its argument
 # (standard for convert(::Type{T}, ::T)), avoiding a needless orthonormal rebuild.
 Base.convert(::Type{ExtrinsicDescription{T}}, A::ExtrinsicDescription{T}) where {T} = A
-function Base.convert(::Type{ExtrinsicDescription{T}}, A::ExtrinsicDescription) where {T}
+function Base.convert(
+        ::Type{ExtrinsicDescription{T}}, A::ExtrinsicDescription,
+    )::ExtrinsicDescription{T} where {T}
     return ExtrinsicDescription(
         convert(Matrix{T}, A.A),
         convert(Vector{T}, A.b);
@@ -92,8 +94,8 @@ function Base.copy!(A::ExtrinsicDescription, B::ExtrinsicDescription)
     copy!(A.b, B.b)
     return A
 end
-Base.copy(A::ExtrinsicDescription) =
-    ExtrinsicDescription(copy(A.A), copy(A.b); orthonormal = true)
+Base.copy(A::ExtrinsicDescription{T}) where {T} =
+    ExtrinsicDescription(copy(A.A), copy(A.b); orthonormal = true)::ExtrinsicDescription{T}
 
 function Base.show(io::IO, A::ExtrinsicDescription{T}) where {T}
     println(io, "ExtrinsicDescription{$T}:")
@@ -132,7 +134,9 @@ end
 # Identity when the eltype already matches: skips the Stiefel-coordinate SVD
 # rebuild that the general method performs.
 Base.convert(::Type{IntrinsicDescription{T}}, A::IntrinsicDescription{T}) where {T} = A
-function Base.convert(::Type{IntrinsicDescription{T}}, A::IntrinsicDescription) where {T}
+function Base.convert(
+        ::Type{IntrinsicDescription{T}}, A::IntrinsicDescription,
+    )::IntrinsicDescription{T} where {T}
     return IntrinsicDescription(convert(Matrix{T}, A.A), convert(Vector{T}, A.b))
 end
 
@@ -199,12 +203,12 @@ function Base.copy!(A::IntrinsicDescription, B::IntrinsicDescription)
     copy!(A.Y, B.Y)
     return A
 end
-Base.copy(A::IntrinsicDescription) =
-    IntrinsicDescription(copy(A.A), copy(A.b), copy(A.X), copy(A.Y))
+Base.copy(A::IntrinsicDescription{T}) where {T} =
+    IntrinsicDescription(copy(A.A), copy(A.b), copy(A.X), copy(A.Y))::IntrinsicDescription{T}
 
 Base.broadcastable(A::IntrinsicDescription) = Ref(A)
 
-function IntrinsicDescription(E::ExtrinsicDescription)
+function IntrinsicDescription(E::ExtrinsicDescription{T})::IntrinsicDescription{T} where {T}
     svd = LA.svd(E.A; full = true)
     m, n = size(E.A)
     A = Matrix((@view svd.Vt[(m + 1):end, :])')
@@ -216,7 +220,7 @@ function IntrinsicDescription(E::ExtrinsicDescription)
     return IntrinsicDescription(A, b)
 end
 
-function ExtrinsicDescription(I::IntrinsicDescription)
+function ExtrinsicDescription(I::IntrinsicDescription{T})::ExtrinsicDescription{T} where {T}
     svd = LA.svd(I.A; full = true)
     m, n = size(I.A)
     A = Matrix((@view svd.U[:, (n + 1):end])')
@@ -245,8 +249,10 @@ struct LinearSubspace{T} <: AbstractSubspace{T}
     intrinsic::IntrinsicDescription{T}
 end
 
-LinearSubspace(I::IntrinsicDescription) = LinearSubspace(ExtrinsicDescription(I), I)
-LinearSubspace(E::ExtrinsicDescription) = LinearSubspace(E, IntrinsicDescription(E))
+LinearSubspace(I::IntrinsicDescription{T}) where {T} =
+    LinearSubspace(ExtrinsicDescription(I), I)::LinearSubspace{T}
+LinearSubspace(E::ExtrinsicDescription{T}) where {T} =
+    LinearSubspace(E, IntrinsicDescription(E))::LinearSubspace{T}
 
 function LinearSubspace(
         A::AbstractMatrix{T},
@@ -259,7 +265,9 @@ function LinearSubspace(
         ),
     )
 
-    return LinearSubspace(ExtrinsicDescription(Matrix(float.(A)), Vector(float.(b))))
+    return LinearSubspace(
+        ExtrinsicDescription(Matrix(float.(A)), Vector(float.(b))),
+    )::LinearSubspace{float(T)}
 end
 
 # Identity when the eltype already matches. This is the hot case for monodromy:
@@ -292,6 +300,26 @@ Codimension of the (affine) linear subspace `A`.
 codim(A::LinearSubspace) = codim(A.intrinsic)
 
 _default_intrinsic(A::LinearSubspace)::Bool = dim(A) <= codim(A)
+
+"""
+    SubspaceCoords.AUTO
+    SubspaceCoords.INTRINSIC
+    SubspaceCoords.EXTRINSIC
+
+Which coordinates a subspace homotopy tracks in. `AUTO` picks intrinsic when
+`dim(L) <= codim(L)`, which is the cheaper of the two.
+"""
+@enumx SubspaceCoords::Int8 begin
+    AUTO
+    INTRINSIC
+    EXTRINSIC
+end
+
+# The choice is made against the start subspace, which the algorithm struct does
+# not know, so `AUTO` is resolved here rather than at construction.
+_use_intrinsic(coords::SubspaceCoords.T, L::LinearSubspace)::Bool =
+    coords == SubspaceCoords.AUTO ? _default_intrinsic(L) :
+    coords == SubspaceCoords.INTRINSIC
 
 """
     ambient_dim(A::LinearSubspace)
@@ -356,15 +384,32 @@ function (A::LinearSubspace)(x::AbstractVector, ::Coordinates{:Extrinsic} = Extr
     return extrinsic(A)(x)
 end
 
+# `-1` marks an unset dimension. A given `dim` or `codim` is non-negative, so the
+# sentinel cannot collide with a real value, and demanding exactly one of them
+# turns a silently ignored argument into an error.
+function _subspace_dim(dim::Int, codim::Int, n::Int)::Int
+    dim >= 0 || codim >= 0 ||
+        throw(ArgumentError("Neither `dim` nor `codim` specified."))
+    dim >= 0 && codim >= 0 && throw(
+        ArgumentError("Both `dim` and `codim` specified; give exactly one."),
+    )
+    if dim >= 0
+        dim <= n || throw(ArgumentError("`dim` has to be between 0 and `n`."))
+        return dim
+    end
+    codim <= n || throw(ArgumentError("`codim` has to be between 0 and `n`."))
+    return n - codim
+end
+
 """
-    rand_subspace([rng], n::Integer; dim | codim, affine = true, real = false)
+    rand_subspace([rng], [T::Type], n::Integer; dim | codim, affine = true)
 
 Generate a random [`LinearSubspace`](@ref) with given dimension `dim` or
 codimension `codim` (one of them has to be provided) in ambient space of
-dimension `n`. If `real` is `true`, then the extrinsic description is real.
-If `affine`, then an affine linear subspace is generated. The matrix `A` of the
-extrinsic description is drawn independently from a normal distribution using
-`randn`.
+dimension `n`. The element type `T` defaults to `ComplexF64`; pass `Float64` for
+a real extrinsic description. If `affine`, then an affine linear subspace is
+generated. The matrix `A` of the extrinsic description is drawn independently
+from a normal distribution using `randn`.
 
     rand_subspace([rng], x::AbstractVector; dim | codim, affine = true)
 
@@ -373,27 +418,16 @@ codimension `codim` in ambient space of dimension `length(x)` going through the
 given point `x`.
 
 As with `rand` and `randn`, pass a random number generator `rng` as the first
-argument to draw from it instead of the global one.
+argument to draw from it instead of the global one, and the element type `T` as
+the argument after it.
 """
 function rand_subspace(
-        rng::Random.AbstractRNG, n::Integer;
-        dim::Union{Nothing, Integer} = nothing,
-        codim::Union{Nothing, Integer} = nothing,
-        real::Bool = false,
+        rng::Random.AbstractRNG, ::Type{T}, n::Integer;
+        dim::Int = -1,
+        codim::Int = -1,
         affine::Bool = true,
-    )
-    dim !== nothing ||
-        codim !== nothing ||
-        throw(ArgumentError("Neither `dim` nor `codim` specified."))
-
-    if dim !== nothing
-        0 <= dim <= n || throw(ArgumentError("`dim` has to be between 0 and `n`."))
-        k = dim
-    else
-        0 <= codim <= n || throw(ArgumentError("`codim` has to be between 0 and `n`."))
-        k = n - codim
-    end
-    T = real ? Float64 : ComplexF64
+    )::LinearSubspace{T} where {T}
+    k = _subspace_dim(dim, codim, Int(n))
     A = randn(rng, T, n - k, n)
     return if affine
         LinearSubspace(A, randn(rng, T, n - k))
@@ -402,51 +436,71 @@ function rand_subspace(
     end
 end
 rand_subspace(
-    n::Integer;
-    dim::Union{Nothing, Integer} = nothing,
-    codim::Union{Nothing, Integer} = nothing,
-    real::Bool = false,
+    rng::Random.AbstractRNG, n::Integer;
+    dim::Int = -1,
+    codim::Int = -1,
     affine::Bool = true,
-) = rand_subspace(
-    Random.default_rng(), n; dim = dim, codim = codim, real = real, affine = affine,
+)::LinearSubspace{ComplexF64} = rand_subspace(
+    rng, ComplexF64, n; dim = dim, codim = codim, affine = affine,
+)
+rand_subspace(
+    ::Type{T}, n::Integer;
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+) where {T} = rand_subspace(
+    Random.default_rng(), T, n; dim = dim, codim = codim, affine = affine,
+)
+rand_subspace(
+    n::Integer;
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+)::LinearSubspace{ComplexF64} = rand_subspace(
+    Random.default_rng(), ComplexF64, n; dim = dim, codim = codim, affine = affine,
+)
+rand_subspace(
+    ::Type{T}, x::AbstractVector{<:MP.AbstractVariable};
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+) where {T} = rand_subspace(
+    T, length(x); dim = dim, codim = codim, affine = affine,
 )
 rand_subspace(
     x::AbstractVector{<:MP.AbstractVariable};
-    dim::Union{Nothing, Integer} = nothing,
-    codim::Union{Nothing, Integer} = nothing,
-    real::Bool = false,
+    dim::Int = -1,
+    codim::Int = -1,
     affine::Bool = true,
-) = rand_subspace(
-    length(x); dim = dim, codim = codim, real = real, affine = affine,
+)::LinearSubspace{ComplexF64} = rand_subspace(
+    ComplexF64, length(x); dim = dim, codim = codim, affine = affine,
+)
+rand_subspace(
+    rng::Random.AbstractRNG, ::Type{T},
+    x::AbstractVector{<:MP.AbstractVariable};
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+) where {T} = rand_subspace(
+    rng, T, length(x); dim = dim, codim = codim, affine = affine,
 )
 rand_subspace(
     rng::Random.AbstractRNG,
     x::AbstractVector{<:MP.AbstractVariable};
-    dim::Union{Nothing, Integer} = nothing,
-    codim::Union{Nothing, Integer} = nothing,
-    real::Bool = false,
+    dim::Int = -1,
+    codim::Int = -1,
     affine::Bool = true,
-) = rand_subspace(
-    rng, length(x); dim = dim, codim = codim, real = real, affine = affine,
+)::LinearSubspace{ComplexF64} = rand_subspace(
+    rng, ComplexF64, length(x); dim = dim, codim = codim, affine = affine,
 )
 function rand_subspace(
         rng::Random.AbstractRNG, x::AbstractVector;
-        dim::Union{Nothing, Integer} = nothing,
-        codim::Union{Nothing, Integer} = nothing,
+        dim::Int = -1,
+        codim::Int = -1,
         affine::Bool = true,
     )
     n = length(x)
-    dim !== nothing ||
-        codim !== nothing ||
-        throw(ArgumentError("Neither `dim` nor `codim` specified."))
-
-    if dim !== nothing
-        0 <= dim <= n || throw(ArgumentError("`dim` has to be between 0 and `n`."))
-        k = dim
-    else
-        0 <= codim <= n || throw(ArgumentError("`codim` has to be between 0 and `n`."))
-        k = n - codim
-    end
+    k = _subspace_dim(dim, codim, n)
 
     if !affine && k == 0 && !all(iszero, x)
         throw(
@@ -468,8 +522,8 @@ function rand_subspace(
 end
 rand_subspace(
     x::AbstractVector;
-    dim::Union{Nothing, Integer} = nothing,
-    codim::Union{Nothing, Integer} = nothing,
+    dim::Int = -1,
+    codim::Int = -1,
     affine::Bool = true,
 ) = rand_subspace(
     Random.default_rng(), x; dim = dim, codim = codim, affine = affine,

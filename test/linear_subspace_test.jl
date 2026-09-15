@@ -110,7 +110,8 @@ end
     @test copy(A) == A
     @test copy(A) !== A
 
-    C = rand_subspace(3; dim = 1, real = true)
+    C = rand_subspace(Float64, 3; dim = 1)
+    @test C isa LinearSubspace{Float64}
     @test geodesic_distance(A, C) > 0
     γ = geodesic(A, C)
     γ1 = γ(1)
@@ -207,11 +208,28 @@ end
 end
 
 @testset "translate promotes coefficient type" begin
-    L = rand_subspace(4; dim = 1, real = true)
+    L = rand_subspace(Float64, 4; dim = 1)
     δb = ComplexF64[0.2 + 0.3im, -0.7im, 1.1 - 0.4im]
     Lt = translate(L, δb)
 
     @test Lt isa LinearSubspace{ComplexF64}
     @test extrinsic(Lt).b ≈ ComplexF64.(extrinsic(L).b) + δb
     @test L isa LinearSubspace{Float64}
+end
+
+@testset "rand_subspace element type is inferable" begin
+    # The element type is an argument, not a `real::Bool` flag, so each method
+    # returns one concrete `LinearSubspace{T}`.
+    @test @inferred(rand_subspace(3; dim = 1)) isa LinearSubspace{ComplexF64}
+    @test @inferred(rand_subspace(ComplexF64, 3; dim = 1)) isa LinearSubspace{ComplexF64}
+    @test @inferred(rand_subspace(Float64, 3; dim = 1)) isa LinearSubspace{Float64}
+    @test @inferred(rand_subspace(Random.default_rng(), 3; codim = 1)) isa
+        LinearSubspace{ComplexF64}
+    @test @inferred(rand_subspace(Random.default_rng(), Float64, 3; codim = 1)) isa
+        LinearSubspace{Float64}
+    @polyvar rs_x rs_y rs_z
+    @test @inferred(rand_subspace([rs_x, rs_y, rs_z]; dim = 1)) isa
+        LinearSubspace{ComplexF64}
+    @test @inferred(rand_subspace(Float64, [rs_x, rs_y, rs_z]; dim = 1)) isa
+        LinearSubspace{Float64}
 end

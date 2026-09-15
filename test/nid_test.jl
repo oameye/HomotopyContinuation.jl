@@ -23,11 +23,11 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             p * (z - 3) * (z - 5),
         ]
 
-        W = solve(F, Regeneration())
+        W = solve(F, Regeneration(; seed = 0x8a1f2c3d))
         @test sort(degree.(W); rev = true) == [8, 8, 2]
         @test isconcretetype(eltype(W))
 
-        dec = solve(W, Decomposition())
+        dec = solve(W, Decomposition(; seed = 0x8a1f2c3d))
         @test all(W -> is_irreducible(W) == Irreducibility.IRREDUCIBLE, dec)
         @test eltype(dec) === eltype(W)
 
@@ -537,7 +537,7 @@ end
         # endpoint-relative default.
         default_m = MonodromyOptions()
         @test default_m.unique_points_atol == 1.0e-14
-        @test default_m.unique_points_rtol === nothing
+        @test isnan(default_m.unique_points_rtol)
 
         inherited = _regeneration_monodromy_options(default_m, W, 2.0e-9, 3.0e-7)
         @test inherited.unique_points_atol == 2.0e-9

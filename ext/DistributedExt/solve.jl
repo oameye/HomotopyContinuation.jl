@@ -124,7 +124,7 @@ end
 @noinline _solve_total_degree_distributed_with_progress(
     cache::HCN.SolveCache{HCN.DistributedExecutor},
 ) = _solve_total_degree_distributed(
-    cache, PathReport(HCN.make_progress(length(cache.start_solutions), true)),
+    cache, PathReport(HCN.make_progress(length(cache.start_solutions))),
 )
 
 function _solve_total_degree_distributed(
@@ -160,7 +160,7 @@ end
 @noinline _solve_polyhedral_distributed_with_progress(
     cache::HCN.PolyhedralSolveCache{HCN.DistributedExecutor},
 ) = _solve_polyhedral_distributed(
-    cache, PathReport(HCN.make_progress(length(cache.start_solutions), true)),
+    cache, PathReport(HCN.make_progress(length(cache.start_solutions))),
 )
 
 function _solve_polyhedral_distributed(
@@ -196,7 +196,7 @@ end
 @noinline _solve_worker_distributed_with_progress(
     cache::HCN.WorkerSolveCache{HCN.DistributedExecutor},
 ) = _solve_worker_distributed(
-    cache, PathReport(HCN.make_progress(length(cache.start_solutions), true)),
+    cache, PathReport(HCN.make_progress(length(cache.start_solutions))),
 )
 
 function _solve_worker_distributed(

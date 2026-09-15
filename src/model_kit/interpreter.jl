@@ -281,7 +281,9 @@ end
 
 ## Inner execution loop — variant-based dispatch
 
-@inline exec_instruction_storage(instr::ExecInstructionT) = variant_storage(instr)
+# Tagged-union accessor; see `sexpr_storage`. `execute_instructions!` splits the
+# union into one concrete branch per opcode, so the interpreter loop stays monomorphic.
+@unstable @inline exec_instruction_storage(instr::ExecInstructionT) = variant_storage(instr)
 
 function _compile_exec_instruction_call(variant::Symbol, op::OpType.T)::Expr
     ctor = Expr(:., :ExecInstruction, QuoteNode(variant))

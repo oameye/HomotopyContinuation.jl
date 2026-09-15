@@ -42,12 +42,11 @@ struct Decomposition{R <: Regeneration, MO <: MonodromyOptions} <: AbstractAlgor
 end
 
 function Decomposition(;
-        regeneration::Union{Nothing, Regeneration} = nothing,
         monodromy::MonodromyOptions = _decompose_stage_monodromy(),
         max_iters::Int = 50,
         warning::Bool = true,
         sorted::EquationSorting.T = EquationSorting.BY_DEGREE,
-        max_codim::Union{Nothing, Int} = nothing,
+        max_codim::Int = -1,
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
         tracker_options::TrackerOptions = TrackerOptions(),
@@ -56,20 +55,38 @@ function Decomposition(;
         show_progress::Bool = true,
         show_monodromy_progress::Bool = false,
     )
-    regen = if regeneration !== nothing
-        regeneration
-    else
-        Regeneration(;
-            sorted = sorted, max_codim = max_codim, atol = atol, rtol = rtol,
-            tracker_options = tracker_options,
-            endgame_options = endgame_options,
-            seed = seed, show_progress = show_progress,
-            show_monodromy_progress = show_monodromy_progress,
-        )
-    end
+    regen = Regeneration(;
+        sorted = sorted, max_codim = max_codim, atol = atol, rtol = rtol,
+        tracker_options = tracker_options,
+        endgame_options = endgame_options,
+        seed = seed, show_progress = show_progress,
+        show_monodromy_progress = show_monodromy_progress,
+    )
     return Decomposition(
         CommonOptions(tracker_options, endgame_options, seed, show_progress),
         regen, monodromy, show_monodromy_progress, max_iters, warning, atol, rtol,
+    )
+end
+
+# A pre-built first stage. The remaining keywords configure the splitting stage,
+# so none of them reach `Regeneration`.
+function Decomposition(
+        regeneration::Regeneration;
+        monodromy::MonodromyOptions = _decompose_stage_monodromy(),
+        max_iters::Int = 50,
+        warning::Bool = true,
+        atol::Float64 = 1.0e-14,
+        rtol::Float64 = sqrt(eps()),
+        tracker_options::TrackerOptions = TrackerOptions(),
+        endgame_options::EndgameOptions = _DECOMPOSITION_ENDGAME,
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        show_progress::Bool = true,
+        show_monodromy_progress::Bool = false,
+    )
+    return Decomposition(
+        CommonOptions(tracker_options, endgame_options, seed, show_progress),
+        regeneration, monodromy, show_monodromy_progress, max_iters, warning,
+        atol, rtol,
     )
 end
 

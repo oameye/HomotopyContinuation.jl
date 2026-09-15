@@ -207,11 +207,18 @@ function _run_sweep(
         flatten::Bool, show_progress::Bool,
     ) where {TR, TP}
     isempty(targets) && throw(ArgumentError("No targets given."))
-    progress = make_many_progress(length(targets), show_progress)
-    entries = _sweep_entries(
-        cache, targets, collect(eachindex(targets)), first_q,
-        transform_result, transform_parameters, progress,
-    )
+    idx = collect(eachindex(targets))
+    entries = if show_progress
+        _sweep_entries(
+            cache, targets, idx, first_q, transform_result, transform_parameters,
+            make_many_progress(length(targets)),
+        )
+    else
+        _sweep_entries(
+            cache, targets, idx, first_q, transform_result, transform_parameters,
+            nothing,
+        )
+    end
     return flatten ? _flatten_entries(entries) : entries
 end
 
@@ -302,7 +309,7 @@ function solve(
         alg::Sweep,
         exec::AbstractExecutor = Threaded(),
     )
-    intrinsic = alg.intrinsic === nothing ? _default_intrinsic(L_start) : alg.intrinsic
+    intrinsic = _use_intrinsic(alg.coords, L_start)
     transform_result = alg.transform_result
     transform_parameters = alg.transform_parameters
     flatten = alg.flatten

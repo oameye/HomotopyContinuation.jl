@@ -123,16 +123,19 @@ end
     search_in_radius(tree::VoronoiTree, v::AbstractVector, tol::Real)
 
 Search whether `tree` contains a point with distance at most `tol` from `v`.
-Returns `nothing` if no such point exists, otherwise its identifier.
+Returns its identifier, or `0` if no such point exists. Identifiers are
+1-based, so `0` is unambiguous.
 """
-function search_in_radius(tree::VoronoiTree{T, M}, v::AbstractVector, tol::Real) where {T, M}
+function search_in_radius(
+        tree::VoronoiTree{T, M}, v::AbstractVector, tol::Real,
+    )::Int where {T, M}
     return _search_in_radius!(tree, tree.root, v, Float64(tol), 1)
 end
 
 function _search_in_radius!(
         tree::VoronoiTree{T, M}, node::VTNode{T}, v, tol::Float64, depth::Int,
-    )::Union{Nothing, Int} where {T, M}
-    !isempty(node) || return nothing
+    )::Int where {T, M}
+    !isempty(node) || return 0
 
     n = length(node)
     triangle_inequality = tree.triangle_inequality
@@ -168,25 +171,25 @@ function _search_in_radius!(
 
     if isassigned(node.children, last(m₁))
         retid = _search_in_radius!(tree, node.children[last(m₁)], v, tol, depth + 1)
-        retid === nothing || return retid
+        iszero(retid) || return retid
     end
 
     if m₂[1] - m₁[1] > 2tol && triangle_inequality
-        return nothing # already checked the first subtree
+        return 0 # already checked the first subtree
     end
 
     if isassigned(node.children, last(m₂))
         retid = _search_in_radius!(tree, node.children[last(m₂)], v, tol, depth + 1)
-        retid === nothing || return retid
+        iszero(retid) || return retid
     end
 
     if m₃[1] - m₁[1] > 2tol && triangle_inequality
-        return nothing # checked the first and second subtree
+        return 0 # checked the first and second subtree
     end
 
     if isassigned(node.children, last(m₃))
         retid = _search_in_radius!(tree, node.children[last(m₃)], v, tol, depth + 1)
-        retid === nothing || return retid
+        iszero(retid) || return retid
     end
 
     # Case 3: child recursions used deeper scratch buffers, so this node's
@@ -199,14 +202,14 @@ function _search_in_radius!(
         if dᵢ - m₁[1] < 2tol || !triangle_inequality
             if isassigned(node.children, i)
                 retid = _search_in_radius!(tree, node.children[i], v, tol, depth + 1)
-                retid === nothing || return retid
+                iszero(retid) || return retid
             end
         else
             break
         end
     end
 
-    return nothing
+    return 0
 end
 
 """
@@ -259,11 +262,11 @@ identifier and `false`.
 """
 function add!(tree::VoronoiTree{T, M}, v::AbstractVector, id::Int, tol::Real) where {T, M}
     found_id = search_in_radius(tree, v, tol)
-    if found_id === nothing
+    if iszero(found_id)
         insert!(tree, v, id)
         return (id, true)
     else
-        return (found_id::Int, false)
+        return (found_id, false)
     end
 end
 

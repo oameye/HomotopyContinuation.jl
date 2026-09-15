@@ -25,21 +25,21 @@ end
         # satisfied) to check the bar text deterministically, independent of the
         # 0.3s startup delay that suppresses the bar for fast solves.
         _, out = run_capture() do
-            p = HC.make_progress(3, true)
+            p = HC.make_progress(3)
             HC.ProgressMeter.update!(p, 2; force = true)
         end
         @test occursin("Tracking", out)
         @test occursin("paths", out)
     end
 
-    @testset "make_progress(n, false) is a no-op sentinel" begin
-        @test HC.make_progress(2, false) === nothing
+    @testset "nothing is the no-progress sentinel" begin
         # update_progress! on the sentinel must be a silent no-op.
         r = first(path_results(solve(F, TotalDegree(; seed = UInt32(1), show_progress = false), Serial())))
         _, out = run_capture() do
-            HC.update_progress!(HC.make_progress(2, false), 1, HC.ProgressStats(), r)
+            HC.update_progress!(nothing, 1, HC.ProgressStats(), r)
         end
         @test isempty(out)
+        @test HC.next_progress!(nothing) === nothing
     end
 
     @testset "record! tallies non-singular / singular / real endpoints" begin

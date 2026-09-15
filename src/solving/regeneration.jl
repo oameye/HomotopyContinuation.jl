@@ -239,14 +239,15 @@ struct Regeneration{MO <: MonodromyOptions} <: AbstractAlgorithm
     monodromy::MO
     show_monodromy_progress::Bool
     sorted::EquationSorting.T
-    max_codim::Union{Nothing, Int}
+    # `-1` means no bound, as in `rand_subspace`.
+    max_codim::Int
     atol::Float64
     rtol::Float64
 end
 
 Regeneration(;
     sorted::EquationSorting.T = EquationSorting.BY_DEGREE,
-    max_codim::Union{Nothing, Int} = nothing,
+    max_codim::Int = -1,
     monodromy::MonodromyOptions = _equation_by_equation_monodromy(),
     atol::Float64 = 1.0e-14,
     rtol::Float64 = sqrt(eps()),
@@ -356,7 +357,7 @@ function solve(
     # A projective variety of codimension k lives in the ambient space with one
     # dimension spent on the cone direction.
     expected_max_codim = min(c, n - projective)
-    codim = if max_codim !== nothing && max_codim < expected_max_codim
+    codim = if max_codim >= 0 && max_codim < expected_max_codim
         # compute one extra codim so spurious points can be removed
         max_codim + 1
     else
@@ -430,7 +431,7 @@ function solve(
     end
     pop!(vars)
 
-    if max_codim !== nothing && max_codim < expected_max_codim
+    if max_codim >= 0 && max_codim < expected_max_codim
         pop!(out)   # drop the extra codim used to remove spurious points
     end
 
@@ -750,10 +751,10 @@ function _manage_initial_points!(P, m)
 end
 
 # Track one (point, root-of-unity) start through the u-homotopy. Returns the
-# endpoint when it is a valid isolated intersection point, else `nothing`.
+# endpoint when it is a valid isolated intersection point, else an empty vector.
 function _track_u_root(
         eg::EndgameTracker, q0::Vector{ComplexF64},
-    )::Union{Nothing, Vector{ComplexF64}}
+    )::Vector{ComplexF64}
     track!(eg, FSVec{ComplexF64}(q0))
     pr = PathResult(eg; path_number = 0, start_solution = q0)
     if is_success(pr) && is_finite(pr) && is_nonsingular(pr)
@@ -765,7 +766,7 @@ function _track_u_root(
         )
         code == TrackerCode.TRACKER_SUCCESS && return q
     end
-    return nothing
+    return ComplexF64[]
 end
 
 # The u-placeholder becomes a d-th root of 1 affinely, of `ℓ(p)^d` projectively.
@@ -788,7 +789,7 @@ function _serial_intersection!(
     for p in P
         for ζ in roots
             q = _track_u_root(eg, _u_start_point(p, ζ, chart, ℓ_coeffs))
-            q === nothing || push!(X, q)
+            isempty(q) || push!(X, q)
         end
     end
     return nothing
@@ -820,7 +821,7 @@ function _threaded_intersection!(
         )
         i, j = fldmod1(k, nroots)
         q = _track_u_root(eg, _u_start_point(P[i], roots[j], chart, ℓ_coeffs))
-        q === nothing || (results[k] = q)
+        isempty(q) || (results[k] = q)
     end
     for r in results
         isempty(r) || push!(X, r)
@@ -1197,7 +1198,7 @@ end
 # affine line, or a linear plane when the step runs projectively.
 _hypersurface_witness(alg::Intersection, seed::UInt32)::Witness{TotalDegree} =
     Witness(
-    _with_seed(alg.common, seed), nothing, nothing,
+    _with_seed(alg.common, seed), -1, -1,
     TotalDegree(;
         tracker_options = _tracker_options(alg),
         endgame_options = _endgame_options(alg),

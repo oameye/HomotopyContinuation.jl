@@ -78,21 +78,21 @@ end
     V = rand_subspace(3; dim = 1)
     W = rand_subspace(3; dim = 1)
     W2 = rand_subspace(3; dim = 1)
-    H = IntrinsicSubspaceHomotopy(quadric.evaluator, V, W; gamma = nothing)
+    H = IntrinsicSubspaceHomotopy(quadric.evaluator, V, W; gamma = one(ComplexF64))
     m, n = size(H)
     u = FSVec{ComplexF64}(zeros(ComplexF64, m))
     xu = FSVec{ComplexF64}(randn(ComplexF64, n))
     set_subspaces!(H, V, W2)
     # First query at exactly t = 0 must reflect the NEW target (NaN invalidation)
     evaluate!(u, H, xu, complex(0.0))
-    H2 = IntrinsicSubspaceHomotopy(quadric.evaluator, V, W2; gamma = nothing)
+    H2 = IntrinsicSubspaceHomotopy(quadric.evaluator, V, W2; gamma = one(ComplexF64))
     u2 = FSVec{ComplexF64}(zeros(ComplexF64, m))
     evaluate!(u2, H2, xu, complex(0.0))
     @test Vector(u) ≈ Vector(u2) atol = 1.0e-13
 end
 
 # γ belongs to the caller's start subspace, so retargeting leaves the start alone.
-# The retarget test above uses `gamma = nothing`, where re-rotating is a no-op.
+# The retarget test above uses `gamma = one(ComplexF64)`, where re-rotating is a no-op.
 @testset "target_parameters! leaves the start subspace fixed" begin
     Random.seed!(29)
     V = rand_subspace(3; dim = 1)
@@ -209,7 +209,7 @@ end
     F4 = System([f1, f2]; variables = x4)
     A = rand_subspace(4; codim = 2)
     B = rand_subspace(4; codim = 2)
-    H = ExtrinsicSubspaceHomotopy(F4, A, B; gamma = nothing)
+    H = ExtrinsicSubspaceHomotopy(F4, A, B; gamma = one(ComplexF64))
     @test size(H) == (4, 4)
 
     Q, Q_cos, Θ = H.path.Q, H.path.Q_cos, H.path.Θ
@@ -247,7 +247,7 @@ end
     Random.seed!(42)
     V = rand_subspace(3; dim = 1)
     W = rand_subspace(3; dim = 1)
-    H = IntrinsicSubspaceHomotopy(quadric.evaluator, V, W; gamma = nothing)
+    H = IntrinsicSubspaceHomotopy(quadric.evaluator, V, W; gamma = one(ComplexF64))
 
     Q, Q_cos, Θ = H.path.Q, H.path.Q_cos, H.path.Θ
     γ_at(t) = Q_cos .* transpose(cos.(t .* Θ)) .+ Q .* transpose(sin.(t .* Θ))

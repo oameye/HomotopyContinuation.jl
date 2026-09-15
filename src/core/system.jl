@@ -51,7 +51,12 @@ end
 
 ## ── System constructor ──────────────────────────────────────────────────────
 
-function System(
+# Construction-time policy (compile mode, shape) is erased behind
+# `Base.inferencebarrier` so the default path does not compile all three
+# code-generation backends and all three shape instantiations. The widened
+# `System` return is that erasure, not an inference failure; see
+# `implementation_docs/06_setup_layer_erasure.md`.
+@unstable function System(
         polys::AbstractVector,
         parameters::AbstractVector,
         variables::AbstractVector,
@@ -116,7 +121,8 @@ exactly once, and when `variables` is omitted they also fix the variable order.
 System([x * y - 2v * w, x^2 - 4v^2]; variable_groups = [[x, v], [y, w]])
 ```
 """
-function System(
+# Forwards to the erased builder above, so it inherits the widened return.
+@unstable function System(
         polys::AbstractVector{<:MP.AbstractPolynomialLike};
         parameters = nothing,
         variables = nothing,

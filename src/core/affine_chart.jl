@@ -287,12 +287,14 @@ system with linear subspaces, the problem is put on a random affine chart
 (intrinsic: chart row appended to the system; extrinsic: homotopy wrapped in
 [`AffineChartHomotopy`](@ref)).
 """
-function linear_subspace_homotopy(
+# Picks the intrinsic or extrinsic homotopy from a runtime flag; the two have
+# different concrete types by design.
+@unstable function linear_subspace_homotopy(
         F::System,
         V::LinearSubspace,
         W::LinearSubspace;
         intrinsic::Bool = _default_intrinsic(V),
-        gamma::Union{Nothing, ComplexF64} = cis(2 * pi * rand()),
+        gamma::ComplexF64 = cis(2 * pi * rand()),
     )
     projective = is_linear(V) && is_linear(W) && is_homogeneous(F)
     return if intrinsic

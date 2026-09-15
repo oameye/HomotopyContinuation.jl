@@ -183,7 +183,10 @@ function _solve_cache(
     )
 end
 
-function CommonSolve.init(
+# The initializer is selected behind `Base.inferencebarrier` so a `solve` call
+# compiles one route, not every shape and start-system combination. The cache's
+# concrete type is recovered at the `solve!` boundary.
+@unstable function CommonSolve.init(
         F::CloneableSystem, alg::TotalDegree,
         exec::AbstractExecutor = Threaded(),
     )::SolveCache
@@ -262,7 +265,7 @@ end
 @noinline _solve_total_degree_serial_without_progress(cache::SolveCache{Serial}) =
     _solve_total_degree_serial(cache, nothing)
 @noinline _solve_total_degree_serial_with_progress(cache::SolveCache{Serial}) =
-    _solve_total_degree_serial(cache, make_progress(length(cache.start_solutions), true))
+    _solve_total_degree_serial(cache, make_progress(length(cache.start_solutions)))
 
 # `start_solution` is copied: the caller's `starts` vector outlives the result.
 function _track_path!(
@@ -308,7 +311,7 @@ end
 @noinline _solve_total_degree_threaded_without_progress(cache::SolveCache{Threaded}) =
     _solve_total_degree_threaded(cache, nothing)
 @noinline _solve_total_degree_threaded_with_progress(cache::SolveCache{Threaded}) =
-    _solve_total_degree_threaded(cache, make_progress(length(cache.start_solutions), true))
+    _solve_total_degree_threaded(cache, make_progress(length(cache.start_solutions)))
 
 function _solve_total_degree_threaded(cache::SolveCache{Threaded}, progress)::Result
     nt = cache.executor.ntasks
