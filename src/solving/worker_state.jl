@@ -36,8 +36,6 @@ struct IntrinsicWorkerState
     u::FSVec{ComplexF64}
 end
 
-const RetargetWorkerState = Union{AmbientWorkerState, IntrinsicWorkerState}
-
 """
     PolyhedralWorkerState
 

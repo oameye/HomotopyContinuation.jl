@@ -301,18 +301,6 @@ _composition_stages(F::System)::Vector{CompositionStage} = CompositionStage[
 ]
 _composition_stages(C::CompositionSystem)::Vector{CompositionStage} = copy(C.stages)
 
-"""
-    _stage_system(stage) -> System
-
-The `System` a stage was built from, recovered from the cloner behind its factory
-thunk. The thunk is the only place a stage holds its system, which is what keeps
-`CompositionStage` one concrete type at any composition depth.
-"""
-_stage_system(stage::CompositionStage)::System =
-    _unwrap_cloner(stage.factory[]).system
-
-_unwrap_cloner(cloner::_SystemCloner)::_SystemCloner = cloner
-
 function _fold_composition(stages::Vector{CompositionStage})::SystemEvaluator
     evaluator = (stages[1].factory[])()::SystemEvaluator
     for k in 2:length(stages)
@@ -424,14 +412,9 @@ parameters(C::CompositionSystem)::Vector{Expression} = C.parameters
 degrees(C::CompositionSystem)::Vector{Int} = C.degrees
 is_homogeneous(C::CompositionSystem)::Bool = C.is_homogeneous
 
-# No shape type parameter, so the shape is a runtime branch;
-# `_init_total_degree_shaped`, its only caller, sits behind an inference barrier.
-# Underdetermined input is rejected before the shape is asked for.
-function system_shape(
-        C::CompositionSystem,
-    )::Union{SquareShape, OverdeterminedShape}
+@inline function with_system_shape(f::F, C::CompositionSystem) where {F}
     m, n = size(C)
-    return m == n ? SquareShape() : OverdeterminedShape()
+    return m == n ? f(SquareShape()) : f(OverdeterminedShape())
 end
 
 _clone_system_evaluator(C::CompositionSystem)::SystemEvaluator =

@@ -529,7 +529,7 @@ end
     f = System([coefficient(detμ, m, xs) for m in monomials(xs, d)]; variables = as)
     @test size(f) == (N, D)
 
-    evaluate_at(F, x, p = ComplexF64[]) = begin
+    evaluate_at(F, x, p = ComplexF64[])::Vector{ComplexF64} = begin
         u = FSVec{ComplexF64}(zeros(ComplexF64, size(F)[1]))
         evaluate!(
             u, F.evaluator, FSVec{ComplexF64}(collect(ComplexF64, x)),
@@ -569,7 +569,7 @@ end
     # the fibers of `f ∘ L₁` are positive-dimensional, so points sharing an
     # image are the same solution
     fL₁ = f ∘ L₁
-    distance(x, y) = maximum(abs, evaluate_at(fL₁, x) .- evaluate_at(fL₁, y))
+    distance(x, y)::Float64 = maximum(abs, evaluate_at(fL₁, x) .- evaluate_at(fL₁, y))
 
     points = solve(
         C,

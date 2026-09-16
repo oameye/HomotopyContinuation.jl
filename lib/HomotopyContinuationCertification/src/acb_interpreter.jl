@@ -119,36 +119,30 @@ acb_op_call(op::OpType.T)::Symbol = Symbol(:acb_, op_call(op), :!)
 # ─────────────────────────────────────────────────────────────────────────────
 
 function _build_acb_execute_call(op::OpType.T, fn_name::Symbol)
-    args = Any[:(tape[s.output])]
+    args = Any[:(tape[output])]
     for k in 1:arity(op)
         field = Symbol(:arg_, k)
-        if should_use_index_not_reference(op, k)
-            push!(args, :(s.$field))
-        else
-            push!(args, :(tape[s.$field]))
-        end
+        push!(args, should_use_index_not_reference(op, k) ? field : :(tape[$field]))
     end
     push!(args, :m)
     return Expr(:call, fn_name, args...)
 end
 
-function _generate_acb_execute_body()
-    cond_body = Tuple{Expr, Expr}[]
+function _generate_acb_execute_arms()
+    arms = Expr[]
     for (variant, op_name) in _EXEC_INSTRUCTION_SPECS
-        storage_type = variant_storage_type(getfield(ExecInstruction, variant))
         op = getfield(OpType, op_name)
-        cond = :(s isa $storage_type)
-        if op == OpType.OP_STOP
-            push!(cond_body, (cond, :(return nothing)))
-        else
-            call = _build_acb_execute_call(op, acb_op_call(op))
-            push!(cond_body, (cond, :(@inbounds $call)))
-        end
+        binds = op == OpType.OP_STOP ? Any[] : Any[Symbol(:arg_, k) for k in 1:arity(op)]
+        push!(binds, :output)
+        pattern = Expr(:call, Expr(:., :ExecInstruction, QuoteNode(variant)), binds...)
+        body = op == OpType.OP_STOP ? :(return nothing) :
+            :(@inbounds $(_build_acb_execute_call(op, acb_op_call(op))))
+        push!(arms, Expr(:call, :(=>), pattern, body))
     end
-    return nested_ifs(cond_body)
+    return arms
 end
 
-let body = _generate_acb_execute_body()
+let arms = _generate_acb_execute_arms()
     @eval Base.@propagate_inbounds function execute_acb_instructions!(
             tape::AcbRefVector,
             instructions::Vector{ExecInstructionT},
@@ -156,8 +150,9 @@ let body = _generate_acb_execute_body()
         # Two scratch balls at the tape's working precision.
         m = (copy(tape[1]), copy(tape[1]))
         @inbounds for instr in instructions
-            s = exec_instruction_storage(instr)
-            $body
+            @match instr begin
+                $(arms...)
+            end
         end
         return nothing
     end

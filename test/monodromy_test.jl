@@ -6,10 +6,11 @@ using DynamicPolynomials: @polyvar, subs
 
 using HomotopyContinuation: _trace_step, _with_solution, _conditioned_chart,
     _chart_alignment, _monodromy_starts, PathResult, solution,
-    MonodromySolver, track_start!, add_tracked_result!, permutations, NoCandidate
+    with_monodromy_solver, track_start!, add_tracked_result!, permutations, NoCandidate
 
-using HomotopyContinuation: MonodromySolver, MonodromyWorkerState, track_loop!,
+using HomotopyContinuation: with_monodromy_solver, MonodromyWorkerState, track_loop!,
     track_start!, set_loop_segment!, reset_trace!, trace_colinearity, trace_complete,
+    trace_conclusive,
     is_success
 using HomotopyContinuation: verify_solution_completeness, parameters
 using HomotopyContinuation: _accumulate_trace!, _trace_dropped!
@@ -151,25 +152,28 @@ end
     F = System([y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]]; variables = y, parameters = p)
     start_pair = find_start_pair(F)
     x0, p0 = start_pair.x, start_pair.p
-    MS = MonodromySolver(F, ComplexF64.(p0))
-    ws = MS.workers[1]
-    @test ws.homotopy.system === F.evaluator
-    cloned_ws = MS.builder()
-    @test cloned_ws.homotopy.system !== F.evaluator
-    @test cloned_ws.homotopy.system !== ws.homotopy.system
+    with_monodromy_solver(F, ComplexF64.(p0)) do MS
+        ws = MS.workers[1]
+        @test ws.homotopy.system === F.evaluator
+        cloned_ws = MS.builder()
+        @test cloned_ws.homotopy.system !== F.evaluator
+        @test cloned_ws.homotopy.system !== ws.homotopy.system
 
-    # A p -> p track refines the start solution into a PathResult
-    res0 = track_start!(ws, ComplexF64.(x0))
-    @test res0 !== nothing && is_success(res0)
+        # A p -> p track refines the start solution into a PathResult
+        res0 = track_start!(ws, ComplexF64.(x0))
+        @test res0 !== nothing && is_success(res0)
 
-    loop = MonodromyLoop(
-        ComplexF64.(p0), MS.options.parameter_sampler, Random.MersenneTwister(0x2718),
-    )
-    res1 = track_loop!(ws, loop, res0, false, MS)
-    @test res1 !== nothing && is_success(res1)
-    # endpoint is back on the fiber over p0
-    residual = [abs(ComplexF64(f(y => solution(res1), p => p0))) for f in F.polys]
-    @test maximum(residual) < 1.0e-8
+        loop = MonodromyLoop(
+            ComplexF64.(p0), MS.options.parameter_sampler,
+            Random.MersenneTwister(0x2718),
+        )
+        res1 = track_loop!(ws, loop, res0, false, MS)
+        @test res1 !== nothing && is_success(res1)
+        # endpoint is back on the fiber over p0
+        residual = [abs(ComplexF64(f(y => solution(res1), p => p0))) for f in F.polys]
+        @test maximum(residual) < 1.0e-8
+        return nothing
+    end
 end
 
 using HomotopyContinuation: MonodromyResult, permutations,
@@ -241,21 +245,30 @@ end
 @testset "trace completeness" begin
     @polyvar y[1:2] p[1:2]
     F = System([y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]]; variables = y, parameters = p)
-    MS = MonodromySolver(F, ComplexF64[3, 1])
-    reset_trace!(MS)
-    @test trace_complete(MS) && MS.trace_paths == 0
+    with_monodromy_solver(F, ComplexF64[3, 1]) do MS
+        reset_trace!(MS)
+        @test trace_complete(MS) && MS.trace_paths == 0
+        # `reset_trace!` leaves the augmentation row, so an untouched trace is
+        # rank one and reads as a perfect pass even though nothing was summed.
+        @test trace_colinearity(MS) == 0.0
+        @test !trace_conclusive(MS)
 
-    x = ComplexF64[1, 1]
-    _accumulate_trace!(MS, x, x, x)
-    @test MS.trace_paths == 1 && trace_complete(MS)
+        x = ComplexF64[1, 1]
+        _accumulate_trace!(MS, x, x, x)
+        @test MS.trace_paths == 1 && trace_complete(MS)
+        @test trace_conclusive(MS)
 
-    # A path that never reached the halfway subspace leaves the trace short, so
-    # its value says nothing about the witness set.
-    _trace_dropped!(MS)
-    @test MS.trace_dropped == 1 && !trace_complete(MS)
+        # A path that never reached the halfway subspace leaves the trace short,
+        # so its value says nothing about the witness set.
+        _trace_dropped!(MS)
+        @test MS.trace_dropped == 1 && !trace_complete(MS)
+        @test !trace_conclusive(MS)
 
-    reset_trace!(MS)
-    @test MS.trace_paths == 0 && MS.trace_dropped == 0 && trace_complete(MS)
+        reset_trace!(MS)
+        @test MS.trace_paths == 0 && MS.trace_dropped == 0 && trace_complete(MS)
+        @test !trace_conclusive(MS)
+        return nothing
+    end
 end
 
 @testset "threaded == serial on solution sets" begin
@@ -377,26 +390,28 @@ end
 @testset "Monodromy endpoint admission" begin
     @polyvar x p
     F = System([x^2 - p]; variables = [x], parameters = [p])
-    MS = MonodromySolver(F, ComplexF64[1])
-    ws = MS.workers[1]
-    base = track_start!(ws, ComplexF64[1])
-    @test base !== nothing
+    with_monodromy_solver(F, ComplexF64[1]) do MS
+        ws = MS.workers[1]
+        base = track_start!(ws, ComplexF64[1])
+        @test base !== nothing
 
-    # x = 0 is not a solution of x² - 1 and has a singular Newton derivative.
-    # It must not become a stored monodromy start merely because it looks new.
-    invalid = _with_solution(base, ComplexF64[0])
-    id, added, _ = add_tracked_result!(MS, invalid, 1, NoCandidate(), 1)
-    @test id == 0
-    @test !added
-    @test length(MS.unique_points) == 0
+        # x = 0 is not a solution of x² - 1 and has a singular Newton derivative.
+        # It must not become a stored monodromy start merely because it looks new.
+        invalid = _with_solution(base, ComplexF64[0])
+        id, added, _ = add_tracked_result!(MS, invalid, 1, NoCandidate(), 1)
+        @test id == 0
+        @test !added
+        @test length(MS.unique_points) == 0
 
-    # A genuinely new approximate endpoint is revalidated/refined at the base.
-    approximate = _with_solution(base, ComplexF64[1.01])
-    id, added, accepted = add_tracked_result!(MS, approximate, 1, NoCandidate(), 1)
-    @test id == 1
-    @test added
-    @test abs(solution(accepted)[1]^2 - 1) < 1.0e-10
-    @test length(MS.unique_points) == 1
+        # A genuinely new approximate endpoint is revalidated/refined at the base.
+        approximate = _with_solution(base, ComplexF64[1.01])
+        id, added, accepted = add_tracked_result!(MS, approximate, 1, NoCandidate(), 1)
+        @test id == 1
+        @test added
+        @test abs(solution(accepted)[1]^2 - 1) < 1.0e-10
+        @test length(MS.unique_points) == 1
+        return nothing
+    end
 end
 
 @testset "Incomplete permutation histories are padded" begin

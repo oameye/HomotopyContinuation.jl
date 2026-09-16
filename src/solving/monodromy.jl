@@ -248,9 +248,14 @@ Find solutions of `F(x; p)` by tracking loops in the parameter space of `F`.
 Pass start data positionally: `solve(F, sols, p, Monodromy())` bases the loops at
 the parameters `p`, and `solve(F, sols, L, Monodromy())` intersects with a
 [`LinearSubspace`](@ref). With no start data, `solve(F, Monodromy())` computes a
-start pair itself, which needs the parameters to occur linearly in `F`; for a
-subspace intersection it needs `dim` or `codim`, the expected (co)dimension of a
-component of `V(F)`.
+start pair itself, which needs the parameters to occur linearly in `F`.
+
+`dim` or `codim`, the expected (co)dimension of a component of `V(F)`, selects
+the subspace route instead: `solve(F, Monodromy(; dim = d))` intersects a
+parameter-free `F` with a subspace of the complementary dimension. Which route
+runs is fixed by whether one of them was given, not by what `F` turns out to be,
+so passing either for a parameterized `F` is an error rather than silently
+ignored.
 
 `variables` and `parameters` split the symbols of a polynomial `F`, exactly as
 they do in [`System`](@ref); they are ignored when `F` is already a `System`.
@@ -258,8 +263,9 @@ they do in [`System`](@ref); they are ignored when `F` is already a `System`.
 Accepts every [`MonodromyOptions`](@ref) keyword, or a pre-built `options` object.
 There is no `endgame_options`: this route runs no endgame.
 """
+# `SUBSPACE` says which route `solve(F, alg)` takes when given no start data.
 struct Monodromy{
-        MO <: MonodromyOptions, V <: AbstractVector, P <: AbstractVector,
+        MO <: MonodromyOptions, V <: AbstractVector, P <: AbstractVector, SUBSPACE,
     } <: AbstractAlgorithm
     common::CommonOptions
     options::MO
@@ -274,12 +280,30 @@ struct Monodromy{
     warning::Bool
 end
 
+# `dim`/`codim` are the subspace route's only input, so whether one was given is
+# the route.
+_subspace_route(::Nothing, ::Nothing) = Val(false)
+_subspace_route(::Any, ::Any) = Val(true)
+
+_route_dim(::Nothing)::Int = -1
+_route_dim(d::Int)::Int = d
+
+_monodromy_algorithm(
+    ::Val{S}, common::CommonOptions, options::MO, variables::V, parameters::P,
+    dim::Int, codim::Int, coords::SubspaceCoords.T, catch_interrupt::Bool,
+    warning::Bool,
+) where {S, MO <: MonodromyOptions, V <: AbstractVector, P <: AbstractVector} =
+    Monodromy{MO, V, P, S}(
+    common, options, variables, parameters, dim, codim, coords,
+    catch_interrupt, warning,
+)
+
 # The one place monodromy's keyword surface is declared.
 function Monodromy(;
         variables::AbstractVector = Any[],
         parameters::AbstractVector = Any[],
-        dim::Int = -1,
-        codim::Int = -1,
+        dim::Union{Nothing, Int} = nothing,
+        codim::Union{Nothing, Int} = nothing,
         coords::SubspaceCoords.T = SubspaceCoords.AUTO,
         catch_interrupt::Bool = true,
         warning::Bool = true,
@@ -310,31 +334,33 @@ function Monodromy(;
         single_loop_per_start_solution::Bool = false,
     )
     opts = MonodromyOptions(;
-            check_startsolutions,
-            group_actions,
-            loop_finished_callback,
-            parameter_sampler,
-            equivalence_classes,
-            trace_test,
-            trace_test_tol,
-            target_solutions_count,
-            timeout,
-            min_solutions,
-            max_loops_no_progress,
-            reuse_loops,
-            permutations,
-            duplicate_check,
-            certification_max_precision,
-            certification_refine_solution,
-            distance,
-            triangle_inequality,
-            unique_points_atol,
-            unique_points_rtol,
-            single_loop_per_start_solution,
+        check_startsolutions,
+        group_actions,
+        loop_finished_callback,
+        parameter_sampler,
+        equivalence_classes,
+        trace_test,
+        trace_test_tol,
+        target_solutions_count,
+        timeout,
+        min_solutions,
+        max_loops_no_progress,
+        reuse_loops,
+        permutations,
+        duplicate_check,
+        certification_max_precision,
+        certification_refine_solution,
+        distance,
+        triangle_inequality,
+        unique_points_atol,
+        unique_points_rtol,
+        single_loop_per_start_solution,
     )
-    return Monodromy(
+    return _monodromy_algorithm(
+        _subspace_route(dim, codim),
         CommonOptions(tracker_options, _MONODROMY_ENDGAME, seed, show_progress),
-        opts, variables, parameters, dim, codim, coords, catch_interrupt, warning,
+        opts, variables, parameters, _route_dim(dim), _route_dim(codim), coords,
+        catch_interrupt, warning,
     )
 end
 
@@ -344,8 +370,8 @@ function Monodromy(
         options::MonodromyOptions;
         variables::AbstractVector = Any[],
         parameters::AbstractVector = Any[],
-        dim::Int = -1,
-        codim::Int = -1,
+        dim::Union{Nothing, Int} = nothing,
+        codim::Union{Nothing, Int} = nothing,
         coords::SubspaceCoords.T = SubspaceCoords.AUTO,
         catch_interrupt::Bool = true,
         warning::Bool = true,
@@ -353,9 +379,11 @@ function Monodromy(
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         show_progress::Bool = true,
     )
-    return Monodromy(
+    return _monodromy_algorithm(
+        _subspace_route(dim, codim),
         CommonOptions(tracker_options, _MONODROMY_ENDGAME, seed, show_progress),
-        options, variables, parameters, dim, codim, coords, catch_interrupt, warning,
+        options, variables, parameters, _route_dim(dim), _route_dim(codim), coords,
+        catch_interrupt, warning,
     )
 end
 
@@ -365,10 +393,10 @@ end
 _monodromy_system(F::SystemLike, ::Monodromy) = F
 _monodromy_system(F::AbstractVector{<:MP.AbstractPolynomialLike}, alg::Monodromy) =
     System(
-        F;
-        variables = isempty(alg.variables) ? nothing : alg.variables,
-        parameters = isempty(alg.parameters) ? nothing : alg.parameters,
-    )
+    F;
+    variables = isempty(alg.variables) ? nothing : alg.variables,
+    parameters = isempty(alg.parameters) ? nothing : alg.parameters,
+)
 _monodromy_system(f::MP.AbstractPolynomialLike, alg::Monodromy) =
     _monodromy_system([f], alg)
 
@@ -581,6 +609,20 @@ struct MonodromyResult{P, LP} <: AbstractSolutionResult
     # `NaN` when no trace test ran: the test only applies to subspace monodromy.
     trace::Float64
 end
+
+"""
+    ParameterMonodromyResult
+    SubspaceMonodromyResult
+
+The two shapes a [`MonodromyResult`](@ref) comes in: loops based at a parameter
+vector, and loops based at the linear subspace a parameter-free system was
+intersected with.
+"""
+const ParameterMonodromyResult =
+    MonodromyResult{Vector{ComplexF64}, Vector{ComplexF64}}
+
+const SubspaceMonodromyResult =
+    MonodromyResult{LinearSubspace{ComplexF64}, LinearSubspace{ComplexF64}}
 
 function Base.show(io::IO, result::MonodromyResult)
     println(io, "MonodromyResult")
@@ -1180,16 +1222,46 @@ const CertifiedMonodromySolver = MonodromySolver{
     CS <: AbstractCertifiedSolutions,
 }
 
-@unstable function _monodromy_solver_from_builder(
-        worker::MonodromyWorkerState{H, P}, builder::B, n::Int,
+# Run `f` on the group actions the deduplication compares orbits with: none when
+# the options ask for none or switch them off, and a chart-normalizing wrapper
+# when the solutions are projective.
+_with_chart_actions(
+    f::Fn, ::MonodromyOptions{<:Any, Nothing}, ::Vector{ComplexF64}, ::Bool,
+) where {Fn} = f(nothing)
+
+function _with_chart_actions(
+        f::Fn, options::MonodromyOptions, chart::Vector{ComplexF64}, use_chart::Bool,
+    ) where {Fn}
+    options.equivalence_classes || return f(nothing)
+    actions = options.group_actions::GroupActions
+    return use_chart ? f(_ChartActions(chart, actions)) : f(actions)
+end
+
+function _with_monodromy_solver_from_builder(
+        f::Fn, worker::MonodromyWorkerState{H, P}, builder::B, n::Int,
         options::MO, chart::Vector{ComplexF64}, use_chart::Bool,
         # Required, so a new route cannot silently downgrade to the heuristic check.
         certified_solutions::CS,
-    ) where {H, P, B, MO <: MonodromyOptions, CS <: Union{Nothing, AbstractCertifiedSolutions}}
-    group_actions = options.equivalence_classes ? options.group_actions : nothing
-    if group_actions !== nothing && use_chart
-        group_actions = _ChartActions(chart, group_actions)
+    ) where {
+        Fn, H, P, B, MO <: MonodromyOptions,
+        CS <: Union{Nothing, AbstractCertifiedSolutions},
+    }
+    return _with_chart_actions(options, chart, use_chart) do group_actions
+        f(
+            _monodromy_solver_from_builder(
+                worker, builder, n, options, group_actions, certified_solutions,
+            ),
+        )
     end
+end
+
+function _monodromy_solver_from_builder(
+        worker::MonodromyWorkerState{H, P}, builder::B, n::Int, options::MO,
+        group_actions::GA, certified_solutions::CS,
+    ) where {
+        H, P, B, GA, MO <: MonodromyOptions,
+        CS <: Union{Nothing, AbstractCertifiedSolutions},
+    }
     unique_points = UniquePoints(
         n;
         distance = options.distance,
@@ -1315,79 +1387,118 @@ end
     ),
 )
 
-# The square system the certified duplicate check certifies against, in the
-# coordinates the run reports: a homogeneous system is charted, a subspace
-# intersection is sliced.
-_certified_system(F::System, chart::Vector{ComplexF64})::System =
-    isempty(chart) ? F : slice(F, _full_subspace(nvariables(F)); chart = chart)
-_certified_system(
-    F::System, L::LinearSubspace{ComplexF64}, chart::Vector{ComplexF64},
-)::System = _rebuild_sliced(F, L, chart)
-_certified_system(F::SystemLike, ::Vector{ComplexF64}) =
-    _certification_needs_equations(F)
-_certified_system(
-    F::SystemLike, ::LinearSubspace{ComplexF64}, ::Vector{ComplexF64},
-) = _certification_needs_equations(F)
+# Runs `fn` on the square system the certified duplicate check certifies against, in
+# the coordinates the run reports: a homogeneous system is charted, a subspace
+# intersection is sliced. Slicing rebuilds over `ComplexF64` while an unsliced system
+# keeps its own coefficient type.
+with_certified_system(fn::F, G::System, chart::Vector{ComplexF64}) where {F} =
+    isempty(chart) ? fn(G) :
+    fn(slice(G, _full_subspace(nvariables(G)); chart = chart))
+with_certified_system(
+    fn::F, G::System, L::LinearSubspace{ComplexF64}, chart::Vector{ComplexF64},
+) where {F} = fn(_rebuild_sliced(G, L, chart))
+with_certified_system(::F, G::SystemLike, ::Vector{ComplexF64}) where {F} =
+    _certification_needs_equations(G)
+with_certified_system(
+    ::F, G::SystemLike, ::LinearSubspace{ComplexF64}, ::Vector{ComplexF64},
+) where {F} = _certification_needs_equations(G)
 
-# The accumulator the certified duplicate check files into, and `nothing` under
-# `DuplicateCheck.HEURISTIC`. A parameter run passes the parameters it certifies
-# at, a witness-set run the subspace it intersects with; `chart` is empty unless
-# the solutions are projective.
-function _certified_accumulator(
-        F::SystemLike, options::MonodromyOptions, p::Vector{ComplexF64},
+# Run `f` on the accumulator the certified duplicate check files into, or on
+# `nothing` under `DuplicateCheck.HEURISTIC`. A parameter run passes the
+# parameters it certifies at, a witness-set run the subspace it intersects with;
+# `chart` is empty unless the solutions are projective.
+function _with_certified_accumulator(
+        f::Fn, F::SystemLike, options::MonodromyOptions, p::Vector{ComplexF64},
         chart::Vector{ComplexF64},
-    )
-    options.duplicate_check == DuplicateCheck.CERTIFIED || return nothing
-    return monodromy_certified_solutions(
-        _certified_system(F, chart), p, options.certification_max_precision,
-        options.certification_refine_solution,
-    )
+    ) where {Fn}
+    options.duplicate_check == DuplicateCheck.CERTIFIED || return f(nothing)
+    return with_certified_system(F, chart) do G
+        f(
+            monodromy_certified_solutions(
+                G, p, options.certification_max_precision,
+                options.certification_refine_solution,
+            ),
+        )
+    end
 end
 
-function _certified_accumulator(
-        F::SystemLike, options::MonodromyOptions, L::LinearSubspace{ComplexF64},
-        chart::Vector{ComplexF64},
-    )
-    options.duplicate_check == DuplicateCheck.CERTIFIED || return nothing
+function _with_certified_accumulator(
+        f::Fn, F::SystemLike, options::MonodromyOptions,
+        L::LinearSubspace{ComplexF64}, chart::Vector{ComplexF64},
+    ) where {Fn}
+    options.duplicate_check == DuplicateCheck.CERTIFIED || return f(nothing)
     # `monodromy_certified_solutions` is the certification package's entry point
     # and takes `nothing` for a parameter-free system.
-    return monodromy_certified_solutions(
-        _certified_system(F, L, chart), nothing,
-        options.certification_max_precision,
-        options.certification_refine_solution,
-    )
+    return with_certified_system(F, L, chart) do G
+        f(
+            monodromy_certified_solutions(
+                G, nothing,
+                options.certification_max_precision,
+                options.certification_refine_solution,
+            ),
+        )
+    end
 end
 
-@unstable function MonodromySolver(
-        F::SystemLike, p::Vector{ComplexF64};
+"""
+    with_monodromy_solver(f, F, p; options, tracker_options, rng, start_solutions)
+    with_monodromy_solver(f, F, L; options, tracker_options, intrinsic, rng,
+                          start_solutions)
+
+Run `f` on the monodromy solver for `F` at the parameters `p`, or for the
+parameter-free `F` intersected with the linear subspace `L`.
+
+The solver is handed to `f` rather than returned: its homotopy, builder,
+deduplication structure and duplicate-check accumulator are all chosen from the
+system and the options, so each branch builds a differently parameterized solver.
+"""
+function with_monodromy_solver(
+        f::Fn, F::SystemLike, p::Vector{ComplexF64};
         options::MonodromyOptions = MonodromyOptions(),
         tracker_options::TrackerOptions = TrackerOptions(),
         rng::Random.AbstractRNG = Random.default_rng(),
         start_solutions::AbstractVector{<:AbstractVector} = Vector{ComplexF64}[],
-    )
+    ) where {Fn}
+    return is_homogeneous(F) ?
+        _with_chart_parameter_solver(
+            f, F, p, options, tracker_options, rng, start_solutions,
+        ) :
+        _with_affine_parameter_solver(f, F, p, options, tracker_options)
+end
+
+# Homogeneous system: solutions are projective, put the problem on a random
+# affine chart. All workers must share the SAME chart so deduplication is
+# consistent.
+function _with_chart_parameter_solver(
+        f::Fn, F::SystemLike, p::Vector{ComplexF64}, options::MonodromyOptions,
+        tracker_options::TrackerOptions, rng::Random.AbstractRNG,
+        start_solutions::AbstractVector{<:AbstractVector},
+    ) where {Fn}
     n = nvariables(F)
-    if is_homogeneous(F)
-        # Homogeneous system: solutions are projective, put the problem on a
-        # random affine chart. All workers must share the SAME chart so
-        # deduplication is consistent.
-        chart = _conditioned_chart(rng, n, start_solutions)
-        chart_builder = ChartParameterMonodromyBuilder(
-            F, p, chart, n, tracker_options,
-        )
-        worker = _chart_parameter_monodromy_worker(
-            F.evaluator, p, chart, n, tracker_options,
-        )
-        return _monodromy_solver_from_builder(
-            worker, chart_builder, n, options, chart, true,
-            _certified_accumulator(F, options, copy(p), chart),
+    chart = _conditioned_chart(rng, n, start_solutions)
+    builder = ChartParameterMonodromyBuilder(F, p, chart, n, tracker_options)
+    worker = _chart_parameter_monodromy_worker(
+        F.evaluator, p, chart, n, tracker_options,
+    )
+    return _with_certified_accumulator(F, options, copy(p), chart) do cs
+        _with_monodromy_solver_from_builder(
+            f, worker, builder, n, options, chart, true, cs,
         )
     end
+end
+
+function _with_affine_parameter_solver(
+        f::Fn, F::SystemLike, p::Vector{ComplexF64}, options::MonodromyOptions,
+        tracker_options::TrackerOptions,
+    ) where {Fn}
+    n = nvariables(F)
     builder = ParameterMonodromyBuilder(F, p, n, tracker_options)
     worker = _parameter_monodromy_worker(F.evaluator, p, n, tracker_options)
-    return _monodromy_solver_from_builder(
-        worker, builder, n, options, ComplexF64[], false,
-        _certified_accumulator(F, options, copy(p), ComplexF64[]),
-    )
+    return _with_certified_accumulator(F, options, copy(p), ComplexF64[]) do cs
+        _with_monodromy_solver_from_builder(
+            f, worker, builder, n, options, ComplexF64[], false, cs,
+        )
+    end
 end
 
 function _subspace_monodromy_worker(
@@ -1404,67 +1515,87 @@ function _subspace_monodromy_worker(
     )
 end
 
-struct SubspaceMonodromyBuilder{S <: SystemLike} <: AbstractPathBuilder
+# `INTRINSIC` and `PROJECTIVE` select which of three homotopies every worker gets.
+# They are decided once, when the solver is built.
+struct SubspaceMonodromyBuilder{S <: SystemLike, INTRINSIC, PROJECTIVE} <:
+    AbstractPathBuilder
     system::S
     subspace::LinearSubspace{ComplexF64}
     chart::Vector{ComplexF64}
     nvariables::Int
     tracker_options::TrackerOptions
-    use_intrinsic::Bool
-    projective::Bool
     # Every worker tracks the SAME homotopy, so the perturbation is drawn once
     # here rather than per worker.
     gamma::ComplexF64
 end
 
-function (builder::SubspaceMonodromyBuilder)()
+function (builder::SubspaceMonodromyBuilder{S, INTRINSIC, PROJECTIVE})() where {
+        S, INTRINSIC, PROJECTIVE,
+    }
     L = builder.subspace
     sys_eval = _clone_system_evaluator(builder.system)
-    H = if builder.use_intrinsic
-        base_eval = builder.projective ?
+    H = if INTRINSIC
+        base_eval = PROJECTIVE ?
             SystemEvaluator(AffineChartSystem(sys_eval, builder.chart)) : sys_eval
         IntrinsicSubspaceHomotopy(base_eval, L, L; gamma = builder.gamma)
     else
         He = ExtrinsicSubspaceHomotopy(sys_eval, L, L; gamma = builder.gamma)
-        builder.projective ? AffineChartHomotopy(He, builder.chart) : He
+        PROJECTIVE ? AffineChartHomotopy(He, builder.chart) : He
     end
     # For the intrinsic projective case the chart row is buried inside the
     # wrapped AffineChartSystem, so the worker keeps its own reference for
     # normalizing start points (extrinsic reaches it via the homotopy).
-    worker_chart = builder.use_intrinsic && builder.projective ?
-        builder.chart : ComplexF64[]
-    # `H` is one of three homotopy types; the call specializes the state on
-    # the branch that produced it.
+    worker_chart = INTRINSIC && PROJECTIVE ? builder.chart : ComplexF64[]
     return _subspace_monodromy_worker(
         H, builder.tracker_options, L, builder.nvariables, worker_chart,
     )
 end
 
-@unstable function MonodromySolver(
-        F::SystemLike, L::LinearSubspace{ComplexF64};
+function with_monodromy_solver(
+        f::Fn, F::SystemLike, L::LinearSubspace{ComplexF64};
         options::MonodromyOptions = MonodromyOptions(),
         tracker_options::TrackerOptions = TrackerOptions(),
         intrinsic::Bool = _default_intrinsic(L),
         rng::Random.AbstractRNG = Random.default_rng(),
         start_solutions::AbstractVector{<:AbstractVector} = Vector{ComplexF64}[],
-    )
+    ) where {Fn}
     n = nvariables(F)
     projective = is_linear(L) && is_homogeneous(F)
     # All workers must share the SAME chart so deduplication is consistent. It
     # is unused affinely, where the draw only keeps the random stream in step.
     chart = projective ? _conditioned_chart(rng, n, start_solutions) :
         randn(rng, ComplexF64, n)
-    builder = SubspaceMonodromyBuilder(
-        F, L, chart, n, tracker_options, intrinsic, projective,
-        _random_gamma(rng),
-    )
-    worker = builder()
-    return _monodromy_solver_from_builder(
-        worker, builder, n, options, chart, projective,
-        _certified_accumulator(
+    gamma = _random_gamma(rng)
+    return _with_subspace_builder(
+        F, L, chart, n, tracker_options, intrinsic, projective, gamma,
+    ) do builder
+        _with_certified_accumulator(
             F, options, L, projective ? chart : ComplexF64[],
-        ),
-    )
+        ) do cs
+            _with_monodromy_solver_from_builder(
+                f, builder(), builder, n, options, chart, projective, cs,
+            )
+        end
+    end
+end
+
+# `intrinsic` and `projective` decide which of three homotopies every worker gets.
+function _with_subspace_builder(
+        f::Fn, F::SystemLike, L::LinearSubspace{ComplexF64},
+        chart::Vector{ComplexF64}, n::Int, tracker_options::TrackerOptions,
+        intrinsic::Bool, projective::Bool, gamma::ComplexF64,
+    ) where {Fn}
+    S = typeof(F)
+    args = (F, L, chart, n, tracker_options, gamma)
+    return intrinsic ?
+        (
+            projective ? f(SubspaceMonodromyBuilder{S, true, true}(args...)) :
+            f(SubspaceMonodromyBuilder{S, true, false}(args...))
+        ) :
+        (
+            projective ? f(SubspaceMonodromyBuilder{S, false, true}(args...)) :
+            f(SubspaceMonodromyBuilder{S, false, false}(args...))
+        )
 end
 
 function add_loop!(
@@ -1513,6 +1644,14 @@ end
 # contributed. Callers acting on `trace_colinearity` must attribute a failure
 # through this first.
 trace_complete(MS::MonodromySolver)::Bool = MS.trace_dropped == 0
+
+# Whether the trace says anything about the witness set at all: it must have
+# summed at least one path and lost none. `reset_trace!` leaves the augmentation
+# row in place, so an untouched trace matrix has rank one and `trace_colinearity`
+# reads it as perfectly colinear. Without the path count a trace that never ran
+# is indistinguishable from one that passed.
+trace_conclusive(MS::MonodromySolver)::Bool =
+    MS.trace_paths > 0 && trace_complete(MS)
 
 # Colinearity measure of the three accumulated trace columns: σ₃/σ₁ of the
 # singular values. Near zero iff the columns are (affinely) colinear.
@@ -2370,7 +2509,7 @@ and `p` can be omitted and the generated parameters can be obtained with
 With a [`LinearSubspace`](@ref) in place of `p` the system `[F(x); L(x)] = 0` is
 solved instead. If `sols` and `L` are not provided it is necessary to give
 `Monodromy`'s `dim` or `codim`, the expected (co)dimension of a component of
-`V(F)`. See also [`linear_subspace_homotopy`](@ref) for the `intrinsic` option.
+`V(F)`. See also [`with_linear_subspace_homotopy`](@ref) for the `intrinsic` option.
 
 `exec` is [`Serial`](@ref), [`Threaded`](@ref) or [`DistributedExecutor`](@ref).
 Only the loop tracking is handed out; loop generation, deduplication and the
@@ -2431,43 +2570,59 @@ hand to another process as to track.
 * `unique_points_atol` / `unique_points_rtol`: tolerances for the solution
   deduplication.
 """
-# The three start-data shapes, by dispatch.
-# A parameter-free system is intersected with a subspace, a parameterized one is
-# tracked in parameter space, so the result's parameter type follows the input.
-@unstable function solve(
-        F::Union{SystemLike, PolynomialInput},
-        alg::Monodromy,
-        exec::AbstractExecutor = Threaded(),
-    )::MonodromyResult
-    G = _monodromy_system(F, alg)
-    # A tagged stream: `_monodromy_solve!` seeds loop generation from `seed`
-    # directly, so the setup draws here must stay uncorrelated with it.
-    rng = _tagged_rng(_seed(alg), 0x0000_0001)
+# The three start-data shapes, by dispatch. A parameter-free system is intersected
+# with a subspace, a parameterized one is tracked in parameter space, and `alg`'s
+# `SUBSPACE` parameter says which.
+@noinline function _monodromy_start_pair(G, rng::Random.AbstractRNG)
     start_pair = find_start_pair(G; rng = rng)
     start_pair.found || error(
         "Cannot compute a start pair (x, p) using `find_start_pair(F)`." *
             " You need to explicitly pass a start pair.",
     )
+    return start_pair
+end
+
+function solve(
+        F::Union{SystemLike, PolynomialInput},
+        alg::Monodromy{MO, V, P, false},
+        exec::AbstractExecutor = Threaded(),
+    )::ParameterMonodromyResult where {MO, V, P}
+    G = _monodromy_system(F, alg)
+    # A tagged stream: `_monodromy_solve!` seeds loop generation from `seed`
+    # directly, so the setup draws here must stay uncorrelated with it.
+    rng = _tagged_rng(_seed(alg), 0x0000_0001)
+    start_pair = _monodromy_start_pair(G, rng)
+    # The intended (co)dimension is required rather than guessed, so a forgotten
+    # parameter argument is caught instead of silently reinterpreted.
+    is_parameterized(start_pair) || error(
+        "Given system doesn't have any parameters. If you intended to intersect " *
+            "with a linear subspace it is necessary to provide a " *
+            "dimension (`dim`) or codimension (`codim`) of the component of interest.",
+    )
+    return _monodromy_parameters(G, [start_pair.x], start_pair.p, alg, exec, rng)
+end
+
+function solve(
+        F::Union{SystemLike, PolynomialInput},
+        alg::Monodromy{MO, V, P, true},
+        exec::AbstractExecutor = Threaded(),
+    )::SubspaceMonodromyResult where {MO, V, P}
+    G = _monodromy_system(F, alg)
+    rng = _tagged_rng(_seed(alg), 0x0000_0001)
+    start_pair = _monodromy_start_pair(G, rng)
+    is_parameterized(start_pair) && error(
+        "`dim` and `codim` are the expected (co)dimension of a component of a " *
+            "parameter-free system, which this system is not: it has " *
+            "$(nparameters(G)) parameter(s). Drop them to track loops in " *
+            "parameter space, or fix the parameters first with `fix_parameters`.",
+    )
     x = start_pair.x
-    if !is_parameterized(start_pair)
-        # No parameters: intersect with a linear subspace. The intended
-        # (co)dimension is required rather than guessed, so a forgotten
-        # parameter argument is caught instead of silently reinterpreted.
-        (alg.dim < 0 && alg.codim < 0) && error(
-            "Given system doesn't have any parameters. If you intended to intersect " *
-                "with a linear subspace it is necessary to provide a " *
-                "dimension (`dim`) or codimension (`codim`) of the component of interest.",
-        )
-        projective = is_homogeneous(G)
-        codim_c = alg.codim < 0 ? -1 : alg.codim + Int(projective)
-        # NOTE the swap: `dim`/`codim` are COMPONENT dimensions, so the subspace
-        # takes the complementary ones.
-        L = rand_subspace(
-            rng, x; dim = codim_c, codim = alg.dim, affine = !projective,
-        )
-        return _monodromy_subspace(G, [x], L, alg, exec, rng)
-    end
-    return _monodromy_parameters(G, [x], start_pair.p, alg, exec, rng)
+    projective = is_homogeneous(G)
+    codim_c = alg.codim < 0 ? -1 : alg.codim + Int(projective)
+    # NOTE the swap: `dim`/`codim` are COMPONENT dimensions, so the subspace
+    # takes the complementary ones.
+    L = rand_subspace(rng, x; dim = codim_c, codim = alg.dim, affine = !projective)
+    return _monodromy_subspace(G, [x], L, alg, exec, rng)
 end
 
 function solve(
@@ -2523,43 +2678,45 @@ solve(
 function _monodromy_parameters(
         F::SystemLike, S::AbstractVector{<:AbstractVector}, p, alg::Monodromy,
         exec::AbstractExecutor, rng::Random.AbstractRNG,
-    )::MonodromyResult
+    )::ParameterMonodromyResult
     cp = convert(Vector{ComplexF64}, p)
-    MS = MonodromySolver(
+    return with_monodromy_solver(
         F, cp;
         options = alg.options, tracker_options = _tracker_options(alg), rng = rng,
         start_solutions = S,
-    )
-    return _monodromy_solve!(
-        MS, S, cp, _seed(alg), _show_progress(alg), exec,
-        alg.catch_interrupt, alg.warning,
-    )
+    ) do MS
+        _monodromy_solve!(
+            MS, S, cp, _seed(alg), _show_progress(alg), exec,
+            alg.catch_interrupt, alg.warning,
+        )
+    end
 end
 
 function _monodromy_subspace(
         F::SystemLike, S::AbstractVector{<:AbstractVector}, L, alg::Monodromy,
         exec::AbstractExecutor, rng::Random.AbstractRNG,
-    )::MonodromyResult
+    )::SubspaceMonodromyResult
     cp = convert(LinearSubspace{ComplexF64}, L)
-    MS = MonodromySolver(
+    return with_monodromy_solver(
         F, cp;
         options = alg.options, tracker_options = _tracker_options(alg),
         intrinsic = _use_intrinsic(alg.coords, cp),
         rng = rng, start_solutions = S,
-    )
-    mH, nH = size(MS.workers[1].homotopy)
-    mH < nH && throw(
-        ArgumentError(
-            "The homotopy for the subspace intersection is underdetermined " *
-                "($mH equations for $nH unknowns). The provided component dimension " *
-                "(dim = $(alg.dim), codim = $(alg.codim)) is likely overstated for " *
-                "this system.",
-        ),
-    )
-    return _monodromy_solve!(
-        MS, S, cp, _seed(alg), _show_progress(alg), exec,
-        alg.catch_interrupt, alg.warning,
-    )
+    ) do MS
+        mH, nH = size(MS.workers[1].homotopy)
+        mH < nH && throw(
+            ArgumentError(
+                "The homotopy for the subspace intersection is underdetermined " *
+                    "($mH equations for $nH unknowns). The provided component " *
+                    "dimension (dim = $(alg.dim), codim = $(alg.codim)) is likely " *
+                    "overstated for this system.",
+            ),
+        )
+        _monodromy_solve!(
+            MS, S, cp, _seed(alg), _show_progress(alg), exec,
+            alg.catch_interrupt, alg.warning,
+        )
+    end
 end
 
 ## ── verify_solution_completeness ─────────────────────────────────────────────
@@ -2569,21 +2726,27 @@ end
 # Augmented system `[F(x, p + λv); (Σᵢ aᵢxᵢ - 1)λ + t]` used by the trace test.
 # DynamicPolynomials variables are identity distinct, so the fresh variables
 # below cannot collide with user variables of the same name.
-# Builds a `System` from freshly introduced symbolic variables, so it inherits the
-# erased `System` return.
-@unstable function _build_verification_system(
+function _build_verification_system(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         x::AbstractVector, p::AbstractVector, n::Int, m::Int,
-    )::System
-    @polyvar t v[1:m] a[1:n] λ
-    return System(
-        [
-            [MP.subs(f, p => p .+ λ .* v) for f in polys];
-            (sum(a .* x) - 1) * λ + t
-        ];
-        variables = [x; λ],
-        parameters = [t; p; v; a],
     )
+    @polyvar t v[1:m] a[1:n] λ
+    # `@polyvar v[1:m]` hands back a `Vector` with no element type on Julia 1.11,
+    # which loses it for everything built from the array variables.
+    VT = typeof(λ)
+    vs = Vector{VT}(v)
+    as = Vector{VT}(a)
+    # `MP.subs` does not say what it returns, and `System` reads its first
+    # parameter off the element type it is given, so the equations go into a
+    # vector of one declared polynomial type, filled in place: a comprehension
+    # would take its element type from `subs` and lose it.
+    PT = MP.polynomial_type(eltype(polys), Float64)
+    eqs = Vector{PT}(undef, length(polys) + 1)
+    for (i, f) in enumerate(polys)
+        eqs[i] = MP.subs(f, p => p .+ λ .* vs)
+    end
+    eqs[end] = (sum(as .* x) - 1) * λ + t
+    return System(eqs; variables = [x; λ], parameters = [t; p; vs; as])
 end
 
 # `Expression` variables are keyed by name, so the fresh ones are renamed until
@@ -2591,7 +2754,7 @@ end
 function _build_verification_system(
         polys::AbstractVector{Expression},
         x::AbstractVector, p::AbstractVector, n::Int, m::Int,
-    )::System
+    )::System{Expression, Expression}
     taken = Expression[x; p]
     fresh(name)::Expression = (w = unique_variable(name, taken, Expression[]); push!(taken, w); w)
 

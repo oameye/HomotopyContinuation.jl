@@ -1,17 +1,44 @@
 # Setup-layer erasure: `SystemSpec` + `SystemHandle`
 
-Planned, not implemented. Line numbers are from the tree at the time of writing.
+Partly superseded. Line numbers are from the tree at the time of writing.
+
+## Status
+
+The type-stability work took the outcome this document wanted by a shorter route,
+so read the plan below against what is already true:
+
+- `System` carries two parameters, not four. The compile mode is a field and the
+  shape is read off `size`; see `01_decisions.md`, "Shape dispatch sits behind an
+  inference barrier".
+- The caches no longer name the builder, the worker or the excess check:
+  `SolveCache{E}`, `PolyhedralSolveCache{E}`, `WorkerSolveCache{E}`, where `E` is
+  the executor the caller passed. `CommonSolve.solve!`, `_solve_total_degree_threaded`
+  and the `@tasks` loops therefore compile once per executor rather than once per
+  input flavor, compile mode and shape. That is step 5 below, done with a
+  `Base.RefValue{Any}` box rather than a `FunctionWrapper`, because a builder
+  crosses the wire to a distributed worker and a `FunctionWrapper` carries a raw
+  pointer into the process that made it.
+- Step 2's stated goal, "`SolveCache{E,B,C}`'s `B` now collapses to one type per
+  route", is therefore already met, and more than met: `B` is gone.
+
+What the plan still buys, and what remains open: the builders are still
+parameterized on the system type, so a builder and its `clone` still compile per
+input flavor; the route bodies still take `SystemLike`; and step 4's
+precompilation still cannot name a signature without naming a user type.
+`SystemSpec` remains the way to close those.
 
 The API unification (`00_architecture.md`, "The solving API") landed first, so the signature
 list below grew by every new `solve` route: the algorithm and executor slots are the last two
 positional arguments on all of them. That does not change this document's thesis — algorithm
-structs never enter a cache (`SolveCache{E,B,C}` is parameterized by executor, builder and
-excess-checker, never by the algorithm), so their type parameters do not reach the hot loop.
+structs never enter a cache (at the time of writing `SolveCache{E,B,C}` was parameterized by
+executor, builder and excess-checker, never by the algorithm), so their type parameters do
+not reach the hot loop.
 The parameters this document is about are the *builder* and *system* ones, which still do.
 
 ## Why
 
-`System{P, V, M, S}` carries four type parameters. `01_decisions.md` ("System{P, V} type
+`System{P, V, M, S}` carried four type parameters when this was written; it now carries
+`P` and `V`. `01_decisions.md` ("System{P, V} type
 parameters") already records that `P` and `V` "affect only the `polys`, `parameters`,
 `variables` fields", yet they propagate into every route that takes a system, and from
 there into the builders, the caches and the tracking loops.
@@ -25,9 +52,10 @@ threaded four layers deep and discarded at the leaf.
 
 The cost is upward, not downward. `StraightLineBuilder{System{Polynomial{…},PolyVar,…}}`
 and `StraightLineBuilder{System{Expression,Expression,…}}` are different types, so
-`SolveCache{E,B,C}` differs, so `CommonSolve.solve!`, `_solve_total_degree_threaded`, the
-`@tasks` loop and the monodromy worker loops all compile again per input flavor, compile
-mode and shape. `SystemLike = Union{System, CompositionSystem}` is one more leaf on the
+the cache differed, so `CommonSolve.solve!`, `_solve_total_degree_threaded`, the
+`@tasks` loop and the monodromy worker loops all compiled again per input flavor, compile
+mode and shape. Erasing the builder fixed that half; the builder's own body still compiles
+per flavor. `SystemLike = Union{System, CompositionSystem}` is one more leaf on the
 same axis, doubling fifteen route bodies so compositions can reach them.
 
 It also blocks the one TTFX lever this project has measured. `01_decisions.md`, "Tape
@@ -97,7 +125,7 @@ equations, and that is the one remaining type erasure on the input side.
 `SystemSpec`, `clone`. Constructors `SystemSpec(::System)` (one stage, kind from
 `compile_mode`), `SystemSpec(::CompositionSystem)` (one stage per `CompositionStage`),
 `SystemSpec(::_SupportSystem)` (one `SUPPORT` stage). Move the three
-`_clone_system_evaluator(::System{P,V,M,S})` bodies (`worker_state.jl:66-115`) into
+`_clone_system_evaluator(::System)` bodies (`worker_state.jl:66-115`) into
 `clone`, and keep `_clone_system_evaluator` as a one-line shim so nothing breaks yet.
 Store `spec::SystemSpec` as a field on `System` (built at construction from data it already
 holds) and on `CompositionSystem`. Run `make test`.
@@ -107,7 +135,8 @@ holds) and on `CompositionSystem`. Run `make test`.
 (`solve.jl:139, 157, 320`, `slice.jl:178`, `subspace_solve.jl:172, 192, 199`,
 `sweep.jl:226`, `polyhedral.jl:557`) plus the two monodromy builders to pass the spec.
 Same for the direct clone sites at `witness_set.jl:571` and `regeneration.jl:581`.
-`SolveCache{E,B,C}`'s `B` now collapses to one type per route. Run `make test`; check
+`SolveCache`'s builder parameter would collapse to one type per route; it has since been
+erased outright, so this step is now about the builder bodies alone. Run `make test`; check
 `concrete_structs_test.jl` still passes.
 
 **3. Route bodies take `SystemHandle`.** Convert the fifteen `SystemLike` signatures
@@ -126,9 +155,11 @@ instantiation, `_solve_total_degree_serial/_threaded`, and the monodromy worker
 constructors. Keep the existing file's discipline: every target `@noinline`, no signature
 naming a user type.
 
-**5. Optional, decide after measuring.** Erase the builder itself behind
-`FunctionWrapper{TrackingWorkerState, Tuple{}}` so `SolveCache` loses `B` entirely and one
-compiled loop serves every route sharing a worker-state type. One indirect call per worker.
+**5. Done.** The builder is erased behind `PathBuilder{TrackingWorkerState}`, so
+`SolveCache` lost `B` entirely and one compiled loop serves every route sharing a
+worker-state type. One dynamic call per worker, which is once per task. The box holds the
+builder itself rather than a `FunctionWrapper`, so it still serializes to a distributed
+worker.
 
 **6. Optional rename.** `AbstractSystem` -> `AbstractSystemKernel` (six subtypes) and
 `_ComposedSystem` -> `_CompositionKernel`, so the kernel interface (what gets erased into a

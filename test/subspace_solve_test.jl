@@ -9,6 +9,10 @@ using DynamicPolynomials: @polyvar
 using CommonSolve: CommonSolve
 using LinearAlgebra: norm
 
+# The builder/worker a cache erased.
+_inner_builder(b) = b._inner[]
+_inner_worker(ws) = ws._inner[]
+
 subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E.A * x - E.b))
 
 @testset "Subspace to subspace solve" begin
@@ -41,20 +45,20 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         # dim 1 == codim 1 → intrinsic by default
         L = rand_subspace(2; codim = 1)
         cache = CommonSolve.init(F, [[1.0 + 0im, 2.0 + 0im]], L, L, Serial())
-        @test cache.worker isa IntrinsicWorkerState
-        @test cache.worker.homotopy isa IntrinsicSubspaceHomotopy
+        @test _inner_worker(cache.worker) isa IntrinsicWorkerState
+        @test _inner_worker(cache.worker).homotopy isa IntrinsicSubspaceHomotopy
 
         # dim 2 > codim 1 → extrinsic by default
         G = System([x^2 + y^2 - 5, x * y + 1]; variables = [x, y, z])
         K = rand_subspace(3; dim = 2)
         starts = [[1.0 + 0im, 2.0 + 0im, 3.0 + 0im]]
         cache2 = CommonSolve.init(G, starts, K, K, Serial())
-        @test cache2.worker isa AmbientWorkerState{ExtrinsicSubspaceHomotopy}
+        @test _inner_worker(cache2.worker) isa AmbientWorkerState{ExtrinsicSubspaceHomotopy}
 
         forced = CommonSolve.init(
             G, starts, K, K, Continuation(; coords = SubspaceCoords.INTRINSIC), Serial(),
         )
-        @test forced.worker isa IntrinsicWorkerState
+        @test _inner_worker(forced.worker) isa IntrinsicWorkerState
     end
 
     @testset "two equations in three variables" begin
@@ -98,7 +102,7 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         cache = CommonSolve.init(
             F, S, L₁, L₂, Continuation(; coords = SubspaceCoords.EXTRINSIC), Serial(),
         )
-        @test cache.worker isa
+        @test _inner_worker(cache.worker) isa
             AmbientWorkerState{AffineChartHomotopy{ExtrinsicSubspaceHomotopy}}
     end
 

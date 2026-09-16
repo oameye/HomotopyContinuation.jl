@@ -337,7 +337,7 @@ using HomotopyContinuation: EndgameTracker, EndgameOptions, EndgameCode, PathRes
 end
 
 using HomotopyContinuation: AffineChartHomotopy, AffineChartSystem, on_affine_chart,
-    on_chart!, linear_subspace_homotopy, SystemEvaluator
+    on_chart!, with_linear_subspace_homotopy, SystemEvaluator
 
 @testset "affine chart" begin
     Random.seed!(14)
@@ -347,28 +347,34 @@ using HomotopyContinuation: AffineChartHomotopy, AffineChartSystem, on_affine_ch
     Fh = System([w[1]^2 + w[2]^2 - w[3]^2]; variables = w)
     V = rand_subspace(3; dim = 2, affine = false)
     W = rand_subspace(3; dim = 2, affine = false)
-    H = linear_subspace_homotopy(Fh, V, W)
-    @test H isa AffineChartHomotopy
+    with_linear_subspace_homotopy(Fh, V, W) do H
+        @test H isa AffineChartHomotopy
 
-    x = randn(ComplexF64, 3)
-    on_chart!(x, H)
-    # after normalization the chart row is satisfied: v'x == 1
-    @test isapprox(sum(H.chart .* x), 1.0 + 0im; atol = 1.0e-12)
+        x = randn(ComplexF64, 3)
+        on_chart!(x, H)
+        # after normalization the chart row is satisfied: v'x == 1
+        @test isapprox(sum(H.chart .* x), 1.0 + 0im; atol = 1.0e-12)
+        return nothing
+    end
 
     # intrinsic + homogeneous: chart row goes on the system instead
     Vp = rand_subspace(3; dim = 1, affine = false)
     Wp = rand_subspace(3; dim = 1, affine = false)
-    Hp = linear_subspace_homotopy(Fh, Vp, Wp)
-    @test Hp isa IntrinsicSubspaceHomotopy
-    @test size(Hp) == (2, 1)   # system row + chart row, one intrinsic coordinate
+    with_linear_subspace_homotopy(Fh, Vp, Wp) do Hp
+        @test Hp isa IntrinsicSubspaceHomotopy
+        # system row + chart row, one intrinsic coordinate
+        @test size(Hp) == (2, 1)
+        return nothing
+    end
 end
 
-@testset "linear_subspace_homotopy dispatch" begin
+@testset "with_linear_subspace_homotopy dispatch" begin
     Random.seed!(15)
     V = rand_subspace(3; dim = 1)
     W = rand_subspace(3; dim = 1)
-    H = linear_subspace_homotopy(quadric, V, W)          # affine system
-    @test H isa IntrinsicSubspaceHomotopy                # dim 1 <= codim 2
-    He = linear_subspace_homotopy(quadric, V, W; intrinsic = false)
-    @test He isa ExtrinsicSubspaceHomotopy
+    name_of(args...; kwargs...) =
+        with_linear_subspace_homotopy(nameof ∘ typeof, args...; kwargs...)
+    # dim 1 <= codim 2, so the affine system takes the intrinsic branch
+    @test name_of(quadric, V, W) === :IntrinsicSubspaceHomotopy
+    @test name_of(quadric, V, W; intrinsic = false) === :ExtrinsicSubspaceHomotopy
 end

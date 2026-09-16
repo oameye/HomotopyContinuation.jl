@@ -277,40 +277,45 @@ target_parameters!(
 )::Nothing = target_parameters!(H.homotopy, q)
 
 """
-    linear_subspace_homotopy(F::System, V::LinearSubspace, W::LinearSubspace;
-                             intrinsic, gamma = cis(2π * rand()))
+    with_linear_subspace_homotopy(f, F::System, V::LinearSubspace, W::LinearSubspace;
+                                  intrinsic, gamma = cis(2π * rand()))
 
-Constructs an [`IntrinsicSubspaceHomotopy`](@ref) (if `dim(V) <= codim(V)`, or
-forced via `intrinsic = true`) or an [`ExtrinsicSubspaceHomotopy`](@ref)
-(if `dim(V) > codim(V)`, or forced via `intrinsic = false`). For a homogeneous
-system with linear subspaces, the problem is put on a random affine chart
-(intrinsic: chart row appended to the system; extrinsic: homotopy wrapped in
-[`AffineChartHomotopy`](@ref)).
+Run `f` on the homotopy that moves `V` to `W`: an
+[`IntrinsicSubspaceHomotopy`](@ref) (if `dim(V) <= codim(V)`, or forced via
+`intrinsic = true`) or an [`ExtrinsicSubspaceHomotopy`](@ref) (if
+`dim(V) > codim(V)`, or forced via `intrinsic = false`). For a homogeneous
+system with linear subspaces the problem is put on a random affine chart: the
+intrinsic route appends the chart row to the system, the extrinsic route wraps
+the homotopy in an [`AffineChartHomotopy`](@ref), which is what makes
+[`solve`](@ref) place the start points on that chart.
+
+The homotopy is handed to `f` rather than returned, so that `f` receives it as
+the concrete type the branch built.
+
+```julia
+with_linear_subspace_homotopy(F, V, W) do H
+    solve(H, starts)
+end
+```
 """
-# Picks the intrinsic or extrinsic homotopy from a runtime flag; the two have
-# different concrete types by design.
-@unstable function linear_subspace_homotopy(
+function with_linear_subspace_homotopy(
+        f::Fn,
         F::System,
         V::LinearSubspace,
         W::LinearSubspace;
         intrinsic::Bool = _default_intrinsic(V),
         gamma::ComplexF64 = cis(2 * pi * rand()),
-    )
+    ) where {Fn}
     projective = is_linear(V) && is_linear(W) && is_homogeneous(F)
-    return if intrinsic
-        if projective
-            IntrinsicSubspaceHomotopy(
-                SystemEvaluator(on_affine_chart(F)), V, W; gamma = gamma,
-            )
-        else
-            IntrinsicSubspaceHomotopy(F.evaluator, V, W; gamma = gamma)
-        end
-    else
-        H = ExtrinsicSubspaceHomotopy(F.evaluator, V, W; gamma = gamma)
-        if projective
-            on_affine_chart(H)
-        else
-            H
-        end
+    if intrinsic
+        return projective ?
+            f(
+                IntrinsicSubspaceHomotopy(
+                    SystemEvaluator(on_affine_chart(F)), V, W; gamma = gamma,
+                ),
+            ) :
+            f(IntrinsicSubspaceHomotopy(F.evaluator, V, W; gamma = gamma))
     end
+    H = ExtrinsicSubspaceHomotopy(F.evaluator, V, W; gamma = gamma)
+    return projective ? f(on_affine_chart(H)) : f(H)
 end

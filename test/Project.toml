@@ -24,7 +24,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 [compat]
 AllocCheck = "0.1, 0.2"
 Aqua = "0.8"
-DispatchDoctor = "0.4.28"
+DispatchDoctor = "0.4.29"
 ExplicitImports = "1"
 JET = "0.9, 0.10, 0.11"
 Preferences = "1"

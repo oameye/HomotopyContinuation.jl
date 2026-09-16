@@ -142,26 +142,27 @@ end
 @testset "evaluate on expressions" begin
     @var x y
     @test evaluate([x^2, x * y], [x, y] => [2, 3]) == [4.0, 6.0]
-    @test evaluate([x^2, x * y], [x, y] => [2, 3]) isa Vector{Float64}
+    @test evaluate([x^2, x * y], [x, y] => [2, 3]) isa Vector{ComplexF64}
     @test evaluate(x^2 + y, Dict(x => 2, y => 3)) == 7.0
     @test evaluate(x^2, x => 1 + 2im) isa ComplexF64
     @test (x^2)(x => 3) == 9.0
     @test evaluate([x y; x^2 y^2], [x, y] => [2, 3]) == [2.0 3.0; 4.0 9.0]
     @test_throws ArgumentError evaluate(x + y, x => 1)
 
-    # A real-coefficient system evaluates to real numbers.
+    # Complex even for real coefficients and real inputs: the element type is fixed
+    # by the signature, not by whether the values come out real.
     constraints = [
         -0.2 * (-4.2467 * (0.1 + 1.0 * x^2) + 1.0 * y^2),
         -0.222 * (-4.49 * (0.5 + 1.0 * x^2) + 1.0 * y^2),
     ]
-    @test evaluate(constraints, Dict(x => 0.25, y => 0.75)) isa Vector{Float64}
+    @test evaluate(constraints, Dict(x => 0.25, y => 0.75)) isa Vector{ComplexF64}
 end
 
 @testset "evaluate and jacobian on systems" begin
     @var x y a
     F = System([x^2 + y, x * y]; variables = [x, y])
     @test F([2, 3]) == [7.0, 6.0]
-    @test F([2, 3]) isa Vector{Float64}
+    @test F([2, 3]) isa Vector{ComplexF64}
     @test jacobian(F, [2, 3]) == [4.0 1.0; 3.0 2.0]
     @test evaluate(F, [2, 3]) == F([2, 3])
     @test F([2im, 3]) isa Vector{ComplexF64}
@@ -178,10 +179,10 @@ end
     C = compose(G, F)
     @test C([2, 3]) == [13.0]
 
-    @testset "issue #511: a float system evaluates real" begin
+    @testset "issue #511: a float system evaluates" begin
         @var z[1:1]
         R = System(1.0 * z .^ 2; variables = z)
-        @test R([2]) isa Vector{Float64}
+        @test R([2]) isa Vector{ComplexF64}
         @test R([2]) == [4.0]
     end
 end

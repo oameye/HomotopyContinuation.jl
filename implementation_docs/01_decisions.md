@@ -158,7 +158,7 @@ Consequences worth knowing before adding a route:
 - **A route that must both record `seed` verbatim and seed a sub-computation with it** uses `_tagged_rng(seed, tag)`, whose seed *vector* cannot collide with `MersenneTwister(seed)`'s. `Monodromy` needs this: its result records the user's seed, while its setup draws (start pair, chart) must not share the stream its loop generation derives from the same seed.
 - **`MersenneTwister` is not thread-safe**, so all draws from one stream must be on one task. Where a draw sits inside a threaded region (`ReuseLoops.RANDOM` in the threaded monodromy worker) each task gets its own stream derived from the seed. Draws that only *look* threaded are fine when they precede the tasks: `membership` and the u-homotopy intersection both pre-draw in the driver, which is also what makes them bit-identical across threading modes.
 - **A homotopy constructor's `gamma` default draws from the global RNG**, so a seeded route must pass `gamma` explicitly. Every worker of one solver must also get the *same* gamma, since they track the same homotopy, so it is drawn once and stored (`SubspaceMonodromyBuilder.gamma`) rather than defaulted per worker.
-- **`rand`/`randn` with no result to reproduce takes an `rng` instead of a seed**, defaulting to `Random.default_rng()` the way `rand` itself does: `LA.rank`, `corank`, `find_start_pair`, `rand_subspace`, the `MonodromySolver` constructors, and the chart/gamma defaults of the homotopy constructors.
+- **`rand`/`randn` with no result to reproduce takes an `rng` instead of a seed**, defaulting to `Random.default_rng()` the way `rand` itself does: `LA.rank`, `corank`, `find_start_pair`, `rand_subspace`, `with_monodromy_solver`, and the chart/gamma defaults of the homotopy constructors.
 
 Polyhedral init passes a `_lifting_sampler` closure to `MixedSubdivisions.fine_mixed_cells`.
 
@@ -272,7 +272,7 @@ Binding costs a second FunctionWrapper hop on every kernel call, measured agains
 | `taylor!` K=2 | +16.3% |
 | `taylor!` K=3 | +11.5% |
 
-End to end that is 3.8% of a 729-path solve (237.5 ms against 228.9 ms), against a one-off CSE pass of 0.8 ms (32-path system) to 1.9 ms (729-path system). Break-even is around 40 paths, so binding wins only where a solve costs 10 ms and loses on everything larger. An earlier version resolved the values inside `init` and chose the representation there, which forked the cache type into `Union{SolveCache{…StraightLineBuilder{System}…}, SolveCache{…StraightLineBuilder{FixedParameterSystem}…}}` and compiled `solve!` and the tracking pipeline behind it twice per route. Deciding at `fix_parameters` instead leaves each route with one cache type.
+End to end that is 3.8% of a 729-path solve (237.5 ms against 228.9 ms), against a one-off CSE pass of 0.8 ms (32-path system) to 1.9 ms (729-path system). Break-even is around 40 paths, so binding wins only where a solve costs 10 ms and loses on everything larger. An earlier version resolved the values inside `init` and chose the representation there, which forked the cache type into `Union{SolveCache{…StraightLineBuilder{System}…}, SolveCache{…StraightLineBuilder{FixedParameterSystem}…}}` and compiled `solve!` and the tracking pipeline behind it twice per route. Deciding at `fix_parameters` instead leaves each route with one cache type. The cache no longer names its builder, so that particular fork is gone; the decision stands on the measurements above.
 
 A `CompositionSystem` binds, because it has no equations to substitute into and rebuilding one as a `System` costs 83 s on the symmetroid composition against ~0.1 s to wrap. It pays the hop knowingly.
 
@@ -322,11 +322,11 @@ That drops `LA.qrfactUnblocked!` and its callees from every route (the package's
 
 ### Shape dispatch sits behind an inference barrier
 
-`System(...)` is declared to return the unparameterized `System`, which is what keeps the three compile-mode builds from all being inferred. The side effect: `S <: SystemShape` is invisible to callers, so `system_shape(F)` union-split inside `init` and the square-up path (`_square_up`, `ExcessSolutionChecker`, `_randomize_support`, `_randomized_evaluator`) was inferred and partly codegen'd for square input that never runs it.
+The shape is a comparison between the equation count and the variable count, so it is decided by runtime data and is not a type parameter of `System`. `with_system_shape(f, F)` branches into a concrete call per shape rather than returning a shape value, so the square-up path (`_square_up`, `ExcessSolutionChecker`, `_randomize_support`, `_randomized_evaluator`) is reachable only from the arm that needs it, and a square input never codegens it.
 
 `init` picks the shaped initializer through `Base.inferencebarrier`, so its body specializes on the concrete `System` and shape dispatch resolves statically. The square-up subtree goes from 1009 CodeInstances (polyhedral) and 222 (total degree) to zero. The same pass fused `_variable_degrees` and `_is_homogeneous`, whose term walks differed only in max-versus-all-equal, so the generic MultivariatePolynomials machinery compiles once.
 
-Median first call over 4 interleaved pairs: `total_degree_interpreted_serial` 9.486s to 9.230s, `polyhedral_interpreted_serial` 14.115s to 13.625s, `witness_set_build` 15.969s to 15.794s. Cost: one dynamic dispatch per `init`.
+Median first call over 4 interleaved pairs: `total_degree_interpreted_serial` 9.486s to 9.230s, `polyhedral_interpreted_serial` 14.115s to 13.625s, `witness_set_build` 15.969s to 15.794s. Cost: one dynamic dispatch per `init`. The barrier costs the caller nothing now that every route ends in a `SolveCache{E}`: the return type is the same whichever way the branch goes, so `init` is inferable through it.
 
 ### Non-polynomial unary interpreter variants are retained (DECIDED)
 

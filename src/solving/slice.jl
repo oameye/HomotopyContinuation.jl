@@ -65,9 +65,9 @@ G = slice(F, L)   # square system with the two linear equations appended
 ```
 """
 function slice(
-        F::System{P, V, M}, L::LinearSubspace;
+        F::System, L::LinearSubspace;
         chart::AbstractVector = [],
-    )::System where {P, V, M}
+    )
     ambient_dim(L) == nvariables(F) || throw(
         ArgumentError(
             "The subspace lives in dimension $(ambient_dim(L)), but the system " *
@@ -76,7 +76,7 @@ function slice(
     )
     return _sliced_system(
         polynomials(F), collect(variables(F)), L;
-        chart = chart, params = collect(parameters(F)), compile = M,
+        chart = chart, params = collect(parameters(F)), compile = F.compile_mode,
     )
 end
 
@@ -116,10 +116,10 @@ end
 # and tape construction entirely. An under- or overdetermined slice falls back to
 # rebuilding the polynomial system, so the shape check and the square-up
 # machinery (excess-solution checker) apply unchanged.
-@unstable function _init_sliced_total_degree(
+function _init_sliced_total_degree(
         G::System, L::LinearSubspace, chart::Vector{ComplexF64},
-        alg::TotalDegree, exec::AbstractExecutor,
-    )
+        alg::TotalDegree, exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
     # The square branch below reads `G.degrees` directly, so guard first: a
     # degree of -1 would size the start-solution array negatively.
     _check_polynomial(G, "`TotalDegree`")
@@ -136,25 +136,25 @@ end
         degs, G, subspace, chart, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, total_degree_start_solutions(degs), _seed(alg), nothing,
-        _show_progress(alg), early_stop_callback(alg),
+        exec, builder, total_degree_start_solutions(degs), _seed(alg),
+        ExcessCheckers(), _show_progress(alg), early_stop_callback(alg),
     )
 end
 
-# Sliced route setup; erased like the other `init` methods.
-@unstable function CommonSolve.init(
+function CommonSolve.init(
         F::System, L::LinearSubspace, alg::TotalDegree,
-        exec::AbstractExecutor = Threaded(),
-    )
+        exec::E = Threaded(),
+    )::SolveCache{E} where {E <: AbstractExecutor}
     G, chart = _sliced_solve_setup(F, L, _seed(alg))
     return _init_sliced_total_degree(G, L, chart, alg, exec)
 end
 
-CommonSolve.init(
-    F::System, L::LinearSubspace, alg::Polyhedral,
-    exec::AbstractExecutor = Threaded(),
-)::PolyhedralSolveCache =
-    CommonSolve.init(_sliced_solve_system(F, L, _seed(alg)), alg, exec)
+function CommonSolve.init(
+        F::System, L::LinearSubspace, alg::Polyhedral,
+        exec::E = Threaded(),
+    )::PolyhedralSolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(_sliced_solve_system(F, L, _seed(alg)), alg, exec)
+end
 
 """
     solve(F::System, L::LinearSubspace, alg = TotalDegree(), exec = Threaded())

@@ -70,19 +70,7 @@ using Random: seed!
         @test !isempty(res)
     end
 
-    @testset "flatten" begin
-        res = solve(
-            F,
-            S₀,
-            p₀,
-            params,
-            Sweep(;
-                transform_result = (r, p) -> real_solutions(r), flatten = true,
-                show_progress = false,
-            ),
-            Serial(),
-        )
-        @test res isa Vector{Vector{Float64}}
+    @testset "flatten_results" begin
         nested = solve(
             F,
             S₀,
@@ -91,11 +79,14 @@ using Random: seed!
             Sweep(; transform_result = (r, p) -> real_solutions(r), show_progress = false),
             Serial(),
         )
+        res = flatten_results(nested)
+        @test res isa Vector{Vector{Float64}}
         @test length(res) == sum(length, nested)
     end
 
-    @testset "flatten rejects non-array entries" begin
-        @test_throws ArgumentError solve(F, S₀, p₀, params, Sweep(; flatten = true, show_progress = false), Serial())
+    @testset "flatten_results rejects non-array entries" begin
+        nested = solve(F, S₀, p₀, params, Sweep(; show_progress = false), Serial())
+        @test_throws ArgumentError flatten_results(nested)
     end
 
     @testset "transform_parameters" begin
@@ -151,11 +142,11 @@ using Random: seed!
             F, S₀, params[1], Serial(), p₀, UInt32(1),
             TrackerOptions(), EndgameOptions(), false,
         )
-        H = cache.worker.homotopy
+        H = cache.worker._inner[].homotopy
         @test H isa ParameterHomotopy
         HomotopyContinuation._retarget!(cache.worker, ComplexF64.(params[2]))
         @test Vector(H.target_p) ≈ ComplexF64.(params[2])
-        @test cache.worker.homotopy === H
+        @test cache.worker._inner[].homotopy === H
     end
 
     @testset "targets of the wrong length are rejected" begin
@@ -273,17 +264,18 @@ using Random: seed!
         end
     end
 
-    @testset "target subspaces, flatten" begin
-        res = solve(
-            f,
-            S,
-            L₀,
-            subspaces,
-            Sweep(;
-                transform_result = (r, L) -> solutions(r), flatten = true,
-                show_progress = false,
+    @testset "target subspaces, flatten_results" begin
+        res = flatten_results(
+            solve(
+                f,
+                S,
+                L₀,
+                subspaces,
+                Sweep(;
+                    transform_result = (r, L) -> solutions(r), show_progress = false,
+                ),
+                Serial(),
             ),
-            Serial(),
         )
         @test res isa Vector{Vector{ComplexF64}}
         @test length(res) == 2 * length(subspaces)

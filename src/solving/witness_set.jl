@@ -246,7 +246,7 @@ function _witness_init(
     return [solution(pr) for pr in results(res; only_nonsingular = true)]
 end
 
-@unstable _init_witness_slice(
+_init_witness_slice(
     F::System, L::LinearSubspace, chart::Vector{ComplexF64},
     solver::TotalDegree, exec::AbstractExecutor,
 ) = _init_sliced_total_degree(F, L, chart, solver, exec)
@@ -418,8 +418,8 @@ end
 Perform a trace test to verify whether the witness set `W` is complete. Returns
 the (normalized) trace, which is theoretically `0` for a complete witness set.
 Due to floating-point arithmetic the value is small but nonzero and must be
-compared against a tolerance. Returns `nothing` if a path-tracking failure
-prevented the test.
+compared against a tolerance. Returns `NaN` if a path-tracking failure prevented
+the test.
 
 Every random choice descends from `seed`, so passing the same `seed` reproduces
 the same trace regardless of the state of the global random number generator.
@@ -431,11 +431,11 @@ function trace_test(
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-    )
+    )::Float64
     L₀ = W.L
     F = W.F
     S₀ = W.R
-    isempty(S₀) && return nothing
+    isempty(S₀) && return NaN
     rng = Random.MersenneTwister(seed)
 
     # In the projective setting we fix a single affine chart `c` and place all
@@ -466,13 +466,13 @@ function trace_test(
         projective = W.projective, chart = chart,
         tracker_options = tracker_options, endgame_options = endgame_options,
     )
-    length(R₁) == degree(W) || return nothing
+    length(R₁) == degree(W) || return NaN
     R₋₁ = _move_witness_points(
         F, S₀, L₀, L₋₁, rng;
         projective = W.projective, chart = chart,
         tracker_options = tracker_options, endgame_options = endgame_options,
     )
-    length(R₋₁) == degree(W) || return nothing
+    length(R₋₁) == degree(W) || return NaN
 
     s₁ = sum(R₁)
     s₋₁ = sum(R₋₁)

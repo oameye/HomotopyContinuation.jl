@@ -70,18 +70,19 @@ solve(
     exec::AbstractExecutor,
 )::Result = solve(G, F, starts, Continuation(), exec)
 
-CommonSolve.init(
-    G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
-    exec::AbstractExecutor,
-)::SolveCache = CommonSolve.init(G, F, starts, Continuation(), exec)
+function CommonSolve.init(
+        G::CloneableSystem, F::CloneableSystem, starts::StartsLike, exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(G, F, starts, Continuation(), exec)
+end
 
 function CommonSolve.init(
         G::CloneableSystem,
         F::CloneableSystem,
         starts::StartsLike,
         alg::Continuation = Continuation(),
-        exec::AbstractExecutor = Threaded(),
-    )::SolveCache
+        exec::E = Threaded(),
+    )::SolveCache{E} where {E <: AbstractExecutor}
     _check_start_target(G, F)
 
     seed = _seed(alg)
@@ -97,7 +98,7 @@ function CommonSolve.init(
         G, F, chart, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, points, seed, nothing, _show_progress(alg),
+        exec, builder, points, seed, ExcessCheckers(), _show_progress(alg),
         early_stop_callback(alg),
     )
 end
@@ -121,9 +122,9 @@ function _place_on_chart!(
 end
 
 function _homotopy_cache(
-        exec::AbstractExecutor, builder, H::AbstractHomotopy, starts,
+        exec::E, builder::AbstractPathBuilder, H::AbstractHomotopy, starts,
         alg::Continuation,
-    )::SolveCache
+    )::SolveCache{E} where {E <: AbstractExecutor}
     m, n = size(H)
     m >= n || throw(
         ArgumentError(
@@ -136,7 +137,7 @@ function _homotopy_cache(
     _check_start_length(points, n)
     _place_on_chart!(points, H)
     return _solve_cache(
-        exec, builder, points, _seed(alg), nothing, _show_progress(alg),
+        exec, builder, points, _seed(alg), ExcessCheckers(), _show_progress(alg),
         early_stop_callback(alg),
     )
 end
@@ -170,16 +171,18 @@ solve(
     H::AbstractHomotopy, starts::StartsLike, exec::AbstractExecutor,
 )::Result = solve(H, starts, Continuation(), exec)
 
-CommonSolve.init(
-    H::AbstractHomotopy, starts::StartsLike, exec::AbstractExecutor,
-)::SolveCache = CommonSolve.init(H, starts, Continuation(), exec)
+function CommonSolve.init(
+        H::AbstractHomotopy, starts::StartsLike, exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(H, starts, Continuation(), exec)
+end
 
 function CommonSolve.init(
         H::AbstractHomotopy,
         starts::StartsLike,
         alg::Continuation = Continuation(),
-        exec::AbstractExecutor = Serial(),
-    )::SolveCache
+        exec::E = Serial(),
+    )::SolveCache{E} where {E <: AbstractExecutor}
     builder = _homotopy_builder(
         exec, H, _tracker_options(alg), _endgame_options(alg),
     )
@@ -220,16 +223,18 @@ solve(
     build_homotopy::Function, starts::StartsLike, exec::AbstractExecutor,
 )::Result = solve(build_homotopy, starts, Continuation(), exec)
 
-CommonSolve.init(
-    build_homotopy::Function, starts::StartsLike, exec::AbstractExecutor,
-)::SolveCache = CommonSolve.init(build_homotopy, starts, Continuation(), exec)
+function CommonSolve.init(
+        build_homotopy::Function, starts::StartsLike, exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(build_homotopy, starts, Continuation(), exec)
+end
 
 function CommonSolve.init(
         build_homotopy::Function,
         starts::StartsLike,
         alg::Continuation,
-        exec::AbstractExecutor,
-    )::SolveCache
+        exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
     H = build_homotopy()
     H isa AbstractHomotopy || throw(
         ArgumentError(

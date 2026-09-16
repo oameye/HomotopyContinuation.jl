@@ -107,6 +107,8 @@ Before merging any PR:
 4. no `Any`-typed fields in structs
 5. every `mutable struct` has documented justification and `const` on fixed fields
 6. for package-identity changes, Aqua/import/extension loading must exercise the real production module, not only a compatibility alias
+7. the package-wide `@stable` contract holds. `make test` checks it: `test/LocalPreferences.toml` sets `dispatch_doctor_mode = "error"`, so an instability throws a `TypeInstabilityError` and fails the file. This only works because `DispatchDoctor.JULIA_OK` is true on the toolchain in use; it was false on 1.13 until DispatchDoctor 0.4.29 (upstream issue #126), which is why compat requires `0.4.29` and must not be relaxed. A run that resolves an older DispatchDoctor compiles `@stable` to nothing and the gate passes vacuously.
+   To enumerate every unstable site instead of stopping at the first, run the suite against an environment with `dispatch_doctor_mode = "warn"` and grep for `Instability detected`. Note that instrumenting `distributed_test.jl` that way needs the preference on each worker, so a warn sweep that skips it does not cover the extension's code paths; the error-mode `make test` does.
 
 ## Coding rules
 
@@ -124,7 +126,10 @@ Before merging any PR:
 - **Enums over Symbols.** Use `EnumX.@enumx` for return codes and state-machine states.
 - **`FSVec{T}` / `FSMat{T}` for pre-allocated buffers.** Never use `FixedSizeVector{T}` / `FixedSizeMatrix{T}` directly as struct-field types because their memory parameter is free.
 - **`AbstractVector` / `AbstractMatrix` only where truly needed.** Use them in public extension contracts; prefer concrete types internally.
-- **Moshi `@data` for tagged unions.** Use `variant_storage(expr)` for pattern dispatch.
+- **Moshi `@data` for tagged unions.** Use `Moshi.Match.@match` to bind a variant's fields, and `isa_variant` for a single-variant test. Never name the storage union: `variant_storage(expr)` returns it by construction, and holding it makes the caller type unstable.
+- **Continuations for a type chosen from runtime data.** Branch into a concrete call rather than returning the value: `with_system_shape`, `with_polyhedral_system`, `with_linear_subspace_homotopy`, `with_monodromy_solver`. Every arm must agree on what `f` returns, so a caller passing `identity` defeats the pattern and a test must run its assertions inside the continuation.
+- **Erase a choice a struct only carries; do not lift it into a parameter.** `PathBuilder{W}` and `PathWorker` hold the chosen builder/worker in a `Base.RefValue{Any}` and assert the type at the call site, as `SystemEvaluator` does. A `FunctionWrapper` is the tighter erasure and belongs on a per-path call, but it carries a raw pointer into the process that made it, so anything crossing the wire to a distributed worker uses the box.
+- **An empty collection, not `Union{Nothing,T}`, for "there is none".** `ExcessCheckers`, an empty `chart`, an empty `perm`.
 
 ### Performance
 

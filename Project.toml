@@ -32,7 +32,7 @@ SemialgebraicSetsExt = "SemialgebraicSets"
 
 [compat]
 CommonSolve = "0.2.6"
-DispatchDoctor = "0.4.28"
+DispatchDoctor = "0.4.29"
 Distributed = "1"
 DynamicPolynomials = "0.6"
 EnumX = "1"

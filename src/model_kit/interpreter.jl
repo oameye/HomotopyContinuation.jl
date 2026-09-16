@@ -281,10 +281,6 @@ end
 
 ## Inner execution loop — variant-based dispatch
 
-# Tagged-union accessor; see `sexpr_storage`. `execute_instructions!` splits the
-# union into one concrete branch per opcode, so the interpreter loop stays monomorphic.
-@unstable @inline exec_instruction_storage(instr::ExecInstructionT) = variant_storage(instr)
-
 function _compile_exec_instruction_call(variant::Symbol, op::OpType.T)::Expr
     ctor = Expr(:., :ExecInstruction, QuoteNode(variant))
     args = op == OpType.OP_STOP ? Any[:out] : Any[Symbol(:arg_, k) for k in 1:arity(op)]
@@ -325,62 +321,56 @@ function _compile_exec_instructions(
 end
 
 ## Generated single-function execute loops
-#
-# Instead of dispatching to 25 separate methods via variant_storage (which returns
-# a 25-way Union and triggers dynamic dispatch), we generate a single function with
-# an if-elseif chain on `isa` checks, which compiles to tag comparisons with no
-# vtable lookup.
 
 function _build_execute_call(op::OpType.T, fn_name::Symbol)
-    args = Expr[]
+    args = Any[]
     for k in 1:arity(op)
         field = Symbol(:arg_, k)
-        if should_use_index_not_reference(op, k)
-            push!(args, :(s.$field))
-        else
-            push!(args, :(tape[s.$field]))
-        end
+        push!(args, should_use_index_not_reference(op, k) ? field : :(tape[$field]))
     end
     return Expr(:call, fn_name, args...)
 end
 
-function _generate_execute_body(fn_mapper::Function)
-    cond_body = Tuple{Expr, Expr}[]
+function _generate_execute_arms(fn_mapper::Function)
+    arms = Expr[]
     for (variant, op_name) in _EXEC_INSTRUCTION_SPECS
-        storage_type = variant_storage_type(getfield(ExecInstruction, variant))
         op = getfield(OpType, op_name)
-        cond = :(s isa $storage_type)
-        if op == OpType.OP_STOP
-            push!(cond_body, (cond, :(return nothing)))
+        binds = op == OpType.OP_STOP ? Any[] : Any[Symbol(:arg_, k) for k in 1:arity(op)]
+        push!(binds, :output)
+        pattern = Expr(:call, Expr(:., :ExecInstruction, QuoteNode(variant)), binds...)
+        body = if op == OpType.OP_STOP
+            :(return nothing)
         else
-            call = _build_execute_call(op, fn_mapper(op))
-            push!(cond_body, (cond, :(@inbounds tape[s.output] = $call)))
+            :(@inbounds tape[output] = $(_build_execute_call(op, fn_mapper(op))))
         end
+        push!(arms, Expr(:call, :(=>), pattern, body))
     end
-    return nested_ifs(cond_body)
+    return arms
 end
 
-let body = _generate_execute_body(op -> op_call(op))
+let arms = _generate_execute_arms(op -> op_call(op))
     @eval Base.@propagate_inbounds function execute_instructions!(
             tape::AbstractVector,
             instructions::Vector{ExecInstructionT},
         )::Nothing
         @inbounds for instr in instructions
-            s = exec_instruction_storage(instr)
-            $body
+            @match instr begin
+                $(arms...)
+            end
         end
         return nothing
     end
 end
 
-let body = _generate_execute_body(op -> Symbol(:taylor_, op_call(op)))
+let arms = _generate_execute_arms(op -> Symbol(:taylor_, op_call(op)))
     @eval Base.@propagate_inbounds function execute_taylor_instructions!(
             tape::AbstractVector,
             instructions::Vector{ExecInstructionT},
         )::Nothing
         @inbounds for instr in instructions
-            s = exec_instruction_storage(instr)
-            $body
+            @match instr begin
+                $(arms...)
+            end
         end
         return nothing
     end

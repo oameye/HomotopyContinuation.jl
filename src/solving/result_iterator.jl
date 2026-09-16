@@ -68,8 +68,8 @@ end
 _path_result(cache::SolveCache, ws::TrackingWorkerState, i::Int)::PathResult =
     _track_path!(ws, cache.start_solutions[i], i)
 
-_path_result(cache::WorkerSolveCache{E, W}, ws::W, i::Int) where {E, W} =
-    _track_path!(ws, cache.start_solutions[i], i)::PathResult
+_path_result(cache::WorkerSolveCache, ws::PathWorker, i::Int)::PathResult =
+    _track_path!(ws, cache.start_solutions[i], i)
 
 function _path_result(
         cache::PolyhedralSolveCache, ws::PolyhedralWorkerState, i::Int,
@@ -157,7 +157,7 @@ function _foreach_path(
 end
 
 _path_worker(cache::SolveCache)::TrackingWorkerState = cache.builder()
-_path_worker(cache::WorkerSolveCache{E, W}) where {E, W} = cache.builder()::W
+_path_worker(cache::WorkerSolveCache)::PathWorker = cache.builder()
 _path_worker(cache::PolyhedralSolveCache)::PolyhedralWorkerState = cache.builder()
 
 function Base.show(io::IO, ri::ResultIterator)
@@ -287,12 +287,13 @@ reclassification.
 """
 function Result(ri::ResultIterator)::Result
     prs = collect(ri)
-    return _finalize_result(prs, length(prs), seed(ri), _excess_checker(ri.cache))
+    return _finalize_result(prs, length(prs), seed(ri), _excess_checkers(ri.cache))
 end
 
-_excess_checker(cache::SolveCache) = cache.excess_checker
-_excess_checker(cache::PolyhedralSolveCache) = cache.excess_checker
-_excess_checker(::WorkerSolveCache) = nothing
+_excess_checkers(cache::SolveCache)::ExcessCheckers = cache.excess_checkers
+_excess_checkers(cache::PolyhedralSolveCache)::ExcessCheckers = cache.excess_checkers
+# The subspace routes never square up, so they carry nothing to re-check.
+_excess_checkers(::WorkerSolveCache)::ExcessCheckers = ExcessCheckers()
 
 # ── Entry points ───────────────────────────────────────────────────────────
 
@@ -332,8 +333,7 @@ result_iterator(F::System, alg::TotalDegree = TotalDegree())::ResultIterator =
 result_iterator(F::System, alg::Polyhedral)::ResultIterator =
     ResultIterator(CommonSolve.init(F, _quiet(alg), Serial()))
 
-# Wraps the erased `init` above.
-@unstable result_iterator(
+result_iterator(
     F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree(),
 )::ResultIterator = ResultIterator(CommonSolve.init(F, L, _quiet(alg), Serial()))
 

@@ -186,29 +186,30 @@ _quiet(alg::Continuation)::Continuation =
 # ── Sweep: one homotopy retargeted over many targets ────────────────────────
 
 """
-    Sweep(; transform_result, transform_parameters, flatten, coords, options...)
+    Sweep(; transform_result, transform_parameters, coords, options...)
 
 Track given start solutions to every target in a vector of targets, retargeting a
 single homotopy per target, and return one entry per target.
 
-`transform_result(result, target)` builds each entry, `flatten = true` concatenates
-array-valued entries, and `transform_parameters(target)` maps each element of the
-target vector to the actual target, so the vector may hold indices or other
-metadata. The transforms exist so a long sweep need not retain every
+`transform_result(result, target)` builds each entry and `transform_parameters(target)`
+maps each element of the target vector to the actual target, so the vector may hold
+indices or other metadata. The transforms exist so a long sweep need not retain every
 [`Result`](@ref).
+
+The result is always the vector of per-target entries. Pass it to
+[`flatten_results`](@ref) to concatenate array-valued entries: doing that here would
+make `solve`'s return type depend on an option value rather than on its arguments.
 """
 struct Sweep{TR, TP} <: AbstractAlgorithm
     common::CommonOptions
     coords::SubspaceCoords.T
     transform_result::TR
     transform_parameters::TP
-    flatten::Bool
 end
 
 Sweep(;
     transform_result = tuple,
     transform_parameters = identity,
-    flatten::Bool = false,
     coords::SubspaceCoords.T = SubspaceCoords.AUTO,
     tracker_options::TrackerOptions = TrackerOptions(),
     endgame_options::EndgameOptions = EndgameOptions(),
@@ -216,5 +217,5 @@ Sweep(;
     show_progress::Bool = true,
 ) = Sweep(
     CommonOptions(tracker_options, endgame_options, seed, show_progress),
-    coords, transform_result, transform_parameters, flatten,
+    coords, transform_result, transform_parameters,
 )

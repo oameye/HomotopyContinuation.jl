@@ -170,8 +170,24 @@ function check_excess_solution(c::ExcessSolutionChecker, r::PathResult)::PathRes
     return _with_return_code(r, PathResultCode.PATH_EXCESS_SOLUTION)
 end
 
-# Post-pass over all path results. `nothing` checker (square systems) is a no-op.
-_check_excess_solutions!(::Vector{PathResult}, ::Nothing)::Nothing = nothing
+"""
+    ExcessCheckers
+
+The excess-solution post-pass a solve carries: one checker when the system was
+squared up, and empty when it was already square, as with an empty `chart` or
+`perm` elsewhere here.
+"""
+const ExcessCheckers = Vector{ExcessSolutionChecker}
+
+# Post-pass over all path results. Empty (square systems) is a no-op.
+function _check_excess_solutions!(
+        results::Vector{PathResult}, cs::ExcessCheckers,
+    )::Nothing
+    for c in cs
+        _check_excess_solutions!(results, c)
+    end
+    return nothing
+end
 
 function _check_excess_solutions!(
         results::Vector{PathResult}, c::ExcessSolutionChecker,

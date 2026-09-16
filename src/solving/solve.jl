@@ -2,14 +2,14 @@
 #
 # Pattern: solve(F, alg, exec) = solve!(init(F, alg, exec))
 
-struct SolveCache{E <: AbstractExecutor, B, C}
+struct SolveCache{E <: AbstractExecutor}
     executor::E
-    builder::B
+    builder::TrackingBuilder
     tracker::EndgameTracker
     start_solutions::Vector{Vector{ComplexF64}}
     seed::UInt32
-    # ExcessSolutionChecker for overdetermined systems, Nothing for square ones
-    excess_checker::C
+    # One checker when the system was squared up, none when it was already square.
+    excess_checkers::ExcessCheckers
     show_progress::Bool
     early_stop::EarlyStop
 end
@@ -20,7 +20,9 @@ end
 Throw for underdetermined input (positive-dimensional solution set).
 """
 function _check_square_or_overdetermined(F::System)::Nothing
-    return _check_square_or_overdetermined(system_shape(F), F)
+    return with_system_shape(F) do shape
+        _check_square_or_overdetermined(shape, F)
+    end
 end
 
 _check_square_or_overdetermined(::SquareShape, ::System)::Nothing = nothing
@@ -170,26 +172,26 @@ end
 
 function _solve_cache(
         exec::E,
-        builder::B,
+        builder::AbstractPathBuilder,
         starts::Vector{Vector{ComplexF64}},
         seed::UInt32,
-        excess_checker::C,
+        excess_checkers::ExcessCheckers,
         show_progress::Bool,
         early_stop::EarlyStop = NEVER_STOP,
-    )::SolveCache{E, B, C} where {E <: AbstractExecutor, B, C}
+    )::SolveCache{E} where {E <: AbstractExecutor}
+    erased = TrackingBuilder(builder)
     return SolveCache(
-        exec, builder, builder().tracker, starts, seed, excess_checker, show_progress,
+        exec, erased, erased().tracker, starts, seed, excess_checkers, show_progress,
         early_stop,
     )
 end
 
-# The initializer is selected behind `Base.inferencebarrier` so a `solve` call
-# compiles one route, not every shape and start-system combination. The cache's
-# concrete type is recovered at the `solve!` boundary.
-@unstable function CommonSolve.init(
+# The route is selected behind `Base.inferencebarrier` so a `solve` call compiles
+# one of them, not every shape and start-system combination.
+function CommonSolve.init(
         F::CloneableSystem, alg::TotalDegree,
-        exec::AbstractExecutor = Threaded(),
-    )::SolveCache
+        exec::E = Threaded(),
+    )::SolveCache{E} where {E <: AbstractExecutor}
     _check_parameter_free(F, "`TotalDegree`")
     _check_polynomial(F, "`TotalDegree`")
     if _is_grouped(F)
@@ -206,34 +208,38 @@ end
     rng = Random.MersenneTwister(_seed(alg))
     γ = _random_gamma(rng)
     # Dynamic call: specializes the body on the concrete `System` so that
-    # `system_shape(F)` resolves statically instead of union-splitting.
+    # the shape branch resolves against the concrete system.
     initializer = Base.inferencebarrier(_init_total_degree_shaped)
     return initializer(F, alg, exec, rng, γ)
 end
 
-_init_total_degree_shaped(
-    F::CloneableSystem, alg::TotalDegree, exec::AbstractExecutor,
-    rng::Random.MersenneTwister, γ::ComplexF64,
-) = _init_total_degree(system_shape(F), F, alg, exec, rng, γ)
+function _init_total_degree_shaped(
+        F::CloneableSystem, alg::TotalDegree, exec::E,
+        rng::Random.MersenneTwister, γ::ComplexF64,
+    )::SolveCache{E} where {E <: AbstractExecutor}
+    return with_system_shape(F) do shape
+        _init_total_degree(shape, F, alg, exec, rng, γ)
+    end
+end
 
 function _init_total_degree(
-        ::SquareShape, F::CloneableSystem, alg::TotalDegree, exec::AbstractExecutor,
+        ::SquareShape, F::CloneableSystem, alg::TotalDegree, exec::E,
         ::Random.MersenneTwister, γ::ComplexF64,
-    )
+    )::SolveCache{E} where {E <: AbstractExecutor}
     degs = degrees(F)
     builder = StraightLineBuilder(
         degs, F, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, total_degree_start_solutions(degs), _seed(alg), nothing,
-        _show_progress(alg), early_stop_callback(alg),
+        exec, builder, total_degree_start_solutions(degs), _seed(alg),
+        ExcessCheckers(), _show_progress(alg), early_stop_callback(alg),
     )
 end
 
 function _init_total_degree(
         ::OverdeterminedShape, F::CloneableSystem, alg::TotalDegree,
-        exec::AbstractExecutor, rng::Random.MersenneTwister, γ::ComplexF64,
-    )
+        exec::E, rng::Random.MersenneTwister, γ::ComplexF64,
+    )::SolveCache{E} where {E <: AbstractExecutor}
     n = nvariables(F)
     A, perm, excess_checker =
         _square_up(rng, F.evaluator, degrees(F), alg.excess_residual_tol)
@@ -242,8 +248,8 @@ function _init_total_degree(
         degs, F, A, perm, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, total_degree_start_solutions(degs), _seed(alg), excess_checker,
-        _show_progress(alg), early_stop_callback(alg),
+        exec, builder, total_degree_start_solutions(degs), _seed(alg),
+        ExcessCheckers([excess_checker]), _show_progress(alg), early_stop_callback(alg),
     )
 end
 
@@ -294,7 +300,7 @@ function _solve_total_degree_serial(cache::SolveCache{Serial}, progress)::Result
     end
 
     return _finalize_result(
-        path_results, length(path_results), cache.seed, cache.excess_checker,
+        path_results, length(path_results), cache.seed, cache.excess_checkers,
     )
 end
 
@@ -340,7 +346,7 @@ function _solve_total_degree_threaded(cache::SolveCache{Threaded}, progress)::Re
     end
 
     tracked = _assigned_results(results)
-    return _finalize_result(tracked, length(tracked), cache.seed, cache.excess_checker)
+    return _finalize_result(tracked, length(tracked), cache.seed, cache.excess_checkers)
 end
 
 # ── CommonSolve.solve!: distributed (extension) ────────────────────────────
@@ -400,7 +406,9 @@ paths_to_track(F::CloneableSystem, alg::TotalDegree = TotalDegree())::Int =
 # The BKK bound of the prepared support, not a solve: building the start solutions
 # means a binomial solve per mixed cell and both trackers, all of it discarded.
 paths_to_track(F::Union{System, CompositionSystem}, alg::Polyhedral)::Int =
-    _mixed_volume(_polyhedral_support(_polyhedral_system(F, alg), alg))
+    with_polyhedral_system(F, alg) do G
+    _mixed_volume(_polyhedral_support(G, alg))
+end
 
 """
     mixed_volume(F::System) -> Int
@@ -539,7 +547,7 @@ function CommonSolve.init(
     )
 
     return _solve_cache(
-        exec, builder, _start_points(starts), _seed(alg), nothing,
+        exec, builder, _start_points(starts), _seed(alg), ExcessCheckers(),
         _show_progress(alg), early_stop_callback(alg),
     )
 end

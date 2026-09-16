@@ -477,9 +477,9 @@ end
             ComplexF64[-0.6 + 0.8im, -1.2 - 0.4im],
         ]
         @test verify_solution_completeness(F, sols, q, Monodromy(; show_progress = false)) ==
-        Completeness.COMPLETE
+            Completeness.COMPLETE
         @test verify_solution_completeness(F, sols[1:1], q, Monodromy(; show_progress = false)) !=
-        Completeness.COMPLETE
+            Completeness.COMPLETE
     end
 
     @testset "MP rational input builds the same system" begin

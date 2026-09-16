@@ -133,17 +133,6 @@ end
 # Vector{SExprT}, Dict{SExprT,...}, Set{SExprT}, and function signatures.
 
 const SExprT = typeof(SExpr.SConst(zero(ComplexF64)))
-const SConstStorage = variant_storage_type(SExpr.SConst)
-const SVarStorage = variant_storage_type(SExpr.SVar)
-const SParamStorage = variant_storage_type(SExpr.SParam)
-const STmpStorage = variant_storage_type(SExpr.STmp)
-const SAddStorage = variant_storage_type(SExpr.SAdd)
-const SMulStorage = variant_storage_type(SExpr.SMul)
-const SPowStorage = variant_storage_type(SExpr.SPow)
-const SRPowStorage = variant_storage_type(SExpr.SRPow)
-const SNegStorage = variant_storage_type(SExpr.SNeg)
-const SUnaryStorage = variant_storage_type(SExpr.SUnary)
-const SFuncSymStorage = variant_storage_type(SExpr.SFuncSym)
 const _EMPTY_SEXPR_VEC = SExprT[]
 
 @inline _owned_args(args::AbstractVector{<:SExprT})::Vector{SExprT} = collect(SExprT, args)
@@ -154,17 +143,6 @@ const _EMPTY_SEXPR_VEC = SExprT[]
 @inline SExpr.SMul(args::AbstractVector{<:SExprT}) = invoke(SExpr.SMul, Tuple{Any}, _owned_args(args))
 @inline SExpr.SFuncSym(kind::SFuncKind.T, args::AbstractVector{<:SExprT}) =
     invoke(SExpr.SFuncSym, Tuple{Any, Any}, kind, _owned_args(args))
-
-# A `@data` variant accessor is a tagged union by construction: its return type is
-# the union of every variant's storage. Callers `isa`-split it, so the union never
-# reaches a dynamic dispatch. Concretizing it would mean abandoning the ADT.
-@unstable @inline sexpr_storage(expr::SExprT) = variant_storage(expr)
-
-# A self-referential `@data` field is widened to `Any`; without the assertion every
-# recursive walk dispatches dynamically and boxes its result.
-@inline storage_args(s::Union{SAddStorage, SMulStorage, SFuncSymStorage}) = s.args::Vector{SExprT}
-@inline storage_base(s::Union{SPowStorage, SRPowStorage}) = s.base::SExprT
-@inline storage_arg(s::Union{SNegStorage, SUnaryStorage}) = s.arg::SExprT
 
 ## ── Hashing (matches old symbol-seeded hash for CSE ordering stability) ──
 
@@ -177,101 +155,90 @@ function _fold_hash(seed, args)::UInt
 end
 
 function Base.hash(e::SExprT, h::UInt)::UInt
-    storage = sexpr_storage(e)
-    if storage isa SConstStorage
-        return hash(storage.val, hash(:SConst, h))
-    elseif storage isa SVarStorage
-        return hash(storage.idx, hash(:SVar, h))
-    elseif storage isa SParamStorage
-        return hash(storage.idx, hash(:SParam, h))
-    elseif storage isa STmpStorage
-        return hash(storage.id, hash(:STmp, h))
-    elseif storage isa SAddStorage
-        return hash(_fold_hash(:SAdd, storage_args(storage)), h)
-    elseif storage isa SMulStorage
-        return hash(_fold_hash(:SMul, storage_args(storage)), h)
-    elseif storage isa SPowStorage
-        return hash(hash(storage.exp, hash(storage_base(storage), hash(:SPow, zero(UInt)))), h)
-    elseif storage isa SRPowStorage
-        return hash(
-            hash(storage.exp, hash(storage_base(storage), hash(:SRPow, zero(UInt)))), h,
-        )
-    elseif storage isa SNegStorage
-        return hash(storage_arg(storage), hash(:SNeg, h))
-    elseif storage isa SUnaryStorage
-        return hash(storage_arg(storage), hash(storage.kind, hash(:SUnary, h)))
-    else # SFuncSymStorage
-        return hash(_fold_hash((:SFuncSym, storage.kind), storage_args(storage)), h)
+    return @match e begin
+        SExpr.SConst(val) => hash(val, hash(:SConst, h))
+        SExpr.SVar(idx) => hash(idx, hash(:SVar, h))
+        SExpr.SParam(idx) => hash(idx, hash(:SParam, h))
+        SExpr.STmp(id) => hash(id, hash(:STmp, h))
+        SExpr.SAdd(args) => hash(_fold_hash(:SAdd, args::Vector{SExprT}), h)
+        SExpr.SMul(args) => hash(_fold_hash(:SMul, args::Vector{SExprT}), h)
+        SExpr.SPow(base, exp) =>
+            hash(hash(exp, hash(base::SExprT, hash(:SPow, zero(UInt)))), h)
+        SExpr.SRPow(base, exp) =>
+            hash(hash(exp, hash(base::SExprT, hash(:SRPow, zero(UInt)))), h)
+        SExpr.SNeg(arg) => hash(arg::SExprT, hash(:SNeg, h))
+        SExpr.SUnary(kind, arg) => hash(arg::SExprT, hash(kind, hash(:SUnary, h)))
+        SExpr.SFuncSym(kind, args) =>
+            hash(_fold_hash((:SFuncSym, kind), args::Vector{SExprT}), h)
     end
 end
 
 ## ── SExpr helpers ───────────────────────────────────────────────────────────
 
-@inline _is_atom_storage(::Union{SConstStorage, SVarStorage, SParamStorage, STmpStorage}) = true
-@inline _is_atom_storage(::Any) = false
-@inline _is_atom(e::SExprT)::Bool = _is_atom_storage(sexpr_storage(e))
+@inline _is_atom(e::SExprT)::Bool = @match e begin
+    SExpr.SConst(_) => true
+    SExpr.SVar(_) => true
+    SExpr.SParam(_) => true
+    SExpr.STmp(_) => true
+    _ => false
+end
 
 """Get the arguments (children) of a compound expression."""
-@inline _get_args_storage(storage::Union{SConstStorage, SVarStorage, SParamStorage, STmpStorage}) =
-    _EMPTY_SEXPR_VEC
-@inline _get_args_storage(storage::SAddStorage) = storage_args(storage)
-@inline _get_args_storage(storage::SMulStorage) = storage_args(storage)
-@inline _get_args_storage(storage::Union{SPowStorage, SRPowStorage}) =
-    SExprT[storage_base(storage)]
-@inline _get_args_storage(storage::SNegStorage) = SExprT[storage_arg(storage)]
-@inline _get_args_storage(storage::SUnaryStorage) = SExprT[storage_arg(storage)]
-@inline _get_args_storage(storage::SFuncSymStorage) = storage_args(storage)
-@inline _get_args(e::SExprT)::Vector{SExprT} = _get_args_storage(sexpr_storage(e))
+@inline _get_args(e::SExprT)::Vector{SExprT} = @match e begin
+    SExpr.SAdd(args) => args::Vector{SExprT}
+    SExpr.SMul(args) => args::Vector{SExprT}
+    SExpr.SFuncSym(_, args) => args::Vector{SExprT}
+    SExpr.SPow(base, _) => SExprT[base::SExprT]
+    SExpr.SRPow(base, _) => SExprT[base::SExprT]
+    SExpr.SNeg(arg) => SExprT[arg::SExprT]
+    SExpr.SUnary(_, arg) => SExprT[arg::SExprT]
+    _ => _EMPTY_SEXPR_VEC
+end
 
-@inline _rebuild_expr_storage(storage::SAddStorage, args::Vector{SExprT})::SExprT =
-    _canonical_add(args)
-@inline _rebuild_expr_storage(storage::SMulStorage, args::Vector{SExprT})::SExprT =
-    _canonical_mul(args)
-@inline _rebuild_expr_storage(storage::SPowStorage, args::Vector{SExprT})::SExprT =
-    SExpr.SPow(args[1], storage.exp)
-@inline _rebuild_expr_storage(storage::SRPowStorage, args::Vector{SExprT})::SExprT =
-    SExpr.SRPow(args[1], storage.exp)
-@inline _rebuild_expr_storage(storage::SNegStorage, args::Vector{SExprT})::SExprT =
-    SExpr.SNeg(args[1])
-@inline _rebuild_expr_storage(storage::SUnaryStorage, args::Vector{SExprT})::SExprT =
-    SExpr.SUnary(storage.kind, args[1])
-@inline function _rebuild_expr_storage(
-        storage::SFuncSymStorage,
-        args::Vector{SExprT},
+@inline function _rebuild_funcsym(
+        kind::SFuncKind.T, args::Vector{SExprT},
     )::SExprT
-    if storage.kind == SFuncKind.SFUNC_ADD
-        return _canonical_add(args)
-    elseif storage.kind == SFuncKind.SFUNC_MUL
-        return _canonical_mul(args)
-    elseif storage.kind == SFuncKind.SFUNC_POW && length(args) == 2
-        exponent_storage = sexpr_storage(args[2])
-        if exponent_storage isa SConstStorage
-            return SExpr.SPow(args[1], Int(real(exponent_storage.val)))
+    kind == SFuncKind.SFUNC_ADD && return _canonical_add(args)
+    kind == SFuncKind.SFUNC_MUL && return _canonical_mul(args)
+    if kind == SFuncKind.SFUNC_POW && length(args) == 2
+        @match args[2] begin
+            SExpr.SConst(val) => return SExpr.SPow(args[1], Int(real(val)))
+            _ => nothing
         end
     end
-    return SExpr.SFuncSym(storage.kind, args)
+    return SExpr.SFuncSym(kind, args)
 end
-@inline _rebuild_expr_storage(::Union{SConstStorage, SVarStorage, SParamStorage, STmpStorage}, args::Vector{SExprT})::SExprT =
-    error("atom expressions should not be rebuilt")
-@inline _rebuild_expr(expr::SExprT, args::Vector{SExprT})::SExprT =
-    _is_atom(expr) ? expr : _rebuild_expr_storage(sexpr_storage(expr), args)
+
+@inline _rebuild_expr(expr::SExprT, args::Vector{SExprT})::SExprT = @match expr begin
+    SExpr.SAdd(_) => _canonical_add(args)
+    SExpr.SMul(_) => _canonical_mul(args)
+    SExpr.SPow(_, exp) => SExpr.SPow(args[1], exp)
+    SExpr.SRPow(_, exp) => SExpr.SRPow(args[1], exp)
+    SExpr.SNeg(_) => SExpr.SNeg(args[1])
+    SExpr.SUnary(kind, _) => SExpr.SUnary(kind, args[1])
+    SExpr.SFuncSym(kind, _) => _rebuild_funcsym(kind, args)
+    # Atoms have no children, so `_rebuild_expr` returns them unchanged.
+    _ => expr
+end
 
 @inline _complex_lt(a::ComplexF64, b::ComplexF64)::Bool =
     real(a) < real(b) || (real(a) == real(b) && imag(a) < imag(b))
 @inline _sexpr_kind_lt(a::SFuncKind.T, b::SFuncKind.T)::Bool = Int(a) < Int(b)
 @inline _sexpr_kind_lt(a::SUnaryKind.T, b::SUnaryKind.T)::Bool = Int(a) < Int(b)
 
-@inline _sexpr_tag_order(::SConstStorage)::UInt8 = 0x01
-@inline _sexpr_tag_order(::SVarStorage)::UInt8 = 0x02
-@inline _sexpr_tag_order(::SParamStorage)::UInt8 = 0x03
-@inline _sexpr_tag_order(::STmpStorage)::UInt8 = 0x04
-@inline _sexpr_tag_order(::SAddStorage)::UInt8 = 0x05
-@inline _sexpr_tag_order(::SMulStorage)::UInt8 = 0x06
-@inline _sexpr_tag_order(::SPowStorage)::UInt8 = 0x07
-@inline _sexpr_tag_order(::SNegStorage)::UInt8 = 0x08
-@inline _sexpr_tag_order(::SUnaryStorage)::UInt8 = 0x09
-@inline _sexpr_tag_order(::SFuncSymStorage)::UInt8 = 0x0a
-@inline _sexpr_tag_order(::SRPowStorage)::UInt8 = 0x0b
+@inline _sexpr_tag_order(e::SExprT)::UInt8 = @match e begin
+    SExpr.SConst(_) => 0x01
+    SExpr.SVar(_) => 0x02
+    SExpr.SParam(_) => 0x03
+    SExpr.STmp(_) => 0x04
+    SExpr.SAdd(_) => 0x05
+    SExpr.SMul(_) => 0x06
+    SExpr.SPow(_, _) => 0x07
+    SExpr.SNeg(_) => 0x08
+    SExpr.SUnary(_, _) => 0x09
+    SExpr.SFuncSym(_, _) => 0x0a
+    SExpr.SRPow(_, _) => 0x0b
+end
 
 function _sexpr_args_lt(a_args::Vector{SExprT}, b_args::Vector{SExprT})::Bool
     n = min(length(a_args), length(b_args))
@@ -285,59 +252,37 @@ function _sexpr_args_lt(a_args::Vector{SExprT}, b_args::Vector{SExprT})::Bool
 end
 
 function _sexpr_struct_lt(a::SExprT, b::SExprT)::Bool
-    a_storage = sexpr_storage(a)
-    b_storage = sexpr_storage(b)
-    a_tag = _sexpr_tag_order(a_storage)
-    b_tag = _sexpr_tag_order(b_storage)
+    a_tag = _sexpr_tag_order(a)
+    b_tag = _sexpr_tag_order(b)
     a_tag == b_tag || return a_tag < b_tag
 
-    if a_storage isa SConstStorage
-        b_storage_typed = b_storage::SConstStorage
-        return _complex_lt(a_storage.val, b_storage_typed.val)
-    elseif a_storage isa SVarStorage
-        b_storage_typed = b_storage::SVarStorage
-        return a_storage.idx < b_storage_typed.idx
-    elseif a_storage isa SParamStorage
-        b_storage_typed = b_storage::SParamStorage
-        return a_storage.idx < b_storage_typed.idx
-    elseif a_storage isa STmpStorage
-        b_storage_typed = b_storage::STmpStorage
-        return a_storage.id < b_storage_typed.id
-    elseif a_storage isa SAddStorage
-        b_storage_typed = b_storage::SAddStorage
-        return _sexpr_args_lt(storage_args(a_storage), storage_args(b_storage_typed))
-    elseif a_storage isa SMulStorage
-        b_storage_typed = b_storage::SMulStorage
-        return _sexpr_args_lt(storage_args(a_storage), storage_args(b_storage_typed))
-    elseif a_storage isa SPowStorage
-        b_storage_typed = b_storage::SPowStorage
-        if storage_base(a_storage) == storage_base(b_storage_typed)
-            return a_storage.exp < b_storage_typed.exp
+    # Same tag on both sides, so each arm binds one variant's fields from each.
+    return @match (a, b) begin
+        (SExpr.SConst(x), SExpr.SConst(y)) => _complex_lt(x, y)
+        (SExpr.SVar(x), SExpr.SVar(y)) => x < y
+        (SExpr.SParam(x), SExpr.SParam(y)) => x < y
+        (SExpr.STmp(x), SExpr.STmp(y)) => x < y
+        (SExpr.SAdd(xs), SExpr.SAdd(ys)) =>
+            _sexpr_args_lt(xs::Vector{SExprT}, ys::Vector{SExprT})
+        (SExpr.SMul(xs), SExpr.SMul(ys)) =>
+            _sexpr_args_lt(xs::Vector{SExprT}, ys::Vector{SExprT})
+        (SExpr.SPow(xb, xe), SExpr.SPow(yb, ye)) => begin
+            p = xb::SExprT
+            q = yb::SExprT
+            p == q ? xe < ye : _sexpr_struct_lt(p, q)
         end
-        return _sexpr_struct_lt(storage_base(a_storage), storage_base(b_storage_typed))
-    elseif a_storage isa SRPowStorage
-        b_storage_typed = b_storage::SRPowStorage
-        if storage_base(a_storage) == storage_base(b_storage_typed)
-            return _complex_lt(a_storage.exp, b_storage_typed.exp)
+        (SExpr.SRPow(xb, xe), SExpr.SRPow(yb, ye)) => begin
+            p = xb::SExprT
+            q = yb::SExprT
+            p == q ? _complex_lt(xe, ye) : _sexpr_struct_lt(p, q)
         end
-        return _sexpr_struct_lt(storage_base(a_storage), storage_base(b_storage_typed))
-    elseif a_storage isa SNegStorage
-        b_storage_typed = b_storage::SNegStorage
-        return _sexpr_struct_lt(storage_arg(a_storage), storage_arg(b_storage_typed))
-    elseif a_storage isa SUnaryStorage
-        b_storage_typed = b_storage::SUnaryStorage
-        if a_storage.kind != b_storage_typed.kind
-            return _sexpr_kind_lt(a_storage.kind, b_storage_typed.kind)
-        end
-        return _sexpr_struct_lt(storage_arg(a_storage), storage_arg(b_storage_typed))
-    elseif a_storage isa SFuncSymStorage
-        b_storage_typed = b_storage::SFuncSymStorage
-        if a_storage.kind != b_storage_typed.kind
-            return _sexpr_kind_lt(a_storage.kind, b_storage_typed.kind)
-        end
-        return _sexpr_args_lt(storage_args(a_storage), storage_args(b_storage_typed))
-    else
-        error("Unhandled SExpr storage in _sexpr_struct_lt: $(typeof(a_storage))")
+        (SExpr.SNeg(x), SExpr.SNeg(y)) => _sexpr_struct_lt(x::SExprT, y::SExprT)
+        (SExpr.SUnary(xk, x), SExpr.SUnary(yk, y)) =>
+            xk != yk ? _sexpr_kind_lt(xk, yk) : _sexpr_struct_lt(x::SExprT, y::SExprT)
+        (SExpr.SFuncSym(xk, xs), SExpr.SFuncSym(yk, ys)) =>
+            xk != yk ? _sexpr_kind_lt(xk, yk) :
+            _sexpr_args_lt(xs::Vector{SExprT}, ys::Vector{SExprT})
+        _ => error("Unhandled SExpr variant in _sexpr_struct_lt")
     end
 end
 
@@ -355,16 +300,18 @@ end
 Extract the "base expression" of an Add term, stripping the leading coefficient.
 """
 function _add_term_base(e::SExprT)::SExprT
-    storage = sexpr_storage(e)
-    if storage isa SMulStorage
-        args = storage_args(storage)
-        if !isempty(args)
-            first_storage = sexpr_storage(args[1])
-            if first_storage isa SConstStorage
-                rest = args[2:end]
-                return length(rest) == 1 ? rest[1] : SExpr.SMul(rest)
+    @match e begin
+        SExpr.SMul(args) => begin
+            xs = args::Vector{SExprT}
+            isempty(xs) || @match xs[1] begin
+                SExpr.SConst(_) => begin
+                    rest = xs[2:end]
+                    return length(rest) == 1 ? rest[1] : SExpr.SMul(rest)
+                end
+                _ => nothing
             end
         end
+        _ => nothing
     end
     return e
 end
@@ -374,15 +321,12 @@ function _flatten_add_arg!(
         const_sum::Base.RefValue{ComplexF64},
         arg::SExprT,
     )::Nothing
-    storage = sexpr_storage(arg)
-    if storage isa SAddStorage
-        for child in storage_args(storage)
+    @match arg begin
+        SExpr.SAdd(args) => for child in args::Vector{SExprT}
             _flatten_add_arg!(flat_args, const_sum, child)
         end
-    elseif storage isa SConstStorage
-        const_sum[] += storage.val
-    else
-        push!(flat_args, arg)
+        SExpr.SConst(val) => (const_sum[] += val)
+        _ => push!(flat_args, arg)
     end
     return nothing
 end
@@ -403,18 +347,16 @@ function _flatten_mul_arg!(
         coeff::Base.RefValue{ComplexF64},
         arg::SExprT,
     )::Nothing
-    storage = sexpr_storage(arg)
-    if storage isa SMulStorage
-        for child in storage_args(storage)
+    @match arg begin
+        SExpr.SMul(args) => for child in args::Vector{SExprT}
             _flatten_mul_arg!(flat_args, coeff, child)
         end
-    elseif storage isa SConstStorage
-        coeff[] *= storage.val
-    elseif storage isa SNegStorage
-        coeff[] = -coeff[]
-        _flatten_mul_arg!(flat_args, coeff, storage_arg(storage))
-    else
-        push!(flat_args, arg)
+        SExpr.SConst(val) => (coeff[] *= val)
+        SExpr.SNeg(a) => begin
+            coeff[] = -coeff[]
+            _flatten_mul_arg!(flat_args, coeff, a::SExprT)
+        end
+        _ => push!(flat_args, arg)
     end
     return nothing
 end
@@ -432,15 +374,17 @@ function _canonical_mul(args::Vector{SExprT})::SExprT
 end
 
 function _canonical_unary(kind::SUnaryKind.T, arg::SExprT)::SExprT
-    storage = sexpr_storage(arg)
-    storage isa SConstStorage && return SExpr.SConst(apply_unary(kind, storage.val))
-    return SExpr.SUnary(kind, arg)
+    return @match arg begin
+        SExpr.SConst(val) => SExpr.SConst(apply_unary(kind, val))
+        _ => SExpr.SUnary(kind, arg)
+    end
 end
 
 function _canonical_rpow(base::SExprT, exp::ComplexF64)::SExprT
-    storage = sexpr_storage(base)
-    storage isa SConstStorage && return SExpr.SConst(storage.val^exp)
-    return SExpr.SRPow(base, exp)
+    return @match base begin
+        SExpr.SConst(val) => SExpr.SConst(val^exp)
+        _ => SExpr.SRPow(base, exp)
+    end
 end
 
 ## ── Polynomial → SExpr conversion ──────────────────────────────────────────

@@ -138,7 +138,7 @@ function _solve_total_degree_distributed(
     )
     tracked = HCN._assigned_results(results)
     return HCN._finalize_result(
-        tracked, length(tracked), cache.seed, cache.excess_checker,
+        tracked, length(tracked), cache.seed, cache.excess_checkers,
     )
 end
 
@@ -174,7 +174,7 @@ function _solve_polyhedral_distributed(
     )
     tracked = HCN._assigned_results(results)
     return HCN._finalize_result(
-        tracked, length(tracked), cache.seed, cache.excess_checker,
+        tracked, length(tracked), cache.seed, cache.excess_checkers,
     )
 end
 
@@ -209,7 +209,7 @@ function _solve_worker_distributed(
         cache.early_stop,
     )
     tracked = HCN._assigned_results(results)
-    return HCN._finalize_result(tracked, length(tracked), cache.seed, nothing)
+    return HCN._finalize_result(tracked, length(tracked), cache.seed, HCN.ExcessCheckers())
 end
 
 # ── Many-target sweeps ──────────────────────────────────────────────────────
@@ -254,5 +254,5 @@ function _sweep_results_distributed(
         k, i = fldmod1(f, np)
         prs[k][i] = flat[f]
     end
-    return [HCN._finalize_result(prs[k], np, seed, nothing) for k in 1:n_targets]
+    return [HCN._finalize_result(prs[k], np, seed, HCN.ExcessCheckers()) for k in 1:n_targets]
 end

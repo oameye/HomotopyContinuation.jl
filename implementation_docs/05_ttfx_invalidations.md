@@ -660,19 +660,25 @@ nor `Any` escapes into `CommonSolve.init`.
 For direct evaluator construction, including the capability split and shared
 evaluation-wrapper constructor, it reports exact `_SupportSystem`,
 `InstructionSequence`, and `SystemEvaluator` returns. The representative square
-`CommonSolve.init` return is exactly
-`PolyhedralSolveCache{Serial,PolyhedralBuilder{_SupportSystem},_SupportSystem,Nothing}`.
+`CommonSolve.init` return was exactly
+`PolyhedralSolveCache{Serial,PolyhedralBuilder{_SupportSystem},_SupportSystem,Nothing}`
+at the time of the report; the cache no longer names its builder or its
+excess check, so the same contract now reads `PolyhedralSolveCache{Serial}`.
 `Core.Compiler.return_type` agrees on every contract.
 
-Two limitations remain visible:
+One limitation remains visible:
 
-- automatic subspace monodromy conservatively returns a union of vector- and
-  subspace-parameter `MonodromyResult`, because the automatic start-pair result
-  is selected from runtime parameter count;
 - Cthulhu 3.0.2 on Julia 1.12.6 hits compiler assertion
   `info === NoCallInfo()` while generating the completeness workflow. JET and
   `Core.Compiler.return_type` succeed and report `Union{Nothing,Bool}`. This is
   a tool/compiler-API limitation, not a package runtime failure.
+
+The other limitation this report recorded, automatic subspace monodromy
+returning a union of vector- and subspace-parameter `MonodromyResult`, is gone.
+Which route `solve(F, ::Monodromy)` takes is `Monodromy`'s `SUBSPACE` type
+parameter, set by whether `dim` or `codim` was given, rather than read off the
+start pair's parameter count, so each of the two methods returns one concrete
+result type.
 
 ## Verification
 

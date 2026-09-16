@@ -4,11 +4,12 @@ using LinearAlgebra: LinearAlgebra
 using Random: Random
 using Printf: Printf
 using ProgressMeter: ProgressMeter
-using DispatchDoctor: @stable, @unstable
+using DispatchDoctor: @stable
 
 using EnumX: @enumx
-using Moshi.Data: @data, variant_storage, variant_storage_type
+using Moshi.Data: @data, isa_variant
 using Moshi.Derive: @derive
+using Moshi.Match: @match
 using MultivariatePolynomials: MultivariatePolynomials
 import MultivariatePolynomials: coefficients, degree, differentiate, monomials
 using DynamicPolynomials: DynamicPolynomials, @polyvar
@@ -43,6 +44,7 @@ export is_failed, is_finite
 export AbstractResult, AbstractSolutionResult
 export TotalDegree, Polyhedral, Result, PathResult, paths_to_track, mixed_volume
 export Continuation, Sweep, Monodromy, Witness, Membership
+export flatten_results
 export Regeneration, Intersection, Decomposition, EquationSorting
 export CommonOptions, early_stop_callback, excess_residual_tol
 export path_results, seed, ntracked, failed, at_infinity, nonsingular, singular
@@ -64,7 +66,7 @@ export LinearSubspace, ExtrinsicDescription, IntrinsicDescription, Intrinsic, Ex
 export intrinsic, extrinsic, is_linear, dim, codim, ambient_dim, SubspaceCoords
 export rand_subspace, rand_subspace!, translate, geodesic, geodesic_distance, coord_change
 export IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy, set_subspaces!
-export AffineChartHomotopy, on_affine_chart, linear_subspace_homotopy
+export AffineChartHomotopy, on_affine_chart, with_linear_subspace_homotopy
 export find_start_pair, StartPair, is_parameterized
 export verify_solution_completeness, Completeness
 export MonodromyOptions, MonodromyResult, is_heuristic_stop, permutations, trace
@@ -85,10 +87,6 @@ export newton, NewtonResult, NewtonCache, NewtonReturnCode
 export Serial, Threaded, DistributedExecutor
 export SemialgebraicSetsHCSolver
 export write_solutions, read_solutions, write_parameters, read_parameters
-# Certification (certify, SolutionCertificate, …) lives in the
-# HomotopyContinuationCertification subpackage (lib/), which depends on
-# Arblib. Keeping Arblib out of this core package is what makes core TTFX
-# minimal; load the subpackage to certify.
 
 const MP = MultivariatePolynomials
 @static if VERSION < v"1.11"
@@ -99,8 +97,6 @@ else
     const FSMat{T} = FixedSizeArrays.FixedSizeMatrixDefault{T}
 end
 
-# Package-owned code is type-stable by default. Downstream users get zero-cost
-# instrumentation; the test suite enables `dispatch_doctor_mode = "error"`.
 @stable default_mode = "disable" default_codegen_level = "min" begin
     include("primitives/double_f64.jl")
     include("utils.jl")

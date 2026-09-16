@@ -2,7 +2,7 @@ using Test
 using HomotopyContinuation
 using HomotopyContinuation: Serial, Threaded, DistributedExecutor, Result,
     PathResult, TotalDegree, Polyhedral, System, CompileMode
-using HomotopyContinuation: _SupportSystem, _stage_system, evaluate!, FSVec,
+using HomotopyContinuation: _SupportSystem, evaluate!, FSVec,
     nparameters, _distributed_solve!, _distributed_sweep_entries,
     _distributed_monodromy_solve!
 using HomotopyContinuation: permutations, trace, is_success,
@@ -13,6 +13,10 @@ using Distributed: Distributed, addprocs, rmprocs, workers, remotecall_eval
 using Serialization: serialize, deserialize
 using CommonSolve: init
 using Random: seed!
+
+# The builder/worker a cache erased.
+_inner_builder(b) = b._inner[]
+_inner_worker(ws) = ws._inner[]
 
 # Every field of every path is compared: a mismatch in the serialized system or
 # in the global index mapping shows up there long before it changes a solution
@@ -118,7 +122,8 @@ end
         end
 
         @testset "_SupportSystem" begin
-            support_system = init(F, Polyhedral(), Serial()).builder.support_system
+            support_system =
+                _inner_builder(init(F, Polyhedral(), Serial()).builder).support_system
             @test support_system isa _SupportSystem
             other = roundtrip(support_system)
             pt = ComplexF64[0.7, -1.3]
@@ -136,8 +141,7 @@ end
             @test length(D.stages) == length(C.stages)
             @test D.degrees == C.degrees
             @test D.is_homogeneous == C.is_homogeneous
-            @test [_stage_system(s).degrees for s in D.stages] ==
-                [_stage_system(s).degrees for s in C.stages]
+            @test [s.degrees for s in D.stages] == [s.degrees for s in C.stages]
             pt, ps = ComplexF64[0.7, -1.3], ComplexF64[2.0, 5.0]
             @test evaluate_at(D.evaluator, pt, ps) == evaluate_at(C.evaluator, pt, ps)
         end

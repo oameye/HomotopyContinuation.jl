@@ -51,31 +51,31 @@ the threaded entry points.
 function evaluate(
         F::EvaluableSystem, x::AbstractVector{<:Number},
         p::AbstractVector{<:Number} = ComplexF64[],
-    )
+    )::Vector{ComplexF64}
     xs, ps = _evaluation_arguments(F, x, p)
     S = _evaluation_target(F)
     u = FSVec{ComplexF64}(undef, size(F)[1])
     evaluate!(u, S, xs, ps)
-    return _narrow(collect(u))
+    return collect(u)
 end
 
 """
     jacobian(F, x, p = ComplexF64[])
 
-Jacobian of the system `F` at the point `x` with parameters `p`. The result is
-real when every entry is.
+Jacobian of the system `F` at the point `x` with parameters `p`. Always complex;
+call `real.` on the result when a real answer is wanted.
 """
 function jacobian(
         F::EvaluableSystem, x::AbstractVector{<:Number},
         p::AbstractVector{<:Number} = ComplexF64[],
-    )
+    )::Matrix{ComplexF64}
     xs, ps = _evaluation_arguments(F, x, p)
     S = _evaluation_target(F)
     m, n = size(F)
     u = FSVec{ComplexF64}(undef, m)
     U = FSMat{ComplexF64}(undef, m, n)
     evaluate_and_jacobian!(u, U, S, xs, ps)
-    return _narrow(collect(U))
+    return collect(U)
 end
 
 (F::Union{CloneableSystem, AbstractSystem})(x::AbstractVector{<:Number}) = evaluate(F, x)

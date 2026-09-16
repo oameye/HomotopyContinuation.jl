@@ -204,8 +204,8 @@ function _check_multi_determined(F::System, N::Int, M::Int)::Nothing
 end
 
 function _init_multi_homogeneous(
-        F::System, alg::TotalDegree, exec::AbstractExecutor,
-    )
+        F::System, alg::TotalDegree, exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
     show_progress = _show_progress(alg)
     groups = variable_groups(F)
     homogeneous = is_homogeneous(F)
@@ -227,7 +227,7 @@ function _init_multi_homogeneous(
 
     A = FSMat{ComplexF64}(zeros(ComplexF64, 0, 0))
     perm = Int[]
-    checker = nothing
+    checkers = ExcessCheckers()
     if m > N
         A, perm, perm_equations = _multi_square_up(
             rng, degrees(F), m, N, homogeneous ? M : 0,
@@ -236,7 +236,7 @@ function _init_multi_homogeneous(
         # the folded homotopy does not expose.
         charted = homogeneous ?
             _sliced_evaluator(F.evaluator, L, ComplexF64[]) : F.evaluator
-        checker = ExcessSolutionChecker(charted, A, perm, alg.excess_residual_tol)
+        push!(checkers, ExcessSolutionChecker(charted, A, perm, alg.excess_residual_tol))
         D = _folded_group_degrees(D, perm_equations, N)
     end
 
@@ -249,7 +249,7 @@ function _init_multi_homogeneous(
         start, F, A, perm, L, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, starts, _seed(alg), checker, show_progress,
+        exec, builder, starts, _seed(alg), checkers, show_progress,
         early_stop_callback(alg),
     )
 end

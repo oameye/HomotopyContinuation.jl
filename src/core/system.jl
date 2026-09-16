@@ -27,7 +27,7 @@ solve(F)
 solve(F, Polyhedral())
 ```
 """
-struct System{P, V, M, S <: SystemShape}
+struct System{P, V}
     polys::FSVec{P}
     parameters::FSVec{V}
     variables::FSVec{V}
@@ -51,28 +51,16 @@ end
 
 ## ── System constructor ──────────────────────────────────────────────────────
 
-# Construction-time policy (compile mode, shape) is erased behind
-# `Base.inferencebarrier` so the default path does not compile all three
-# code-generation backends and all three shape instantiations. The widened
-# `System` return is that erasure, not an inference failure; see
-# `implementation_docs/06_setup_layer_erasure.md`.
-@unstable function System(
+function System(
         polys::AbstractVector,
         parameters::AbstractVector,
         variables::AbstractVector,
         compile::CompileMode.T = CompileMode.INTERPRETED,
         variable_groups::Vector{Vector{Int}} = Vector{Int}[],
-    )::System
+    )
     neqs = length(polys)
     nvars = length(variables)
     nparams = length(parameters)
-    shape = if neqs < nvars
-        UnderdeterminedShape()
-    elseif neqs == nvars
-        SquareShape()
-    else
-        OverdeterminedShape()
-    end
     builder = if compile == CompileMode.INTERPRETED
         _build_interpreted_system
     elseif compile == CompileMode.COMPILED
@@ -80,16 +68,11 @@ end
     else
         _build_codegen_all_system
     end
-    # The compile mode and shape are construction-time policy. Hide their
-    # closed unions from inference so the default path does not traverse all
-    # three code-generation backends or all three shape instantiations.
-    builder = Base.inferencebarrier(builder)
-    shape = Base.inferencebarrier(shape)
     normalized, lowered = _lower_input(polys, variables, parameters)
     isempty(variable_groups) ||
         (lowered = _group_input(lowered, normalized, variables, variable_groups))
     return _dispatch_system_build(
-        builder, normalized, variables, parameters, lowered, neqs, nvars, nparams, shape,
+        builder, normalized, variables, parameters, lowered, neqs, nvars, nparams,
     )
 end
 
@@ -121,8 +104,7 @@ exactly once, and when `variables` is omitted they also fix the variable order.
 System([x * y - 2v * w, x^2 - 4v^2]; variable_groups = [[x, v], [y, w]])
 ```
 """
-# Forwards to the erased builder above, so it inherits the widened return.
-@unstable function System(
+function System(
         polys::AbstractVector{<:MP.AbstractPolynomialLike};
         parameters = nothing,
         variables = nothing,
@@ -221,7 +203,11 @@ end
 ## ── Accessors ────────────────────────────────────────────────────────────────
 
 Base.size(F::System)::Tuple{Int, Int} = size(F.evaluator)
-@inline system_shape(::System{P, V, M, S}) where {P, V, M, S} = S()
+@inline function with_system_shape(f::F, S::System) where {F}
+    m, n = size(S)
+    return m < n ? f(UnderdeterminedShape()) :
+        m == n ? f(SquareShape()) : f(OverdeterminedShape())
+end
 degrees(F::System)::Vector{Int} = F.degrees
 
 """
@@ -524,42 +510,41 @@ end
         neqs::Int,
         nvars::Int,
         nparams::Int,
-        shape::SystemShape,
-    )::System
-    Base.@nospecialize builder polys variables parameters shape
-    return builder(polys, variables, parameters, lowered, neqs, nvars, nparams, shape)
+    )
+    Base.@nospecialize builder polys variables parameters
+    return builder(polys, variables, parameters, lowered, neqs, nvars, nparams)
 end
 
 @noinline function _build_interpreted_system(
         polys, variables, parameters, lowered::LoweredInput,
-        neqs::Int, nvars::Int, nparams::Int, shape,
-    )::System
-    Base.@nospecialize polys variables parameters shape
+        neqs::Int, nvars::Int, nparams::Int,
+    )
+    Base.@nospecialize polys variables parameters
     return _build_compiled_system(
         InterpretedCompile(), polys, variables, parameters, lowered,
-        neqs, nvars, nparams, shape,
+        neqs, nvars, nparams,
     )
 end
 
 @noinline function _build_codegen_system(
         polys, variables, parameters, lowered::LoweredInput,
-        neqs::Int, nvars::Int, nparams::Int, shape,
-    )::System
-    Base.@nospecialize polys variables parameters shape
+        neqs::Int, nvars::Int, nparams::Int,
+    )
+    Base.@nospecialize polys variables parameters
     return _build_compiled_system(
         CompiledCompile(), polys, variables, parameters, lowered,
-        neqs, nvars, nparams, shape,
+        neqs, nvars, nparams,
     )
 end
 
 @noinline function _build_codegen_all_system(
         polys, variables, parameters, lowered::LoweredInput,
-        neqs::Int, nvars::Int, nparams::Int, shape,
-    )::System
-    Base.@nospecialize polys variables parameters shape
+        neqs::Int, nvars::Int, nparams::Int,
+    )
+    Base.@nospecialize polys variables parameters
     return _build_compiled_system(
         CompiledAllCompile(), polys, variables, parameters, lowered,
-        neqs, nvars, nparams, shape,
+        neqs, nvars, nparams,
     )
 end
 
@@ -572,8 +557,7 @@ end
         neqs::Int,
         nvars::Int,
         nparams::Int,
-        ::S,
-    )::System where {C <: SystemCompileStrategy, S <: SystemShape}
+    ) where {C <: SystemCompileStrategy}
     Base.@nospecialize polys variables parameters
     seq_eval = lowered.seq_eval
     seq_jac = lowered.seq_jac
@@ -596,7 +580,7 @@ end
     fs_polys = _to_fsvec(polys)
     fs_parameters = _to_fsvec(parameters)
     fs_variables = _to_fsvec(variables)
-    return System{eltype(fs_polys), eltype(fs_variables), M, S}(
+    return System{eltype(fs_polys), eltype(fs_variables)}(
         fs_polys,
         fs_parameters,
         fs_variables,
