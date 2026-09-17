@@ -78,7 +78,7 @@ end
 
 StrictModeTest.test_compiled(
     HomotopyContinuation;
-    guarantees = (:noalloc, :trim_compatible),
+    guarantees = (:noalloc, :noboxing, :trim_compatible),
     only = in_static_core,
     exempt = CODEGEN_HELPERS,
 )
