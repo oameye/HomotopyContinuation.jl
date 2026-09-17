@@ -20,10 +20,12 @@ const GUARANTEED = Set(
         "model_kit/sexpr.jl",
         "model_kit/taylor.jl",
         "primitives/double_f64.jl",
+        "primitives/norms.jl",
         "solving/algorithm.jl",
         "solving/group_actions.jl",
         "solving/unique_points.jl",
         "solving/voronoi_tree.jl",
+        "tracking/valuation.jl",
         "utils.jl",
     ]
 )

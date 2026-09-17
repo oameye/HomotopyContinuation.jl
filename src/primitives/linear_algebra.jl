@@ -45,12 +45,14 @@ mutable struct MatrixWorkspace <: AbstractMatrix{ComplexF64}
     const inf_norm_est_rwork::FSVec{Float64}
 end
 
-function MatrixWorkspace(m::Integer, n::Integer)
+function MatrixWorkspace(m::Integer, n::Integer)::MatrixWorkspace
     A = FSMat{ComplexF64}(zeros(ComplexF64, m, n))
     return _make_matrix_workspace(A, m, n)
 end
 
-function _make_matrix_workspace(A::FSMat{ComplexF64}, m::Int, n::Int)
+function _make_matrix_workspace(
+        A::FSMat{ComplexF64}, m::Int, n::Int,
+    )::MatrixWorkspace
     m >= n || throw(ArgumentError("Expected m >= n, got m=$m, n=$n"))
 
     row_scaling = FSVec{Float64}(ones(m))
