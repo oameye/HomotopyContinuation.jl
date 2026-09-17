@@ -10,8 +10,9 @@ CERT := lib/HomotopyContinuationCertification
 TEST_LOG ?= test-run.log
 CERT_LOG ?= test-cert.log
 EXTENSIVE_LOG ?= test-extensive.log
+STRICT_LOG ?= test-strict.log
 
-.PHONY: test test-serial test-cert test-extensive benchmark ttfx format deps update help compare
+.PHONY: test test-serial test-cert test-extensive test-strict benchmark ttfx format deps update help compare
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}'
@@ -27,6 +28,13 @@ test-cert: ## Run the certification subpackage test suite (threaded; log: test-c
 
 test-extensive: ## Run the large solves — minutes each, not part of `make test` (log: test-extensive.log)
 	set -o pipefail; $(JULIA) --project=test/extensive -t auto test/extensive/runtests.jl 2>&1 | tee $(EXTENSIVE_LOG)
+
+# `make test` runs the production configuration, where DispatchDoctor is disabled
+# and the allocation and static-analysis contracts measure package code. This
+# target turns instrumentation to "error" and reruns the same files, so the
+# type-stability contract is the thing being measured.
+test-strict: ## Run the suite with DispatchDoctor in error mode (log: test-strict.log)
+	set -o pipefail; $(JULIA) --project=test/strict test/strict/runtests.jl --jobs=$(JOBS) 2>&1 | tee $(STRICT_LOG)
 
 test-serial: ## Run all tests serially (for debugging; logs as above)
 	set -o pipefail; $(JULIA) --project=test test/runtests.jl --jobs=1 2>&1 | tee $(TEST_LOG)
@@ -53,6 +61,7 @@ format: ## Format all Julia files with Runic
 deps: ## Instantiate all environments
 	$(JULIA) --project -e 'using Pkg; Pkg.instantiate()'
 	$(JULIA) --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+	$(JULIA) --project=test/strict -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
 	$(JULIA) --project=$(CERT) -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
 	$(JULIA) --project=$(CERT)/test -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="$(CERT)")]); Pkg.instantiate()'
 	$(JULIA) --project=test/extensive -e 'using Pkg; Pkg.develop([Pkg.PackageSpec(path="."), Pkg.PackageSpec(path="$(CERT)")]); Pkg.instantiate()'

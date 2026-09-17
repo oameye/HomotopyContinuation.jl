@@ -1,0 +1,22 @@
+[deps]
+CommonSolve = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
+DispatchDoctor = "8d63f2c5-f18a-4cf2-ba9d-b3f60fc568c8"
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+DynamicPolynomials = "7c1d4256-1411-5781-91ec-d7bc3513ac07"
+HomotopyContinuation = "f213a82b-91d6-5c5d-acf7-10f1c761b327"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MultivariatePolynomials = "102ac46a-7ee4-5c85-9060-abc95bfdeaa3"
+ParallelTestRunner = "d3525ed8-44d0-4b2c-a655-542cee43accc"
+Preferences = "21216c6a-2e73-6563-6e65-726566657250"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+RuntimeGeneratedFunctions = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
+SemialgebraicSets = "8e049039-38e8-557d-ae3a-bc521ccf6204"
+Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[sources]
+HomotopyContinuation = {path = "../.."}
+
+[compat]
+DispatchDoctor = "0.4.29"
+Preferences = "1"

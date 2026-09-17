@@ -122,7 +122,7 @@ function initialize_hypersurfaces(
     HS = System{P, V}
     out = Vector{WitnessSet{HS}}(undef, length(fs))
     for i in eachindex(fs)
-        h = System([fs[i]]; parameters = empty(vars), variables = vars)::HS
+        h = System([fs[i]]; parameters = empty(vars), variables = vars)
         out[i] = with_numerator_system(fs[i], h, vars) do G, Q
             R = _witness_init(G, L, rng, hyper_alg, exec)
             WitnessSet(h, L, _drop_poles(Q, R))
@@ -1030,8 +1030,8 @@ function fill_up!(
                 unique_points(
                     solutions(res); distance = opts.distance,
                     triangle_inequality = opts.triangle_inequality,
-                    atol = opts.unique_points_atol::Float64,
-                    rtol = opts.unique_points_rtol::Float64,
+                    atol = opts.unique_points_atol,
+                    rtol = opts.unique_points_rtol,
                 )
         end
     end

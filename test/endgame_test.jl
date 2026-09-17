@@ -6,6 +6,11 @@ using HomotopyContinuation: System, StraightLineHomotopy, HomotopyEvaluator,
     evaluate!, evaluate_and_jacobian!, weighted_norm, inf_norm, inf_distance,
     FSVec, FSMat
 using DynamicPolynomials: @polyvar
+using Preferences: load_preference
+
+# `@stable` heap-allocates the closures the evaluators call through, so the
+# zero-allocation contract below describes the shipped configuration only.
+const INSTRUMENTED = load_preference(HC, "dispatch_doctor_mode", "disable") != "disable"
 
 @testset "Endgame Tracker" begin
 
@@ -449,7 +454,7 @@ using DynamicPolynomials: @polyvar
         _measure_endgame_step_allocs()  # warmup
         allocs = _measure_endgame_step_allocs()
         # Julia 1.10's counter includes concurrent allocations in the process.
-        VERSION < v"1.11" || @test allocs == 0
+        VERSION < v"1.11" || INSTRUMENTED || @test allocs == 0
     end
 
     # ══════════════════════════════════════════════════════════════════════

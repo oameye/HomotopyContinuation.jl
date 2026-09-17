@@ -64,11 +64,11 @@ function expand(e::Expression)::Expression
         SymExpr.ENum(_) => e
         SymExpr.EVar(_) => e
         SymExpr.EAdd(args) =>
-            _eadd(Expression[expand(a) for a in args::Vector{Expression}])
-        SymExpr.EMul(args) => _expand_product(args::Vector{Expression})
-        SymExpr.EPow(base, exp) => _expand_power(expand(base::Expression), exp)
-        SymExpr.ERPow(base, exp) => _erpow(expand(base::Expression), exp)
-        SymExpr.EFn(kind, arg) => _efn(kind, expand(arg::Expression))
+            _eadd(Expression[expand(a) for a in args])
+        SymExpr.EMul(args) => _expand_product(args)
+        SymExpr.EPow(base, exp) => _expand_power(expand(base), exp)
+        SymExpr.ERPow(base, exp) => _erpow(expand(base), exp)
+        SymExpr.EFn(kind, arg) => _efn(kind, expand(arg))
     end
 end
 
@@ -84,11 +84,11 @@ _var_index(vars::AbstractVector{Expression})::Dict{Symbol, Int} =
 function _depends_on(e::Expression, var_to_idx::Dict{Symbol, Int})::Bool
     return @match e begin
         SymExpr.EVar(name) => haskey(var_to_idx, name)
-        SymExpr.EAdd(args) => any(a -> _depends_on(a, var_to_idx), args::Vector{Expression})
-        SymExpr.EMul(args) => any(a -> _depends_on(a, var_to_idx), args::Vector{Expression})
-        SymExpr.EPow(base, _) => _depends_on(base::Expression, var_to_idx)
-        SymExpr.ERPow(base, _) => _depends_on(base::Expression, var_to_idx)
-        SymExpr.EFn(_, arg) => _depends_on(arg::Expression, var_to_idx)
+        SymExpr.EAdd(args) => any(a -> _depends_on(a, var_to_idx), args)
+        SymExpr.EMul(args) => any(a -> _depends_on(a, var_to_idx), args)
+        SymExpr.EPow(base, _) => _depends_on(base, var_to_idx)
+        SymExpr.ERPow(base, _) => _depends_on(base, var_to_idx)
+        SymExpr.EFn(_, arg) => _depends_on(arg, var_to_idx)
         _ => false
     end
 end
@@ -144,7 +144,7 @@ function _expr_terms(
         end
         SymExpr.EAdd(args) => begin
             acc = _ExprTerms()
-            for a in args::Vector{Expression}
+            for a in args
                 terms = _expr_terms(a, var_to_idx, n)
                 terms.found || return _NOT_POLYNOMIAL_TERMS
                 _add_expr_terms!(acc, terms.terms)
@@ -153,7 +153,7 @@ function _expr_terms(
         end
         SymExpr.EMul(args) => begin
             acc = _ExprTerms(zeros(Int, n) => one(Expression))
-            for a in args::Vector{Expression}
+            for a in args
                 terms = _expr_terms(a, var_to_idx, n)
                 terms.found || return _NOT_POLYNOMIAL_TERMS
                 acc = _multiply_expr_terms(acc, terms.terms)
@@ -163,7 +163,7 @@ function _expr_terms(
         SymExpr.EPow(base, exp) => begin
             _depends_on(e, var_to_idx) || return constant()
             exp > 0 || return _NOT_POLYNOMIAL_TERMS
-            b = _expr_terms(base::Expression, var_to_idx, n)
+            b = _expr_terms(base, var_to_idx, n)
             b.found || return _NOT_POLYNOMIAL_TERMS
             acc = _ExprTerms(zeros(Int, n) => one(Expression))
             for _ in 1:exp
@@ -172,11 +172,11 @@ function _expr_terms(
             _polynomial_terms(acc)
         end
         SymExpr.ERPow(base, _) => begin
-            _depends_on(base::Expression, var_to_idx) && return _NOT_POLYNOMIAL_TERMS
+            _depends_on(base, var_to_idx) && return _NOT_POLYNOMIAL_TERMS
             constant()
         end
         SymExpr.EFn(_, arg) => begin
-            _depends_on(arg::Expression, var_to_idx) && return _NOT_POLYNOMIAL_TERMS
+            _depends_on(arg, var_to_idx) && return _NOT_POLYNOMIAL_TERMS
             constant()
         end
     end

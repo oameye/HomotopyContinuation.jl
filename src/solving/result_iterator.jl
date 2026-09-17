@@ -54,7 +54,7 @@ function Base.getindex(ri::ResultIterator, k::Int)::PathResult
     1 <= k <= length(ri) || throw(BoundsError(ri, k))
     i = 0
     for _ in 1:k
-        i = findnext(ri.mask, i + 1)::Int
+        i = something(findnext(ri.mask, i + 1))
     end
     return _path_result(ri.cache, i)
 end

@@ -61,7 +61,7 @@ function search_in_radius(
     if iszero(id) && UP.group_actions !== nothing
         # Ref against closure boxing (id would be reassigned inside the closure).
         id_ref = Ref(0)
-        let actions = UP.group_actions::GA
+        let actions = UP.group_actions
             apply_actions(actions, v) do w
                 id′ = search_in_radius(UP.tree, w, tol)
                 if !iszero(id′)

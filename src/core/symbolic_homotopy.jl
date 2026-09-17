@@ -90,7 +90,7 @@ Base.:(==)(H::Homotopy, G::Homotopy)::Bool =
     H.t == G.t && H.parameters == G.parameters
 
 function Base.show(io::IO, H::Homotopy)
-    if get(io, :compact, false)::Bool
+    if get(io, :compact, false) === true
         print(io, "[")
         join(io, H.expressions, ", ")
         print(io, "]")

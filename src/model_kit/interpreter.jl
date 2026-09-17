@@ -288,7 +288,7 @@ function _compile_exec_instruction_call(variant::Symbol, op::OpType.T)::Expr
     return Expr(:call, ctor, args...)
 end
 
-function _compile_exec_instruction_branches()
+function _compile_exec_instruction_branches()::Vector{Tuple{Expr, Expr}}
     return [
         (
             :(op == $op),

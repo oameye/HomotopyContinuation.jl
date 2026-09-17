@@ -304,7 +304,7 @@ function _opts_cse_visit!(
     @match expr begin
         SExpr.SAdd(args) => begin
             # bvisit(const Add &x)
-            for a in args::Vector{SExprT}
+            for a in args
                 _opts_cse_visit!(a, adds, muls, opt_subs, seen)
             end
             push!(adds, expr)
@@ -312,10 +312,10 @@ function _opts_cse_visit!(
 
         SExpr.SMul(margs) => begin
             # bvisit(const Mul &x)
-            for a in margs::Vector{SExprT}
+            for a in margs
                 _opts_cse_visit!(a, adds, muls, opt_subs, seen)
             end
-            args = margs::Vector{SExprT}
+            args = margs
             if !isempty(args)
                 first_val = @match args[1] begin
                     SExpr.SConst(val) => ExprNumber(true, val)
@@ -365,7 +365,7 @@ function _opts_cse_visit!(
 
         SExpr.SPow(base, exp) => begin
             # bvisit(const Pow &x)
-            b = base::SExprT
+            b = base
             _opts_cse_visit!(b, adds, muls, opt_subs, seen)
             # SymEngine: check if exponent is negative
             if exp < 0
@@ -377,15 +377,15 @@ function _opts_cse_visit!(
             end
         end
 
-        SExpr.SRPow(base, _) => _opts_cse_visit!(base::SExprT, adds, muls, opt_subs, seen)
+        SExpr.SRPow(base, _) => _opts_cse_visit!(base, adds, muls, opt_subs, seen)
 
         # SNeg is our representation for SymEngine's Mul(-1, x) where neg simplifies to atom
-        SExpr.SNeg(arg) => _opts_cse_visit!(arg::SExprT, adds, muls, opt_subs, seen)
+        SExpr.SNeg(arg) => _opts_cse_visit!(arg, adds, muls, opt_subs, seen)
 
-        SExpr.SUnary(_, arg) => _opts_cse_visit!(arg::SExprT, adds, muls, opt_subs, seen)
+        SExpr.SUnary(_, arg) => _opts_cse_visit!(arg, adds, muls, opt_subs, seen)
 
         # bvisit(const Basic &x) — generic case for compound expressions
-        SExpr.SFuncSym(_, fargs) => for a in fargs::Vector{SExprT}
+        SExpr.SFuncSym(_, fargs) => for a in fargs
             _opts_cse_visit!(a, adds, muls, opt_subs, seen)
         end
 

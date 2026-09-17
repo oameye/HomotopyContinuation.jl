@@ -107,17 +107,10 @@ end
     include("model_kit/operations.jl")
     include("model_kit/instruction_sequence.jl")
 
-    # model_kit/sexpr.jl — SExpr types, hash/==, canonicalization, poly_to_sexpr
     include("model_kit/sexpr.jl")
-
-    # model_kit/expression.jl — user-facing symbolic Expression frontend
     include("model_kit/expression.jl")
     include("model_kit/symbolic_utils.jl")
-
-    # model_kit/cse.jl — SymEngine-style CSE algorithm (opt_cse + tree_cse)
     include("model_kit/cse.jl")
-
-    # model_kit/tape_compiler.jl — TapeCompiler, compile_to_instructions
     include("model_kit/tape_compiler.jl")
 
     include("model_kit/polynomial_compiler.jl")

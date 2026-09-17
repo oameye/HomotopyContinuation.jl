@@ -52,10 +52,12 @@ jobs:
           version: '1.10'
           arch: x64
       - uses: julia-actions/cache@v3
-      - name: Instantiate test environment
-        run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
-      - name: Exercise package-wide DispatchDoctor contract
-        run: julia --project=test --threads=1 --color=yes quality/dispatch_doctor.jl
+      - name: Instantiate strict test environment
+        run: julia --project=test/strict -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Run the suite with instrumentation in error mode
+        run: julia --project=test/strict test/strict/runtests.jl --jobs=4
+      - name: Exercise first-call paths under instrumentation
+        run: julia --project=test/strict --threads=1 --color=yes quality/dispatch_doctor.jl
 
   strict-mode:
     name: StrictMode / Julia 1.13

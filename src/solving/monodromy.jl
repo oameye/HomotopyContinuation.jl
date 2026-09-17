@@ -1233,7 +1233,10 @@ function _with_chart_actions(
         f::Fn, options::MonodromyOptions, chart::Vector{ComplexF64}, use_chart::Bool,
     ) where {Fn}
     options.equivalence_classes || return f(nothing)
-    actions = options.group_actions::GroupActions
+    actions = options.group_actions
+    # The constructor clears `equivalence_classes` when there is no group action,
+    # so this branch is unreachable; it is what tells inference so.
+    actions === nothing && return f(nothing)
     return use_chart ? f(_ChartActions(chart, actions)) : f(actions)
 end
 

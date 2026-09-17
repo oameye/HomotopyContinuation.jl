@@ -86,12 +86,12 @@ function Base.hash(e::Expression, h::UInt)::UInt
         SymExpr.ENum(val) => hash(_canonical_zeros(val), hash(:ENum, h))
         SymExpr.EVar(name) => hash(name, hash(:EVar, h))
         SymExpr.EAdd(args) =>
-            hash(_fold_expr_hash(:EAdd, args::Vector{Expression}), h)
+            hash(_fold_expr_hash(:EAdd, args), h)
         SymExpr.EMul(args) =>
-            hash(_fold_expr_hash(:EMul, args::Vector{Expression}), h)
-        SymExpr.EPow(base, exp) => hash(exp, hash(base::Expression, hash(:EPow, h)))
-        SymExpr.ERPow(base, exp) => hash(exp, hash(base::Expression, hash(:ERPow, h)))
-        SymExpr.EFn(kind, arg) => hash(arg::Expression, hash(kind, hash(:EFn, h)))
+            hash(_fold_expr_hash(:EMul, args), h)
+        SymExpr.EPow(base, exp) => hash(exp, hash(base, hash(:EPow, h)))
+        SymExpr.ERPow(base, exp) => hash(exp, hash(base, hash(:ERPow, h)))
+        SymExpr.EFn(kind, arg) => hash(arg, hash(kind, hash(:EFn, h)))
     end
 end
 
@@ -144,11 +144,11 @@ function Base.conj(e::Expression)::Expression
     return @match e begin
         SymExpr.ENum(val) => SymExpr.ENum(conj(val))
         SymExpr.EVar(_) => e
-        SymExpr.EAdd(args) => _eadd(Expression[conj(a) for a in args::Vector{Expression}])
-        SymExpr.EMul(args) => _emul(Expression[conj(a) for a in args::Vector{Expression}])
-        SymExpr.EPow(base, exp) => _epow(conj(base::Expression), exp)
-        SymExpr.ERPow(base, exp) => _erpow(conj(base::Expression), conj(exp))
-        SymExpr.EFn(kind, arg) => _efn(kind, conj(arg::Expression))
+        SymExpr.EAdd(args) => _eadd(Expression[conj(a) for a in args])
+        SymExpr.EMul(args) => _emul(Expression[conj(a) for a in args])
+        SymExpr.EPow(base, exp) => _epow(conj(base), exp)
+        SymExpr.ERPow(base, exp) => _erpow(conj(base), conj(exp))
+        SymExpr.EFn(kind, arg) => _efn(kind, conj(arg))
     end
 end
 
@@ -183,7 +183,7 @@ function _flatten_eadd!(
         terms::Vector{Expression}, const_sum::ComplexF64, e::Expression,
     )::ComplexF64
     @match e begin
-        SymExpr.EAdd(args) => for child in args::Vector{Expression}
+        SymExpr.EAdd(args) => for child in args
             const_sum = _flatten_eadd!(terms, const_sum, child)
         end
         SymExpr.ENum(val) => (const_sum += val)
@@ -216,7 +216,7 @@ end
 function _split_coefficient(e::Expression)::Tuple{Expression, ComplexF64}
     @match e begin
         SymExpr.EMul(args) => begin
-            xs = args::Vector{Expression}
+            xs = args
             @match xs[1] begin
                 SymExpr.ENum(val) => begin
                     rest = xs[2:end]
@@ -271,7 +271,7 @@ function _flatten_emul!(
         factors::Vector{Expression}, coeff::ComplexF64, e::Expression,
     )::ComplexF64
     @match e begin
-        SymExpr.EMul(args) => for child in args::Vector{Expression}
+        SymExpr.EMul(args) => for child in args
             coeff = _flatten_emul!(factors, coeff, child)
         end
         SymExpr.ENum(val) => (coeff *= val)
@@ -283,8 +283,8 @@ end
 """Split a factor into its base and its exponent."""
 @inline function _split_power(e::Expression)::Tuple{Expression, ComplexF64}
     return @match e begin
-        SymExpr.EPow(base, exp) => (base::Expression, ComplexF64(exp))
-        SymExpr.ERPow(base, exp) => (base::Expression, exp)
+        SymExpr.EPow(base, exp) => (base, ComplexF64(exp))
+        SymExpr.ERPow(base, exp) => (base, exp)
         _ => (e, one(ComplexF64))
     end
 end
@@ -329,10 +329,10 @@ function _epow(base::Expression, k::Int)::Expression
     k == 1 && return base
     return @match base begin
         SymExpr.ENum(val) => SymExpr.ENum(op_pow_int(val, k))
-        SymExpr.EPow(b, exp) => _epow(b::Expression, exp * k)
+        SymExpr.EPow(b, exp) => _epow(b, exp * k)
         # (a*b)^k = a^k * b^k keeps powers next to their base for CSE.
         SymExpr.EMul(args) =>
-            _emul(Expression[_epow(a, k) for a in args::Vector{Expression}])
+            _emul(Expression[_epow(a, k) for a in args])
         _ => SymExpr.EPow(base, k)
     end
 end
@@ -572,15 +572,15 @@ function _collect_expr_variables!(
             push!(seen, name)
             push!(acc, e)
         end
-        SymExpr.EAdd(args) => for a in args::Vector{Expression}
+        SymExpr.EAdd(args) => for a in args
             _collect_expr_variables!(acc, seen, a)
         end
-        SymExpr.EMul(args) => for a in args::Vector{Expression}
+        SymExpr.EMul(args) => for a in args
             _collect_expr_variables!(acc, seen, a)
         end
-        SymExpr.EPow(base, _) => _collect_expr_variables!(acc, seen, base::Expression)
-        SymExpr.ERPow(base, _) => _collect_expr_variables!(acc, seen, base::Expression)
-        SymExpr.EFn(_, arg) => _collect_expr_variables!(acc, seen, arg::Expression)
+        SymExpr.EPow(base, _) => _collect_expr_variables!(acc, seen, base)
+        SymExpr.ERPow(base, _) => _collect_expr_variables!(acc, seen, base)
+        SymExpr.EFn(_, arg) => _collect_expr_variables!(acc, seen, arg)
         _ => nothing
     end
     return nothing
@@ -629,9 +629,9 @@ function _differentiate(e::Expression, v::Symbol)::Expression
         SymExpr.ENum(_) => zero(Expression)
         SymExpr.EVar(name) => name === v ? one(Expression) : zero(Expression)
         SymExpr.EAdd(args) =>
-            _eadd(Expression[_differentiate(a, v) for a in args::Vector{Expression}])
+            _eadd(Expression[_differentiate(a, v) for a in args])
         SymExpr.EMul(args) => begin
-            xs = args::Vector{Expression}
+            xs = args
             terms = Expression[]
             for i in eachindex(xs)
                 da = _differentiate(xs[i], v)
@@ -646,13 +646,13 @@ function _differentiate(e::Expression, v::Symbol)::Expression
             _eadd(terms)
         end
         SymExpr.EPow(base, exp) => begin
-            b = base::Expression
+            b = base
             db = _differentiate(b, v)
             iszero(db) && return zero(Expression)
             _emul(Expression[SymExpr.ENum(ComplexF64(exp)), _epow(b, exp - 1), db])
         end
         SymExpr.ERPow(base, exp) => begin
-            b = base::Expression
+            b = base
             db = _differentiate(b, v)
             iszero(db) && return zero(Expression)
             _emul(
@@ -662,7 +662,7 @@ function _differentiate(e::Expression, v::Symbol)::Expression
             )
         end
         SymExpr.EFn(kind, arg) => begin
-            a = arg::Expression
+            a = arg
             da = _differentiate(a, v)
             iszero(da) && return zero(Expression)
             _emul(Expression[_unary_derivative(kind, a), da])
@@ -746,12 +746,12 @@ function _subs(e::Expression, map::Dict{Symbol, Expression})::Expression
         SymExpr.ENum(_) => e
         SymExpr.EVar(name) => get(map, name, e)
         SymExpr.EAdd(args) =>
-            _eadd(Expression[_subs(a, map) for a in args::Vector{Expression}])
+            _eadd(Expression[_subs(a, map) for a in args])
         SymExpr.EMul(args) =>
-            _emul(Expression[_subs(a, map) for a in args::Vector{Expression}])
-        SymExpr.EPow(base, exp) => _epow(_subs(base::Expression, map), exp)
-        SymExpr.ERPow(base, exp) => _erpow(_subs(base::Expression, map), exp)
-        SymExpr.EFn(kind, arg) => _efn(kind, _subs(arg::Expression, map))
+            _emul(Expression[_subs(a, map) for a in args])
+        SymExpr.EPow(base, exp) => _epow(_subs(base, map), exp)
+        SymExpr.ERPow(base, exp) => _erpow(_subs(base, map), exp)
+        SymExpr.EFn(kind, arg) => _efn(kind, _subs(arg, map))
     end
 end
 
@@ -810,7 +810,7 @@ function _den_powers(d::Expression)::Tuple{ComplexF64, Dict{Expression, Int}}
     coeff = one(ComplexF64)
     powers = Dict{Expression, Int}()
     factors = @match d begin
-        SymExpr.EMul(args) => args::Vector{Expression}
+        SymExpr.EMul(args) => args
         _ => Expression[d]
     end
     for f in factors
@@ -868,11 +868,11 @@ num_den(x / (y - 1) + y)   # (x + y*(-1 + y), -1 + y)
 """
 function num_den(f::Expression)::Tuple{Expression, Expression}
     return @match f begin
-        SymExpr.EAdd(args) => _num_den_add(args::Vector{Expression})
+        SymExpr.EAdd(args) => _num_den_add(args)
         SymExpr.EMul(args) => begin
             num = one(Expression)
             den = one(Expression)
-            for a in args::Vector{Expression}
+            for a in args
                 (p, q) = num_den(a)
                 num = _emul(Expression[num, p])
                 den = _emul(Expression[den, q])
@@ -880,7 +880,7 @@ function num_den(f::Expression)::Tuple{Expression, Expression}
             (num, den)
         end
         SymExpr.EPow(base, exp) => begin
-            (p, q) = num_den(base::Expression)
+            (p, q) = num_den(base)
             exp > 0 ? (_epow(p, exp), _epow(q, exp)) : (_epow(q, -exp), _epow(p, -exp))
         end
         # Literals, variables, a non-integer power and the unary functions have no
@@ -909,7 +909,7 @@ function _degree_bounds(
         SymExpr.EAdd(args) => begin
             lo = typemax(Int)
             hi = 0
-            for a in args::Vector{Expression}
+            for a in args
                 bounds = _degree_bounds(a, weights)
                 bounds == _NOT_POLYNOMIAL && return _NOT_POLYNOMIAL
                 lo = min(lo, bounds[1])
@@ -920,7 +920,7 @@ function _degree_bounds(
         SymExpr.EMul(args) => begin
             lo = 0
             hi = 0
-            for a in args::Vector{Expression}
+            for a in args
                 bounds = _degree_bounds(a, weights)
                 bounds == _NOT_POLYNOMIAL && return _NOT_POLYNOMIAL
                 lo += bounds[1]
@@ -929,19 +929,19 @@ function _degree_bounds(
             (lo, hi)
         end
         SymExpr.EPow(base, exp) => begin
-            bounds = _degree_bounds(base::Expression, weights)
+            bounds = _degree_bounds(base, weights)
             bounds == _NOT_POLYNOMIAL && return _NOT_POLYNOMIAL
             bounds == (0, 0) && return (0, 0)
             exp < 0 && return _NOT_POLYNOMIAL
             (exp * bounds[1], exp * bounds[2])
         end
         SymExpr.ERPow(base, _) => begin
-            bounds = _degree_bounds(base::Expression, weights)
+            bounds = _degree_bounds(base, weights)
             bounds == _NOT_POLYNOMIAL && return _NOT_POLYNOMIAL
             bounds == (0, 0) ? (0, 0) : _NOT_POLYNOMIAL
         end
         SymExpr.EFn(_, arg) => begin
-            bounds = _degree_bounds(arg::Expression, weights)
+            bounds = _degree_bounds(arg, weights)
             bounds == _NOT_POLYNOMIAL && return _NOT_POLYNOMIAL
             bounds == (0, 0) ? (0, 0) : _NOT_POLYNOMIAL
         end
@@ -1003,12 +1003,12 @@ function has_real_coefficients(e::Expression)::Bool
     return @match e begin
         SymExpr.ENum(val) => iszero(imag(val))
         SymExpr.EVar(_) => true
-        SymExpr.EAdd(args) => all(has_real_coefficients, args::Vector{Expression})
-        SymExpr.EMul(args) => all(has_real_coefficients, args::Vector{Expression})
-        SymExpr.EPow(base, _) => has_real_coefficients(base::Expression)
+        SymExpr.EAdd(args) => all(has_real_coefficients, args)
+        SymExpr.EMul(args) => all(has_real_coefficients, args)
+        SymExpr.EPow(base, _) => has_real_coefficients(base)
         SymExpr.ERPow(base, exp) =>
-            isreal(exp) && has_real_coefficients(base::Expression)
-        SymExpr.EFn(_, arg) => has_real_coefficients(arg::Expression)
+            isreal(exp) && has_real_coefficients(base)
+        SymExpr.EFn(_, arg) => has_real_coefficients(arg)
     end
 end
 
@@ -1027,22 +1027,22 @@ function expression_scale(e::Expression)::Float64
         SymExpr.EVar(_) => 1.0
         SymExpr.EAdd(args) => begin
             s = 0.0
-            for a in args::Vector{Expression}
+            for a in args
                 s += expression_scale(a)
             end
             s
         end
         SymExpr.EMul(args) => begin
             s = 1.0
-            for a in args::Vector{Expression}
+            for a in args
                 s *= expression_scale(a)
             end
             s
         end
-        SymExpr.EPow(base, exp) => expression_scale(base::Expression)^exp
-        SymExpr.ERPow(base, exp) => expression_scale(base::Expression)^real(exp)
+        SymExpr.EPow(base, exp) => expression_scale(base)^exp
+        SymExpr.ERPow(base, exp) => expression_scale(base)^real(exp)
         SymExpr.EFn(kind, arg) =>
-            kind == SUnaryKind.UNARY_SQRT ? sqrt(expression_scale(arg::Expression)) : 1.0
+            kind == SUnaryKind.UNARY_SQRT ? sqrt(expression_scale(arg)) : 1.0
     end
 end
 
@@ -1065,7 +1065,7 @@ function _show_expr(io::IO, e::Expression, prec::Int)::Nothing
         SymExpr.EVar(name) => print(io, name)
         SymExpr.EAdd(args) => begin
             prec > 1 && print(io, "(")
-            for (i, a) in enumerate(args::Vector{Expression})
+            for (i, a) in enumerate(args)
                 i > 1 && print(io, " + ")
                 _show_expr(io, a, 1)
             end
@@ -1073,24 +1073,24 @@ function _show_expr(io::IO, e::Expression, prec::Int)::Nothing
         end
         SymExpr.EMul(args) => begin
             prec > 2 && print(io, "(")
-            for (i, a) in enumerate(args::Vector{Expression})
+            for (i, a) in enumerate(args)
                 i > 1 && print(io, "*")
                 _show_expr(io, a, 2)
             end
             prec > 2 && print(io, ")")
         end
         SymExpr.EPow(base, exp) => begin
-            _show_expr(io, base::Expression, 3)
+            _show_expr(io, base, 3)
             print(io, "^", exp)
         end
         SymExpr.ERPow(base, exp) => begin
-            _show_expr(io, base::Expression, 3)
+            _show_expr(io, base, 3)
             print(io, "^")
             _show_number(io, exp)
         end
         SymExpr.EFn(kind, arg) => begin
             print(io, _unary_name(kind), "(")
-            _show_expr(io, arg::Expression, 0)
+            _show_expr(io, arg, 0)
             print(io, ")")
         end
     end
@@ -1125,23 +1125,23 @@ function expression_to_sexpr(
         SymExpr.EAdd(args) => _canonical_add(
             SExprT[
                 expression_to_sexpr(a, var_to_idx, param_to_idx)
-                    for a in args::Vector{Expression}
+                    for a in args
             ],
         )
         SymExpr.EMul(args) => _canonical_mul(
             SExprT[
                 expression_to_sexpr(a, var_to_idx, param_to_idx)
-                    for a in args::Vector{Expression}
+                    for a in args
             ],
         )
         SymExpr.EPow(base, exp) => SExpr.SPow(
-            expression_to_sexpr(base::Expression, var_to_idx, param_to_idx), exp,
+            expression_to_sexpr(base, var_to_idx, param_to_idx), exp,
         )
         SymExpr.ERPow(base, exp) => _canonical_rpow(
-            expression_to_sexpr(base::Expression, var_to_idx, param_to_idx), exp,
+            expression_to_sexpr(base, var_to_idx, param_to_idx), exp,
         )
         SymExpr.EFn(kind, arg) => _canonical_unary(
-            kind, expression_to_sexpr(arg::Expression, var_to_idx, param_to_idx),
+            kind, expression_to_sexpr(arg, var_to_idx, param_to_idx),
         )
     end
 end

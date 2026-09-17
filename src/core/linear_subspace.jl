@@ -50,7 +50,7 @@ struct ExtrinsicDescription{T}
             A::Matrix{T},
             b::Vector{T};
             orthonormal::Bool = false,
-        ) where {T}
+        )::ExtrinsicDescription{T} where {T}
         return if orthonormal || size(A, 1) == 0
             new{T}(A, b)
         else
@@ -95,7 +95,7 @@ function Base.copy!(A::ExtrinsicDescription, B::ExtrinsicDescription)
     return A
 end
 Base.copy(A::ExtrinsicDescription{T}) where {T} =
-    ExtrinsicDescription(copy(A.A), copy(A.b); orthonormal = true)::ExtrinsicDescription{T}
+    ExtrinsicDescription(copy(A.A), copy(A.b); orthonormal = true)
 
 function Base.show(io::IO, A::ExtrinsicDescription{T}) where {T}
     println(io, "ExtrinsicDescription{$T}:")
@@ -126,8 +126,8 @@ struct IntrinsicDescription{T}
     Y::Matrix{T}
 end
 function IntrinsicDescription(A::Matrix{T}, b::Vector{T}) where {T}
-    X = stiefel_coordinates_intrinsic(A)::Matrix{T}
-    Y = stiefel_coordinates_intrinsic(A, b)::Matrix{T}
+    X = stiefel_coordinates_intrinsic(A)
+    Y = stiefel_coordinates_intrinsic(A, b)
     return IntrinsicDescription{T}(A, b, X, Y)
 end
 
@@ -204,7 +204,7 @@ function Base.copy!(A::IntrinsicDescription, B::IntrinsicDescription)
     return A
 end
 Base.copy(A::IntrinsicDescription{T}) where {T} =
-    IntrinsicDescription(copy(A.A), copy(A.b), copy(A.X), copy(A.Y))::IntrinsicDescription{T}
+    IntrinsicDescription(copy(A.A), copy(A.b), copy(A.X), copy(A.Y))
 
 Base.broadcastable(A::IntrinsicDescription) = Ref(A)
 
@@ -250,9 +250,9 @@ struct LinearSubspace{T} <: AbstractSubspace{T}
 end
 
 LinearSubspace(I::IntrinsicDescription{T}) where {T} =
-    LinearSubspace(ExtrinsicDescription(I), I)::LinearSubspace{T}
+    LinearSubspace{T}(ExtrinsicDescription(I), I)
 LinearSubspace(E::ExtrinsicDescription{T}) where {T} =
-    LinearSubspace(E, IntrinsicDescription(E))::LinearSubspace{T}
+    LinearSubspace{T}(E, IntrinsicDescription(E))
 
 function LinearSubspace(
         A::AbstractMatrix{T},
@@ -265,9 +265,10 @@ function LinearSubspace(
         ),
     )
 
+    F = float(T)
     return LinearSubspace(
-        ExtrinsicDescription(Matrix(float.(A)), Vector(float.(b))),
-    )::LinearSubspace{float(T)}
+        ExtrinsicDescription(Matrix{F}(A), Vector{F}(b)),
+    )
 end
 
 # Identity when the eltype already matches. This is the hot case for monodromy:

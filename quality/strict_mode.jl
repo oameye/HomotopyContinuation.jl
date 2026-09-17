@@ -11,10 +11,13 @@ end
 const GUARANTEED = Set(
     [
         "core/abstract_types.jl",
+        "core/linear_subspace.jl",
         "core/symbolic_homotopy.jl",
         "core/system_evaluate.jl",
         "model_kit/cse.jl",
+        "model_kit/expression.jl",
         "model_kit/instruction_sequence.jl",
+        "model_kit/sexpr.jl",
         "model_kit/taylor.jl",
         "primitives/double_f64.jl",
         "solving/algorithm.jl",
@@ -45,4 +48,39 @@ StrictModeTest.test_compiled(
     HomotopyContinuation;
     guarantees = (:typestable,),
     only = in_guaranteed_layer,
+)
+
+# The numeric core carries the stronger guarantee: AllocCheck proves these
+# allocate nothing. It is a strict subset of GUARANTEED — everything else in the
+# package allocates somewhere by design, from sorting to register allocation.
+const ALLOCATION_FREE = Set(
+    [
+        "core/abstract_types.jl",
+        "core/symbolic_homotopy.jl",
+        "core/system_evaluate.jl",
+        "model_kit/taylor.jl",
+        "primitives/double_f64.jl",
+        "primitives/norms.jl",
+    ]
+)
+
+# These build `Expr` trees at code-generation time, so allocation is what they do.
+const CODEGEN_HELPERS = (
+    HomotopyContinuation._cauchy_product_exprs,
+    HomotopyContinuation._expr_sum,
+    HomotopyContinuation._taylor_hyperbolic_stmts,
+    HomotopyContinuation._taylor_pow_recurrence_expr,
+    HomotopyContinuation._taylor_tangent_stmts,
+)
+
+function in_allocation_free_layer(f)
+    files = _package_files(f)
+    return !isempty(files) && all(in(ALLOCATION_FREE), files)
+end
+
+StrictModeTest.test_compiled(
+    HomotopyContinuation;
+    guarantees = (:noalloc,),
+    only = in_allocation_free_layer,
+    exempt = CODEGEN_HELPERS,
 )

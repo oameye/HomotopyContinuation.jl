@@ -160,16 +160,16 @@ function Base.hash(e::SExprT, h::UInt)::UInt
         SExpr.SVar(idx) => hash(idx, hash(:SVar, h))
         SExpr.SParam(idx) => hash(idx, hash(:SParam, h))
         SExpr.STmp(id) => hash(id, hash(:STmp, h))
-        SExpr.SAdd(args) => hash(_fold_hash(:SAdd, args::Vector{SExprT}), h)
-        SExpr.SMul(args) => hash(_fold_hash(:SMul, args::Vector{SExprT}), h)
+        SExpr.SAdd(args) => hash(_fold_hash(:SAdd, args), h)
+        SExpr.SMul(args) => hash(_fold_hash(:SMul, args), h)
         SExpr.SPow(base, exp) =>
-            hash(hash(exp, hash(base::SExprT, hash(:SPow, zero(UInt)))), h)
+            hash(hash(exp, hash(base, hash(:SPow, zero(UInt)))), h)
         SExpr.SRPow(base, exp) =>
-            hash(hash(exp, hash(base::SExprT, hash(:SRPow, zero(UInt)))), h)
-        SExpr.SNeg(arg) => hash(arg::SExprT, hash(:SNeg, h))
-        SExpr.SUnary(kind, arg) => hash(arg::SExprT, hash(kind, hash(:SUnary, h)))
+            hash(hash(exp, hash(base, hash(:SRPow, zero(UInt)))), h)
+        SExpr.SNeg(arg) => hash(arg, hash(:SNeg, h))
+        SExpr.SUnary(kind, arg) => hash(arg, hash(kind, hash(:SUnary, h)))
         SExpr.SFuncSym(kind, args) =>
-            hash(_fold_hash((:SFuncSym, kind), args::Vector{SExprT}), h)
+            hash(_fold_hash((:SFuncSym, kind), args), h)
     end
 end
 
@@ -263,25 +263,25 @@ function _sexpr_struct_lt(a::SExprT, b::SExprT)::Bool
         (SExpr.SParam(x), SExpr.SParam(y)) => x < y
         (SExpr.STmp(x), SExpr.STmp(y)) => x < y
         (SExpr.SAdd(xs), SExpr.SAdd(ys)) =>
-            _sexpr_args_lt(xs::Vector{SExprT}, ys::Vector{SExprT})
+            _sexpr_args_lt(xs, ys)
         (SExpr.SMul(xs), SExpr.SMul(ys)) =>
-            _sexpr_args_lt(xs::Vector{SExprT}, ys::Vector{SExprT})
+            _sexpr_args_lt(xs, ys)
         (SExpr.SPow(xb, xe), SExpr.SPow(yb, ye)) => begin
-            p = xb::SExprT
-            q = yb::SExprT
+            p = xb
+            q = yb
             p == q ? xe < ye : _sexpr_struct_lt(p, q)
         end
         (SExpr.SRPow(xb, xe), SExpr.SRPow(yb, ye)) => begin
-            p = xb::SExprT
-            q = yb::SExprT
+            p = xb
+            q = yb
             p == q ? _complex_lt(xe, ye) : _sexpr_struct_lt(p, q)
         end
-        (SExpr.SNeg(x), SExpr.SNeg(y)) => _sexpr_struct_lt(x::SExprT, y::SExprT)
+        (SExpr.SNeg(x), SExpr.SNeg(y)) => _sexpr_struct_lt(x, y)
         (SExpr.SUnary(xk, x), SExpr.SUnary(yk, y)) =>
-            xk != yk ? _sexpr_kind_lt(xk, yk) : _sexpr_struct_lt(x::SExprT, y::SExprT)
+            xk != yk ? _sexpr_kind_lt(xk, yk) : _sexpr_struct_lt(x, y)
         (SExpr.SFuncSym(xk, xs), SExpr.SFuncSym(yk, ys)) =>
             xk != yk ? _sexpr_kind_lt(xk, yk) :
-            _sexpr_args_lt(xs::Vector{SExprT}, ys::Vector{SExprT})
+            _sexpr_args_lt(xs, ys)
         _ => error("Unhandled SExpr variant in _sexpr_struct_lt")
     end
 end
@@ -302,7 +302,7 @@ Extract the "base expression" of an Add term, stripping the leading coefficient.
 function _add_term_base(e::SExprT)::SExprT
     @match e begin
         SExpr.SMul(args) => begin
-            xs = args::Vector{SExprT}
+            xs = args
             isempty(xs) || @match xs[1] begin
                 SExpr.SConst(_) => begin
                     rest = xs[2:end]
@@ -322,7 +322,7 @@ function _flatten_add_arg!(
         arg::SExprT,
     )::Nothing
     @match arg begin
-        SExpr.SAdd(args) => for child in args::Vector{SExprT}
+        SExpr.SAdd(args) => for child in args
             _flatten_add_arg!(flat_args, const_sum, child)
         end
         SExpr.SConst(val) => (const_sum[] += val)
@@ -348,13 +348,13 @@ function _flatten_mul_arg!(
         arg::SExprT,
     )::Nothing
     @match arg begin
-        SExpr.SMul(args) => for child in args::Vector{SExprT}
+        SExpr.SMul(args) => for child in args
             _flatten_mul_arg!(flat_args, coeff, child)
         end
         SExpr.SConst(val) => (coeff[] *= val)
         SExpr.SNeg(a) => begin
             coeff[] = -coeff[]
-            _flatten_mul_arg!(flat_args, coeff, a::SExprT)
+            _flatten_mul_arg!(flat_args, coeff, a)
         end
         _ => push!(flat_args, arg)
     end

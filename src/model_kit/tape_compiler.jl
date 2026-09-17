@@ -148,16 +148,16 @@ function _compile!(c::TapeCompiler, expr::SExprT)::Int32
         SExpr.SVar(idx) => c.var_slots[idx]
         SExpr.SParam(idx) => c.param_slots[idx]
         SExpr.STmp(id) => _compile_tmp!(c, id)
-        SExpr.SPow(base, exp) => _tape_pow!(c, _compile!(c, base::SExprT), exp)
+        SExpr.SPow(base, exp) => _tape_pow!(c, _compile!(c, base), exp)
         SExpr.SRPow(base, exp) => _emit!(
-            c, OpType.OP_POW, _compile!(c, base::SExprT), _get_constant_slot!(c, exp),
+            c, OpType.OP_POW, _compile!(c, base), _get_constant_slot!(c, exp),
         )
-        SExpr.SMul(args) => _compile_mul!(c, args::Vector{SExprT})
-        SExpr.SAdd(args) => _compile_sum!(c, args::Vector{SExprT})
-        SExpr.SNeg(arg) => _tape_neg!(c, _compile!(c, arg::SExprT))
+        SExpr.SMul(args) => _compile_mul!(c, args)
+        SExpr.SAdd(args) => _compile_sum!(c, args)
+        SExpr.SNeg(arg) => _tape_neg!(c, _compile!(c, arg))
         SExpr.SUnary(kind, arg) =>
-            _emit!(c, unary_op_type(kind), _compile!(c, arg::SExprT))
-        SExpr.SFuncSym(kind, args) => _compile_funcsym!(c, kind, args::Vector{SExprT})
+            _emit!(c, unary_op_type(kind), _compile!(c, arg))
+        SExpr.SFuncSym(kind, args) => _compile_funcsym!(c, kind, args)
     end
 end
 
@@ -180,9 +180,9 @@ function _compile_split_into_num_denom!(c::TapeCompiler, args::Vector{SExprT})
     for arg in args
         @match arg begin
             SExpr.SPow(base, exp) => if exp < 0
-                push!(denoms, _tape_pow!(c, _compile!(c, base::SExprT), -exp))
+                push!(denoms, _tape_pow!(c, _compile!(c, base), -exp))
             else
-                push!(nums, _tape_pow!(c, _compile!(c, base::SExprT), exp))
+                push!(nums, _tape_pow!(c, _compile!(c, base), exp))
             end
             _ => push!(nums, _compile!(c, arg))
         end
@@ -242,7 +242,7 @@ function _split_into_positives_negatives(args::Vector{SExprT})
     for arg in args
         sign, val = @match arg begin
             SExpr.SMul(margs) => begin
-                s, values = _split_off_minus_one(margs::Vector{SExprT})
+                s, values = _split_off_minus_one(margs)
                 (s, length(values) == 1 ? values[1] : SExpr.SMul(values))
             end
             _ => (1, arg)
@@ -261,7 +261,7 @@ function _compile_reduce_to_at_most_two!(
     )::Tuple{Int32, Int32}
     @match expr begin
         SExpr.SMul(margs) => begin
-            args = margs::Vector{SExprT}
+            args = margs
             if length(args) == 2
                 return (_compile!(c, args[1]), _compile!(c, args[2]))
             elseif length(args) == 1

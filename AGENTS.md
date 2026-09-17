@@ -55,6 +55,7 @@ All common tasks go through the Makefile:
 ```sh
 make test           # core tests in parallel, then certification
 make test-cert      # certification package only
+make test-strict    # same files with DispatchDoctor in error mode
 make test-extensive # large reference solves
 make test-serial    # serial debugging run
 make benchmark      # steady-state benchmarks
@@ -79,6 +80,8 @@ Tests run via ParallelTestRunner — each file is self-contained and runs in its
 `test/test_systems.jl` and `test/minors_polys.jl` hold shared polynomial system data; they define no tests and are `include`d by the files that need them. Add new systems to `TEST_SYSTEM_COLLECTION` to get them covered by the evaluation sweep in `test/system_sweep_test.jl`.
 
 `test/extensive/` holds solves that take minutes each (the 15625-path Fano quintic, the 27072-path 3264 problem). It has its own environment because it certifies, runs threaded through a plain `runtests.jl`, and is filtered out of `make test` discovery.
+
+`test/strict/` holds no test files of its own. It is an environment whose `LocalPreferences.toml` sets `dispatch_doctor_mode = "error"`, and its `runtests.jl` reruns the files in `test/` under that instrumentation. Two contracts need two runs because they cannot be measured in one process: `@stable` heap-allocates the closures the evaluators call through, so an instrumented run cannot measure allocations, and it adds wrapper methods and generated names, so an instrumented `report_package` describes the wrappers. `alloc_check_test.jl` and `jet_test.jl` are therefore excluded from the strict run, and the `@allocated` assertions in `core_test.jl`, `tracking_test.jl` and `endgame_test.jl` skip themselves when the preference is set.
 
 The historical same-process direct-v2 files `compare_v2_primitives_test.jl`, `compare_v2_solve_counts_test.jl`, and `compare_v2_solve_match_test.jl` are excluded after package-identity restoration. Fixed parity regressions remain active. A future live oracle must use isolated environments.
 
@@ -107,8 +110,11 @@ Before merging any PR:
 4. no `Any`-typed fields in structs
 5. every `mutable struct` has documented justification and `const` on fixed fields
 6. for package-identity changes, Aqua/import/extension loading must exercise the real production module, not only a compatibility alias
-7. the package-wide `@stable` contract holds. `make test` checks it: `test/LocalPreferences.toml` sets `dispatch_doctor_mode = "error"`, so an instability throws a `TypeInstabilityError` and fails the file. This only works because `DispatchDoctor.JULIA_OK` is true on the toolchain in use; it was false on 1.13 until DispatchDoctor 0.4.29 (upstream issue #126), which is why compat requires `0.4.29` and must not be relaxed. A run that resolves an older DispatchDoctor compiles `@stable` to nothing and the gate passes vacuously.
-   To enumerate every unstable site instead of stopping at the first, run the suite against an environment with `dispatch_doctor_mode = "warn"` and grep for `Instability detected`. Note that instrumenting `distributed_test.jl` that way needs the preference on each worker, so a warn sweep that skips it does not cover the extension's code paths; the error-mode `make test` does.
+7. the package-wide `@stable` contract holds. `make test-strict` checks it: `test/strict/LocalPreferences.toml` sets `dispatch_doctor_mode = "error"`, so an instability throws a `TypeInstabilityError` and fails the file. `make test` cannot check it, because it runs the production configuration where the contract compiles to nothing.
+   The gate only bites where `DispatchDoctor.JULIA_OK` is true. It was false on 1.13 until DispatchDoctor 0.4.29 (upstream issue #126), which is why compat requires `0.4.29` and must not be relaxed, and why `test/strict/runtests.jl` errors out rather than running when the flag is false. A run that resolves an older DispatchDoctor compiles `@stable` to nothing and passes vacuously.
+   To enumerate every unstable site instead of stopping at the first, set `dispatch_doctor_mode = "warn"` in a copy of that environment and grep for `Instability detected`. Instrumenting `distributed_test.jl` that way needs the preference on each worker, so a warn sweep that skips it does not cover the extension's code paths; the error-mode run does.
+8. the two StrictMode layers in `quality/strict_mode.jl` hold. They prove strictly more than DispatchDoctor, which only checks that a call's return type is concrete: StrictMode reads compiled output, so it also catches dynamic dispatch *inside* a body. That is why it names files rather than covering the package. `GUARANTEED` carries `:typestable` and `ALLOCATION_FREE`, a subset, carries `:noalloc`.
+   The type-erasure layer can never join either list. `PathWorker` holds a `Base.RefValue{Any}` and the evaluators dispatch through a `FunctionWrapper`, both deliberate, so anything calling through them fails `:typestable` by construction. Growing the lists means finding leaf code that crosses no erasure boundary; run `proof_audit(HomotopyContinuation; sweep = true, guarantees = (:typestable,))` after warming the TTFX workloads to see the current surface.
 
 ## Coding rules
 
@@ -130,6 +136,8 @@ Before merging any PR:
 - **Continuations for a type chosen from runtime data.** Branch into a concrete call rather than returning the value: `with_system_shape`, `with_polyhedral_system`, `with_linear_subspace_homotopy`, `with_monodromy_solver`. Every arm must agree on what `f` returns, so a caller passing `identity` defeats the pattern and a test must run its assertions inside the continuation.
 - **Erase a choice a struct only carries; do not lift it into a parameter.** `PathBuilder{W}` and `PathWorker` hold the chosen builder/worker in a `Base.RefValue{Any}` and assert the type at the call site, as `SystemEvaluator` does. A `FunctionWrapper` is the tighter erasure and belongs on a per-path call, but it carries a raw pointer into the process that made it, so anything crossing the wire to a distributed worker uses the box.
 - **An empty collection, not `Union{Nothing,T}`, for "there is none".** `ExcessCheckers`, an empty `chart`, an empty `perm`.
+- **A return annotation states a contract; an assertion in a body hides a defect.** `f(...)::T` on a definition is welcome. `x::T` inside a body means a value arrived untyped, so fix where it came from: type the struct field, annotate the callee's return, or restructure so the value is never read back out of an untyped container. `nested_ifs` needed `expr.args[end]::Expr` only because it walked `Expr.args`, a `Vector{Any}`; building the tree inside out removed the assertion and the dispatch with it.
+  The exceptions are boundaries the package does not own or erased on purpose, and there are eleven left in `src/`: the `factory[]` and `_inner[]` unboxes behind the erasure, `make()` past its `@nospecialize` barrier, the `inferencebarrier` that keeps `qr!` out of a square-only session, caller-supplied callbacks in `polyhedral.jl` and `result_iterator.jl`, ProgressMeter's forwarded `Real` properties, and one `Union{Nothing,CertifiedEndpoint}` narrowed after its status code already ruled out `nothing`. `Serialization.deserialize` in `ext/DistributedExt/` is the same case: the wire hands back `Any`.
 
 ### Performance
 

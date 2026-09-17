@@ -615,8 +615,9 @@ function iterative_refinement!(
         tol::Float64,
         max_iters::Int,
     )
-    refine!() = mixed_precision_iterative_refinement!(x, M, b, norm)
-    return _iterative_refinement_loop!(refine!, tol, max_iters)
+    return _iterative_refinement_loop!(
+        mixed_precision_iterative_refinement!, tol, max_iters, x, M, b, norm,
+    )
 end
 
 function iterative_refinement!(
@@ -646,8 +647,9 @@ function iterative_refinement!(
         tol::Float64,
         max_iters::Int,
     )
-    refine!() = _mixed_precision_refinement_infnorm!(x, M, b)
-    return _iterative_refinement_loop!(refine!, tol, max_iters)
+    return _iterative_refinement_loop!(
+        _mixed_precision_refinement_infnorm!, tol, max_iters, x, M, b,
+    )
 end
 
 function iterative_refinement!(
@@ -661,12 +663,15 @@ function iterative_refinement!(
 end
 
 # Shared refinement loop — Julia specializes on the concrete type of `refine!`,
-# so this has zero dispatch overhead.
-@inline function _iterative_refinement_loop!(refine!::F, tol::Float64, max_iters::Int) where {F}
-    δ = refine!()
+# so this has zero dispatch overhead. `args` is passed through rather than
+# captured, so `refine!` stays a named method the stability gate can see.
+@inline function _iterative_refinement_loop!(
+        refine!::F, tol::Float64, max_iters::Int, args::Vararg{Any, N},
+    ) where {F, N}
+    δ = refine!(args...)
     δ < tol && return (accuracy = δ, diverged = false)
     for _ in 2:max_iters
-        δ′ = refine!()
+        δ′ = refine!(args...)
         if δ′ < tol
             return (accuracy = δ′, diverged = false)
         elseif δ′ > 0.5 * δ

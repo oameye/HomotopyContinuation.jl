@@ -1,22 +1,18 @@
 ## Code generation helpers
 
 """
-    nested_ifs(cond_body, elsebranch=nothing)
+    nested_ifs(cond_body, elsebranch)
 
 Build a nested if-elseif-else expression from `[(condition, body), ...]` pairs.
 Used at code-generation time to build dispatch chains.
 """
-function nested_ifs(cond_body::Vector, elsebranch = nothing)
-    orig_expr = Expr(:if, cond_body[1][1], cond_body[1][2])
-    expr = orig_expr
-    for i in 2:length(cond_body)
-        push!(expr.args, Expr(:elseif, cond_body[i][1], cond_body[i][2]))
-        expr = expr.args[end]
+function nested_ifs(cond_body::Vector{Tuple{Expr, Expr}}, elsebranch::Expr)::Expr
+    expr = elsebranch
+    for i in length(cond_body):-1:1
+        cond, body = cond_body[i]
+        expr = Expr(i == 1 ? :if : :elseif, cond, body, expr)
     end
-    if !isnothing(elsebranch)
-        push!(expr.args, elsebranch)
-    end
-    return orig_expr
+    return expr
 end
 
 @enumx OpType::Int8 begin
