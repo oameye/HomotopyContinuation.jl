@@ -2463,7 +2463,6 @@ function _monodromy_solve_body!(
     reset_trace!(MS)
     reset_loops!(MS)
     results = check_start_solutions!(MS, X)
-    retcode = MonodromyCode.IN_PROGRESS
     if isempty(results)
         if warning
             @warn "None of the provided solutions is a valid start solution (Newton's method did not converge)."

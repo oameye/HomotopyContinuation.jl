@@ -50,10 +50,7 @@ StrictModeTest.test_compiled(
     only = in_guaranteed_layer,
 )
 
-# The numeric core carries the stronger guarantee: AllocCheck proves these
-# allocate nothing. It is a strict subset of GUARANTEED — everything else in the
-# package allocates somewhere by design, from sorting to register allocation.
-const ALLOCATION_FREE = Set(
+const STATIC_CORE = Set(
     [
         "core/abstract_types.jl",
         "core/symbolic_homotopy.jl",
@@ -64,7 +61,6 @@ const ALLOCATION_FREE = Set(
     ]
 )
 
-# These build `Expr` trees at code-generation time, so allocation is what they do.
 const CODEGEN_HELPERS = (
     HomotopyContinuation._cauchy_product_exprs,
     HomotopyContinuation._expr_sum,
@@ -73,14 +69,14 @@ const CODEGEN_HELPERS = (
     HomotopyContinuation._taylor_tangent_stmts,
 )
 
-function in_allocation_free_layer(f)
+function in_static_core(f)
     files = _package_files(f)
-    return !isempty(files) && all(in(ALLOCATION_FREE), files)
+    return !isempty(files) && all(in(STATIC_CORE), files)
 end
 
 StrictModeTest.test_compiled(
     HomotopyContinuation;
-    guarantees = (:noalloc,),
-    only = in_allocation_free_layer,
+    guarantees = (:noalloc, :trim_compatible),
+    only = in_static_core,
     exempt = CODEGEN_HELPERS,
 )

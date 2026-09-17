@@ -12,7 +12,7 @@ using Moshi.Derive: @derive
 using Moshi.Match: @match
 using MultivariatePolynomials: MultivariatePolynomials
 import MultivariatePolynomials: coefficients, degree, differentiate, monomials
-using DynamicPolynomials: DynamicPolynomials, @polyvar
+using DynamicPolynomials: @polyvar
 using FixedSizeArrays: FixedSizeArrays
 import FunctionWrappers: FunctionWrapper
 using CommonSolve: CommonSolve

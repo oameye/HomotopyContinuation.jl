@@ -441,19 +441,16 @@ function trace_test(
     # In the projective setting we fix a single affine chart `c` and place all
     # witness points (and both translated sets) on it, so the barycenters are
     # comparable representatives.
-    # Assign `chart` inside the branch so that within the projective branch its
     # An empty chart is the no-chart sentinel, as everywhere else here, so
-    # `on_chart!(y, chart)` always resolves to the concrete method.
-    if W.projective
-        chart = randn(rng, ComplexF64, nvariables(F))
-        S₀c = map(S₀) do s
+    chart = W.projective ? randn(rng, ComplexF64, nvariables(F)) : ComplexF64[]
+    S₀c = if W.projective
+        map(S₀) do s
             y = ComplexF64.(s)
             on_chart!(y, chart)
             return y
         end
     else
-        chart = ComplexF64[]
-        S₀c = S₀
+        S₀
     end
 
     s₀ = sum(S₀c)

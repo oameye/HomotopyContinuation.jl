@@ -210,7 +210,7 @@ Base.broadcastable(A::IntrinsicDescription) = Ref(A)
 
 function IntrinsicDescription(E::ExtrinsicDescription{T})::IntrinsicDescription{T} where {T}
     svd = LA.svd(E.A; full = true)
-    m, n = size(E.A)
+    m = size(E.A, 1)
     A = Matrix((@view svd.Vt[(m + 1):end, :])')
     b = if iszero(E.b)
         zeros(eltype(E.b), size(A, 1))
@@ -222,7 +222,7 @@ end
 
 function ExtrinsicDescription(I::IntrinsicDescription{T})::ExtrinsicDescription{T} where {T}
     svd = LA.svd(I.A; full = true)
-    m, n = size(I.A)
+    n = size(I.A, 2)
     A = Matrix((@view svd.U[:, (n + 1):end])')
     b = if iszero(I.b)
         zeros(eltype(A), size(A, 1))
