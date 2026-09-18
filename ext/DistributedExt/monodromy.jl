@@ -173,14 +173,14 @@ function _drive_monodromy!(
             retcode = HCN.MonodromyCode.SUCCESS
             break
         end
-        if opts.target_solutions_count === nothing &&
-                length(results) >= something(opts.min_solutions, 0) &&
+        if opts.target_solutions_count == typemax(Int) &&
+                length(results) >= opts.min_solutions &&
                 HCN.loops_no_change(stats, length(results)) >=
                 opts.max_loops_no_progress
             retcode = HCN.MonodromyCode.HEURISTIC_STOP
             break
         end
-        if length(results) == something(opts.target_solutions_count, -1)
+        if length(results) == opts.target_solutions_count
             retcode = HCN.MonodromyCode.SUCCESS
             break
         end
@@ -214,12 +214,12 @@ function _drive_monodromy!(
                 )
 
                 undecided || continue
-                if length(results) == something(opts.target_solutions_count, -1) &&
+                if length(results) == opts.target_solutions_count &&
                         # only terminate after a completed loop to ensure that we
                         # collect proper permutation information
                         !opts.permutations
                     retcode = HCN.MonodromyCode.SUCCESS
-                elseif opts.timeout !== nothing && time() - t₀ > (opts.timeout::Float64)
+                elseif time() - t₀ > opts.timeout
                     retcode = HCN.MonodromyCode.TIMEOUT
                 end
                 retcode == HCN.MonodromyCode.IN_PROGRESS || empty!(queue)
@@ -248,7 +248,7 @@ function _handle_monodromy_result!(
     # can land while a later one fails. The worker holds no solver, so the
     # missing columns of a job that asked for them are counted here.
     columns = r.trace
-    if columns === nothing
+    if isempty(columns)
         collect_trace = opts.trace_test && HCN.nloops(MS) == r.loop_id &&
             MS.workers[1].base isa HCN.LinearSubspace
         collect_trace && HCN._trace_dropped!(MS)
@@ -257,7 +257,7 @@ function _handle_monodromy_result!(
     end
 
     res = r.result
-    if res === nothing || res.singular
+    if res.singular
         HCN.loop_failed!(stats)
         if opts.permutations
             HCN.add_permutation!(stats, r.loop_id, r.id, 0)

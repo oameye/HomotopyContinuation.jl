@@ -2,12 +2,12 @@ using Test, Random
 using HomotopyContinuation
 using HomotopyContinuation: VoronoiTree, search_in_radius, add!, InfNorm, inf_distance
 
-# Brute-force oracle: first id within tol, or nothing.
+# Brute-force oracle: first id within tol, or 0.
 function brute_search(pts::Vector{Vector{ComplexF64}}, ids::Vector{Int}, v, tol)
     for (p, id) in zip(pts, ids)
         inf_distance(p, v) < tol && return id
     end
-    return nothing
+    return 0
 end
 
 @testset "VoronoiTree vs brute-force oracle" begin
@@ -30,7 +30,7 @@ end
         expected = brute_search(pts, ids, v, tol)
         got = search_in_radius(tree, v, tol)
         got == expected || (mismatches += 1)
-        if expected === nothing
+        if iszero(expected)
             add!(tree, v, next_id, tol)
             push!(pts, v)
             push!(ids, next_id)
@@ -62,7 +62,7 @@ end
 
     d = data[9342] .+ 1.0e-5
     @test search_in_radius(tree, d, 1.0e-4) == 9342
-    @test search_in_radius(tree, d, 1.0e-6) === nothing
+    @test search_in_radius(tree, d, 1.0e-6) == 0
 end
 
 @testset "many points at nearly identical distance" begin
@@ -74,9 +74,9 @@ end
     for (i, pi) in enumerate(p)
         insert!(tree, pi, i)
     end
-    @test isnothing(search_in_radius(tree, [0.0 + 0im], 1.0e-5))
+    @test search_in_radius(tree, [0.0 + 0im], 1.0e-5) == 0
     insert!(tree, [1.0e-5 + 0im], 101)
-    @test isnothing(search_in_radius(tree, [0.0 + 0im], 1.0e-6))
+    @test search_in_radius(tree, [0.0 + 0im], 1.0e-6) == 0
     @test search_in_radius(tree, [0.0 + 0im], 1.0e-4) == 101
 end
 
@@ -88,5 +88,5 @@ end
     @test sort(collect(tree)) == [1, 2]
     empty!(tree)
     @test length(tree) == 0
-    @test search_in_radius(tree, [1.0 + 0im, 2.0 + 0im], 1.0e-6) === nothing
+    @test search_in_radius(tree, [1.0 + 0im, 2.0 + 0im], 1.0e-6) == 0
 end

@@ -40,7 +40,9 @@ Base.push!(W::WitnessPoints, p::Vector{ComplexF64}) = push!(W.R, p)
 
 # Strip the u coordinate from the points and the u-column from the subspace,
 # projecting a WitnessPoints in (n+1)-space back to an n-space WitnessSet.
-function u_transform(W::WitnessPoints)
+function u_transform(
+        W::WitnessPoints,
+    )::Tuple{Vector{Vector{ComplexF64}}, LinearSubspace{ComplexF64}}
     L = W.Lᵤ
     E = extrinsic(L)
     A, b = E.A, E.b
@@ -55,7 +57,13 @@ end
 # n-space. For index `i` this drops the first `i-1` rows of the base and, for
 # type 2, prepends the equation `u = c`. A linear `L₀` takes `c = 0`, so the whole
 # flag stays linear and the u-regeneration runs projectively.
-function get_flag(iter, L₀::LinearSubspace, rng::Random.MersenneTwister)
+const _FlagPair = Tuple{LinearSubspace{ComplexF64}, LinearSubspace{ComplexF64}}
+
+# Both stacks are built against `ComplexF64` zeros, so the flag is `ComplexF64`
+# whatever `L₀`'s element type is; `map` cannot see that through the constructor.
+function get_flag(
+        iter, L₀::LinearSubspace, rng::Random.MersenneTwister,
+    )::Vector{_FlagPair}
     A₀ = extrinsic(L₀).A          # orthonormal rows
     b₀ = extrinsic(L₀).b
     n = size(A₀, 1) + 1
@@ -111,13 +119,14 @@ function initialize_hypersurfaces(
         ),
         show_progress = false,
     )
-    HS = System{P, V, CompileMode.INTERPRETED, UnderdeterminedShape}
+    HS = System{P, V}
     out = Vector{WitnessSet{HS}}(undef, length(fs))
     for i in eachindex(fs)
-        h = System([fs[i]]; parameters = empty(vars), variables = vars)::HS
-        G, Q = _numerator_system(fs[i], h, vars)
-        R = _witness_init(G, L, rng, hyper_alg, exec)
-        out[i] = WitnessSet(h, L, Q === nothing ? R : _drop_poles(Q, R))
+        h = System([fs[i]]; parameters = empty(vars), variables = vars)
+        out[i] = with_numerator_system(fs[i], h, vars) do G, Q
+            R = _witness_init(G, L, rng, hyper_alg, exec)
+            WitnessSet(h, L, _drop_poles(Q, R))
+        end
     end
     return out
 end
@@ -239,14 +248,15 @@ struct Regeneration{MO <: MonodromyOptions} <: AbstractAlgorithm
     monodromy::MO
     show_monodromy_progress::Bool
     sorted::EquationSorting.T
-    max_codim::Union{Nothing, Int}
+    # `-1` means no bound, as in `rand_subspace`.
+    max_codim::Int
     atol::Float64
     rtol::Float64
 end
 
 Regeneration(;
     sorted::EquationSorting.T = EquationSorting.BY_DEGREE,
-    max_codim::Union{Nothing, Int} = nothing,
+    max_codim::Int = -1,
     monodromy::MonodromyOptions = _equation_by_equation_monodromy(),
     atol::Float64 = 1.0e-14,
     rtol::Float64 = sqrt(eps()),
@@ -356,7 +366,7 @@ function solve(
     # A projective variety of codimension k lives in the ambient space with one
     # dimension spent on the cone direction.
     expected_max_codim = min(c, n - projective)
-    codim = if max_codim !== nothing && max_codim < expected_max_codim
+    codim = if max_codim >= 0 && max_codim < expected_max_codim
         # compute one extra codim so spurious points can be removed
         max_codim + 1
     else
@@ -430,7 +440,7 @@ function solve(
     end
     pop!(vars)
 
-    if max_codim !== nothing && max_codim < expected_max_codim
+    if max_codim >= 0 && max_codim < expected_max_codim
         pop!(out)   # drop the extra codim used to remove spurious points
     end
 
@@ -528,14 +538,24 @@ function _linear_form(
         eqs::Vector{P}, xvars::Vector{V}, coeffs::Vector{Float64},
     )::P where {P <: MP.AbstractPolynomialLike, V}
     isempty(coeffs) && return one(P)
-    return convert(P, sum(coeffs[j] * xvars[j] for j in eachindex(coeffs)))
+    first_index = firstindex(coeffs)
+    form = convert(P, coeffs[first_index] * xvars[first_index])
+    for j in (first_index + 1):lastindex(coeffs)
+        form = form + coeffs[j] * xvars[j]
+    end
+    return form
 end
 
 function _linear_form(
         ::Vector{Expression}, xvars::Vector{Expression}, coeffs::Vector{Float64},
     )::Expression
     isempty(coeffs) && return Expression(1)
-    return sum(coeffs[j] * xvars[j] for j in eachindex(coeffs))
+    first_index = firstindex(coeffs)
+    form = coeffs[first_index] * xvars[first_index]
+    for j in (first_index + 1):lastindex(coeffs)
+        form = form + coeffs[j] * xvars[j]
+    end
+    return form
 end
 
 # `u` starts on the `d`-th roots of `ℓ(p)^d` rather than of 1.
@@ -550,9 +570,15 @@ function _randomize_equations(
         eqs::Vector{P}, rng::Random.MersenneTwister,
     )::Vector{P} where {P}
     c = length(eqs)
-    return P[
-        sum(randn(rng) * eqs[j] for j in i:c) for i in 1:c
-    ]
+    out = Vector{P}(undef, c)
+    for i in 1:c
+        form = convert(P, randn(rng) * eqs[i])
+        for j in (i + 1):c
+            form = form + randn(rng) * eqs[j]
+        end
+        out[i] = form
+    end
+    return out
 end
 
 function _check_regeneration_sorted(
@@ -568,14 +594,24 @@ function _check_regeneration_sorted(
     return nothing
 end
 
-# The hypersurface whose witness set gives the witness set of `f = 0`, and the
-# denominator of `f`, or `nothing` when it has none.
-_numerator_system(::MP.AbstractPolynomialLike, h::System, ::Vector) = (h, nothing)
+# What `_numerator_system` yields when the equation is already polynomial: there is
+# no pole variety to drop points from.
+struct NoDenominator end
 
-function _numerator_system(f::Expression, h::System, vars::Vector{Expression})
+_drop_poles(::NoDenominator, R::Vector{Vector{ComplexF64}})::Vector{Vector{ComplexF64}} = R
+
+# Runs `fn(numerator, denominator)` on the hypersurface whose witness set gives the
+# witness set of `f = 0`. Whether there is a denominator is a property of `f`, not of
+# its type.
+with_numerator_system(fn::F, ::MP.AbstractPolynomialLike, h::System, ::Vector) where {F} =
+    fn(h, NoDenominator())
+
+function with_numerator_system(
+        fn::F, f::Expression, h::System, vars::Vector{Expression},
+    ) where {F}
     (p, q) = num_den(f)
-    degree(q, vars) <= 0 && return (h, nothing)
-    return (
+    degree(q, vars) <= 0 && return fn(h, NoDenominator())
+    return fn(
         System([p]; parameters = Expression[], variables = vars),
         System([q]; parameters = Expression[], variables = vars),
     )
@@ -750,10 +786,10 @@ function _manage_initial_points!(P, m)
 end
 
 # Track one (point, root-of-unity) start through the u-homotopy. Returns the
-# endpoint when it is a valid isolated intersection point, else `nothing`.
+# endpoint when it is a valid isolated intersection point, else an empty vector.
 function _track_u_root(
         eg::EndgameTracker, q0::Vector{ComplexF64},
-    )::Union{Nothing, Vector{ComplexF64}}
+    )::Vector{ComplexF64}
     track!(eg, FSVec{ComplexF64}(q0))
     pr = PathResult(eg; path_number = 0, start_solution = q0)
     if is_success(pr) && is_finite(pr) && is_nonsingular(pr)
@@ -765,7 +801,7 @@ function _track_u_root(
         )
         code == TrackerCode.TRACKER_SUCCESS && return q
     end
-    return nothing
+    return ComplexF64[]
 end
 
 # The u-placeholder becomes a d-th root of 1 affinely, of `ℓ(p)^d` projectively.
@@ -788,7 +824,7 @@ function _serial_intersection!(
     for p in P
         for ζ in roots
             q = _track_u_root(eg, _u_start_point(p, ζ, chart, ℓ_coeffs))
-            q === nothing || push!(X, q)
+            isempty(q) || push!(X, q)
         end
     end
     return nothing
@@ -820,7 +856,7 @@ function _threaded_intersection!(
         )
         i, j = fldmod1(k, nroots)
         q = _track_u_root(eg, _u_start_point(P[i], roots[j], chart, ℓ_coeffs))
-        q === nothing || (results[k] = q)
+        isempty(q) || (results[k] = q)
     end
     for r in results
         isempty(r) || push!(X, r)
@@ -982,12 +1018,13 @@ function _monodromy_with_options(
     cp = convert(LinearSubspace{ComplexF64}, L)
     # `_monodromy_solve!` seeds its loops from `seed`; the solver's chart takes a
     # tagged stream off the same seed so the two do not share draws.
-    MS = MonodromySolver(
+    return with_monodromy_solver(
         F, cp;
         options = opts, tracker_options = tracker_options,
         rng = _tagged_rng(seed, 0x0000_0001), start_solutions = X,
-    )
-    return _monodromy_solve!(MS, X, cp, seed, show_progress, exec)
+    ) do MS
+        _monodromy_solve!(MS, X, cp, seed, show_progress, exec)
+    end
 end
 
 function fill_up!(
@@ -1009,8 +1046,8 @@ function fill_up!(
                 unique_points(
                     solutions(res); distance = opts.distance,
                     triangle_inequality = opts.triangle_inequality,
-                    atol = opts.unique_points_atol::Float64,
-                    rtol = opts.unique_points_rtol::Float64,
+                    atol = opts.unique_points_atol,
+                    rtol = opts.unique_points_rtol,
                 )
         end
     end
@@ -1027,9 +1064,12 @@ _get_c(flag) = extrinsic(flag[1][1]).b[1]
     intersect(W::WitnessSet, H::WitnessSet, alg = Intersection(), exec = Threaded())
 
 Intersect the witness set `W` with the witness set `H` of a single hypersurface,
-returning the witness set(s) of `V(system(W)) ∩ V(system(H))` obtained by one
-u-regeneration step. Returns a single `WitnessSet` when the result has one
-dimension, otherwise a `Vector{WitnessSet}`.
+returning the witness sets of `V(system(W)) ∩ V(system(H))` obtained by one
+u-regeneration step, one per dimension.
+
+Always a `Vector`, including when the intersection has a single dimension:
+unwrapping that case would make the return type depend on the result rather than on
+the arguments.
 
     intersect(W::WitnessSet, f, alg = Intersection(), exec = Threaded())
 
@@ -1121,7 +1161,7 @@ function Base.intersect(
     )
 
     G = System([eqs; h]; parameters = empty(vars), variables = vars)
-    out = WitnessSet[]
+    out = WitnessSet{typeof(G)}[]
     for Wi in Ws
         P, L = u_transform(Wi)
         push!(out, WitnessSet(G, L, P; projective = projective))
@@ -1130,7 +1170,7 @@ function Base.intersect(
     # lie on a higher-dimensional component (they are junk from the u-homotopy).
     _remove_contained_points!(out, rng, exec; atol = atol, rtol = rtol)
     filter!(X -> degree(X) > 0, out)
-    return length(out) == 1 ? first(out) : out
+    return out
 end
 
 # For witness sets sorted by decreasing dimension, drop from each set the points
@@ -1197,7 +1237,7 @@ end
 # affine line, or a linear plane when the step runs projectively.
 _hypersurface_witness(alg::Intersection, seed::UInt32)::Witness{TotalDegree} =
     Witness(
-    _with_seed(alg.common, seed), nothing, nothing,
+    _with_seed(alg.common, seed), -1, -1,
     TotalDegree(;
         tracker_options = _tracker_options(alg),
         endgame_options = _endgame_options(alg),
@@ -1241,13 +1281,14 @@ function _hypersurface_witness_set(
         ),
     )
     h = System([f]; parameters = Expression[], variables = vars)
-    G, Q = _numerator_system(f, h, vars)
-    Wp = solve(
-        G, _hypersurface_slice(rng, length(vars), projective),
-        _hypersurface_witness(alg, rand(rng, UInt32)), exec,
-    )
-    R = Q === nothing ? solutions(Wp) : _drop_poles(Q, solutions(Wp))
-    return WitnessSet(h, linear_subspace(Wp), R; projective = projective)
+    return with_numerator_system(f, h, vars) do G, Q
+        Wp = solve(
+            G, _hypersurface_slice(rng, length(vars), projective),
+            _hypersurface_witness(alg, rand(rng, UInt32)), exec,
+        )
+        R = _drop_poles(Q, solutions(Wp))
+        WitnessSet(h, linear_subspace(Wp), R; projective = projective)
+    end
 end
 
 # The witness points of one component are a trace-tested loop with no permutations;

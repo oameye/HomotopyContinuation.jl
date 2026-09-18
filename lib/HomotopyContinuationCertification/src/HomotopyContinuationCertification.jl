@@ -19,7 +19,7 @@ using Arblib: Arblib, AcbMatrix, AcbRefVector, AcbRefMatrix, Mag
 using EnumX: @enumx
 using IntervalTrees: IntervalTrees
 using OhMyThreads: @tasks, @set, @local
-using Moshi.Data: variant_storage_type
+using Moshi.Match: @match
 
 # Core HomotopyContinuation internals the certification code builds on.
 # These are accessed via qualified imports; certification is intimately coupled
@@ -31,7 +31,7 @@ using HomotopyContinuation:
     Interpreter, InstructionSequence, ExecInstruction, ExecInstructionT,
     OpType, op_call, arity, should_use_index_not_reference,
     instruction_op, instruction_output,
-    _EXEC_INSTRUCTION_SPECS, nested_ifs, exec_instruction_storage,
+    _EXEC_INSTRUCTION_SPECS,
     _compile_exec_instructions, execute!,
     NewtonCache, _newton, _clone_system_evaluator, solution,
     _with_fields,

@@ -42,12 +42,11 @@ struct Decomposition{R <: Regeneration, MO <: MonodromyOptions} <: AbstractAlgor
 end
 
 function Decomposition(;
-        regeneration::Union{Nothing, Regeneration} = nothing,
         monodromy::MonodromyOptions = _decompose_stage_monodromy(),
         max_iters::Int = 50,
         warning::Bool = true,
         sorted::EquationSorting.T = EquationSorting.BY_DEGREE,
-        max_codim::Union{Nothing, Int} = nothing,
+        max_codim::Int = -1,
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
         tracker_options::TrackerOptions = TrackerOptions(),
@@ -56,20 +55,38 @@ function Decomposition(;
         show_progress::Bool = true,
         show_monodromy_progress::Bool = false,
     )
-    regen = if regeneration !== nothing
-        regeneration
-    else
-        Regeneration(;
-            sorted = sorted, max_codim = max_codim, atol = atol, rtol = rtol,
-            tracker_options = tracker_options,
-            endgame_options = endgame_options,
-            seed = seed, show_progress = show_progress,
-            show_monodromy_progress = show_monodromy_progress,
-        )
-    end
+    regen = Regeneration(;
+        sorted = sorted, max_codim = max_codim, atol = atol, rtol = rtol,
+        tracker_options = tracker_options,
+        endgame_options = endgame_options,
+        seed = seed, show_progress = show_progress,
+        show_monodromy_progress = show_monodromy_progress,
+    )
     return Decomposition(
         CommonOptions(tracker_options, endgame_options, seed, show_progress),
         regen, monodromy, show_monodromy_progress, max_iters, warning, atol, rtol,
+    )
+end
+
+# A pre-built first stage. The remaining keywords configure the splitting stage,
+# so none of them reach `Regeneration`.
+function Decomposition(
+        regeneration::Regeneration;
+        monodromy::MonodromyOptions = _decompose_stage_monodromy(),
+        max_iters::Int = 50,
+        warning::Bool = true,
+        atol::Float64 = 1.0e-14,
+        rtol::Float64 = sqrt(eps()),
+        tracker_options::TrackerOptions = TrackerOptions(),
+        endgame_options::EndgameOptions = _DECOMPOSITION_ENDGAME,
+        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        show_progress::Bool = true,
+        show_monodromy_progress::Bool = false,
+    )
+    return Decomposition(
+        CommonOptions(tracker_options, endgame_options, seed, show_progress),
+        regeneration, monodromy, show_monodromy_progress, max_iters, warning,
+        atol, rtol,
     )
 end
 
@@ -217,6 +234,17 @@ function _absorb_monodromy_result!(
     return nothing
 end
 
+# The trace as a gate value. `Inf` unless the test actually ran over every path
+# of the loop, so that no evidence fails a gate which accepts on a small value:
+# an untouched trace reads as `0`, a short one is missing whatever the lost paths
+# would have contributed, and a parameter run has no trace and reports `NaN`,
+# which compares false against everything.
+function _trace_gate(MS::MonodromySolver, res::MonodromyResult)::Float64
+    trace_conclusive(MS) || return Inf
+    t = trace(res)
+    return isnan(t) ? Inf : t
+end
+
 function _decompose_with_monodromy(
         W::WT, options::MonodromyOptions, max_iters::Int,
         warning::Bool, rng::Random.MersenneTwister, exec::AbstractExecutor,
@@ -238,20 +266,37 @@ function _decompose_with_monodromy(
     end
 
     cp = convert(LinearSubspace{ComplexF64}, L)
-    MS = MonodromySolver(
+    return with_monodromy_solver(
         G, cp; options = options, tracker_options = tracker_options, rng = rng,
         start_solutions = P,
-    )
+    ) do MS
+        _decompose_with_solver(
+            MS, decomposition, G, L, cp, P, n, options, max_iters, warning, rng,
+            exec, show_monodromy_progress, atol, rtol,
+        )
+    end
+end
 
+function _decompose_with_solver(
+        MS::MonodromySolver, decomposition::Vector{WT}, G, L, cp, P, n::Int,
+        options::MonodromyOptions, max_iters::Int, warning::Bool,
+        rng::Random.MersenneTwister, exec::AbstractExecutor,
+        show_monodromy_progress::Bool, atol::Float64, rtol::Float64,
+    )::Vector{WT} where {WT <: WitnessSet}
     res = _monodromy_solve!(
         MS, P, cp, rand(rng, UInt32), show_monodromy_progress, exec,
     )
 
-    if warning && (something(trace(res), Inf) > options.trace_test_tol)
-        if trace_complete(MS)
+    if warning && _trace_gate(MS, res) > options.trace_test_tol
+        if trace_conclusive(MS)
             @warn "Trying to decompose a non-complete set of witness points for " *
                 "codimension $(dim(L)) (trace test failed). Output contains all " *
                 "components for which the trace test succeeded."
+        elseif MS.trace_paths == 0
+            @warn "The trace test for codimension $(dim(L)) did not run: no path " *
+                "reached the halfway subspace, so there is no trace to compare " *
+                "against. Output contains all components for which the trace test " *
+                "succeeded."
         else
             @warn "The trace test for codimension $(dim(L)) is inconclusive: " *
                 "$(MS.trace_dropped) of $(MS.trace_dropped + MS.trace_paths) paths " *
@@ -320,8 +365,8 @@ function _decompose_with_monodromy(
                     if !done[k] && _identity_root!(identity, k) == root
             ]
 
-            if something(trace(res_orbit), Inf) >= options.trace_test_tol
-                trace_complete(MS) || (inconclusive += 1)
+            if _trace_gate(MS, res_orbit) >= options.trace_test_tol
+                trace_conclusive(MS) || (inconclusive += 1)
                 continue
             end
 

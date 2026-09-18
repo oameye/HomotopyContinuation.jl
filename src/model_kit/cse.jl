@@ -172,7 +172,7 @@ end
 
 """Insert `number` into a sorted vector if not already present."""
 function _add_to_sorted_vec!(vec::Vector{UInt32}, number::UInt32)::Nothing
-    idx = searchsortedfirst(vec, number)
+    idx = searchsortedfirst(vec, number, Base.Order.Forward)
     if idx > length(vec) || vec[idx] != number
         insert!(vec, idx, number)
     end
@@ -301,98 +301,97 @@ function _opts_cse_visit!(
     )::Nothing
     expr in seen && return nothing
     push!(seen, expr)
-    storage = sexpr_storage(expr)
-
-    if storage isa SAddStorage
-        # bvisit(const Add &x)
-        for a in storage_args(storage)
-            _opts_cse_visit!(a, adds, muls, opt_subs, seen)
+    @match expr begin
+        SExpr.SAdd(args) => begin
+            # bvisit(const Add &x)
+            for a in args
+                _opts_cse_visit!(a, adds, muls, opt_subs, seen)
+            end
+            push!(adds, expr)
         end
-        push!(adds, expr)
 
-    elseif storage isa SMulStorage
-        # bvisit(const Mul &x)
-        for a in storage_args(storage)
-            _opts_cse_visit!(a, adds, muls, opt_subs, seen)
-        end
-        # Check for negative coefficient
-        # SymEngine: if (x.get_coef()->is_negative())
-        # IMPORTANT: SymEngine's is_negative() returns true ONLY for real negative
-        # numbers (Integer, Rational, RealDouble), NEVER for Complex.
-        # So we must check: imaginary part is zero AND real part is negative.
-        args = storage_args(storage)
-        if !isempty(args)
-            first_storage = sexpr_storage(args[1])
-            if first_storage isa SConstStorage &&
-                    imag(first_storage.val) == 0 && real(first_storage.val) < 0
-                neg_coeff = first_storage.val
-                pos_coeff = -neg_coeff
-                # Compute neg(expr): flip the coefficient
-                if length(args) == 2 && isone(pos_coeff)
-                    # neg(Mul(-1, x)) = x — SymEngine simplifies this
-                    neg_expr = args[2]
-                else
-                    if isone(pos_coeff)
-                        pos_args = args[2:end]
-                    else
-                        pos_args = copy(args)
-                        pos_args[1] = SExpr.SConst(pos_coeff)
-                    end
-                    neg_expr = length(pos_args) == 1 ? pos_args[1] : SExpr.SMul(pos_args)
+        SExpr.SMul(margs) => begin
+            # bvisit(const Mul &x)
+            for a in margs
+                _opts_cse_visit!(a, adds, muls, opt_subs, seen)
+            end
+            args = margs
+            if !isempty(args)
+                first_val = @match args[1] begin
+                    SExpr.SConst(val) => ExprNumber(true, val)
+                    _ => ExprNumber(false, zero(ComplexF64))
                 end
-                # SymEngine: if (not is_a<Symbol>(*neg_expr))
-                # Skip when negation simplifies to an atom (like a variable)
-                if !_is_atom(neg_expr)
-                    opt_subs[expr] = SExpr.SFuncSym(
-                        SFuncKind.SFUNC_MUL,
-                        SExprT[SExpr.SConst(-one(ComplexF64)), neg_expr],
-                    )
-                    push!(seen, neg_expr)
-                    # SymEngine: expr = neg_expr; if (is_a<Mul>(*expr)) muls.insert(expr)
-                    # Note: using Set ensures no duplicates (matching SymEngine's set_basic)
-                    if sexpr_storage(neg_expr) isa SMulStorage
-                        push!(muls, neg_expr)
+                if first_val.found &&
+                        imag(first_val.val) == 0 && real(first_val.val) < 0
+                    neg_coeff = first_val.val
+                    pos_coeff = -neg_coeff
+                    # Compute neg(expr): flip the coefficient
+                    if length(args) == 2 && isone(pos_coeff)
+                        # neg(Mul(-1, x)) = x — SymEngine simplifies this
+                        neg_expr = args[2]
+                    else
+                        if isone(pos_coeff)
+                            pos_args = args[2:end]
+                        else
+                            pos_args = copy(args)
+                            pos_args[1] = SExpr.SConst(pos_coeff)
+                        end
+                        neg_expr = length(pos_args) == 1 ? pos_args[1] : SExpr.SMul(pos_args)
+                    end
+                    # SymEngine: if (not is_a<Symbol>(*neg_expr))
+                    # Skip when negation simplifies to an atom (like a variable)
+                    if !_is_atom(neg_expr)
+                        opt_subs[expr] = SExpr.SFuncSym(
+                            SFuncKind.SFUNC_MUL,
+                            SExprT[SExpr.SConst(-one(ComplexF64)), neg_expr],
+                        )
+                        push!(seen, neg_expr)
+                        # SymEngine: expr = neg_expr; if (is_a<Mul>(*expr)) muls.insert(expr)
+                        # Note: using Set ensures no duplicates (matching SymEngine's set_basic)
+                        if isa_variant(neg_expr, SExpr.SMul)
+                            push!(muls, neg_expr)
+                        end
+                    else
+                        # neg_expr is an atom, treat original as regular Mul
+                        push!(muls, expr)
                     end
                 else
-                    # neg_expr is an atom, treat original as regular Mul
                     push!(muls, expr)
                 end
             else
                 push!(muls, expr)
             end
-        else
-            push!(muls, expr)
         end
 
-    elseif storage isa SPowStorage
-        # bvisit(const Pow &x)
-        _opts_cse_visit!(storage_base(storage), adds, muls, opt_subs, seen)
-        # SymEngine: check if exponent is negative
-        if storage.exp < 0
-            # pow(base, -n) → FuncSym("pow", [pow(base, n), -1])
-            opt_subs[expr] = SExpr.SFuncSym(
-                SFuncKind.SFUNC_POW,
-                SExprT[SExpr.SPow(storage_base(storage), -storage.exp), SExpr.SConst(ComplexF64(-1))],
-            )
+        SExpr.SPow(base, exp) => begin
+            # bvisit(const Pow &x)
+            b = base
+            _opts_cse_visit!(b, adds, muls, opt_subs, seen)
+            # SymEngine: check if exponent is negative
+            if exp < 0
+                # pow(base, -n) → FuncSym("pow", [pow(base, n), -1])
+                opt_subs[expr] = SExpr.SFuncSym(
+                    SFuncKind.SFUNC_POW,
+                    SExprT[SExpr.SPow(b, -exp), SExpr.SConst(ComplexF64(-1))],
+                )
+            end
         end
 
-    elseif storage isa SRPowStorage
-        _opts_cse_visit!(storage_base(storage), adds, muls, opt_subs, seen)
+        SExpr.SRPow(base, _) => _opts_cse_visit!(base, adds, muls, opt_subs, seen)
 
-    elseif storage isa SNegStorage
         # SNeg is our representation for SymEngine's Mul(-1, x) where neg simplifies to atom
-        _opts_cse_visit!(storage_arg(storage), adds, muls, opt_subs, seen)
+        SExpr.SNeg(arg) => _opts_cse_visit!(arg, adds, muls, opt_subs, seen)
 
-    elseif storage isa SUnaryStorage
-        _opts_cse_visit!(storage_arg(storage), adds, muls, opt_subs, seen)
+        SExpr.SUnary(_, arg) => _opts_cse_visit!(arg, adds, muls, opt_subs, seen)
 
-    elseif storage isa SFuncSymStorage
         # bvisit(const Basic &x) — generic case for compound expressions
-        for a in storage_args(storage)
+        SExpr.SFuncSym(_, fargs) => for a in fargs
             _opts_cse_visit!(a, adds, muls, opt_subs, seen)
         end
+
+        # Atoms (SConst, SVar, SParam, STmp) — nothing to do
+        _ => nothing
     end
-    # Atoms (SConst, SVar, SParam, STmp) — nothing to do
     return nothing
 end
 
@@ -445,15 +444,9 @@ function _find_repeated!(
         to_eliminate::Set{SExprT},
         opt_subs::Dict{SExprT, SExprT},
     )::Nothing
-    storage = sexpr_storage(expr)
     # SymEngine: if (is_a_Number(*expr) ...) return;
-    if storage isa SConstStorage
-        return nothing
-    end
-
-    if storage isa STmpStorage
-        return nothing
-    end
+    isa_variant(expr, SExpr.SConst) && return nothing
+    isa_variant(expr, SExpr.STmp) && return nothing
 
     # SymEngine: if (seen_subexp.find(expr) != seen_subexp.end()) { to_eliminate.insert(expr); return; }
     if expr in seen

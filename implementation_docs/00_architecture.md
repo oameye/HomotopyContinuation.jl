@@ -43,7 +43,7 @@
    EndgameTracker → Valuation · singular endgame · at-infinity detection
          │
          ▼
-   solve(F, alg, exec) → init(F, alg, exec) → SolveCache{E,B} / PolyhedralSolveCache{E,B,S}
+   solve(F, alg, exec) → init(F, alg, exec) → SolveCache{E} / PolyhedralSolveCache{E}
          │
          ├── Serial()   → solve!(cache::Cache{Serial})   single-task loop
          └── Threaded(n) → solve!(cache::Cache{Threaded}) @tasks/@local via OhMyThreads
@@ -191,7 +191,7 @@ All FW signatures use `FSVec{T}`/`FSMat{T}` (concrete FixedSizeArray aliases). T
 ### System
 
 ```julia
-struct System{P, V, M, S}
+struct System{P, V}
     polys::FSVec{P}                    # original MP polynomials
     parameters::FSVec{V}               # parameter variables
     variables::FSVec{V}                # decision variables
@@ -213,6 +213,14 @@ struct System{P, V, M, S}
     compile_mode::CompileMode.T        # needed by _clone_system_evaluator for threading
 end
 ```
+
+`P` and `V` follow the element types of the input, so a `System` is concrete as
+soon as the call that builds it is. The compile mode lives in the
+`compile_mode` field and the shape is read off `size`; neither is a type
+parameter, because both are decided by runtime data and lifting them would make
+every constructor return an abstract type. Route dispatch still specializes on
+the shape: `with_system_shape(f, F)` branches into a concrete call per shape
+rather than returning a shape value.
 
 ### CompositionSystem
 
@@ -244,7 +252,7 @@ demand.
 Degrees and homogeneity are folded from the stages rather than the composed
 equations: `deg(gⱼ ∘ F)` is the degree of `gⱼ` in the weights `deg(fᵢ)`, and
 `gⱼ ∘ F` is homogeneous when `gⱼ` is homogeneous in those weights and every
-`fᵢ` is. This matters because `MonodromySolver` picks an affine chart off
+`fᵢ` is. This matters because `with_monodromy_solver` picks an affine chart off
 `is_homogeneous`, and a false negative there tracks a projective problem in
 ambient coordinates with a rank-deficient Jacobian. Where every equation of `F`
 shares one degree `d` the rule collapses to `deg(gⱼ) · d` with `gⱼ` homogeneous,
@@ -294,7 +302,7 @@ end
 const SExprT = typeof(SExpr.SConst(zero(ComplexF64)))  # single concrete type
 ```
 
-All variants share one concrete type. Access via `variant_storage(expr)` for pattern dispatch on storage types (`SConstStorage`, `SVarStorage`, etc.).
+All variants share one concrete type. Match on them with `Moshi.Match.@match`, which binds a variant's fields directly and emits the tag switch itself. `variant_storage(expr)` returns the storage union by construction, so naming its result makes the caller type unstable; the storage aliases it fed (`SConstStorage`, `SVarStorage`, ...) are gone.
 
 `SPow` with a negative exponent is how division reaches the tape: `a / b` lowers to
 `SMul([a, SPow(b, -1)])`, and the tape compiler splits products into numerator and
@@ -409,8 +417,13 @@ struct DistributedExecutor <: AbstractExecutor
 end
 ```
 
-`solve(F, alg, exec)` dispatches on executor type via `SolveCache{E,B,C}`,
-`PolyhedralSolveCache{E,B,S,C}` and `WorkerSolveCache{E,W,B}`.
+`solve(F, alg, exec)` dispatches on executor type via `SolveCache{E}`,
+`PolyhedralSolveCache{E}` and `WorkerSolveCache{E}`. The executor is the caller's,
+so a cache is concrete as soon as the call is. Which builder, worker and
+excess-solution check a route needs is read off the system at run time, so each
+is erased behind a concrete handle (`PathBuilder{W}`, `PathWorker`, a
+possibly-empty `ExcessCheckers`) rather than lifted into a parameter: lifting one
+would make every `init` return a union of the routes it might have taken.
 
 **Builder pattern.** Each builder stores immutable reconstruction data and produces fresh
 worker state per task via `builder()`. Ten live in `solving/builder.jl`, plus two in
@@ -504,7 +517,7 @@ matrix via singular values.
 `LinearSubspace` (intrinsic + extrinsic descriptions, Grassmannian geodesics,
 `rand_subspace`, `geodesic_distance`) supports monodromy on positive-dimensional
 solution sets: `Monodromy` accepts a `LinearSubspace` in place of the
-parameter vector and moves it via `linear_subspace_homotopy`
+parameter vector and moves it via `with_linear_subspace_homotopy`
 (IntrinsicSubspaceHomotopy by default).
 
 ## The solving API
@@ -574,8 +587,8 @@ Optional: `set_solution!(x, y, t)`, `get_solution!(out, x, t)`, `start_parameter
 | CoefficientHomotopy | H(x,t) = F(x; t·start + (1-t)·target) | Polyhedral phase 2 |
 | ParameterHomotopy | H(x,t) = F(x; t·p₁ + (1-t)·p₀), retargetable via start/target_parameters! | Parameter solve, `Sweep`, monodromy loops |
 | ToricHomotopy | H(x,t) = F(x; c_j·t^{w_j}) | Polyhedral phase 1 |
-| IntrinsicSubspaceHomotopy | F restricted to a moving subspace, intrinsic coords (Grassmannian geodesic) | linear_subspace_homotopy (default) |
-| ExtrinsicSubspaceHomotopy | [F; interpolated extrinsic equations] | linear_subspace_homotopy (fallback) |
+| IntrinsicSubspaceHomotopy | F restricted to a moving subspace, intrinsic coords (Grassmannian geodesic) | with_linear_subspace_homotopy (default) |
+| ExtrinsicSubspaceHomotopy | [F; interpolated extrinsic equations] | with_linear_subspace_homotopy (fallback) |
 | AffineChartHomotopy | H on a random affine chart of projective space | on_affine_chart |
 
 ## OpType Reference

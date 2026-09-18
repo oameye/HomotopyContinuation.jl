@@ -9,6 +9,11 @@ using HomotopyContinuation: System, StraightLineHomotopy, HomotopyEvaluator,
     TaylorVector, TruncatedTaylorSeries, weighted_norm, FSVec, FSMat
 using DynamicPolynomials: @polyvar
 using LinearAlgebra: LinearAlgebra as LA
+using Preferences: load_preference
+
+# `@stable` heap-allocates the closures the evaluators call through, so the
+# zero-allocation contracts below describe the shipped configuration only.
+const INSTRUMENTED = load_preference(HC, "dispatch_doctor_mode", "disable") != "disable"
 
 function allocated_predict!(x̂::FSVec{ComplexF64}, pred::Predictor, dt::ComplexF64)::Int
     return @allocated predict!(x̂, pred, dt)
@@ -385,7 +390,7 @@ end
             allocs = @allocated step!(tracker)
             # Julia 1.10's counter is process-wide and sees allocations from
             # other test tasks. AllocCheck covers the same hot path there.
-            VERSION < v"1.11" || @test allocs == 0
+            VERSION < v"1.11" || INSTRUMENTED || @test allocs == 0
         end
     end
 

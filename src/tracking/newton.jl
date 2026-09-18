@@ -146,7 +146,7 @@ function newton(
         max_rel_norm_first_update::Float64 = max_abs_norm_first_update,
         cache::NewtonCache = NewtonCache(F),
     )::NewtonResult
-    m, n = size(F)
+    _, n = size(F)
     length(x₀) == n || throw(
         DimensionMismatch("x₀ has length $(length(x₀)), expected $n"),
     )

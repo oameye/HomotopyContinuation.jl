@@ -383,9 +383,9 @@ end
     C = F ∘ System(A * [x, y] + c; variables = [x, y])
 
     pair = find_start_pair(C)
-    @test pair !== nothing
-    start, p = pair
-    @test p !== nothing
+    @test pair.found
+    start, p = pair.x, pair.p
+    @test !isempty(p)
     @test length(start) == 2
     @test length(p) == 2
     @test norm(evaluate_system(C, start, p), Inf) < 1.0e-10
@@ -403,7 +403,7 @@ end
     Cf = System([x^2 + y^2 - 3.0, x + y - 1.0]; variables = [x, y]) ∘
         System(A * [x, y] + c; variables = [x, y])
     free_pair = find_start_pair(Cf)
-    @test free_pair !== nothing
-    @test free_pair[2] === nothing
-    @test norm(evaluate_system(Cf, free_pair[1]), Inf) < 1.0e-10
+    @test free_pair.found
+    @test isempty(free_pair.p)
+    @test norm(evaluate_system(Cf, free_pair.x), Inf) < 1.0e-10
 end

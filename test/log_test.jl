@@ -12,7 +12,7 @@ log_fsm(m) = FSMat{ComplexF64}(collect(ComplexF64, m))
 
     @testset "Expression frontend" begin
         @test sprint(show, log(x)) == "log(x)"
-        @test Next.expr_number(log(Expression(2))) ≈ log(2)
+        @test Next.expr_number(log(Expression(2))).val ≈ log(2)
         @test differentiate(log(x), x) == inv(x)
         @test subs(log(x + 2), x => 1) == Expression(log(3))
         @test !Next.is_polynomial(log(x), [x])

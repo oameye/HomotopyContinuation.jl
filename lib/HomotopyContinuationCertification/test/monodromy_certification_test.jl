@@ -1,9 +1,9 @@
 using Test
 using HomotopyContinuation:
-    @polyvar, System, Monodromy, MonodromyOptions, MonodromySolver, Serial, Threaded,
+    @polyvar, System, Monodromy, MonodromyOptions, with_monodromy_solver, Serial, Threaded,
     solve, solutions, nsolutions, nresults, results, is_success, is_singular,
     winding_number, slice, parameters, LinearSubspace, PathResult, PathResultCode,
-    DuplicateCheck, ncertified_distinct, ndiscarded_uncertified, add!,
+    DuplicateCheck, SubspaceCoords, ncertified_distinct, ndiscarded_uncertified, add!,
     accuracy, residual, condition_jacobian, path_results
 using HomotopyContinuationCertification:
     Certification, certify, ndistinct_certified
@@ -72,26 +72,26 @@ certified(; kwargs...) = Monodromy(;
             1.0e-6, 3.2e-7, 1.0e10, 2, true, 0, 0, 0, false, ComplexF64[1.0], 0.0, 1,
             ComplexF64[1.0], Float64[], 1,
         )
-        MS = MonodromySolver(
+        with_monodromy_solver(
             F, p;
             options = MonodromyOptions(; duplicate_check = DuplicateCheck.CERTIFIED),
-        )
-        id, added, accepted = add!(MS, singular_endpoint, 1)
-        @test added
-        @test id == 1
-        @test !is_singular(accepted)
-        # The winding number describes the path, so it survives.
-        @test winding_number(accepted) == 2
-        # The diagnostics describe the point that is reported, not the endpoint
-        # it replaced: that one sat 1e-7 off the solution and was called
-        # ill-conditioned, and its numbers said so.
-        @test residual(accepted) < 1.0e-12 < residual(singular_endpoint)
-        @test accuracy(accepted) < 1.0e-12 < accuracy(singular_endpoint)
-        @test condition_jacobian(accepted) < 1.0e3 < condition_jacobian(singular_endpoint)
-        # The same point is now a certified duplicate, not a second solution.
-        _, added_again, _ = add!(MS, singular_endpoint, 2)
-        @test !added_again
-        @test MS.statistics.certified_duplicates[] == 1
+        ) do MS
+            id, added, accepted = add!(MS, singular_endpoint, 1)
+            @test added
+            @test id == 1
+            @test !is_singular(accepted)
+            # The winding number describes the path, so it survives.
+            @test winding_number(accepted) == 2
+            @test residual(accepted) < 1.0e-12 < residual(singular_endpoint)
+            @test accuracy(accepted) < 1.0e-12 < accuracy(singular_endpoint)
+            @test condition_jacobian(accepted) <
+                1.0e3 < condition_jacobian(singular_endpoint)
+            # The same point is now a certified duplicate, not a second solution.
+            _, added_again, _ = add!(MS, singular_endpoint, 2)
+            @test !added_again
+            @test MS.statistics.certified_duplicates[] == 1
+            return nothing
+        end
 
         # A point that is no solution certifies as neither, and is discarded.
         # Refinement is off: Newton would pull it onto a solution first.
@@ -100,17 +100,19 @@ certified(; kwargs...) = Monodromy(;
             1.0, 1, false, 0, 0, 0, false, ComplexF64[100.0], 0.0, 2,
             ComplexF64[100.0], Float64[], 1,
         )
-        MS_raw = MonodromySolver(
+        with_monodromy_solver(
             F, p;
             options = MonodromyOptions(;
                 duplicate_check = DuplicateCheck.CERTIFIED,
                 certification_refine_solution = false,
             ),
-        )
-        id_far, added_far, _ = add!(MS_raw, far_off, 1)
-        @test !added_far
-        @test id_far == 0
-        @test MS_raw.statistics.uncertified_discards[] == 1
+        ) do MS_raw
+            id_far, added_far, _ = add!(MS_raw, far_off, 1)
+            @test !added_far
+            @test id_far == 0
+            @test MS_raw.statistics.uncertified_discards[] == 1
+            return nothing
+        end
     end
 
     @testset "equivalence classes" begin
@@ -139,7 +141,12 @@ certified(; kwargs...) = Monodromy(;
         L = LinearSubspace([1.0 + 0im 0.0 + 0im], [0.0 + 0im])
         r = solve(
             G, [[0.0 + 0im, 1.0 + 0im], [0.0 + 0im, -1.0 + 0im]], L,
-            certified(; target_solutions_count = 2, intrinsic = intrinsic), Serial(),
+            certified(;
+                target_solutions_count = 2,
+                coords = intrinsic ? SubspaceCoords.INTRINSIC :
+                    SubspaceCoords.EXTRINSIC,
+            ),
+            Serial(),
         )
         sliced = certify(
             slice(G, parameters(r)), solutions(r),

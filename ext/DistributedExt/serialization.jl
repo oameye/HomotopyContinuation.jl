@@ -37,21 +37,23 @@ function Serialization.serialize(s::AbstractSer, sys::HCN.System)
     Serialization.serialize(s, collect(sys.parameters))
     Serialization.serialize(s, collect(sys.variables))
     Serialization.serialize(s, HCN._lowered(sys))
+    Serialization.serialize(s, sys.compile_mode)
     return nothing
 end
 
 function Serialization.deserialize(
-        s::AbstractSer, ::Type{HCN.System{P, V, M, S}},
-    )::HCN.System{P, V, M, S} where {P, V, M, S}
+        s::AbstractSer, ::Type{HCN.System{P, V}},
+    )::HCN.System{P, V} where {P, V}
     polys = Serialization.deserialize(s)::Vector{P}
     parameters = Serialization.deserialize(s)::Vector{V}
     variables = Serialization.deserialize(s)::Vector{V}
     lowered = Serialization.deserialize(s)::HCN.LoweredInput
+    compile_mode = Serialization.deserialize(s)::HCN.CompileMode.T
 
     return HCN._build_compiled_system(
-        _compile_strategy(M), polys, variables, parameters, lowered,
-        length(polys), length(variables), length(parameters), S(),
-    )::HCN.System{P, V, M, S}
+        _compile_strategy(compile_mode), polys, variables, parameters, lowered,
+        length(polys), length(variables), length(parameters),
+    )::HCN.System{P, V}
 end
 
 # ── _SupportSystem ──────────────────────────────────────────────────────────
@@ -100,11 +102,12 @@ end
 
 # ── CompositionSystem ───────────────────────────────────────────────────────
 
-# A stage holds its system only inside its factory thunk, and every stage was
-# built from one `System`, so the stage vector is rebuilt from those systems.
+_stage_system(stage::HCN.CompositionStage) =
+    (stage.factory[]::HCN._SystemCloner).system
+
 function Serialization.serialize(s::AbstractSer, C::HCN.CompositionSystem)
     Serialization.serialize_type(s, typeof(C))
-    Serialization.serialize(s, [HCN._stage_system(stage) for stage in C.stages])
+    Serialization.serialize(s, [_stage_system(stage) for stage in C.stages])
     Serialization.serialize(s, C.variables)
     Serialization.serialize(s, C.parameters)
     Serialization.serialize(s, C.degrees)

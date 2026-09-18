@@ -81,14 +81,27 @@ _reseed(alg::Polyhedral, seed::UInt32)::Polyhedral =
 _quiet(alg::Polyhedral)::Polyhedral = _with_common(alg, _quiet(alg.common))
 
 """
+    _SupportSystem
+
+Minimal reconstruction data for `Fᵢ(x; p) = Σⱼ pᵢⱼ x^support[i][:,j]`.
+Polyhedral tracking needs only an evaluator and immutable instruction sequences
+for worker-local tapes; no symbolic variables or polynomial objects are needed.
+"""
+struct _SupportSystem
+    evaluator::SystemEvaluator
+    eval_sequence::InstructionSequence
+    jacobian_sequence::InstructionSequence
+end
+
+"""
     PolyhedralSolveCache
 
 Holds pre-built trackers and start solutions for the two-phase polyhedral homotopy.
 Created by `CommonSolve.init`.
 """
-struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S, C}
+struct PolyhedralSolveCache{E <: AbstractExecutor}
     executor::E
-    builder::B
+    builder::PolyhedralPathBuilder
     toric_tracker::Tracker
     coeff_tracker::EndgameTracker
     toric_homotopy::ToricHomotopy
@@ -99,9 +112,9 @@ struct PolyhedralSolveCache{E <: AbstractExecutor, B <: PolyhedralBuilder, S, C}
     # carries a point from the toric phase to the coefficient phase
     x_buffer::Vector{ComplexF64}
     # GC roots for interpreters — must be kept alive for FunctionWrapper closures
-    _support_system::S
-    # ExcessSolutionChecker for overdetermined systems, Nothing for square ones
-    excess_checker::C
+    _support_system::_SupportSystem
+    # One checker when the system was squared up, none when it was already square.
+    excess_checkers::ExcessCheckers
     show_progress::Bool
     early_stop::EarlyStop
 end
@@ -155,19 +168,6 @@ function _randomize_support(
 end
 
 # ── Helper: build coefficient-parametric evaluator from support ─────────
-
-"""
-    _SupportSystem
-
-Minimal reconstruction data for `Fᵢ(x; p) = Σⱼ pᵢⱼ x^support[i][:,j]`.
-Polyhedral tracking needs only an evaluator and immutable instruction sequences
-for worker-local tapes; no symbolic variables or polynomial objects are needed.
-"""
-struct _SupportSystem
-    evaluator::SystemEvaluator
-    eval_sequence::InstructionSequence
-    jacobian_sequence::InstructionSequence
-end
 
 # Sparse (variable_slot, exponent) key for the monomial x^support[:, term],
 # optionally differentiated once wrt `derivative_variable` (0 = no derivative).
@@ -341,12 +341,33 @@ end
     c.eval_sequence, c.jacobian_sequence, c.nequations, c.nvariables, c.nparams,
 )
 
-function _unsupported_support_taylor!(::Any, ::Any, ::Any)::Nothing
+@noinline function _unsupported_support_taylor!()::Nothing
     throw(
         ArgumentError(
             "the internal polyhedral support evaluator does not provide this Taylor mode",
         )
     )
+end
+
+@inline function _unsupported_support_taylor!(
+        ::FSVec{ComplexF64}, ::TaylorVector{2, ComplexF64}, ::FSVec{ComplexF64},
+    )::Nothing
+    return _unsupported_support_taylor!()
+end
+@inline function _unsupported_support_taylor!(
+        ::FSVec{ComplexF64}, ::TaylorVector{3, ComplexF64}, ::FSVec{ComplexF64},
+    )::Nothing
+    return _unsupported_support_taylor!()
+end
+@inline function _unsupported_support_taylor!(
+        ::FSVec{ComplexF64}, ::TaylorVector{4, ComplexF64}, ::FSVec{ComplexF64},
+    )::Nothing
+    return _unsupported_support_taylor!()
+end
+@inline function _unsupported_support_taylor!(
+        ::FSVec{ComplexF64}, ::TaylorVector{2, ComplexF64}, ::TaylorVector{2, ComplexF64},
+    )::Nothing
+    return _unsupported_support_taylor!()
 end
 
 function _support_system(support::Vector{Matrix{Int32}})::_SupportSystem
@@ -367,22 +388,31 @@ _clone_system_evaluator(system::_SupportSystem)::SystemEvaluator =
 
 # ── CommonSolve.init: polys + Polyhedral ────────────────────────────────────
 
+const _PolyhedralSourceData =
+    Tuple{Vector{Matrix{Int32}}, Vector{Vector{ComplexF64}}, ExcessCheckers}
+
 function _polyhedral_source_data(
         ::SquareShape, ::Random.MersenneTwister, F::System, ::Float64,
-    )
+    )::_PolyhedralSourceData
     source_support, source_coeffs = support_coefficients(F)
-    return source_support, source_coeffs, nothing
+    return source_support, source_coeffs, ExcessCheckers()
 end
+
+# `with_polyhedral_system` rejects an underdetermined system before the support is
+# read, so this arm raises that same error rather than leaving the branch a hole.
+_polyhedral_source_data(
+    shape::UnderdeterminedShape, ::Random.MersenneTwister, F::System, ::Float64,
+)::_PolyhedralSourceData = _check_square_or_overdetermined(shape, F)
 
 function _polyhedral_source_data(
         ::OverdeterminedShape, rng::Random.MersenneTwister, F::System,
         excess_residual_tol::Float64,
-    )
+    )::_PolyhedralSourceData
     source_support, source_coeffs = support_coefficients(F)
     A, perm, checker = _square_up(rng, F, excess_residual_tol)
     randomized_support, randomized_coeffs =
         _randomize_support(source_support, source_coeffs, A, perm)
-    return randomized_support, randomized_coeffs, checker
+    return randomized_support, randomized_coeffs, ExcessCheckers([checker])
 end
 
 # `System` caches parameter-free supports as dense, nonnegative `Int32`
@@ -503,37 +533,42 @@ end
     error("MixedSubdivisions could not compute fine mixed cells")
 
 """
-    _polyhedral_system(F, alg) -> System
+    with_polyhedral_system(f, F, alg)
 
-The system `_init_polyhedral` runs on, with every route's preparation applied: a
-homogeneous system is put on an affine chart, a composition is substituted out.
-Reading the support off this is what keeps `paths_to_track` from drifting away
-from the paths a solve actually tracks.
+Run `f` on the system `_init_polyhedral` runs on, with every route's preparation
+applied: a homogeneous system is put on an affine chart, a composition is
+substituted out. Reading the support off this is what keeps `paths_to_track` from
+drifting away from the paths a solve actually tracks.
+
+The system is handed to `f` rather than returned: a chart rewrite replaces the
+equations with expressions, so the branches build differently parameterized
+`System`s.
 """
-function _polyhedral_system(F::System, alg::Polyhedral)::System
-    _check_parameter_free(F, "`Polyhedral`")
-    _check_polynomial(F, "`Polyhedral`")
-    if is_homogeneous(F)
-        _check_single_group(F)
-        _check_projective_determined(F, "`Polyhedral`")
-        G = _polynomial_system(F)
-        return _polyhedral_system(
-            _sliced_solve_system(G, _full_subspace(nvariables(G)), _seed(alg)), alg,
+function with_polyhedral_system(f::F, S::System, alg::Polyhedral) where {F}
+    _check_parameter_free(S, "`Polyhedral`")
+    _check_polynomial(S, "`Polyhedral`")
+    if is_homogeneous(S)
+        _check_single_group(S)
+        _check_projective_determined(S, "`Polyhedral`")
+        G = _polynomial_system(S)
+        return with_polyhedral_system(
+            f, _sliced_solve_system(G, _full_subspace(nvariables(G)), _seed(alg)), alg,
         )
     end
-    _check_square_or_overdetermined(F)
-    return F
+    _check_square_or_overdetermined(S)
+    return f(S)
 end
 
-_polyhedral_system(C::CompositionSystem, alg::Polyhedral)::System =
-    _polyhedral_system(System(C), alg)
+with_polyhedral_system(f::F, C::CompositionSystem, alg::Polyhedral) where {F} =
+    with_polyhedral_system(f, System(C), alg)
 
 # The support the mixed cells are computed from: squared up when the system is
 # overdetermined, then padded unless only the torus solutions are wanted.
 function _polyhedral_support(F::System, alg::Polyhedral)::Vector{Matrix{Int32}}
     rng = Random.MersenneTwister(_seed(alg))
-    source_support, _, _ =
-        _polyhedral_source_data(system_shape(F), rng, F, alg.excess_residual_tol)
+    source_support, _, _ = with_system_shape(F) do shape
+        _polyhedral_source_data(shape, rng, F, alg.excess_residual_tol)
+    end
     return Matrix{Int32}[_padded_support(A, alg.only_torus) for A in source_support]
 end
 
@@ -545,17 +580,19 @@ _padded_support(A::Matrix{Int32}, only_torus::Bool)::Matrix{Int32} =
 
 function CommonSolve.init(
         F::System, alg::Polyhedral,
-        exec::AbstractExecutor = Threaded(),
-    )::PolyhedralSolveCache
+        exec::E = Threaded(),
+    )::PolyhedralSolveCache{E} where {E <: AbstractExecutor}
     # Dynamic call: specializes the body on the concrete `System` so that
-    # `system_shape(F)` resolves statically instead of union-splitting.
+    # the shape branch resolves against the concrete system.
     initializer = Base.inferencebarrier(_init_polyhedral)
-    return initializer(_polyhedral_system(F, alg), alg, exec)::PolyhedralSolveCache
+    return with_polyhedral_system(F, alg) do G
+        initializer(G, alg, exec)::PolyhedralSolveCache{E}
+    end
 end
 
 function _init_polyhedral(
-        F::System, alg::Polyhedral, exec::AbstractExecutor,
-    )::PolyhedralSolveCache
+        F::System, alg::Polyhedral, exec::E,
+    )::PolyhedralSolveCache{E} where {E <: AbstractExecutor}
     show_progress = _show_progress(alg)
     seed = _seed(alg)
     n = F.nvars
@@ -567,8 +604,9 @@ function _init_polyhedral(
     #    Overdetermined systems are squared up first: the polyhedral machinery
     #    (mixed cells, parametric system, both homotopy phases) then operates on
     #    the support of G = [I A]·(F∘perm) and never sees the original system.
-    source_support, source_coeffs, excess_checker =
-        _polyhedral_source_data(system_shape(F), rng, F, alg.excess_residual_tol)
+    source_support, source_coeffs, excess_checkers = with_system_shape(F) do shape
+        _polyhedral_source_data(shape, rng, F, alg.excess_residual_tol)
+    end
 
     # 2. Generate start coefficients for ORIGINAL support FIRST.
     #    Coefficients must be generated before zero column addition so the RNG
@@ -651,13 +689,13 @@ function _init_polyhedral(
     worker = builder()
 
     return PolyhedralSolveCache(
-        exec, builder,
+        exec, PolyhedralPathBuilder(builder),
         worker.toric_tracker, worker.coeff_tracker, worker.toric_homotopy,
         support, lifting,
         all_starts, seed,
         worker.x_buffer,
         support_system,
-        excess_checker,
+        excess_checkers,
         show_progress,
         early_stop_callback(alg),
     )
@@ -767,7 +805,7 @@ end
 @noinline _solve_polyhedral_serial_without_progress(cache::PolyhedralSolveCache{Serial}) =
     _solve_polyhedral_serial(cache, nothing)
 @noinline _solve_polyhedral_serial_with_progress(cache::PolyhedralSolveCache{Serial}) =
-    _solve_polyhedral_serial(cache, make_progress(length(cache.start_solutions), true))
+    _solve_polyhedral_serial(cache, make_progress(length(cache.start_solutions)))
 
 # One two-phase path: toric phase from the mixed cell, then the coefficient homotopy.
 function _track_polyhedral_path!(
@@ -835,7 +873,7 @@ function _solve_polyhedral_serial(cache::PolyhedralSolveCache{Serial}, progress)
     end
 
     return _finalize_result(
-        path_results, length(path_results), cache.seed, cache.excess_checker,
+        path_results, length(path_results), cache.seed, cache.excess_checkers,
     )
 end
 
@@ -852,7 +890,7 @@ end
 @noinline _solve_polyhedral_threaded_without_progress(cache::PolyhedralSolveCache{Threaded}) =
     _solve_polyhedral_threaded(cache, nothing)
 @noinline _solve_polyhedral_threaded_with_progress(cache::PolyhedralSolveCache{Threaded}) =
-    _solve_polyhedral_threaded(cache, make_progress(length(cache.start_solutions), true))
+    _solve_polyhedral_threaded(cache, make_progress(length(cache.start_solutions)))
 
 function _solve_polyhedral_threaded(cache::PolyhedralSolveCache{Threaded}, progress)::Result
     nt = cache.executor.ntasks
@@ -887,7 +925,7 @@ function _solve_polyhedral_threaded(cache::PolyhedralSolveCache{Threaded}, progr
     end
 
     tracked = _assigned_results(results)
-    return _finalize_result(tracked, length(tracked), cache.seed, cache.excess_checker)
+    return _finalize_result(tracked, length(tracked), cache.seed, cache.excess_checkers)
 end
 
 # ── CommonSolve.solve!: distributed (extension) ──────────────────────────

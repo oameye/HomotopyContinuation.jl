@@ -127,60 +127,48 @@ end
 
 ## ── Main dispatcher ─────────────────────────────────────────────────────────
 
-"""Compile an SExpr to a tape slot, returning the Int32 slot index."""
-@inline _compile!(c::TapeCompiler, expr::SExprT)::Int32 =
-    _compile_storage!(c, sexpr_storage(expr))
-
-@inline _compile_storage!(c::TapeCompiler, storage::SConstStorage)::Int32 =
-    _get_constant_slot!(c, storage.val)
-@inline _compile_storage!(c::TapeCompiler, storage::SVarStorage)::Int32 =
-    c.var_slots[storage.idx]
-@inline _compile_storage!(c::TapeCompiler, storage::SParamStorage)::Int32 =
-    c.param_slots[storage.idx]
-
-function _compile_storage!(c::TapeCompiler, storage::STmpStorage)::Int32
-    cached = get(c.cse_slots, storage.id, _SLOT_NONE)
+function _compile_tmp!(c::TapeCompiler, id::Int)::Int32
+    cached = get(c.cse_slots, id, _SLOT_NONE)
     cached != _SLOT_NONE && return cached
-    slot = _compile!(c, c.cse_defs[storage.id])
-    c.cse_slots[storage.id] = slot
+    slot = _compile!(c, c.cse_defs[id])
+    c.cse_slots[id] = slot
     return slot
 end
 
-function _compile_storage!(c::TapeCompiler, storage::SPowStorage)::Int32
-    base_slot = _compile!(c, storage_base(storage))
-    return _tape_pow!(c, base_slot, storage.exp)
+function _compile_funcsym!(c::TapeCompiler, kind::SFuncKind.T, args::Vector{SExprT})::Int32
+    kind == SFuncKind.SFUNC_ADD && return _compile_sum!(c, args)
+    kind == SFuncKind.SFUNC_MUL && return _compile_mul!(c, args)
+    error("Unknown SFuncSym kind: $(kind)")
 end
 
-function _compile_storage!(c::TapeCompiler, storage::SRPowStorage)::Int32
-    base_slot = _compile!(c, storage_base(storage))
-    return _emit!(c, OpType.OP_POW, base_slot, _get_constant_slot!(c, storage.exp))
-end
-
-@inline _compile_storage!(c::TapeCompiler, storage::SMulStorage)::Int32 =
-    _compile_mul!(c, storage_args(storage))
-@inline _compile_storage!(c::TapeCompiler, storage::SAddStorage)::Int32 =
-    _compile_sum!(c, storage_args(storage))
-@inline _compile_storage!(c::TapeCompiler, storage::SNegStorage)::Int32 =
-    _tape_neg!(c, _compile!(c, storage_arg(storage)))
-@inline _compile_storage!(c::TapeCompiler, storage::SUnaryStorage)::Int32 =
-    _emit!(c, unary_op_type(storage.kind), _compile!(c, storage_arg(storage)))
-
-function _compile_storage!(c::TapeCompiler, storage::SFuncSymStorage)::Int32
-    if storage.kind == SFuncKind.SFUNC_ADD
-        return _compile_sum!(c, storage_args(storage))
-    elseif storage.kind == SFuncKind.SFUNC_MUL
-        return _compile_mul!(c, storage_args(storage))
+"""Compile an SExpr to a tape slot, returning the Int32 slot index."""
+function _compile!(c::TapeCompiler, expr::SExprT)::Int32
+    return @match expr begin
+        SExpr.SConst(val) => _get_constant_slot!(c, val)
+        SExpr.SVar(idx) => c.var_slots[idx]
+        SExpr.SParam(idx) => c.param_slots[idx]
+        SExpr.STmp(id) => _compile_tmp!(c, id)
+        SExpr.SPow(base, exp) => _tape_pow!(c, _compile!(c, base), exp)
+        SExpr.SRPow(base, exp) => _emit!(
+            c, OpType.OP_POW, _compile!(c, base), _get_constant_slot!(c, exp),
+        )
+        SExpr.SMul(args) => _compile_mul!(c, args)
+        SExpr.SAdd(args) => _compile_sum!(c, args)
+        SExpr.SNeg(arg) => _tape_neg!(c, _compile!(c, arg))
+        SExpr.SUnary(kind, arg) =>
+            _emit!(c, unary_op_type(kind), _compile!(c, arg))
+        SExpr.SFuncSym(kind, args) => _compile_funcsym!(c, kind, args)
     end
-    error("Unknown SFuncSym kind: $(storage.kind)")
 end
 
 ## ── Mul processing ──────────────────────────────────────────────────────────
 
 function _split_off_minus_one(args::Vector{SExprT})::Tuple{Int, Vector{SExprT}}
     if !isempty(args)
-        coeff_storage = sexpr_storage(args[1])
-        if coeff_storage isa SConstStorage && coeff_storage.val == -one(ComplexF64)
-            return -1, args[2:end]
+        @match args[1] begin
+            SExpr.SConst(val) =>
+                val == -one(ComplexF64) && return -1, args[2:end]
+            _ => nothing
         end
     end
     return 1, args
@@ -190,13 +178,13 @@ function _compile_split_into_num_denom!(c::TapeCompiler, args::Vector{SExprT})
     nums = Int32[]
     denoms = Int32[]
     for arg in args
-        storage = sexpr_storage(arg)
-        if storage isa SPowStorage && storage.exp < 0
-            push!(denoms, _tape_pow!(c, _compile!(c, storage_base(storage)), -storage.exp))
-        elseif storage isa SPowStorage
-            push!(nums, _tape_pow!(c, _compile!(c, storage_base(storage)), storage.exp))
-        else
-            push!(nums, _compile!(c, arg))
+        @match arg begin
+            SExpr.SPow(base, exp) => if exp < 0
+                push!(denoms, _tape_pow!(c, _compile!(c, base), -exp))
+            else
+                push!(nums, _tape_pow!(c, _compile!(c, base), exp))
+            end
+            _ => push!(nums, _compile!(c, arg))
         end
     end
     return nums, denoms
@@ -252,13 +240,12 @@ function _split_into_positives_negatives(args::Vector{SExprT})
     positives = SExprT[]
     negatives = SExprT[]
     for arg in args
-        storage = sexpr_storage(arg)
-        if storage isa SMulStorage
-            sign, values = _split_off_minus_one(storage_args(storage))
-            val = length(values) == 1 ? values[1] : SExpr.SMul(values)
-        else
-            sign = 1
-            val = arg
+        sign, val = @match arg begin
+            SExpr.SMul(margs) => begin
+                s, values = _split_off_minus_one(margs)
+                (s, length(values) == 1 ? values[1] : SExpr.SMul(values))
+            end
+            _ => (1, arg)
         end
         if sign == -1
             push!(negatives, val)
@@ -272,18 +259,20 @@ end
 function _compile_reduce_to_at_most_two!(
         c::TapeCompiler, expr::SExprT,
     )::Tuple{Int32, Int32}
-    storage = sexpr_storage(expr)
-    if storage isa SMulStorage
-        args = storage_args(storage)
-        if length(args) == 2
-            return (_compile!(c, args[1]), _compile!(c, args[2]))
-        elseif length(args) == 1
-            return (_compile!(c, args[1]), _SLOT_NONE)
-        elseif length(args) > 2
-            prefix = SExpr.SMul(args[1:(end - 1)])
-            v2 = _compile!(c, prefix)
-            return (_compile!(c, args[end]), v2)
+    @match expr begin
+        SExpr.SMul(margs) => begin
+            args = margs
+            if length(args) == 2
+                return (_compile!(c, args[1]), _compile!(c, args[2]))
+            elseif length(args) == 1
+                return (_compile!(c, args[1]), _SLOT_NONE)
+            elseif length(args) > 2
+                prefix = SExpr.SMul(args[1:(end - 1)])
+                v2 = _compile!(c, prefix)
+                return (_compile!(c, args[end]), v2)
+            end
         end
+        _ => nothing
     end
     return (_compile!(c, expr), _SLOT_NONE)
 end
@@ -675,8 +664,11 @@ function compile_to_instructions(
 
     # Register CSE definitions (compiled lazily on first use)
     for (tmp, definition) in replacements
-        tmp_storage = sexpr_storage(tmp)::STmpStorage
-        compiler.cse_defs[tmp_storage.id] = definition
+        id = @match tmp begin
+            SExpr.STmp(id) => id
+            _ => error("CSE replacement key is not an `STmp`")
+        end
+        compiler.cse_defs[id] = definition
     end
 
     # Use a two-pass approach with placeholder slots.

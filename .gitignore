@@ -17,4 +17,5 @@ ttfx_output.json
 test-run.log
 test-cert.log
 test-extensive.log
+test-strict.log
 ttfx_benchmark.json

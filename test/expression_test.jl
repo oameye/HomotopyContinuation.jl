@@ -19,8 +19,8 @@ using LinearAlgebra: det, dot
         @test !Next.is_variable(p + q)
         @test Next.is_number(Expression(2))
         @test !Next.is_number(p)
-        @test Next.expr_number(Expression(2)) == ComplexF64(2)
-        @test Next.expr_number(p) === nothing
+        @test Next.expr_number(Expression(2)).val == ComplexF64(2)
+        @test !Next.expr_number(p).found
     end
 
     @testset "@unique_var avoids collisions" begin
@@ -158,7 +158,7 @@ using LinearAlgebra: det, dot
         @test subs(f, [x, y, w] => [2, 3, -5]) == Expression(-52)
         @test subs([f, 2f], [x, y, w] => [2, 3, -5]) ==
             Expression[-52, -104]
-        @test Next.expr_number(subs(f, Dict(x => 2, y => 3, w => -5))) == -52
+        @test Next.expr_number(subs(f, Dict(x => 2, y => 3, w => -5))).val == -52
 
         # Float64 coefficients stay real after folding.
         @var a b
@@ -167,7 +167,7 @@ using LinearAlgebra: det, dot
             -0.222 * (-4.49 * (0.5 + 1.0 * a^2) + 1.0 * b^2),
         ]
         vals = subs(constraints, Dict(a => 0.25, b => 0.75))
-        @test all(v -> imag(Next.expr_number(v)) == 0, vals)
+        @test all(v -> imag(Next.expr_number(v).val) == 0, vals)
     end
 
     @testset "determinant" begin
@@ -262,8 +262,9 @@ using LinearAlgebra: det, dot
         for f in (x / (y - 1) + y, (1 + 1 / x)^-2 * y, a / (x * y) + 1 / (x + y))
             p, q = num_den(f)
             v = Dict(x => 0.3 + 0.7im, y => -1.1 + 0.2im, a => 2.0 - 0.5im)
-            @test Next.expr_number(Next.subs(f, v)) ≈
-                Next.expr_number(Next.subs(p, v)) / Next.expr_number(Next.subs(q, v))
+            @test Next.expr_number(Next.subs(f, v)).val ≈
+                Next.expr_number(Next.subs(p, v)).val /
+                Next.expr_number(Next.subs(q, v)).val
         end
 
         # A rational factor in a product form. Nothing is expanded, so the
@@ -273,8 +274,8 @@ using LinearAlgebra: det, dot
         p, q = num_den(f * g)
         @test q == y - 1
         v = Dict(x => 0.4 + 0.1im, y => 1.3 - 0.2im, z => -0.7 + 0.9im)
-        @test Next.expr_number(Next.subs(p, v)) ≈
-            Next.expr_number(Next.subs(f * (x + (y - 1) * (y + z - 1)), v))
+        @test Next.expr_number(Next.subs(p, v)).val ≈
+            Next.expr_number(Next.subs(f * (x + (y - 1) * (y + z - 1)), v)).val
     end
 
     @testset "has_real_coefficients" begin

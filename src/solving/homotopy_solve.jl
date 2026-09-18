@@ -60,28 +60,33 @@ F = System([x^2 - a, x * y - a + b]; variables = [x, y], parameters = [a, b])
 solve(fix_parameters(F, [1, 0]), fix_parameters(F, [2, 4]), [[1, 1]])
 ```
 """
-solve(
-    G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
-    alg::Continuation = Continuation(), exec::AbstractExecutor = Threaded(),
-)::Result = CommonSolve.solve!(CommonSolve.init(G, F, starts, alg, exec))
+function solve(
+        G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
+        alg::Continuation = Continuation(), exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(CommonSolve.init(G, F, starts, alg, exec))
+end
 
-solve(
-    G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
-    exec::AbstractExecutor,
-)::Result = solve(G, F, starts, Continuation(), exec)
+function solve(
+        G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
+        exec::E,
+    )::Result where {E <: AbstractExecutor}
+    return solve(G, F, starts, Continuation(), exec)
+end
 
-CommonSolve.init(
-    G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
-    exec::AbstractExecutor,
-)::SolveCache = CommonSolve.init(G, F, starts, Continuation(), exec)
+function CommonSolve.init(
+        G::CloneableSystem, F::CloneableSystem, starts::StartsLike, exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(G, F, starts, Continuation(), exec)
+end
 
 function CommonSolve.init(
         G::CloneableSystem,
         F::CloneableSystem,
         starts::StartsLike,
         alg::Continuation = Continuation(),
-        exec::AbstractExecutor = Threaded(),
-    )::SolveCache
+        exec::E = Threaded(),
+    )::SolveCache{E} where {E <: AbstractExecutor}
     _check_start_target(G, F)
 
     seed = _seed(alg)
@@ -97,7 +102,7 @@ function CommonSolve.init(
         G, F, chart, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, points, seed, nothing, _show_progress(alg),
+        exec, builder, points, seed, ExcessCheckers(), _show_progress(alg),
         early_stop_callback(alg),
     )
 end
@@ -121,9 +126,9 @@ function _place_on_chart!(
 end
 
 function _homotopy_cache(
-        exec::AbstractExecutor, builder, H::AbstractHomotopy, starts,
+        exec::E, builder::AbstractPathBuilder, H::AbstractHomotopy, starts,
         alg::Continuation,
-    )::SolveCache
+    )::SolveCache{E} where {E <: AbstractExecutor}
     m, n = size(H)
     m >= n || throw(
         ArgumentError(
@@ -136,7 +141,7 @@ function _homotopy_cache(
     _check_start_length(points, n)
     _place_on_chart!(points, H)
     return _solve_cache(
-        exec, builder, points, _seed(alg), nothing, _show_progress(alg),
+        exec, builder, points, _seed(alg), ExcessCheckers(), _show_progress(alg),
         early_stop_callback(alg),
     )
 end
@@ -161,25 +166,29 @@ F = System([x^2 - a, x * y - a + b]; variables = [x, y], parameters = [a, b])
 solve(ParameterHomotopy(F, [1, 0], [2, 4]), [[1, 1]])
 ```
 """
-solve(
-    H::AbstractHomotopy, starts::StartsLike,
-    alg::Continuation = Continuation(), exec::AbstractExecutor = Serial(),
-)::Result = CommonSolve.solve!(CommonSolve.init(H, starts, alg, exec))
+function solve(
+        H::AbstractHomotopy, starts::StartsLike,
+        alg::Continuation = Continuation(), exec::E = Serial(),
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(CommonSolve.init(H, starts, alg, exec))
+end
 
-solve(
-    H::AbstractHomotopy, starts::StartsLike, exec::AbstractExecutor,
-)::Result = solve(H, starts, Continuation(), exec)
+function solve(H::AbstractHomotopy, starts::StartsLike, exec::E)::Result where {E <: AbstractExecutor}
+    return solve(H, starts, Continuation(), exec)
+end
 
-CommonSolve.init(
-    H::AbstractHomotopy, starts::StartsLike, exec::AbstractExecutor,
-)::SolveCache = CommonSolve.init(H, starts, Continuation(), exec)
+function CommonSolve.init(
+        H::AbstractHomotopy, starts::StartsLike, exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(H, starts, Continuation(), exec)
+end
 
 function CommonSolve.init(
         H::AbstractHomotopy,
         starts::StartsLike,
         alg::Continuation = Continuation(),
-        exec::AbstractExecutor = Serial(),
-    )::SolveCache
+        exec::E = Serial(),
+    )::SolveCache{E} where {E <: AbstractExecutor}
     builder = _homotopy_builder(
         exec, H, _tracker_options(alg), _endgame_options(alg),
     )
@@ -209,27 +218,31 @@ Every call must allocate a homotopy sharing nothing mutable with the others. One
 built around an existing system's evaluator does *not* qualify: the evaluator
 carries the interpreter tapes.
 """
-solve(
-    build_homotopy::Function, starts::StartsLike,
-    alg::Continuation, exec::AbstractExecutor,
-)::Result = CommonSolve.solve!(
-    CommonSolve.init(build_homotopy, starts, alg, exec),
-)
+function solve(
+        build_homotopy::Function, starts::StartsLike,
+        alg::Continuation, exec::E,
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(CommonSolve.init(build_homotopy, starts, alg, exec))
+end
 
-solve(
-    build_homotopy::Function, starts::StartsLike, exec::AbstractExecutor,
-)::Result = solve(build_homotopy, starts, Continuation(), exec)
+function solve(
+        build_homotopy::Function, starts::StartsLike, exec::E,
+    )::Result where {E <: AbstractExecutor}
+    return solve(build_homotopy, starts, Continuation(), exec)
+end
 
-CommonSolve.init(
-    build_homotopy::Function, starts::StartsLike, exec::AbstractExecutor,
-)::SolveCache = CommonSolve.init(build_homotopy, starts, Continuation(), exec)
+function CommonSolve.init(
+        build_homotopy::Function, starts::StartsLike, exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(build_homotopy, starts, Continuation(), exec)
+end
 
 function CommonSolve.init(
         build_homotopy::Function,
         starts::StartsLike,
         alg::Continuation,
-        exec::AbstractExecutor,
-    )::SolveCache
+        exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
     H = build_homotopy()
     H isa AbstractHomotopy || throw(
         ArgumentError(
@@ -247,9 +260,9 @@ for f in (:(solve), :(CommonSolve.init))
     @eval begin
         $f(
             H::Homotopy, starts::StartsLike, alg::Continuation = Continuation(),
-            exec::AbstractExecutor = Serial(),
-        ) = $f(_as_homotopy(H), starts, alg, exec)
-        $f(H::Homotopy, starts::StartsLike, exec::AbstractExecutor) =
+            exec::E = Serial(),
+        ) where {E <: AbstractExecutor} = $f(_as_homotopy(H), starts, alg, exec)
+        $f(H::Homotopy, starts::StartsLike, exec::E) where {E <: AbstractExecutor} =
             $f(_as_homotopy(H), starts, Continuation(), exec)
 
         $f(

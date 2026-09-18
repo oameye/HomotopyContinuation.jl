@@ -1063,7 +1063,8 @@ function _certify_impl(
     is_real_system = is_real(F)
     certs = Vector{CertT}(undef, N)
 
-    progress = make_progress(N, show_progress; desc = "Certifying $N solutions... ")
+    progress = show_progress ?
+        make_progress(N; desc = "Certifying $N solutions... ") : nothing
 
     if exec isa Threaded && exec.ntasks > 1 && N > 1
         plock = ReentrantLock()
@@ -1543,9 +1544,9 @@ function distinct_certified_solutions!(
     show_progress = alg.show_progress
     max_precision = alg.max_precision
     refine_solution = alg.refine_solution
-    progress = make_progress(
-        length(S), show_progress; desc = "Certifying $(length(S)) solutions... ",
-    )
+    progress = show_progress ?
+        make_progress(length(S); desc = "Certifying $(length(S)) solutions... ") :
+        nothing
     if exec isa Threaded && exec.ntasks > 1
         plock = ReentrantLock()
         @tasks for i in eachindex(S)

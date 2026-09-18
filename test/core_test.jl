@@ -11,6 +11,11 @@ using HomotopyContinuation: AbstractSystem, AbstractHomotopy,
     execute!, execute_taylor!, FSVec, FSMat
 using DynamicPolynomials: @polyvar
 using MultivariatePolynomials: differentiate as mp_diff
+using Preferences: load_preference
+
+# `@stable` heap-allocates the closures the evaluators call through, so the
+# zero-allocation contracts below describe the shipped configuration only.
+const INSTRUMENTED = load_preference(HC, "dispatch_doctor_mode", "disable") != "disable"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Test AbstractSystem for wrapping via HomotopyEvaluator
@@ -740,8 +745,8 @@ end
         evaluate!(u, seval, xv, p)
         evaluate_and_jacobian!(u, U, seval, xv, p)
 
-        @test (@allocated evaluate!(u, seval, xv, p)) == 0
-        @test (@allocated evaluate_and_jacobian!(u, U, seval, xv, p)) == 0
+        INSTRUMENTED || @test (@allocated evaluate!(u, seval, xv, p)) == 0
+        INSTRUMENTED || @test (@allocated evaluate_and_jacobian!(u, U, seval, xv, p)) == 0
     end
 
     @testset "zero allocations: HomotopyEvaluator eval + jac" begin
@@ -760,8 +765,8 @@ end
         evaluate!(u, heval, xv, t)
         evaluate_and_jacobian!(u, U, heval, xv, t)
 
-        @test (@allocated evaluate!(u, heval, xv, t)) == 0
-        @test (@allocated evaluate_and_jacobian!(u, U, heval, xv, t)) == 0
+        INSTRUMENTED || @test (@allocated evaluate!(u, heval, xv, t)) == 0
+        INSTRUMENTED || @test (@allocated evaluate_and_jacobian!(u, U, heval, xv, t)) == 0
     end
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -847,7 +852,7 @@ end
         evaluate!(u, heval, xv, t)
         evaluate_and_jacobian!(u, U, heval, xv, t)
 
-        @test (@allocated evaluate!(u, heval, xv, t)) == 0
-        @test (@allocated evaluate_and_jacobian!(u, U, heval, xv, t)) == 0
+        INSTRUMENTED || @test (@allocated evaluate!(u, heval, xv, t)) == 0
+        INSTRUMENTED || @test (@allocated evaluate_and_jacobian!(u, U, heval, xv, t)) == 0
     end
 end

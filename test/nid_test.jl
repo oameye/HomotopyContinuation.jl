@@ -23,11 +23,11 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             p * (z - 3) * (z - 5),
         ]
 
-        W = solve(F, Regeneration())
+        W = solve(F, Regeneration(; seed = 0x8a1f2c3d))
         @test sort(degree.(W); rev = true) == [8, 8, 2]
         @test isconcretetype(eltype(W))
 
-        dec = solve(W, Decomposition())
+        dec = solve(W, Decomposition(; seed = 0x8a1f2c3d))
         @test all(W -> is_irreducible(W) == Irreducibility.IRREDUCIBLE, dec)
         @test eltype(dec) === eltype(W)
 
@@ -157,9 +157,9 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test !membership(randn(3), W)
         @test membership(solutions(W)[1], W)
         U = intersect(W, x / (y - 1) + y + z - 1)
-        @test degree(U) == 4
+        @test degree(only(U)) == 4
         V = intersect(W, x * y^3 - z^4 + x^3 - 8)
-        @test degree(V) == 16
+        @test degree(only(V)) == 16
 
         # A numerator and a denominator sharing a structural factor: the zero of
         # the numerator at `r = 1` is a pole of the equation, not a point of its
@@ -230,8 +230,8 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         # variables out. A homogeneous one is sliced affinely like any other.
         @polyvar x1 x2 x3 x4
         Wp = solve(System([x1^2 + x2^2 + x3^2 - 4]), Witness(; show_progress = false))
-        @test degree(intersect(Wp, x1^2 - x2^2 - 1, Intersection(; show_progress = false))) == 4
-        @test degree(intersect(Wp, x1^2 - x2^2, Intersection(; show_progress = false))) == 4
+        @test degree(only(intersect(Wp, x1^2 - x2^2 - 1, Intersection(; show_progress = false)))) == 4
+        @test degree(only(intersect(Wp, x1^2 - x2^2, Intersection(; show_progress = false)))) == 4
         @test_throws ArgumentError intersect(Wp, x1^2 - x4^2, Intersection(; show_progress = false))
 
         @var y1 y2 y3
@@ -239,10 +239,15 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             System([y1^2 + y2^2 + y3^2 - 4]; variables = [y1, y2, y3]),
             Witness(; show_progress = false),
         )
-        @test degree(intersect(We, y1^2 - y2^2 - 1, Intersection(; show_progress = false))) == 4
-        @test degree(intersect(We, y1^2 - y2^2, Intersection(; show_progress = false))) == 4
+        @test degree(only(intersect(We, y1^2 - y2^2 - 1, Intersection(; show_progress = false)))) == 4
+        @test degree(only(intersect(We, y1^2 - y2^2, Intersection(; show_progress = false)))) == 4
         @test degree(
-            intersect(We, (y1^2 - y2^2) / (y1 - y2), Intersection(; show_progress = false))
+            only(
+                intersect(
+                    We, (y1^2 - y2^2) / (y1 - y2),
+                    Intersection(; show_progress = false),
+                ),
+            ),
         ) == 2
     end
 
@@ -495,7 +500,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         @test !advances_ambient(dec)
 
         W = solve(System([x^2 + y^2 - 5]), Witness(; seed = s, show_progress = false))
-        cut = () -> intersect(W, x - y, Intersection(; seed = s))
+        cut = () -> only(intersect(W, x - y, Intersection(; seed = s)))
         I1, I2 = from_two_states(cut)
         @test degree(I1) == degree(I2)
         @test !advances_ambient(cut)
@@ -537,7 +542,7 @@ end
         # endpoint-relative default.
         default_m = MonodromyOptions()
         @test default_m.unique_points_atol == 1.0e-14
-        @test default_m.unique_points_rtol === nothing
+        @test isnan(default_m.unique_points_rtol)
 
         inherited = _regeneration_monodromy_options(default_m, W, 2.0e-9, 3.0e-7)
         @test inherited.unique_points_atol == 2.0e-9

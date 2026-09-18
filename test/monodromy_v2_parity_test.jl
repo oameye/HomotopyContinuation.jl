@@ -74,7 +74,8 @@ end
 @testset "toric ED: start pairs, distances, dedup options" begin
     F, uv = toric_ed_system()
     Random.seed!(0x008b8687)
-    x₀, p₀ = find_start_pair(F)
+    start_pair = find_start_pair(F)
+    x₀, p₀ = start_pair.x, start_pair.p
 
     # input of length > 1 (duplicated start solutions)
     r = solve(
@@ -157,7 +158,8 @@ end
 @testset "toric ED: group action and reuse_loops" begin
     F, uv = toric_ed_system()
     Random.seed!(0x008b868e)
-    x₀, p₀ = find_start_pair(F)
+    start_pair = find_start_pair(F)
+    x₀, p₀ = start_pair.x, start_pair.p
 
     roots_of_unity = toric_ed_roots_of_unity
 
@@ -471,8 +473,10 @@ end
     @test nsolutions(mres) == 2
     sols = solutions(mres)
     p123 = [1.0 + 0im, 2.0 + 0im, 3.0 + 0im]
-    @test verify_solution_completeness(sys, sols, p123, Monodromy(; show_progress = false)) === true
-    @test verify_solution_completeness(sys, sols[1:1], p123, Monodromy(; show_progress = false)) in (false, nothing)
+    @test verify_solution_completeness(sys, sols, p123, Monodromy(; show_progress = false)) ==
+        Completeness.COMPLETE
+    @test verify_solution_completeness(sys, sols[1:1], p123, Monodromy(; show_progress = false)) !=
+        Completeness.COMPLETE
     # an impossibly strict trace tolerance rejects even the full set
     @test verify_solution_completeness(
         sys,
@@ -480,7 +484,7 @@ end
         p123,
         Monodromy(; show_progress = false);
         trace_tol = 1.0e-60
-    ) in (false, nothing)
+    ) != Completeness.COMPLETE
 end
 
 @testset "unique_points tolerances" begin
@@ -525,7 +529,7 @@ end
     f = System([coefficient(detμ, m, xs) for m in monomials(xs, d)]; variables = as)
     @test size(f) == (N, D)
 
-    evaluate_at(F, x, p = ComplexF64[]) = begin
+    evaluate_at(F, x, p = ComplexF64[])::Vector{ComplexF64} = begin
         u = FSVec{ComplexF64}(zeros(ComplexF64, size(F)[1]))
         evaluate!(
             u, F.evaluator, FSVec{ComplexF64}(collect(ComplexF64, x)),
@@ -565,7 +569,7 @@ end
     # the fibers of `f ∘ L₁` are positive-dimensional, so points sharing an
     # image are the same solution
     fL₁ = f ∘ L₁
-    distance(x, y) = maximum(abs, evaluate_at(fL₁, x) .- evaluate_at(fL₁, y))
+    distance(x, y)::Float64 = maximum(abs, evaluate_at(fL₁, x) .- evaluate_at(fL₁, y))
 
     points = solve(
         C,

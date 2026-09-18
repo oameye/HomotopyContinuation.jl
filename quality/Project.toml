@@ -1,0 +1,12 @@
+[deps]
+HomotopyContinuation = "f213a82b-91d6-5c5d-acf7-10f1c761b327"
+StrictMode = "0e98b4f4-d0e6-42ac-af0a-707c24852f32"
+StrictModeTest = "a64655d1-1e86-453c-b761-1219f9f51c2b"
+
+[sources]
+HomotopyContinuation = {path = ".."}
+
+[compat]
+StrictMode = "0.4.5"
+StrictModeTest = "0.4.5"
+julia = "1.13"

@@ -52,9 +52,11 @@ _retarget!(ws::AmbientWorkerState, q::LinearSubspace)::Nothing =
 _retarget!(ws::IntrinsicWorkerState, q::LinearSubspace)::Nothing =
     _retarget_subspace!(ws.homotopy, q)
 
+_retarget!(ws::PathWorker, q)::Nothing = _retarget!(ws._inner[], q)::Nothing
+
 # Retarget and track every start solution once.
 function _sweep_one!(
-        ws::RetargetWorkerState, starts::Vector{Vector{ComplexF64}},
+        ws::PathWorker, starts::Vector{Vector{ComplexF64}},
         seed::UInt32, q,
     )::Result
     _retarget!(ws, q)
@@ -113,7 +115,7 @@ function _sweep_results_threaded(
         end
     end
 
-    return [_finalize_result(prs[k], np, seed, nothing) for k in 1:n_targets]
+    return [_finalize_result(prs[k], np, seed, ExcessCheckers()) for k in 1:n_targets]
 end
 
 # ── Transformed entries: one per target ────────────────────────────────────
@@ -186,14 +188,27 @@ _sweep_entries(
 function _flatten_first(entry::Any)
     entry isa AbstractArray || throw(
         ArgumentError(
-            "`flatten = true` requires `transform_result` to return an array, " *
+            "`flatten_results` requires each entry to be an array, " *
                 "got $(typeof(entry)).",
         ),
     )
     return collect(entry)
 end
 
-function _flatten_entries(entries::Vector)
+"""
+    flatten_results(entries)
+
+Concatenate the array-valued entries a [`Sweep`](@ref) returned into one vector.
+A sweep returns one entry per target; every entry must be an array, and an
+`ArgumentError` is thrown otherwise.
+
+```julia
+entries = solve(F, S₀, p₀, targets, Sweep(; transform_result = (r, p) -> real_solutions(r)))
+all_solutions = flatten_results(entries)
+```
+"""
+function flatten_results(entries::AbstractVector)
+    isempty(entries) && throw(ArgumentError("No entries to flatten."))
     out = _flatten_first(entries[1])
     for k in 2:length(entries)
         append!(out, entries[k])
@@ -204,15 +219,22 @@ end
 function _run_sweep(
         cache::WorkerSolveCache, targets::AbstractVector, first_q,
         transform_result::TR, transform_parameters::TP,
-        flatten::Bool, show_progress::Bool,
+        show_progress::Bool,
     ) where {TR, TP}
     isempty(targets) && throw(ArgumentError("No targets given."))
-    progress = make_many_progress(length(targets), show_progress)
-    entries = _sweep_entries(
-        cache, targets, collect(eachindex(targets)), first_q,
-        transform_result, transform_parameters, progress,
-    )
-    return flatten ? _flatten_entries(entries) : entries
+    idx = collect(eachindex(targets))
+    entries = if show_progress
+        _sweep_entries(
+            cache, targets, idx, first_q, transform_result, transform_parameters,
+            make_many_progress(length(targets)),
+        )
+    else
+        _sweep_entries(
+            cache, targets, idx, first_q, transform_result, transform_parameters,
+            nothing,
+        )
+    end
+    return entries
 end
 
 # ── Parameter sweep ────────────────────────────────────────────────────────
@@ -222,7 +244,7 @@ function _init_parameter_sweep(
         p_start::AbstractVector{<:Number}, seed::UInt32,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
         show_progress::Bool,
-    ) where {E <: AbstractExecutor}
+    )::WorkerSolveCache{E} where {E <: AbstractExecutor}
     _check_square_or_overdetermined(F)
     np = nparameters(F)
     np > 0 || throw(
@@ -277,7 +299,6 @@ function solve(
     )
     transform_result = alg.transform_result
     transform_parameters = alg.transform_parameters
-    flatten = alg.flatten
     seed = _seed(alg)
     tracker_options = _tracker_options(alg)
     endgame_options = _endgame_options(alg)
@@ -290,7 +311,7 @@ function solve(
     )
     return _run_sweep(
         cache, targets, q_first, transform_result, transform_parameters,
-        flatten, show_progress,
+        show_progress,
     )
 end
 
@@ -302,10 +323,9 @@ function solve(
         alg::Sweep,
         exec::AbstractExecutor = Threaded(),
     )
-    intrinsic = alg.intrinsic === nothing ? _default_intrinsic(L_start) : alg.intrinsic
+    intrinsic = _use_intrinsic(alg.coords, L_start)
     transform_result = alg.transform_result
     transform_parameters = alg.transform_parameters
-    flatten = alg.flatten
     seed = _seed(alg)
     tracker_options = _tracker_options(alg)
     endgame_options = _endgame_options(alg)
@@ -328,7 +348,7 @@ function solve(
     end
     return _run_sweep(
         cache, targets, L_first, transform_result, transform_parameters,
-        flatten, show_progress,
+        show_progress,
     )
 end
 

@@ -16,14 +16,14 @@ tapes one evaluator hop shorter and is what the routes reading the support or th
 equations (polyhedral, witness sets) need. A composition has no equations to
 substitute into and binds them instead.
 """
-function fix_parameters(F::System{P, V, M}, p::AbstractVector{<:Number})::System where {P, V, M}
+function fix_parameters(F::System, p::AbstractVector{<:Number})
     values = _parameter_values(F, p)
     # Not named `variables`: the local would shadow the getter on its own rhs.
     vars = collect(variables(F))
     groups = variable_groups(F)
     return System(
         _substitute(polynomials(F), collect(parameters(F)), values);
-        variables = vars, compile = M,
+        variables = vars, compile = F.compile_mode,
         variable_groups = isempty(groups) ? nothing : [vars[g] for g in groups],
     )
 end
@@ -86,7 +86,8 @@ _clone_system_evaluator(F::FixedParameterSystem)::SystemEvaluator =
 degrees(F::FixedParameterSystem)::Vector{Int} = degrees(F.system)
 nvariables(F::FixedParameterSystem)::Int = nvariables(F.system)
 nparameters(::FixedParameterSystem)::Int = 0
-system_shape(F::FixedParameterSystem) = system_shape(F.system)
+@inline with_system_shape(f::F, S::FixedParameterSystem) where {F} =
+    with_system_shape(f, S.system)
 Base.size(F::FixedParameterSystem)::Tuple{Int, Int} = size(F.system)
 # Conservative: binding values can only create homogeneity, never destroy it.
 is_homogeneous(F::FixedParameterSystem)::Bool = is_homogeneous(F.system)

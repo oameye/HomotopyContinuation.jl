@@ -165,30 +165,30 @@ the dimension is estimated from the rank of the system. `solver` is the algorith
 used for the underlying intersection, [`TotalDegree`](@ref) by default; the
 remaining options configure it, and a `solver` given explicitly carries its own.
 """
+# `-1` marks an unset dimension: both unset means the dimension is estimated from
+# the rank of the system.
 struct Witness{S <: Union{TotalDegree, Polyhedral}} <: AbstractAlgorithm
     common::CommonOptions
-    dim::Union{Nothing, Int}
-    codim::Union{Nothing, Int}
+    dim::Int
+    codim::Int
     solver::S
 end
 
 function Witness(;
-        dim::Union{Nothing, Int} = nothing,
-        codim::Union{Nothing, Int} = nothing,
-        solver::Union{Nothing, TotalDegree, Polyhedral} = nothing,
+        dim::Int = -1,
+        codim::Int = -1,
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         show_progress::Bool = true,
-    )
-    inner = solver === nothing ?
-        TotalDegree(;
+        solver::Union{TotalDegree, Polyhedral} = TotalDegree(;
             tracker_options = tracker_options, endgame_options = endgame_options,
             seed = seed, show_progress = show_progress,
-        ) : solver
+        ),
+    )
     return Witness(
         CommonOptions(tracker_options, endgame_options, seed, show_progress),
-        dim, codim, inner,
+        dim, codim, solver,
     )
 end
 
@@ -269,7 +269,7 @@ function _move_witness_points(
         L_target::LinearSubspace,
         rng::Random.MersenneTwister;
         projective::Bool = false,
-        chart::Union{Nothing, Vector{ComplexF64}} = nothing,
+        chart::Vector{ComplexF64} = ComplexF64[],
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
     )::Vector{Vector{ComplexF64}}
@@ -283,7 +283,7 @@ function _move_witness_points(
     # branches build the SAME concrete `EndgameTracker` (no Union) and `c` is
     # always bound (no possibly-undefined binding for JET).
     c = projective ?
-        (chart === nothing ? randn(rng, ComplexF64, nvariables(F)) : chart) :
+        (isempty(chart) ? randn(rng, ComplexF64, nvariables(F)) : chart) :
         ComplexF64[]
     eg = if projective
         _endgame_tracker(AffineChartHomotopy(base, c), tracker_options, endgame_options)
@@ -347,12 +347,12 @@ function solve(
     rng = Random.MersenneTwister(_seed(alg))
     n = nvariables(F)
     projective = is_homogeneous(F)
-    if dim === nothing && codim === nothing
+    if dim < 0 && codim < 0
         variety_dim = corank(F; rng = rng) - (projective ? 1 : 0)
-    elseif codim !== nothing
+    elseif codim >= 0
         variety_dim = n - codim - (projective ? 1 : 0)
     else
-        variety_dim = something(dim)   # dim !== nothing on this branch; strip the Union
+        variety_dim = dim
     end
     variety_dim < 0 && throw(
         ArgumentError(
@@ -418,8 +418,8 @@ end
 Perform a trace test to verify whether the witness set `W` is complete. Returns
 the (normalized) trace, which is theoretically `0` for a complete witness set.
 Due to floating-point arithmetic the value is small but nonzero and must be
-compared against a tolerance. Returns `nothing` if a path-tracking failure
-prevented the test.
+compared against a tolerance. Returns `NaN` if a path-tracking failure prevented
+the test.
 
 Every random choice descends from `seed`, so passing the same `seed` reproduces
 the same trace regardless of the state of the global random number generator.
@@ -431,29 +431,26 @@ function trace_test(
         tracker_options::TrackerOptions = TrackerOptions(),
         endgame_options::EndgameOptions = EndgameOptions(),
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
-    )
+    )::Float64
     L₀ = W.L
     F = W.F
     S₀ = W.R
-    isempty(S₀) && return nothing
+    isempty(S₀) && return NaN
     rng = Random.MersenneTwister(seed)
 
     # In the projective setting we fix a single affine chart `c` and place all
     # witness points (and both translated sets) on it, so the barycenters are
     # comparable representatives.
-    # Assign `chart` inside the branch so that within the projective branch its
-    # type narrows to `Vector{ComplexF64}` and `on_chart!(y, chart)` resolves to
-    # a concrete method (no `on_chart!(..., ::Nothing)` for JET).
-    if W.projective
-        chart = randn(rng, ComplexF64, nvariables(F))
-        S₀c = map(S₀) do s
+    # An empty chart is the no-chart sentinel, as everywhere else here, so
+    chart = W.projective ? randn(rng, ComplexF64, nvariables(F)) : ComplexF64[]
+    S₀c = if W.projective
+        map(S₀) do s
             y = ComplexF64.(s)
             on_chart!(y, chart)
             return y
         end
     else
-        chart = nothing
-        S₀c = S₀
+        S₀
     end
 
     s₀ = sum(S₀c)
@@ -466,13 +463,13 @@ function trace_test(
         projective = W.projective, chart = chart,
         tracker_options = tracker_options, endgame_options = endgame_options,
     )
-    length(R₁) == degree(W) || return nothing
+    length(R₁) == degree(W) || return NaN
     R₋₁ = _move_witness_points(
         F, S₀, L₀, L₋₁, rng;
         projective = W.projective, chart = chart,
         tracker_options = tracker_options, endgame_options = endgame_options,
     )
-    length(R₋₁) == degree(W) || return nothing
+    length(R₋₁) == degree(W) || return NaN
 
     s₁ = sum(R₁)
     s₋₁ = sum(R₋₁)
@@ -655,9 +652,30 @@ function membership(
     Rs = [randn(rng, ComplexF64, k, n) for _ in eachindex(P)]
 
     out = Vector{Bool}(undef, length(P))
-    progress = make_progress(
-        length(P), show_progress; desc = "Testing membership: ",
-    )
+    # The progress branch is taken once, so each call compiles against one
+    # concrete progress type instead of a union.
+    return if show_progress
+        _membership_run!(
+            out, P, W, exec, F, chart, x0, Rs, gamma, tracker_options,
+            endgame_options, atol, rtol,
+            make_progress(length(P); desc = "Testing membership: "),
+        )
+    else
+        _membership_run!(
+            out, P, W, exec, F, chart, x0, Rs, gamma, tracker_options,
+            endgame_options, atol, rtol, nothing,
+        )
+    end
+end
+
+function _membership_run!(
+        out::Vector{Bool}, P::AbstractVector{<:AbstractVector}, W::WitnessSet,
+        exec::AbstractExecutor, F, chart::Vector{ComplexF64},
+        x0::Vector{ComplexF64}, Rs::Vector{Matrix{ComplexF64}},
+        gamma::ComplexF64, tracker_options::TrackerOptions,
+        endgame_options::EndgameOptions, atol::Float64, rtol::Float64,
+        progress::P_,
+    )::Vector{Bool} where {P_}
     if exec isa Threaded && length(P) > 1
         nt = exec.ntasks
         plock = ReentrantLock()
@@ -668,9 +686,7 @@ function membership(
                 tracker_options, endgame_options,
             )
             out[i] = _membership_query(st, W, chart, x0, P[i], Rs[i], atol, rtol)
-            if progress !== nothing
-                @lock plock ProgressMeter.next!(progress)
-            end
+            @lock plock next_progress!(progress)
         end
     else
         st = MembershipState(
@@ -678,7 +694,7 @@ function membership(
         )
         for (i, x) in enumerate(P)
             out[i] = _membership_query(st, W, chart, x0, x, Rs[i], atol, rtol)
-            progress !== nothing && ProgressMeter.next!(progress)
+            next_progress!(progress)
         end
     end
     return out

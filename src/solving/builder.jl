@@ -360,3 +360,92 @@ function (b::PolyhedralBuilder)()::PolyhedralWorkerState
         toric_H, toric_tracker, coeff_tracker, Vector{ComplexF64}(undef, n),
     )
 end
+
+## ── Type-erased builder ──────────────────────────────────────────────────────
+
+const BuilderBox = Base.RefValue{Any}
+
+"""
+    PathBuilder{W}
+
+Concrete, monomorphic wrapper around any `AbstractPathBuilder` whose workers are
+`W`, so that a cache can hold a builder without naming which one. Calling it
+costs one dynamic call per worker, which is once per task.
+"""
+struct PathBuilder{W} <: AbstractPathBuilder
+    _inner::BuilderBox
+    _independent::Bool
+end
+
+PathBuilder{W}(b::AbstractPathBuilder) where {W} =
+    PathBuilder{W}(BuilderBox(b), _builds_independent_workers(b))
+
+PathBuilder{W}(b::PathBuilder{W}) where {W} = b
+
+(b::PathBuilder{W})() where {W} = (b._inner[])()::W
+
+_builds_independent_workers(b::PathBuilder)::Bool = b._independent
+
+const TrackingBuilder = PathBuilder{TrackingWorkerState}
+const PolyhedralPathBuilder = PathBuilder{PolyhedralWorkerState}
+
+## ── Type-erased worker ───────────────────────────────────────────────────────
+
+const WorkerTrackFW = FunctionWrapper{PathResult, Tuple{Vector{ComplexF64}, Int}}
+const WorkerBox = Base.RefValue{Any}
+
+struct _WorkerTracker{W}
+    worker::W
+end
+
+(t::_WorkerTracker)(x₀::Vector{ComplexF64}, k::Int)::PathResult =
+    _track_path!(t.worker, x₀, k)
+
+"""
+    PathWorker
+
+Concrete, monomorphic handle around a worker state, so that a cache can hold one
+without naming which. A subspace route builds an `IntrinsicWorkerState` in
+intrinsic coordinates and an `AmbientWorkerState` in ambient ones.
+"""
+struct PathWorker
+    _track!::WorkerTrackFW
+    _inner::WorkerBox
+end
+
+PathWorker(worker)::PathWorker =
+    PathWorker(WorkerTrackFW(_WorkerTracker(worker)), WorkerBox(worker))
+
+PathWorker(worker::PathWorker)::PathWorker = worker
+
+_track_path!(ws::PathWorker, x₀::Vector{ComplexF64}, k::Int)::PathResult =
+    ws._track!(x₀, k)
+
+# A copied `FunctionWrapper` keeps a raw pointer to the original closure, so a
+# copied worker would track through the original tracker while retargeting the
+# copy. Rebuild the wrapper around the copied worker instead.
+Base.deepcopy_internal(ws::PathWorker, stackdict::IdDict)::PathWorker = get!(
+    () -> PathWorker(Base.deepcopy_internal(ws._inner[], stackdict)),
+    stackdict, ws,
+)
+
+"""
+    WorkerPathBuilder
+
+A [`PathBuilder`](@ref) whose workers are [`PathWorker`](@ref)s. Separate from
+`PathBuilder{PathWorker}` because it wraps what the inner builder returns rather
+than asserting it: the inner builders return their own concrete worker states.
+"""
+struct WorkerPathBuilder <: AbstractPathBuilder
+    _inner::BuilderBox
+    _independent::Bool
+end
+
+WorkerPathBuilder(b::AbstractPathBuilder)::WorkerPathBuilder =
+    WorkerPathBuilder(BuilderBox(b), _builds_independent_workers(b))
+
+WorkerPathBuilder(b::WorkerPathBuilder)::WorkerPathBuilder = b
+
+(b::WorkerPathBuilder)()::PathWorker = PathWorker((b._inner[])())
+
+_builds_independent_workers(b::WorkerPathBuilder)::Bool = b._independent

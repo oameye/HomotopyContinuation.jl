@@ -613,25 +613,34 @@ using CommonSolve: CommonSolve
         @test ws2.tracker !== ws.tracker
     end
 
-    @testset "System stores compile_mode" begin
+    @testset "System keeps compile mode and shape out of the type" begin
         @polyvar x y
+        shape_of(F) = HomotopyContinuation.with_system_shape(nameof ∘ typeof, F)
+
         F_interp = System([x^2 - 1, y - 2])
         @test F_interp.compile_mode == CompileMode.INTERPRETED
-        @test HomotopyContinuation.system_shape(F_interp) isa
-            HomotopyContinuation.SquareShape
+        @test shape_of(F_interp) === :SquareShape
 
         F_compiled = System([x^2 - 1, y - 2]; compile = CompileMode.COMPILED)
         @test F_compiled.compile_mode == CompileMode.COMPILED
-        @test typeof(F_interp) != typeof(F_compiled)
 
         F_under = System([x + y])
         F_over = System([x^2 - 1, y - 2, x + y - 3])
-        @test HomotopyContinuation.system_shape(F_under) isa
-            HomotopyContinuation.UnderdeterminedShape
-        @test HomotopyContinuation.system_shape(F_over) isa
-            HomotopyContinuation.OverdeterminedShape
-        @test typeof(F_interp) != typeof(F_under)
-        @test typeof(F_interp) != typeof(F_over)
+        @test shape_of(F_under) === :UnderdeterminedShape
+        @test shape_of(F_over) === :OverdeterminedShape
+
+        @test typeof(F_interp) == typeof(F_compiled)
+        @test typeof(F_interp) == typeof(F_under) == typeof(F_over)
+    end
+
+    @testset "System construction is inferable" begin
+        @polyvar x y
+        @test isconcretetype(typeof(System([x^2 - 1, y - 2])))
+        @test @inferred(
+            System(
+                [x^2 - 1, y - 2], typeof(x)[], [x, y], CompileMode.INTERPRETED,
+            )
+        ) isa System
     end
 
     # ── Executor integration tests ───────────────────────────────────────

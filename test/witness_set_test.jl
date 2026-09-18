@@ -286,23 +286,29 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         end
 
         # intrinsic move between the same subspaces reaches all points too
-        Hom = linear_subspace_homotopy(Fcirc, l1, l2; intrinsic = true)
-        @test Hom isa IntrinsicSubspaceHomotopy
-        eg = EndgameTracker(
-            Tracker(HomotopyEvaluator(Hom); options = TrackerOptions()),
-            EndgameOptions(),
-        )
-        u = FSVec{ComplexF64}(zeros(ComplexF64, 1))
-        amb = zeros(ComplexF64, 2)
-        moved = 0
-        for s in solutions(W1)
-            intrinsic_coordinates!(u, Hom, ComplexF64.(s), complex(1.0))
-            track!(eg, u)
-            pr = PathResult(eg; path_number = 0, start_solution = ComplexF64.(s))
-            if is_success(pr)
-                ambient_coordinates!(amb, Hom, HomotopyContinuation.solution(pr), complex(0.0))
-                norm(l2(amb)) < 1.0e-10 && (moved += 1)
+        moved = with_linear_subspace_homotopy(
+            Fcirc, l1, l2; intrinsic = true,
+        ) do Hom
+            @test Hom isa IntrinsicSubspaceHomotopy
+            eg = EndgameTracker(
+                Tracker(HomotopyEvaluator(Hom); options = TrackerOptions()),
+                EndgameOptions(),
+            )
+            u = FSVec{ComplexF64}(zeros(ComplexF64, 1))
+            amb = zeros(ComplexF64, 2)
+            n = 0
+            for s in solutions(W1)
+                intrinsic_coordinates!(u, Hom, ComplexF64.(s), complex(1.0))
+                track!(eg, u)
+                pr = PathResult(eg; path_number = 0, start_solution = ComplexF64.(s))
+                if is_success(pr)
+                    ambient_coordinates!(
+                        amb, Hom, HomotopyContinuation.solution(pr), complex(0.0),
+                    )
+                    norm(l2(amb)) < 1.0e-10 && (n += 1)
+                end
             end
+            return n
         end
         @test moved == 2
 

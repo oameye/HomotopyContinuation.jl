@@ -18,20 +18,26 @@ tracker: `worker` tracks the paths, `builder` produces one independent worker
 state per task, and the homotopy inside `worker` can be retargeted
 (`target_parameters!`) between solves.
 """
-struct WorkerSolveCache{E <: AbstractExecutor, W, B}
+struct WorkerSolveCache{E <: AbstractExecutor}
     executor::E
-    builder::B
-    worker::W
+    builder::WorkerPathBuilder
+    worker::PathWorker
     start_solutions::Vector{Vector{ComplexF64}}
     seed::UInt32
     show_progress::Bool
     early_stop::EarlyStop
 end
 
-WorkerSolveCache(
-    exec::AbstractExecutor, builder, worker,
-    starts::Vector{Vector{ComplexF64}}, seed::UInt32, show_progress::Bool,
-) = WorkerSolveCache(exec, builder, worker, starts, seed, show_progress, NEVER_STOP)
+function WorkerSolveCache(
+        exec::E, builder::AbstractPathBuilder, worker,
+        starts::Vector{Vector{ComplexF64}}, seed::UInt32, show_progress::Bool,
+        early_stop::EarlyStop = NEVER_STOP,
+    )::WorkerSolveCache{E} where {E <: AbstractExecutor}
+    return WorkerSolveCache{E}(
+        exec, WorkerPathBuilder(builder), PathWorker(worker), starts, seed,
+        show_progress, early_stop,
+    )
+end
 
 # ── One path ───────────────────────────────────────────────────────────────
 
@@ -56,7 +62,7 @@ end
 # ── All paths ──────────────────────────────────────────────────────────────
 
 function _track_all_serial(
-        ws::RetargetWorkerState, starts::Vector{Vector{ComplexF64}},
+        ws::PathWorker, starts::Vector{Vector{ComplexF64}},
         seed::UInt32, progress, stop::EarlyStop = NEVER_STOP,
     )::Result
     path_results = PathResult[]
@@ -69,7 +75,7 @@ function _track_all_serial(
         is_success(pr) && stop(pr) && break
     end
     # `tracked_paths` is what ran, which is what `nfailed` is derived from.
-    return _finalize_result(path_results, length(path_results), seed, nothing)
+    return _finalize_result(path_results, length(path_results), seed, ExcessCheckers())
 end
 
 function _track_all_threaded(cache::WorkerSolveCache{Threaded}, progress)::Result
@@ -100,7 +106,7 @@ function _track_all_threaded(cache::WorkerSolveCache{Threaded}, progress)::Resul
     end
 
     tracked = _assigned_results(results)
-    return _finalize_result(tracked, length(tracked), cache.seed, nothing)
+    return _finalize_result(tracked, length(tracked), cache.seed, ExcessCheckers())
 end
 
 # ── CommonSolve.solve! ─────────────────────────────────────────────────────
@@ -120,7 +126,7 @@ end
 @noinline _solve_worker_serial_with_progress(cache::WorkerSolveCache{Serial}) =
     _track_all_serial(
     cache.worker, cache.start_solutions, cache.seed,
-    make_progress(length(cache.start_solutions), true), cache.early_stop,
+    make_progress(length(cache.start_solutions)), cache.early_stop,
 )
 
 function CommonSolve.solve!(cache::WorkerSolveCache{Threaded})::Result
@@ -134,7 +140,7 @@ end
 @noinline _solve_worker_threaded_without_progress(cache::WorkerSolveCache{Threaded}) =
     _track_all_threaded(cache, nothing)
 @noinline _solve_worker_threaded_with_progress(cache::WorkerSolveCache{Threaded}) =
-    _track_all_threaded(cache, make_progress(length(cache.start_solutions), true))
+    _track_all_threaded(cache, make_progress(length(cache.start_solutions)))
 
 CommonSolve.solve!(cache::WorkerSolveCache{DistributedExecutor})::Result =
     _distributed_solve!(cache)
@@ -183,7 +189,7 @@ function _init_intrinsic_subspace(
         exec::E, seed::UInt32, tracker_options::TrackerOptions,
         endgame_options::EndgameOptions, show_progress::Bool,
         early_stop::EarlyStop = NEVER_STOP,
-    ) where {E <: AbstractExecutor}
+    )::WorkerSolveCache{E} where {E <: AbstractExecutor}
     builder = IntrinsicSubspaceBuilder(
         G, convert(LinearSubspace{ComplexF64}, L_start),
         convert(LinearSubspace{ComplexF64}, L_target),
@@ -196,6 +202,8 @@ function _init_intrinsic_subspace(
     )
 end
 
+# An empty chart means the affine route; a chart wraps the homotopy. The two
+# builders are different concrete types.
 function _init_extrinsic_subspace(
         G::System, starts::Vector{Vector{ComplexF64}},
         L_start::LinearSubspace, L_target::LinearSubspace,
@@ -203,7 +211,7 @@ function _init_extrinsic_subspace(
         exec::E, seed::UInt32, tracker_options::TrackerOptions,
         endgame_options::EndgameOptions, show_progress::Bool,
         early_stop::EarlyStop = NEVER_STOP,
-    ) where {E <: AbstractExecutor}
+    )::WorkerSolveCache{E} where {E <: AbstractExecutor}
     V = convert(LinearSubspace{ComplexF64}, L_start)
     W = convert(LinearSubspace{ComplexF64}, L_target)
     if isempty(chart)
@@ -249,13 +257,15 @@ function _subspace_solve_setup(
     return G, points, chart, gamma
 end
 
+# Three routes, chosen from the coordinates and whether the problem is projective:
+# intrinsic, extrinsic, extrinsic on an affine chart.
 function CommonSolve.init(
         F::System, starts::StartsLike, L_start::LinearSubspace, L_target::LinearSubspace,
         alg::Continuation = Continuation(),
-        exec::AbstractExecutor = Threaded(),
-    )
+        exec::E = Threaded(),
+    )::WorkerSolveCache{E} where {E <: AbstractExecutor}
     seed = _seed(alg)
-    intrinsic = alg.intrinsic === nothing ? _default_intrinsic(L_start) : alg.intrinsic
+    intrinsic = _use_intrinsic(alg.coords, L_start)
     G, points, chart, gamma = _subspace_solve_setup(
         F, starts, L_start, L_target, seed,
     )
@@ -274,10 +284,12 @@ function CommonSolve.init(
     end
 end
 
-CommonSolve.init(
-    F::System, starts::StartsLike, L_start::LinearSubspace,
-    L_target::LinearSubspace, exec::AbstractExecutor,
-) = CommonSolve.init(F, starts, L_start, L_target, Continuation(), exec)
+function CommonSolve.init(
+        F::System, starts::StartsLike, L_start::LinearSubspace,
+        L_target::LinearSubspace, exec::E,
+    )::WorkerSolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(F, starts, L_start, L_target, Continuation(), exec)
+end
 
 """
     solve(F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace,
@@ -302,18 +314,22 @@ S₁ = solutions(solve(F, L₁))
 result = solve(F, S₁, L₁, L₂)
 ```
 """
-solve(
-    F::System, starts::StartsLike, L_start::LinearSubspace,
-    L_target::LinearSubspace, alg::Continuation = Continuation(),
-    exec::AbstractExecutor = Threaded(),
-)::Result = CommonSolve.solve!(
-    CommonSolve.init(F, starts, L_start, L_target, alg, exec),
-)
+function solve(
+        F::System, starts::StartsLike, L_start::LinearSubspace,
+        L_target::LinearSubspace, alg::Continuation = Continuation(),
+        exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(
+        CommonSolve.init(F, starts, L_start, L_target, alg, exec),
+    )
+end
 
-solve(
-    F::System, starts::StartsLike, L_start::LinearSubspace,
-    L_target::LinearSubspace, exec::AbstractExecutor,
-)::Result = solve(F, starts, L_start, L_target, Continuation(), exec)
+function solve(
+        F::System, starts::StartsLike, L_start::LinearSubspace,
+        L_target::LinearSubspace, exec::E,
+    )::Result where {E <: AbstractExecutor}
+    return solve(F, starts, L_start, L_target, Continuation(), exec)
+end
 
 for f in (:(solve), :(CommonSolve.init))
     @eval begin

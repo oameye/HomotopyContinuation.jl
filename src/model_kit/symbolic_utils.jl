@@ -8,9 +8,9 @@
 
 ## ── Expansion ───────────────────────────────────────────────────────────────
 
-_summands(e::Expression)::Vector{Expression} =
-let storage = expr_storage(e)
-    storage isa EAddStorage ? storage_args(storage) : Expression[e]
+_summands(e::Expression)::Vector{Expression} = @match e begin
+    SymExpr.EAdd(args) => args::Vector{Expression}
+    _ => Expression[e]
 end
 
 function _distribute(
@@ -39,7 +39,7 @@ end
 
 # Splits the summands once, not once per exponent as `_expand_product` would.
 function _expand_power(base::Expression, k::Int)::Expression
-    k > 0 && expr_storage(base) isa EAddStorage || return _epow(base, k)
+    k > 0 && isa_variant(base, SymExpr.EAdd) || return _epow(base, k)
     factor = _summands(base)
     terms = factor
     for _ in 2:k
@@ -60,21 +60,15 @@ expand((x + y)^2)   # 2*x*y + x^2 + y^2
 ```
 """
 function expand(e::Expression)::Expression
-    storage = expr_storage(e)
-    if storage isa ENumStorage
-        return e
-    elseif storage isa EVarStorage
-        return e
-    elseif storage isa EAddStorage
-        return _eadd(Expression[expand(a) for a in storage_args(storage)])
-    elseif storage isa EMulStorage
-        return _expand_product(storage_args(storage))
-    elseif storage isa EPowStorage
-        return _expand_power(expand(storage_base(storage)), storage.exp)
-    elseif storage isa ERPowStorage
-        return _erpow(expand(storage_base(storage)), storage.exp)
-    else
-        return _efn(storage.kind, expand(storage_arg(storage)))
+    return @match e begin
+        SymExpr.ENum(_) => e
+        SymExpr.EVar(_) => e
+        SymExpr.EAdd(args) =>
+            _eadd(Expression[expand(a) for a in args])
+        SymExpr.EMul(args) => _expand_product(args)
+        SymExpr.EPow(base, exp) => _expand_power(expand(base), exp)
+        SymExpr.ERPow(base, exp) => _erpow(expand(base), exp)
+        SymExpr.EFn(kind, arg) => _efn(kind, expand(arg))
     end
 end
 
@@ -88,27 +82,15 @@ _var_index(vars::AbstractVector{Expression})::Dict{Symbol, Int} =
     Dict{Symbol, Int}(Symbol(v) => i for (i, v) in enumerate(vars))
 
 function _depends_on(e::Expression, var_to_idx::Dict{Symbol, Int})::Bool
-    storage = expr_storage(e)
-    if storage isa EVarStorage
-        return haskey(var_to_idx, storage.name)
-    elseif storage isa EAddStorage
-        for a in storage_args(storage)
-            _depends_on(a, var_to_idx) && return true
-        end
-        return false
-    elseif storage isa EMulStorage
-        for a in storage_args(storage)
-            _depends_on(a, var_to_idx) && return true
-        end
-        return false
-    elseif storage isa EPowStorage
-        return _depends_on(storage_base(storage), var_to_idx)
-    elseif storage isa ERPowStorage
-        return _depends_on(storage_base(storage), var_to_idx)
-    elseif storage isa EFnStorage
-        return _depends_on(storage_arg(storage), var_to_idx)
+    return @match e begin
+        SymExpr.EVar(name) => haskey(var_to_idx, name)
+        SymExpr.EAdd(args) => any(a -> _depends_on(a, var_to_idx), args)
+        SymExpr.EMul(args) => any(a -> _depends_on(a, var_to_idx), args)
+        SymExpr.EPow(base, _) => _depends_on(base, var_to_idx)
+        SymExpr.ERPow(base, _) => _depends_on(base, var_to_idx)
+        SymExpr.EFn(_, arg) => _depends_on(arg, var_to_idx)
+        _ => false
     end
-    return false
 end
 
 @inline function _accumulate_term!(acc::_ExprTerms, m::Vector{Int}, c::Expression)::Nothing
@@ -132,51 +114,71 @@ function _multiply_expr_terms(a::_ExprTerms, b::_ExprTerms)::_ExprTerms
     return out
 end
 
-# `nothing` when `e` is not polynomial in the indexed variables.
+# `found` and not an empty dict: cancellation can legitimately leave no terms at
+# all, since `_clean_terms!` drops zero coefficients, so emptiness cannot double
+# as the failure marker.
+struct ExprTerms
+    found::Bool
+    terms::_ExprTerms
+end
+
+const _NOT_POLYNOMIAL_TERMS = ExprTerms(false, _ExprTerms())
+_polynomial_terms(t::_ExprTerms)::ExprTerms = ExprTerms(true, t)
+
+# `found` is `false` when `e` is not polynomial in the indexed variables.
 function _expr_terms(
         e::Expression, var_to_idx::Dict{Symbol, Int}, n::Int,
-    )::Union{Nothing, _ExprTerms}
-    storage = expr_storage(e)
-    if storage isa ENumStorage
-        return _ExprTerms(zeros(Int, n) => e)
-    elseif storage isa EVarStorage
-        idx = get(var_to_idx, storage.name, 0)
-        idx == 0 && return _ExprTerms(zeros(Int, n) => e)
-        m = zeros(Int, n)
-        m[idx] = 1
-        return _ExprTerms(m => one(Expression))
-    elseif storage isa EAddStorage
-        acc = _ExprTerms()
-        for a in storage_args(storage)
-            terms = _expr_terms(a, var_to_idx, n)
-            terms === nothing && return nothing
-            _add_expr_terms!(acc, terms)
+    )::ExprTerms
+    constant() = _polynomial_terms(_ExprTerms(zeros(Int, n) => e))
+    return @match e begin
+        SymExpr.ENum(_) => constant()
+        SymExpr.EVar(name) => begin
+            idx = get(var_to_idx, name, 0)
+            if idx == 0
+                constant()
+            else
+                m = zeros(Int, n)
+                m[idx] = 1
+                _polynomial_terms(_ExprTerms(m => one(Expression)))
+            end
         end
-        return acc
-    elseif storage isa EMulStorage
-        acc = _ExprTerms(zeros(Int, n) => one(Expression))
-        for a in storage_args(storage)
-            terms = _expr_terms(a, var_to_idx, n)
-            terms === nothing && return nothing
-            acc = _multiply_expr_terms(acc, terms)
+        SymExpr.EAdd(args) => begin
+            acc = _ExprTerms()
+            for a in args
+                terms = _expr_terms(a, var_to_idx, n)
+                terms.found || return _NOT_POLYNOMIAL_TERMS
+                _add_expr_terms!(acc, terms.terms)
+            end
+            _polynomial_terms(acc)
         end
-        return acc
-    elseif storage isa EPowStorage
-        _depends_on(e, var_to_idx) || return _ExprTerms(zeros(Int, n) => e)
-        storage.exp > 0 || return nothing
-        base = _expr_terms(storage_base(storage), var_to_idx, n)
-        base === nothing && return nothing
-        acc = _ExprTerms(zeros(Int, n) => one(Expression))
-        for _ in 1:(storage.exp)
-            acc = _multiply_expr_terms(acc, base)
+        SymExpr.EMul(args) => begin
+            acc = _ExprTerms(zeros(Int, n) => one(Expression))
+            for a in args
+                terms = _expr_terms(a, var_to_idx, n)
+                terms.found || return _NOT_POLYNOMIAL_TERMS
+                acc = _multiply_expr_terms(acc, terms.terms)
+            end
+            _polynomial_terms(acc)
         end
-        return acc
-    elseif storage isa ERPowStorage
-        _depends_on(storage_base(storage), var_to_idx) && return nothing
-        return _ExprTerms(zeros(Int, n) => e)
-    else
-        _depends_on(storage_arg(storage), var_to_idx) && return nothing
-        return _ExprTerms(zeros(Int, n) => e)
+        SymExpr.EPow(base, exp) => begin
+            _depends_on(e, var_to_idx) || return constant()
+            exp > 0 || return _NOT_POLYNOMIAL_TERMS
+            b = _expr_terms(base, var_to_idx, n)
+            b.found || return _NOT_POLYNOMIAL_TERMS
+            acc = _ExprTerms(zeros(Int, n) => one(Expression))
+            for _ in 1:exp
+                acc = _multiply_expr_terms(acc, b.terms)
+            end
+            _polynomial_terms(acc)
+        end
+        SymExpr.ERPow(base, _) => begin
+            _depends_on(base, var_to_idx) && return _NOT_POLYNOMIAL_TERMS
+            constant()
+        end
+        SymExpr.EFn(_, arg) => begin
+            _depends_on(arg, var_to_idx) && return _NOT_POLYNOMIAL_TERMS
+            constant()
+        end
     end
 end
 
@@ -192,10 +194,10 @@ end
 
 function _terms_or_throw(f::Expression, vars::AbstractVector{Expression})::_ExprTerms
     terms = _expr_terms(f, _var_index(vars), length(vars))
-    terms === nothing && throw(
+    terms.found || throw(
         ArgumentError("`" * string(f) * "` is not polynomial in the given variables"),
     )
-    return _clean_terms!(terms)
+    return _clean_terms!(terms.terms)
 end
 
 """
@@ -248,13 +250,13 @@ function _numeric_coefficients(c::Vector{Expression})::Vector{ComplexF64}
     out = Vector{ComplexF64}(undef, length(c))
     for (i, e) in enumerate(c)
         v = expr_number(e)
-        v === nothing && throw(
+        v.found || throw(
             ArgumentError(
                 "the coefficient `" * string(e) *
                     "` is not a number; use `to_dict` for symbolic coefficients",
             ),
         )
-        out[i] = v
+        out[i] = v.val
     end
     return out
 end
@@ -455,10 +457,10 @@ function coeffs_as_dense_poly(
         c = get(terms, e, nothing)
         c === nothing && continue
         v = expr_number(c)
-        v === nothing && throw(
+        v.found || throw(
             ArgumentError("the coefficient `" * string(c) * "` is not a number"),
         )
-        out[i] = v
+        out[i] = v.val
         delete!(terms, e)
     end
     isempty(terms) || throw(
@@ -563,8 +565,8 @@ function horner(
         f::Expression, vars::AbstractVector{Expression} = variables(f),
     )::Expression
     raw = _expr_terms(f, _var_index(vars), length(vars))
-    raw === nothing && return f
-    terms = _clean_terms!(raw)
+    raw.found || return f
+    terms = _clean_terms!(raw.terms)
     isempty(terms) && return zero(Expression)
     exponents, c = _sorted_terms(terms)
     return _multivariate_horner(_exponent_matrix(Int, exponents, length(vars)), c, vars)
@@ -581,23 +583,14 @@ The value of `e`, which must carry no variables.
 """
 function to_number(e::Expression)::ComplexF64
     v = expr_number(e)
-    v === nothing &&
-        throw(ArgumentError("`" * string(e) * "` is not a number"))
-    return v
+    v.found || throw(ArgumentError("`" * string(e) * "` is not a number"))
+    return v.val
 end
 
 # `Expression <: Number`, so `convert(Number, e)` must stay the identity `Base.convert`
 # guarantees; only a target `e` does not satisfy asks for the numeric value.
 Base.convert(::Type{T}, e::Expression) where {T <: Number} =
     e isa T ? e : convert(T, to_number(e))
-
-# All-real input evaluates to `Float64`, not to complex with vanishing imaginary parts.
-_narrow(z::ComplexF64)::Union{Float64, ComplexF64} = iszero(imag(z)) ? real(z) : z
-
-function _narrow(u::AbstractArray{ComplexF64, N}) where {N}
-    all(z -> iszero(imag(z)), u) && return real.(u)
-    return u
-end
 
 """
     evaluate(f, subs...)
@@ -606,18 +599,22 @@ Substitute into the expression or array of expressions `f` and return the
 resulting numbers. Every variable must be given a value, either as
 `variables => values` pairs or as one dictionary.
 
+Always complex, including when every value comes out real: narrowing to `Float64`
+would make the return type depend on the values rather than on the argument types.
+Call `real.` on the result when a real answer is wanted.
+
 ```julia
 @var x y
-evaluate([x^2, x * y], [x, y] => [2, 3])   # [4.0, 6.0]
+evaluate([x^2, x * y], [x, y] => [2, 3])   # ComplexF64[4.0 + 0.0im, 6.0 + 0.0im]
 ```
 """
-evaluate(f::Expression, pairs::Pair...) = _narrow(to_number(subs(f, pairs...)))
-evaluate(f::Expression, pairs::AbstractDict) = _narrow(to_number(subs(f, pairs)))
+evaluate(f::Expression, pairs::Pair...)::ComplexF64 = to_number(subs(f, pairs...))
+evaluate(f::Expression, pairs::AbstractDict)::ComplexF64 = to_number(subs(f, pairs))
 
 evaluate(f::AbstractArray{Expression}, pairs::Pair...) =
-    _narrow(map(to_number, subs(f, pairs...)))
+    map(to_number, subs(f, pairs...))
 evaluate(f::AbstractArray{Expression}, pairs::AbstractDict) =
-    _narrow(map(to_number, subs(f, pairs)))
+    map(to_number, subs(f, pairs))
 
 (f::Expression)(pairs::Pair...) = evaluate(f, pairs...)
 (f::Expression)(pairs::AbstractDict) = evaluate(f, pairs)

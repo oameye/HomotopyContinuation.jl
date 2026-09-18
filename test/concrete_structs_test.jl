@@ -41,18 +41,12 @@ const _CONCRETE_SKIP = Set{Symbol}()
         @test all_concrete(TruncatedTaylorSeries{4, ComplexF64}; verbose = false)
     end
     @testset "RegenerationState concrete phase" begin
-        system_type = System{
-            Int, Int, CompileMode.INTERPRETED,
-            HomotopyContinuation.SquareShape,
-        }
+        system_type = System{Int, Int}
         state_type = HomotopyContinuation.RegenerationState{Int, Int, system_type}
         @test all_concrete(state_type; verbose = false)
     end
     @testset "NumericalIrreducibleDecomposition concrete result" begin
-        system_type = System{
-            Int, Int, CompileMode.INTERPRETED,
-            HomotopyContinuation.SquareShape,
-        }
+        system_type = System{Int, Int}
         witness_type = WitnessSet{system_type}
         @test all_concrete(
             NumericalIrreducibleDecomposition{witness_type}; verbose = false,

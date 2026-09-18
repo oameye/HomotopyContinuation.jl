@@ -177,7 +177,7 @@ function _orbit_merge!(
         tol = max(atol, rtol * norms[j])
         apply_actions(acts, path_results[success_idx[j]].solution) do w
             l = search_in_radius(tree, w, tol)
-            if l !== nothing && l != j
+            if !iszero(l) && l != j
                 do_union!(j, l)
             end
             return false
@@ -393,17 +393,17 @@ function statistics(r::Result; real_tol::Float64 = DEFAULT_REAL_TOL)::ResultStat
 end
 
 """
-    _finalize_result(path_results, tracked_paths, seed, excess_checker) -> Result
+    _finalize_result(path_results, tracked_paths, seed, excess_checkers) -> Result
 
 Shared tail of every `solve!` method: reclassify excess solutions of an
-overdetermined solve (no-op when the checker is `nothing`), then assemble
-the `Result`.
+overdetermined solve (a no-op when `excess_checkers` is empty, which is what a
+square solve carries), then assemble the `Result`.
 """
 function _finalize_result(
         path_results::Vector{PathResult}, tracked_paths::Int, seed::UInt32,
-        excess_checker::Union{ExcessSolutionChecker, Nothing},
+        excess_checkers::ExcessCheckers,
     )::Result
-    _check_excess_solutions!(path_results, excess_checker)
+    _check_excess_solutions!(path_results, excess_checkers)
     return Result(path_results, tracked_paths, seed)
 end
 

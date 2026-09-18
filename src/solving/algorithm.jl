@@ -152,22 +152,21 @@ a parameter homotopy, a subspace homotopy, a start/target system pair, or a
 homotopy supplied directly. Nothing is constructed, unlike [`TotalDegree`](@ref)
 and [`Polyhedral`](@ref).
 
-`intrinsic` applies to subspace endpoints only and chooses the tracking
-coordinates; it defaults to `dim(L_start) <= codim(L_start)`.
+`coords` applies to subspace endpoints only and chooses the tracking
+coordinates; `SubspaceCoords.AUTO` picks intrinsic when `dim(L_start) <= codim(L_start)`.
 
 `early_stop_callback` is called with each successful [`PathResult`](@ref); return
 `true` to stop. Paths already running still finish, so which extra results appear
 is not reproducible under [`Threaded`](@ref) or [`DistributedExecutor`](@ref).
 """
-struct Continuation{I <: Union{Nothing, Bool}} <: AbstractAlgorithm
+struct Continuation <: AbstractAlgorithm
     common::CommonOptions
-    # `nothing` means "decide from the start subspace", which is not known here.
-    intrinsic::I
+    coords::SubspaceCoords.T
     early_stop::EarlyStop
 end
 
 Continuation(;
-    intrinsic::Union{Nothing, Bool} = nothing,
+    coords::SubspaceCoords.T = SubspaceCoords.AUTO,
     early_stop_callback = _never_stop,
     tracker_options::TrackerOptions = TrackerOptions(),
     endgame_options::EndgameOptions = EndgameOptions(),
@@ -175,47 +174,48 @@ Continuation(;
     show_progress::Bool = true,
 ) = Continuation(
     CommonOptions(tracker_options, endgame_options, seed, show_progress),
-    intrinsic,
+    coords,
     _early_stop(early_stop_callback),
 )
 
 early_stop_callback(alg::Continuation)::EarlyStop = alg.early_stop
 
 _quiet(alg::Continuation)::Continuation =
-    Continuation(_quiet(alg.common), alg.intrinsic, alg.early_stop)
+    Continuation(_quiet(alg.common), alg.coords, alg.early_stop)
 
 # ── Sweep: one homotopy retargeted over many targets ────────────────────────
 
 """
-    Sweep(; transform_result, transform_parameters, flatten, intrinsic, options...)
+    Sweep(; transform_result, transform_parameters, coords, options...)
 
 Track given start solutions to every target in a vector of targets, retargeting a
 single homotopy per target, and return one entry per target.
 
-`transform_result(result, target)` builds each entry, `flatten = true` concatenates
-array-valued entries, and `transform_parameters(target)` maps each element of the
-target vector to the actual target, so the vector may hold indices or other
-metadata. The transforms exist so a long sweep need not retain every
+`transform_result(result, target)` builds each entry and `transform_parameters(target)`
+maps each element of the target vector to the actual target, so the vector may hold
+indices or other metadata. The transforms exist so a long sweep need not retain every
 [`Result`](@ref).
+
+The result is always the vector of per-target entries. Pass it to
+[`flatten_results`](@ref) to concatenate array-valued entries: doing that here would
+make `solve`'s return type depend on an option value rather than on its arguments.
 """
-struct Sweep{I <: Union{Nothing, Bool}, TR, TP} <: AbstractAlgorithm
+struct Sweep{TR, TP} <: AbstractAlgorithm
     common::CommonOptions
-    intrinsic::I
+    coords::SubspaceCoords.T
     transform_result::TR
     transform_parameters::TP
-    flatten::Bool
 end
 
 Sweep(;
     transform_result = tuple,
     transform_parameters = identity,
-    flatten::Bool = false,
-    intrinsic::Union{Nothing, Bool} = nothing,
+    coords::SubspaceCoords.T = SubspaceCoords.AUTO,
     tracker_options::TrackerOptions = TrackerOptions(),
     endgame_options::EndgameOptions = EndgameOptions(),
     seed::UInt32 = rand(Random.RandomDevice(), UInt32),
     show_progress::Bool = true,
 ) = Sweep(
     CommonOptions(tracker_options, endgame_options, seed, show_progress),
-    intrinsic, transform_result, transform_parameters, flatten,
+    coords, transform_result, transform_parameters,
 )

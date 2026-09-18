@@ -45,9 +45,10 @@ fix_parameters(
 Base.size(H::FixedParameterHomotopy)::Tuple{Int, Int} = size(H.homotopy)
 nvariables(H::FixedParameterHomotopy)::Int = nvariables(H.homotopy)
 nparameters(::FixedParameterHomotopy)::Int = 0
-variables(H::FixedParameterHomotopy) = variables(H.homotopy)
+variables(H::FixedParameterHomotopy)::Vector{Expression} = variables(H.homotopy)
 parameters(::FixedParameterHomotopy)::Vector{Expression} = Expression[]
-variable_groups(H::FixedParameterHomotopy) = variable_groups(H.homotopy)
+variable_groups(H::FixedParameterHomotopy)::Vector{Vector{Int}} =
+    variable_groups(H.homotopy)
 
 _clone_homotopy(H::FixedParameterHomotopy)::FixedParameterHomotopy =
     FixedParameterHomotopy(_clone_homotopy(H.homotopy), copy(H.parameters))

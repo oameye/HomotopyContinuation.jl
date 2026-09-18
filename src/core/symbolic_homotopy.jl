@@ -90,7 +90,7 @@ Base.:(==)(H::Homotopy, G::Homotopy)::Bool =
     H.t == G.t && H.parameters == G.parameters
 
 function Base.show(io::IO, H::Homotopy)
-    if get(io, :compact, false)::Bool
+    if get(io, :compact, false) === true
         print(io, "[")
         join(io, H.expressions, ", ")
         print(io, "]")
@@ -161,8 +161,8 @@ end
     evaluate(H::Homotopy, x, t, p = ComplexF64[])
 
 Value of `H` at the point `x` and path parameter `t`, on the normalized equations
-[`expressions`](@ref) reports (see [`equation_scales`](@ref)). The result is real
-when every entry is.
+[`expressions`](@ref) reports (see [`equation_scales`](@ref)). Always complex; call
+`real.` on the result when a real answer is wanted.
 """
 evaluate(
     H::Homotopy, x::AbstractVector{<:Number}, t::Number,
@@ -172,8 +172,8 @@ evaluate(
 """
     jacobian(H::Homotopy, x, t, p = ComplexF64[])
 
-Jacobian of `H` in its variables at the point `x` and path parameter `t`. The
-result is real when every entry is.
+Jacobian of `H` in its variables at the point `x` and path parameter `t`. Always
+complex; call `real.` on the result when a real answer is wanted.
 """
 jacobian(
     H::Homotopy, x::AbstractVector{<:Number}, t::Number,
@@ -183,11 +183,6 @@ jacobian(
 (H::Homotopy)(x::AbstractVector{<:Number}, t::Number) = evaluate(H, x, t)
 (H::Homotopy)(x::AbstractVector{<:Number}, t::Number, p::AbstractVector{<:Number}) =
     evaluate(H, x, t, p)
-
-## The form a `Homotopy` is tracked through. The path parameter is the wrapped system's
-## only parameter, so interpolating it from 1 at `t = 1` to 0 at `t = 0` reproduces `t`
-## itself, and the parameter-Taylor convolution against `[t, 1, 0, …]` is exact for
-## arbitrary dependence on `t`.
 
 _as_homotopy(H::AbstractHomotopy) = H
 

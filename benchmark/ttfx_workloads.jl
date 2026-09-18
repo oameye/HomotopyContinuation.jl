@@ -20,7 +20,6 @@ using HomotopyContinuation:
     add!,
     ambient_coordinates!,
     intrinsic_coordinates!,
-    linear_subspace_homotopy,
     on_chart!,
     rand_subspace,
     track!,
@@ -250,10 +249,11 @@ function run(::Val{:affine_chart})
     F = System([w[1]^2 + w[2]^2 - w[3]^2]; variables = w)
     V = rand_subspace(3; dim = 2, affine = false)
     W = rand_subspace(3; dim = 2, affine = false)
-    H = linear_subspace_homotopy(F, V, W)
-    x = randn(rng, ComplexF64, 3)
-    H isa AffineChartHomotopy && on_chart!(x, H)
-    return H, x
+    return with_linear_subspace_homotopy(F, V, W) do H
+        x = randn(rng, ComplexF64, 3)
+        H isa AffineChartHomotopy && on_chart!(x, H)
+        return x
+    end
 end
 
 # ── Sliced, witness-set, sweep and lazy routes ────────────────────────────────
@@ -323,19 +323,19 @@ function _subspace_sweep_problem()
     return F, starts, L₀, targets
 end
 
-function _subspace_sweep(intrinsic::Bool)
+function _subspace_sweep(coords::SubspaceCoords.T)
     F, starts, L₀, targets = _subspace_sweep_problem()
     return solve(
         F, starts, L₀, targets,
         Sweep(;
-            intrinsic = intrinsic, seed = UInt32(0x1234), show_progress = false,
+            coords = coords, seed = UInt32(0x1234), show_progress = false,
         ),
         Serial(),
     )
 end
 
-run(::Val{:subspace_sweep_intrinsic}) = _subspace_sweep(true)
-run(::Val{:subspace_sweep_extrinsic}) = _subspace_sweep(false)
+run(::Val{:subspace_sweep_intrinsic}) = _subspace_sweep(SubspaceCoords.INTRINSIC)
+run(::Val{:subspace_sweep_extrinsic}) = _subspace_sweep(SubspaceCoords.EXTRINSIC)
 
 function run(::Val{:result_iterator_lazy})
     F, L = _conic_and_line()

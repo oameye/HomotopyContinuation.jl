@@ -35,18 +35,18 @@ end
 # equation `c·x − 1` is appended so the system is square.
 function _sliced_system(
         polys::AbstractVector, vars::AbstractVector, L::LinearSubspace;
-        chart::Union{Nothing, AbstractVector} = nothing,
+        chart::AbstractVector = [],
         params::AbstractVector = empty(vars),
         compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
     lin = _linear_equations(L, vars)
     eqs = vcat(collect(polys), lin)
-    chart !== nothing && push!(eqs, _chart_equation(chart, vars))
+    isempty(chart) || push!(eqs, _chart_equation(chart, vars))
     return System(eqs; parameters = params, variables = vars, compile = compile)
 end
 
 """
-    slice(F::System, L::LinearSubspace; chart = nothing) -> System
+    slice(F::System, L::LinearSubspace; chart = []) -> System
 
 Return the system whose zero set is `V(F) ∩ L`, namely `F` with the linear
 equations `A x − b` of `L` appended. The variables, parameters and compile mode
@@ -65,9 +65,9 @@ G = slice(F, L)   # square system with the two linear equations appended
 ```
 """
 function slice(
-        F::System{P, V, M}, L::LinearSubspace;
-        chart::Union{Nothing, AbstractVector} = nothing,
-    )::System where {P, V, M}
+        F::System, L::LinearSubspace;
+        chart::AbstractVector = [],
+    )
     ambient_dim(L) == nvariables(F) || throw(
         ArgumentError(
             "The subspace lives in dimension $(ambient_dim(L)), but the system " *
@@ -76,7 +76,7 @@ function slice(
     )
     return _sliced_system(
         polynomials(F), collect(variables(F)), L;
-        chart = chart, params = collect(parameters(F)), compile = M,
+        chart = chart, params = collect(parameters(F)), compile = F.compile_mode,
     )
 end
 
@@ -118,8 +118,8 @@ end
 # machinery (excess-solution checker) apply unchanged.
 function _init_sliced_total_degree(
         G::System, L::LinearSubspace, chart::Vector{ComplexF64},
-        alg::TotalDegree, exec::AbstractExecutor,
-    )
+        alg::TotalDegree, exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
     # The square branch below reads `G.degrees` directly, so guard first: a
     # degree of -1 would size the start-solution array negatively.
     _check_polynomial(G, "`TotalDegree`")
@@ -136,24 +136,25 @@ function _init_sliced_total_degree(
         degs, G, subspace, chart, γ, _tracker_options(alg), _endgame_options(alg),
     )
     return _solve_cache(
-        exec, builder, total_degree_start_solutions(degs), _seed(alg), nothing,
-        _show_progress(alg), early_stop_callback(alg),
+        exec, builder, total_degree_start_solutions(degs), _seed(alg),
+        ExcessCheckers(), _show_progress(alg), early_stop_callback(alg),
     )
 end
 
 function CommonSolve.init(
         F::System, L::LinearSubspace, alg::TotalDegree,
-        exec::AbstractExecutor = Threaded(),
-    )
+        exec::E = Threaded(),
+    )::SolveCache{E} where {E <: AbstractExecutor}
     G, chart = _sliced_solve_setup(F, L, _seed(alg))
     return _init_sliced_total_degree(G, L, chart, alg, exec)
 end
 
-CommonSolve.init(
-    F::System, L::LinearSubspace, alg::Polyhedral,
-    exec::AbstractExecutor = Threaded(),
-)::PolyhedralSolveCache =
-    CommonSolve.init(_sliced_solve_system(F, L, _seed(alg)), alg, exec)
+function CommonSolve.init(
+        F::System, L::LinearSubspace, alg::Polyhedral,
+        exec::E = Threaded(),
+    )::PolyhedralSolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(_sliced_solve_system(F, L, _seed(alg)), alg, exec)
+end
 
 """
     solve(F::System, L::LinearSubspace, alg = TotalDegree(), exec = Threaded())
@@ -172,15 +173,20 @@ L = rand_subspace(2; codim = 1)
 result = solve(F, L)
 ```
 """
-solve(
-    F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree(),
-    exec::AbstractExecutor = Threaded(),
-)::Result = CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
+function solve(
+        F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree(),
+        exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
+end
 
-solve(
-    F::System, L::LinearSubspace, alg::Polyhedral,
-    exec::AbstractExecutor = Threaded(),
-)::Result = CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
+function solve(
+        F::System, L::LinearSubspace, alg::Polyhedral,
+        exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
+end
 
-solve(F::System, L::LinearSubspace, exec::AbstractExecutor)::Result =
-    solve(F, L, TotalDegree(), exec)
+function solve(F::System, L::LinearSubspace, exec::E)::Result where {E <: AbstractExecutor}
+    return solve(F, L, TotalDegree(), exec)
+end

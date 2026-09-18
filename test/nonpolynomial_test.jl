@@ -3,7 +3,7 @@ using Random: Random, MersenneTwister, randn, rand
 import HomotopyContinuation as Next
 using HomotopyContinuation: Expression, System, CompileMode, @var, @polyvar,
     differentiate, solve, solutions, nsolutions,
-    verify_solution_completeness, Serial, TotalDegree, Polyhedral,
+    verify_solution_completeness, Completeness, Serial, TotalDegree, Polyhedral,
     Continuation, Monodromy, Witness, Regeneration, Decomposition, Intersection,
     TaylorVector, ComplexDF64, HomotopyEvaluator, StraightLineHomotopy,
     Interpreter, execute!, expand,
@@ -263,7 +263,7 @@ end
         @test expand.(differentiate(F, x) - dF_want) == Vector{Expression}(zeros(Int, 9))
 
         x0 = 0.1
-        got = [Next.expr_number(Next.subs(f, x => Expression(x0))) for f in F]
+        got = [Next.expr_number(Next.subs(f, x => Expression(x0))).val for f in F]
         want = ComplexF64[
             sin(x0), cos(x0), exp(x0), tan(x0), asin(x0), acos(x0),
             sinh(x0), cosh(x0), tanh(x0),
@@ -476,8 +476,10 @@ end
             ComplexF64[-0.6 - 0.8im, -1.2 + 0.4im],
             ComplexF64[-0.6 + 0.8im, -1.2 - 0.4im],
         ]
-        @test verify_solution_completeness(F, sols, q, Monodromy(; show_progress = false)) == true
-        @test verify_solution_completeness(F, sols[1:1], q, Monodromy(; show_progress = false)) == false
+        @test verify_solution_completeness(F, sols, q, Monodromy(; show_progress = false)) ==
+            Completeness.COMPLETE
+        @test verify_solution_completeness(F, sols[1:1], q, Monodromy(; show_progress = false)) !=
+            Completeness.COMPLETE
     end
 
     @testset "MP rational input builds the same system" begin

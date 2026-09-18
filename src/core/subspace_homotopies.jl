@@ -197,8 +197,8 @@ _clone_homotopy(H::IntrinsicSubspaceHomotopy)::IntrinsicSubspaceHomotopy =
     gamma = H.gamma,
 )
 
-# Normalize a caller-supplied gamma to |gamma| = 1, or 1 when disabled (nothing).
-_normalize_gamma(gamma::Nothing)::ComplexF64 = one(ComplexF64)
+# Normalize a caller-supplied gamma to |gamma| = 1. Pass `one(ComplexF64)` to
+# disable the perturbation: `_apply_gamma` is the identity there.
 _normalize_gamma(gamma::ComplexF64)::ComplexF64 = gamma / abs(gamma)
 
 # Apply the genericity perturbation to a start subspace (identity when g == 1).
@@ -211,7 +211,7 @@ function IntrinsicSubspaceHomotopy(
         system::SystemEvaluator,
         start::LinearSubspace,
         target::LinearSubspace;
-        gamma::Union{Nothing, ComplexF64} = cis(2 * pi * rand()),
+        gamma::ComplexF64 = cis(2 * pi * rand()),
     )
     g = _normalize_gamma(gamma)
     # multiply with random complex number to get generic paths
@@ -250,7 +250,7 @@ end
 
 function IntrinsicSubspaceHomotopy(
         F::System, start::LinearSubspace, target::LinearSubspace;
-        gamma::Union{Nothing, ComplexF64} = cis(2 * pi * rand()),
+        gamma::ComplexF64 = cis(2 * pi * rand()),
     )
     return IntrinsicSubspaceHomotopy(F.evaluator, start, target; gamma = gamma)
 end
@@ -303,7 +303,7 @@ function ExtrinsicSubspaceHomotopy(
         system::SystemEvaluator,
         start::LinearSubspace,
         target::LinearSubspace;
-        gamma::Union{Nothing, ComplexF64} = cis(2 * pi * rand()),
+        gamma::ComplexF64 = cis(2 * pi * rand()),
     )
     g = _normalize_gamma(gamma)
     start_c = _apply_gamma(g, convert(LinearSubspace{ComplexF64}, start))
@@ -339,7 +339,7 @@ end
 
 function ExtrinsicSubspaceHomotopy(
         F::System, start::LinearSubspace, target::LinearSubspace;
-        gamma::Union{Nothing, ComplexF64} = cis(2 * pi * rand()),
+        gamma::ComplexF64 = cis(2 * pi * rand()),
     )
     return ExtrinsicSubspaceHomotopy(F.evaluator, start, target; gamma = gamma)
 end

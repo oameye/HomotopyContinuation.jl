@@ -9,6 +9,10 @@ using DynamicPolynomials: @polyvar
 using MultivariatePolynomials: MultivariatePolynomials as MP
 using CommonSolve: CommonSolve
 
+# The builder/worker a cache erased.
+_inner_builder(b) = b._inner[]
+_inner_worker(ws) = ws._inner[]
+
 # Sort key that is stable under path ordering, for comparing two solve routes.
 _key(R) = sort(
     solutions(R);
@@ -50,7 +54,8 @@ _key(R) = sort(
         @test nparameters(H) == 0
         @test size(H) == size(C)
         @test Next.degrees(H) == Next.degrees(C)
-        @test Next.system_shape(H) === Next.system_shape(C)
+        @test Next.with_system_shape(nameof ∘ typeof, H) ===
+            Next.with_system_shape(nameof ∘ typeof, C)
     end
 
     @testset "rejects a mismatched parameter count" begin
@@ -194,7 +199,7 @@ end
             fix_parameters(F, [2, 4]),
             TotalDegree(; seed = UInt32(41), show_progress = false), Serial(),
         )
-        @test cache.builder.target_system isa System
+        @test _inner_builder(cache.builder).target_system isa System
         @test typeof(cache) === typeof(
             CommonSolve.init(
                 Next.fix_parameters(F, ComplexF64[2, 4]),
