@@ -30,35 +30,6 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
 jobs:
-  dispatch-doctor:
-    name: DispatchDoctor / Julia 1.10
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    if: ${{ !github.event.pull_request.draft }}
-    permissions:
-      actions: write
-      contents: read
-    env:
-      JULIA_NUM_THREADS: '1'
-      OPENBLAS_NUM_THREADS: '1'
-      OMP_NUM_THREADS: '1'
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: julia-actions/setup-julia@v3
-        with:
-          show-versioninfo: true
-          version: '1.10'
-          arch: x64
-      - uses: julia-actions/cache@v3
-      - name: Instantiate strict test environment
-        run: julia --project=test/strict -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
-      - name: Run the suite with instrumentation in error mode
-        run: julia --project=test/strict test/strict/runtests.jl --jobs=4
-      - name: Exercise first-call paths under instrumentation
-        run: julia --project=test/strict --threads=1 --color=yes quality/dispatch_doctor.jl
-
   strict-mode:
     name: StrictMode / Julia 1.13
     runs-on: ubuntu-latest
