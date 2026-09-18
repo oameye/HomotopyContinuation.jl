@@ -538,14 +538,24 @@ function _linear_form(
         eqs::Vector{P}, xvars::Vector{V}, coeffs::Vector{Float64},
     )::P where {P <: MP.AbstractPolynomialLike, V}
     isempty(coeffs) && return one(P)
-    return convert(P, sum(coeffs[j] * xvars[j] for j in eachindex(coeffs)))
+    first_index = firstindex(coeffs)
+    form = convert(P, coeffs[first_index] * xvars[first_index])
+    for j in (first_index + 1):lastindex(coeffs)
+        form = form + coeffs[j] * xvars[j]
+    end
+    return form
 end
 
 function _linear_form(
         ::Vector{Expression}, xvars::Vector{Expression}, coeffs::Vector{Float64},
     )::Expression
     isempty(coeffs) && return Expression(1)
-    return sum(coeffs[j] * xvars[j] for j in eachindex(coeffs))
+    first_index = firstindex(coeffs)
+    form = coeffs[first_index] * xvars[first_index]
+    for j in (first_index + 1):lastindex(coeffs)
+        form = form + coeffs[j] * xvars[j]
+    end
+    return form
 end
 
 # `u` starts on the `d`-th roots of `ℓ(p)^d` rather than of 1.
@@ -560,9 +570,15 @@ function _randomize_equations(
         eqs::Vector{P}, rng::Random.MersenneTwister,
     )::Vector{P} where {P}
     c = length(eqs)
-    return P[
-        sum(randn(rng) * eqs[j] for j in i:c) for i in 1:c
-    ]
+    out = Vector{P}(undef, c)
+    for i in 1:c
+        form = convert(P, randn(rng) * eqs[i])
+        for j in (i + 1):c
+            form = form + randn(rng) * eqs[j]
+        end
+        out[i] = form
+    end
+    return out
 end
 
 function _check_regeneration_sorted(
