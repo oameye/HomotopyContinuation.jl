@@ -217,7 +217,6 @@ function IntrinsicSubspaceHomotopy(
     # multiply with random complex number to get generic paths
     start_c = _apply_gamma(g, convert(LinearSubspace{ComplexF64}, start))
     target_c = convert(LinearSubspace{ComplexF64}, target)
-
     geodesics = GeodesicCache()
     path = _geodesic!(geodesics, intrinsic(start_c), intrinsic(target_c))
     Q = path.Q
@@ -684,24 +683,6 @@ function taylor!(
     return nothing
 end
 
-# Tracker-facing solution transfer is the identity: coordinate conversion is
-# the monodromy solver's job via intrinsic_coordinates!/ambient_coordinates!.
-function set_solution!(
-        x::FSVec{ComplexF64}, ::IntrinsicSubspaceHomotopy,
-        y::FSVec{ComplexF64}, ::ComplexF64,
-    )::Nothing
-    copyto!(x, y)
-    return nothing
-end
-
-function get_solution!(
-        out::FSVec{ComplexF64}, ::IntrinsicSubspaceHomotopy,
-        x::FSVec{ComplexF64}, ::ComplexF64,
-    )::Nothing
-    copyto!(out, x)
-    return nothing
-end
-
 ############################
 ## ExtrinsicSubspaceHomotopy
 ############################
@@ -834,21 +815,5 @@ function taylor!(
     @inbounds for i in 1:k
         u[m + i] = H.L[i]
     end
-    return nothing
-end
-
-function set_solution!(
-        x::FSVec{ComplexF64}, ::ExtrinsicSubspaceHomotopy,
-        y::FSVec{ComplexF64}, ::ComplexF64,
-    )::Nothing
-    copyto!(x, y)
-    return nothing
-end
-
-function get_solution!(
-        out::FSVec{ComplexF64}, ::ExtrinsicSubspaceHomotopy,
-        x::FSVec{ComplexF64}, ::ComplexF64,
-    )::Nothing
-    copyto!(out, x)
     return nothing
 end
