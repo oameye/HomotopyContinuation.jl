@@ -174,8 +174,6 @@ end
     include("solving/witness_set.jl")
     include("solving/regeneration.jl")
     include("solving/nid.jl")
-    # include("precompile.jl")
-    # include("precompile_signatures.jl")
 end
 
 end # module
