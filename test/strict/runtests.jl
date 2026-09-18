@@ -24,11 +24,24 @@ const OTHER_CONTRACTS = [
     "jet_test",
 ]
 
+# These are broad semantic/regression stress suites whose large multiplicity makes
+# DispatchDoctor repeatedly infer the same numerical kernels. Compact instrumented
+# workloads in `quality/dispatch_doctor.jl` cover the corresponding endgame,
+# witness-set, sweep, and monodromy routes. The ordinary suite still runs every file.
+const SEMANTIC_STRESS = [
+    "endgame_test",
+    "monodromy_v2_parity_test",
+    "system_sweep_test",
+    "v2_parity_test",
+    "witness_set_test",
+]
+
 testsuite = find_tests(dirname(@__DIR__))
 filter!(testsuite) do entry
     name = first(entry)
     startswith(name, "extensive/") && return false
     startswith(name, "strict/") && return false
-    return !(name in OTHER_CONTRACTS)
+    name in OTHER_CONTRACTS && return false
+    return !(name in SEMANTIC_STRESS)
 end
 ParallelTestRunner.runtests(HomotopyContinuation, ARGS; testsuite = testsuite)
