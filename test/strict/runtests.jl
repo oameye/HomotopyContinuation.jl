@@ -27,6 +27,7 @@ testsuite = find_tests(dirname(@__DIR__))
 filter!(testsuite) do entry
     name = first(entry)
     startswith(name, "extensive/") && return false
+    startswith(name, "public_api/") && return false
     startswith(name, "strict/") && return false
     return !(name in OTHER_CONTRACTS)
 end
