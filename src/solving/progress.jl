@@ -51,7 +51,7 @@ function make_many_progress(n::Int; delay::Float64 = 0.3)::ProgressMeter.Progres
     return progress
 end
 
-update_many_progress!(::Nothing, ::Int, ::Int)::Nothing = nothing
+@inline update_many_progress!(::Nothing, ::Int, ::Int)::Nothing = nothing
 function update_many_progress!(
         progress::ProgressMeter.Progress, nsolved::Int, ntracked::Int,
     )::Nothing
@@ -62,7 +62,7 @@ function update_many_progress!(
     return nothing
 end
 
-update_progress!(::Nothing, ntracked::Int, ::ProgressStats, ::PathResult)::Nothing = nothing
+@inline update_progress!(::Nothing, ntracked::Int, ::ProgressStats, ::PathResult)::Nothing = nothing
 function update_progress!(
         progress::ProgressMeter.Progress, ntracked::Int, stats::ProgressStats, r::PathResult,
     )::Nothing
@@ -71,7 +71,7 @@ function update_progress!(
     return nothing
 end
 
-next_progress!(::Nothing)::Nothing = nothing
+@inline next_progress!(::Nothing)::Nothing = nothing
 function next_progress!(progress::ProgressMeter.Progress)::Nothing
     ProgressMeter.next!(progress)
     return nothing

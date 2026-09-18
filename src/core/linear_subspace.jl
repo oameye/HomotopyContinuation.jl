@@ -67,7 +67,7 @@ function _all_zero(b::AbstractVector)::Bool
     end
     return true
 end
-.
+
 function _all_equal(A::AbstractArray, B::AbstractArray)::Bool
     axes(A) == axes(B) || return false
     for i in eachindex(A, B)

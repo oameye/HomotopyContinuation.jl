@@ -60,15 +60,19 @@ F = System([x^2 - a, x * y - a + b]; variables = [x, y], parameters = [a, b])
 solve(fix_parameters(F, [1, 0]), fix_parameters(F, [2, 4]), [[1, 1]])
 ```
 """
-solve(
-    G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
-    alg::Continuation = Continuation(), exec::AbstractExecutor = Threaded(),
-)::Result = CommonSolve.solve!(CommonSolve.init(G, F, starts, alg, exec))
+function solve(
+        G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
+        alg::Continuation = Continuation(), exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(CommonSolve.init(G, F, starts, alg, exec))
+end
 
-solve(
-    G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
-    exec::AbstractExecutor,
-)::Result = solve(G, F, starts, Continuation(), exec)
+function solve(
+        G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
+        exec::E,
+    )::Result where {E <: AbstractExecutor}
+    return solve(G, F, starts, Continuation(), exec)
+end
 
 function CommonSolve.init(
         G::CloneableSystem, F::CloneableSystem, starts::StartsLike, exec::E,
@@ -162,14 +166,16 @@ F = System([x^2 - a, x * y - a + b]; variables = [x, y], parameters = [a, b])
 solve(ParameterHomotopy(F, [1, 0], [2, 4]), [[1, 1]])
 ```
 """
-solve(
-    H::AbstractHomotopy, starts::StartsLike,
-    alg::Continuation = Continuation(), exec::AbstractExecutor = Serial(),
-)::Result = CommonSolve.solve!(CommonSolve.init(H, starts, alg, exec))
+function solve(
+        H::AbstractHomotopy, starts::StartsLike,
+        alg::Continuation = Continuation(), exec::E = Serial(),
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(CommonSolve.init(H, starts, alg, exec))
+end
 
-solve(
-    H::AbstractHomotopy, starts::StartsLike, exec::AbstractExecutor,
-)::Result = solve(H, starts, Continuation(), exec)
+function solve(H::AbstractHomotopy, starts::StartsLike, exec::E)::Result where {E <: AbstractExecutor}
+    return solve(H, starts, Continuation(), exec)
+end
 
 function CommonSolve.init(
         H::AbstractHomotopy, starts::StartsLike, exec::E,
@@ -212,16 +218,18 @@ Every call must allocate a homotopy sharing nothing mutable with the others. One
 built around an existing system's evaluator does *not* qualify: the evaluator
 carries the interpreter tapes.
 """
-solve(
-    build_homotopy::Function, starts::StartsLike,
-    alg::Continuation, exec::AbstractExecutor,
-)::Result = CommonSolve.solve!(
-    CommonSolve.init(build_homotopy, starts, alg, exec),
-)
+function solve(
+        build_homotopy::Function, starts::StartsLike,
+        alg::Continuation, exec::E,
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(CommonSolve.init(build_homotopy, starts, alg, exec))
+end
 
-solve(
-    build_homotopy::Function, starts::StartsLike, exec::AbstractExecutor,
-)::Result = solve(build_homotopy, starts, Continuation(), exec)
+function solve(
+        build_homotopy::Function, starts::StartsLike, exec::E,
+    )::Result where {E <: AbstractExecutor}
+    return solve(build_homotopy, starts, Continuation(), exec)
+end
 
 function CommonSolve.init(
         build_homotopy::Function, starts::StartsLike, exec::E,
@@ -252,9 +260,9 @@ for f in (:(solve), :(CommonSolve.init))
     @eval begin
         $f(
             H::Homotopy, starts::StartsLike, alg::Continuation = Continuation(),
-            exec::AbstractExecutor = Serial(),
-        ) = $f(_as_homotopy(H), starts, alg, exec)
-        $f(H::Homotopy, starts::StartsLike, exec::AbstractExecutor) =
+            exec::E = Serial(),
+        ) where {E <: AbstractExecutor} = $f(_as_homotopy(H), starts, alg, exec)
+        $f(H::Homotopy, starts::StartsLike, exec::E) where {E <: AbstractExecutor} =
             $f(_as_homotopy(H), starts, Continuation(), exec)
 
         $f(

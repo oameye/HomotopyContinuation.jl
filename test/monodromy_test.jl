@@ -57,6 +57,13 @@ using HomotopyContinuation: MonodromyOptions, MonodromyLoop, MonodromyStatistics
     @test opts.equivalence_classes == false || opts.group_actions !== nothing
     @test opts.reuse_loops == ReuseLoops.ALL
 
+    m = @inferred Monodromy(; show_progress = false)
+    @test m.common.show_progress == false
+    @test @inferred(Monodromy(; dim = 1, show_progress = false)).dim == 1
+    @test @inferred(Monodromy(; codim = 1, show_progress = false)).codim == 1
+    @test isconcretetype(eltype(m.variables))
+    @test isconcretetype(eltype(m.parameters))
+
     p = [1.0 + 0im, 2.0 + 0im]
     loop = MonodromyLoop(p, independent_normal, Random.MersenneTwister(0x2718))
     @test loop.p == p

@@ -284,10 +284,12 @@ function CommonSolve.init(
     end
 end
 
-CommonSolve.init(
-    F::System, starts::StartsLike, L_start::LinearSubspace,
-    L_target::LinearSubspace, exec::AbstractExecutor,
-) = CommonSolve.init(F, starts, L_start, L_target, Continuation(), exec)
+function CommonSolve.init(
+        F::System, starts::StartsLike, L_start::LinearSubspace,
+        L_target::LinearSubspace, exec::E,
+    )::WorkerSolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(F, starts, L_start, L_target, Continuation(), exec)
+end
 
 """
     solve(F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace,
@@ -312,18 +314,22 @@ S₁ = solutions(solve(F, L₁))
 result = solve(F, S₁, L₁, L₂)
 ```
 """
-solve(
-    F::System, starts::StartsLike, L_start::LinearSubspace,
-    L_target::LinearSubspace, alg::Continuation = Continuation(),
-    exec::AbstractExecutor = Threaded(),
-)::Result = CommonSolve.solve!(
-    CommonSolve.init(F, starts, L_start, L_target, alg, exec),
-)
+function solve(
+        F::System, starts::StartsLike, L_start::LinearSubspace,
+        L_target::LinearSubspace, alg::Continuation = Continuation(),
+        exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(
+        CommonSolve.init(F, starts, L_start, L_target, alg, exec),
+    )
+end
 
-solve(
-    F::System, starts::StartsLike, L_start::LinearSubspace,
-    L_target::LinearSubspace, exec::AbstractExecutor,
-)::Result = solve(F, starts, L_start, L_target, Continuation(), exec)
+function solve(
+        F::System, starts::StartsLike, L_start::LinearSubspace,
+        L_target::LinearSubspace, exec::E,
+    )::Result where {E <: AbstractExecutor}
+    return solve(F, starts, L_start, L_target, Continuation(), exec)
+end
 
 for f in (:(solve), :(CommonSolve.init))
     @eval begin

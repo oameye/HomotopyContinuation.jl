@@ -173,15 +173,20 @@ L = rand_subspace(2; codim = 1)
 result = solve(F, L)
 ```
 """
-solve(
-    F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree(),
-    exec::AbstractExecutor = Threaded(),
-)::Result = CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
+function solve(
+        F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree(),
+        exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
+end
 
-solve(
-    F::System, L::LinearSubspace, alg::Polyhedral,
-    exec::AbstractExecutor = Threaded(),
-)::Result = CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
+function solve(
+        F::System, L::LinearSubspace, alg::Polyhedral,
+        exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
+end
 
-solve(F::System, L::LinearSubspace, exec::AbstractExecutor)::Result =
-    solve(F, L, TotalDegree(), exec)
+function solve(F::System, L::LinearSubspace, exec::E)::Result where {E <: AbstractExecutor}
+    return solve(F, L, TotalDegree(), exec)
+end

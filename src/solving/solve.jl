@@ -104,9 +104,8 @@ _polynomial_system(F::FixedParameterSystem)::System =
 # Solved on a random affine chart: the slice by the whole ambient space, whose
 # chart row makes `m = n - 1` square.
 function _init_projective(
-        F::CloneableSystem, alg::Union{TotalDegree, Polyhedral},
-        exec::AbstractExecutor, route::String,
-    )
+        F::CloneableSystem, alg::TotalDegree, exec::E, route::String,
+    )::SolveCache{E} where {E <: AbstractExecutor}
     # Before the count check, whose message is confusing for grouped input.
     _check_single_group(F)
     _check_projective_determined(F, route)
@@ -376,13 +375,14 @@ equations are never rebuilt.
 function solve(
         F::CloneableSystem,
         alg::TotalDegree = TotalDegree(),
-        exec::AbstractExecutor = Threaded(),
-    )::Result
+        exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
     return CommonSolve.solve!(CommonSolve.init(F, alg, exec))
 end
 
-solve(F::CloneableSystem, exec::AbstractExecutor)::Result =
-    solve(F, TotalDegree(), exec)
+function solve(F::CloneableSystem, exec::E)::Result where {E <: AbstractExecutor}
+    return solve(F, TotalDegree(), exec)
+end
 
 """
     paths_to_track(F::System, alg = TotalDegree()) -> Int
@@ -456,19 +456,25 @@ function SemialgebraicSetsHCSolver(args...; kwargs...)
     )
 end
 
-solve(
-    F::System, alg::Polyhedral, exec::AbstractExecutor = Threaded(),
-)::Result = CommonSolve.solve!(CommonSolve.init(F, alg, exec))
+function solve(
+        F::System, alg::Polyhedral, exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
+    return CommonSolve.solve!(CommonSolve.init(F, alg, exec))
+end
 
 # The polyhedral start system is built from the composed monomials, which only
 # the substituted equations carry.
-solve(
-    C::CompositionSystem, alg::Polyhedral, exec::AbstractExecutor = Threaded(),
-)::Result = solve(System(C), alg, exec)
+function solve(
+        C::CompositionSystem, alg::Polyhedral, exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
+    return solve(System(C), alg, exec)
+end
 
-CommonSolve.init(
-    C::CompositionSystem, alg::Polyhedral, exec::AbstractExecutor = Threaded(),
-) = CommonSolve.init(System(C), alg, exec)
+function CommonSolve.init(
+        C::CompositionSystem, alg::Polyhedral, exec::E = Threaded(),
+    )::PolyhedralSolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(System(C), alg, exec)
+end
 
 # ── Parameter homotopy ─────────────────────────────────────────────────────
 
@@ -496,22 +502,26 @@ function solve(
         p_start::AbstractVector{<:Number},
         p_target::AbstractVector{<:Number},
         alg::Continuation = Continuation(),
-        exec::AbstractExecutor = Threaded(),
-    )::Result
+        exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
     return CommonSolve.solve!(
         CommonSolve.init(F, starts, p_start, p_target, alg, exec),
     )
 end
 
-solve(
-    F::SystemLike, starts::StartsLike, p_start::AbstractVector{<:Number},
-    p_target::AbstractVector{<:Number}, exec::AbstractExecutor,
-)::Result = solve(F, starts, p_start, p_target, Continuation(), exec)
+function solve(
+        F::SystemLike, starts::StartsLike, p_start::AbstractVector{<:Number},
+        p_target::AbstractVector{<:Number}, exec::E,
+    )::Result where {E <: AbstractExecutor}
+    return solve(F, starts, p_start, p_target, Continuation(), exec)
+end
 
-CommonSolve.init(
-    F::SystemLike, starts::StartsLike, p_start::AbstractVector{<:Number},
-    p_target::AbstractVector{<:Number}, exec::AbstractExecutor,
-) = CommonSolve.init(F, starts, p_start, p_target, Continuation(), exec)
+function CommonSolve.init(
+        F::SystemLike, starts::StartsLike, p_start::AbstractVector{<:Number},
+        p_target::AbstractVector{<:Number}, exec::E,
+    )::SolveCache{E} where {E <: AbstractExecutor}
+    return CommonSolve.init(F, starts, p_start, p_target, Continuation(), exec)
+end
 
 function CommonSolve.init(
         F::SystemLike,
@@ -519,8 +529,8 @@ function CommonSolve.init(
         p_start::AbstractVector{<:Number},
         p_target::AbstractVector{<:Number},
         alg::Continuation = Continuation(),
-        exec::AbstractExecutor = Threaded(),
-    )
+        exec::E = Threaded(),
+    )::SolveCache{E} where {E <: AbstractExecutor}
     _check_square_or_overdetermined(F)
     np = nparameters(F)
     np > 0 || throw(

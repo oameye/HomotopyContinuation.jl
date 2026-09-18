@@ -804,11 +804,10 @@ function _build_zero_parameter_taylor_fws(
         taylor_1::SysTaylor1FW,
         taylor_2::SysTaylor2FW,
         taylor_3::SysTaylor3FW,
-        ::Any, ::Any, ::Any,
+        ::Interpreter{Vector{TruncatedTaylorSeries{2, ComplexF64}}},
+        ::Interpreter{Vector{TruncatedTaylorSeries{3, ComplexF64}}},
+        ::Interpreter{Vector{TruncatedTaylorSeries{4, ComplexF64}}},
     )
-    # A TaylorVector with zero parameter columns is equivalent to the ordinary
-    # empty-parameter call. Delegate to the already-built scalar wrappers so a
-    # parameter-free System does not compile three unused convolution kernels.
     return (
         SysTaylor1ParamFW((u, tx, ::TaylorVector{2, ComplexF64}) -> (taylor_1(u, tx, _EMPTY_PARAMS); nothing)),
         SysTaylor2ParamFW((u, tx, ::TaylorVector{3, ComplexF64}) -> (taylor_2(u, tx, _EMPTY_PARAMS); nothing)),
@@ -817,7 +816,7 @@ function _build_zero_parameter_taylor_fws(
 end
 
 function _build_parameter_taylor_fws(
-        ::Any, ::Any, ::Any,
+        ::SysTaylor1FW, ::SysTaylor2FW, ::SysTaylor3FW,
         interp_t1::Interpreter{Vector{TruncatedTaylorSeries{2, ComplexF64}}},
         interp_t2::Interpreter{Vector{TruncatedTaylorSeries{3, ComplexF64}}},
         interp_t3::Interpreter{Vector{TruncatedTaylorSeries{4, ComplexF64}}},

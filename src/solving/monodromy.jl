@@ -282,8 +282,10 @@ end
 
 # `dim`/`codim` are the subspace route's only input, so whether one was given is
 # the route.
-_subspace_route(::Nothing, ::Nothing) = Val(false)
-_subspace_route(::Any, ::Any) = Val(true)
+_subspace_route(::Nothing, ::Nothing)::Val{false} = Val(false)
+_subspace_route(::Int, ::Nothing)::Val{true} = Val(true)
+_subspace_route(::Nothing, ::Int)::Val{true} = Val(true)
+_subspace_route(::Int, ::Int)::Val{true} = Val(true)
 
 _route_dim(::Nothing)::Int = -1
 _route_dim(d::Int)::Int = d
@@ -300,8 +302,8 @@ _monodromy_algorithm(
 
 # The one place monodromy's keyword surface is declared.
 function Monodromy(;
-        variables::AbstractVector = Any[],
-        parameters::AbstractVector = Any[],
+        variables::AbstractVector = Expression[],
+        parameters::AbstractVector = Expression[],
         dim::Union{Nothing, Int} = nothing,
         codim::Union{Nothing, Int} = nothing,
         coords::SubspaceCoords.T = SubspaceCoords.AUTO,
@@ -368,8 +370,8 @@ end
 # rather than the monodromy run, so none of them reach `MonodromyOptions`.
 function Monodromy(
         options::MonodromyOptions;
-        variables::AbstractVector = Any[],
-        parameters::AbstractVector = Any[],
+        variables::AbstractVector = Expression[],
+        parameters::AbstractVector = Expression[],
         dim::Union{Nothing, Int} = nothing,
         codim::Union{Nothing, Int} = nothing,
         coords::SubspaceCoords.T = SubspaceCoords.AUTO,
@@ -2110,10 +2112,10 @@ function _monodromy_solve!(
         p::P,
         seed::UInt32,
         show_progress::Bool,
-        executor::AbstractExecutor,
+        executor::E,
         catch_interrupt::Bool = true,
         warning::Bool = false,
-    )::MonodromyResult{P, P} where {H, P}
+    )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
     runner = show_progress ?
         _monodromy_with_progress! : _monodromy_without_progress!
     # Keeping the two bodies out of one inferred union means a quiet solve does
@@ -2128,8 +2130,8 @@ end
 @noinline function _dispatch_monodromy_policy(
         runner::Function, MS::MonodromySolver{H, P},
         X::AbstractVector{<:AbstractVector}, p::P, seed::UInt32,
-        executor::AbstractExecutor, catch_interrupt::Bool, warning::Bool,
-    )::MonodromyResult{P, P} where {H, P}
+        executor::E, catch_interrupt::Bool, warning::Bool,
+    )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
     Base.@nospecialize runner MS X p executor
     return runner(MS, X, p, seed, executor, catch_interrupt, warning)
 end
@@ -2148,8 +2150,8 @@ end
 
 @noinline function _monodromy_without_progress!(
         MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
-        executor::AbstractExecutor, catch_interrupt::Bool, warning::Bool,
-    )::MonodromyResult{P, P} where {H, P}
+        executor::E, catch_interrupt::Bool, warning::Bool,
+    )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
     return _monodromy_solve_body!(
         MS, X, p, seed, nothing, executor, catch_interrupt, warning,
     )
@@ -2157,8 +2159,8 @@ end
 
 @noinline function _monodromy_with_progress!(
         MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
-        executor::AbstractExecutor, catch_interrupt::Bool, warning::Bool,
-    )::MonodromyResult{P, P} where {H, P}
+        executor::E, catch_interrupt::Bool, warning::Bool,
+    )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
     return _monodromy_solve_body!(
         MS, X, p, seed, _make_monodromy_progress(MS), executor,
         catch_interrupt, warning,
@@ -2446,10 +2448,10 @@ function _monodromy_solve_body!(
         p::P,
         seed::UInt32,
         progress,
-        executor::AbstractExecutor,
+        executor::E,
         catch_interrupt::Bool,
         warning::Bool,
-    )::MonodromyResult{P, P} where {H, P}
+    )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
     MS.statistics = MonodromyStatistics()
     empty!(MS.unique_points)
     _reset_certified!(MS)
@@ -2580,8 +2582,8 @@ end
 function solve(
         F::Union{SystemLike, PolynomialInput},
         alg::Monodromy{MO, V, P, false},
-        exec::AbstractExecutor = Threaded(),
-    )::ParameterMonodromyResult where {MO, V, P}
+        exec::E = Threaded(),
+    )::ParameterMonodromyResult where {MO, V, P, E <: AbstractExecutor}
     G = _monodromy_system(F, alg)
     # A tagged stream: `_monodromy_solve!` seeds loop generation from `seed`
     # directly, so the setup draws here must stay uncorrelated with it.
@@ -2600,8 +2602,8 @@ end
 function solve(
         F::Union{SystemLike, PolynomialInput},
         alg::Monodromy{MO, V, P, true},
-        exec::AbstractExecutor = Threaded(),
-    )::SubspaceMonodromyResult where {MO, V, P}
+        exec::E = Threaded(),
+    )::SubspaceMonodromyResult where {MO, V, P, E <: AbstractExecutor}
     G = _monodromy_system(F, alg)
     rng = _tagged_rng(_seed(alg), 0x0000_0001)
     start_pair = _monodromy_start_pair(G, rng)
@@ -2625,8 +2627,8 @@ function solve(
         sols::SolutionsLike,
         p::AbstractVector{<:Number},
         alg::Monodromy,
-        exec::AbstractExecutor = Threaded(),
-    )::MonodromyResult
+        exec::E = Threaded(),
+    )::MonodromyResult where {E <: AbstractExecutor}
     G = _monodromy_system(F, alg)
     return _monodromy_parameters(
         G, _monodromy_starts(sols), p, alg, exec,
@@ -2639,8 +2641,8 @@ function solve(
         sols::SolutionsLike,
         L::LinearSubspace,
         alg::Monodromy,
-        exec::AbstractExecutor = Threaded(),
-    )::MonodromyResult
+        exec::E = Threaded(),
+    )::MonodromyResult where {E <: AbstractExecutor}
     G = _monodromy_system(F, alg)
     return _monodromy_subspace(
         G, _monodromy_starts(sols), L, alg, exec,
@@ -2660,20 +2662,24 @@ Track the solutions of the monodromy result `R` from its parameters to `p_target
 via a parameter homotopy. `R` supplies both the start solutions and the start
 parameters, so only the target end is given.
 """
-solve(
-    F::SystemLike, R::MonodromyResult, p_target::AbstractVector{<:Number},
-    alg::Continuation = Continuation(), exec::AbstractExecutor = Threaded(),
-)::Result = solve(F, solutions(R), Vector(parameters(R)), p_target, alg, exec)
+function solve(
+        F::SystemLike, R::MonodromyResult, p_target::AbstractVector{<:Number},
+        alg::Continuation = Continuation(), exec::E = Threaded(),
+    )::Result where {E <: AbstractExecutor}
+    return solve(F, solutions(R), Vector(parameters(R)), p_target, alg, exec)
+end
 
-solve(
-    F::SystemLike, R::MonodromyResult, p_target::AbstractVector{<:Number},
-    exec::AbstractExecutor,
-)::Result = solve(F, R, p_target, Continuation(), exec)
+function solve(
+        F::SystemLike, R::MonodromyResult, p_target::AbstractVector{<:Number},
+        exec::E,
+    )::Result where {E <: AbstractExecutor}
+    return solve(F, R, p_target, Continuation(), exec)
+end
 
 function _monodromy_parameters(
         F::SystemLike, S::AbstractVector{<:AbstractVector}, p, alg::Monodromy,
-        exec::AbstractExecutor, rng::Random.AbstractRNG,
-    )::ParameterMonodromyResult
+        exec::E, rng::Random.AbstractRNG,
+    )::ParameterMonodromyResult where {E <: AbstractExecutor}
     cp = convert(Vector{ComplexF64}, p)
     return with_monodromy_solver(
         F, cp;
@@ -2689,8 +2695,8 @@ end
 
 function _monodromy_subspace(
         F::SystemLike, S::AbstractVector{<:AbstractVector}, L, alg::Monodromy,
-        exec::AbstractExecutor, rng::Random.AbstractRNG,
-    )::SubspaceMonodromyResult
+        exec::E, rng::Random.AbstractRNG,
+    )::SubspaceMonodromyResult where {E <: AbstractExecutor}
     cp = convert(LinearSubspace{ComplexF64}, L)
     return with_monodromy_solver(
         F, cp;
@@ -2813,10 +2819,10 @@ function verify_solution_completeness(
         F::System,
         mres::MonodromyResult,
         alg::Monodromy = Monodromy(),
-        exec::AbstractExecutor = Threaded();
+        exec::E = Threaded();
         trace_tol::Float64 = 1.0e-14,
         endgame_options::EndgameOptions = EndgameOptions(),
-    )::Completeness.T
+    )::Completeness.T where {E <: AbstractExecutor}
     return verify_solution_completeness(
         F, solutions(mres), Vector(parameters(mres)), alg, exec;
         trace_tol = trace_tol, endgame_options = endgame_options,
@@ -2844,10 +2850,10 @@ function verify_solution_completeness(
         sols::AbstractVector{<:AbstractVector},
         q::AbstractVector,
         alg::Monodromy = Monodromy(),
-        exec::AbstractExecutor = Threaded();
+        exec::E = Threaded();
         trace_tol::Float64 = 1.0e-14,
         endgame_options::EndgameOptions = EndgameOptions(),
-    )::Completeness.T
+    )::Completeness.T where {E <: AbstractExecutor}
     show_progress = _show_progress(alg)
     seed = _seed(alg)
     tracker_options = _tracker_options(alg)

@@ -341,12 +341,33 @@ end
     c.eval_sequence, c.jacobian_sequence, c.nequations, c.nvariables, c.nparams,
 )
 
-function _unsupported_support_taylor!(::Any, ::Any, ::Any)::Nothing
+@noinline function _unsupported_support_taylor!()::Nothing
     throw(
         ArgumentError(
             "the internal polyhedral support evaluator does not provide this Taylor mode",
         )
     )
+end
+
+@inline function _unsupported_support_taylor!(
+        ::FSVec{ComplexF64}, ::TaylorVector{2, ComplexF64}, ::FSVec{ComplexF64},
+    )::Nothing
+    return _unsupported_support_taylor!()
+end
+@inline function _unsupported_support_taylor!(
+        ::FSVec{ComplexF64}, ::TaylorVector{3, ComplexF64}, ::FSVec{ComplexF64},
+    )::Nothing
+    return _unsupported_support_taylor!()
+end
+@inline function _unsupported_support_taylor!(
+        ::FSVec{ComplexF64}, ::TaylorVector{4, ComplexF64}, ::FSVec{ComplexF64},
+    )::Nothing
+    return _unsupported_support_taylor!()
+end
+@inline function _unsupported_support_taylor!(
+        ::FSVec{ComplexF64}, ::TaylorVector{2, ComplexF64}, ::TaylorVector{2, ComplexF64},
+    )::Nothing
+    return _unsupported_support_taylor!()
 end
 
 function _support_system(support::Vector{Matrix{Int32}})::_SupportSystem
