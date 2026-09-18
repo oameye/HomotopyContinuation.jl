@@ -256,21 +256,3 @@ function taylor!(
     taylor!(u, Val(3), H.system, tx, H.tp3)
     return nothing
 end
-
-## set/get solution: identity
-
-function set_solution!(
-        x::FSVec{ComplexF64}, ::LinearParameterHomotopy,
-        y::FSVec{ComplexF64}, ::ComplexF64,
-    )::Nothing
-    copyto!(x, y)
-    return nothing
-end
-
-function get_solution!(
-        out::FSVec{ComplexF64}, ::LinearParameterHomotopy,
-        x::FSVec{ComplexF64}, ::ComplexF64,
-    )::Nothing
-    copyto!(out, x)
-    return nothing
-end

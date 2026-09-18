@@ -231,24 +231,6 @@ function taylor!(
     return nothing
 end
 
-# Tracker-facing solution transfer is the identity (decision 8); the monodromy
-# solver renormalizes via on_chart! through the concrete handle.
-function set_solution!(
-        x::FSVec{ComplexF64}, ::AffineChartHomotopy,
-        y::FSVec{ComplexF64}, ::ComplexF64,
-    )::Nothing
-    copyto!(x, y)
-    return nothing
-end
-
-function get_solution!(
-        out::FSVec{ComplexF64}, ::AffineChartHomotopy,
-        x::FSVec{ComplexF64}, ::ComplexF64,
-    )::Nothing
-    copyto!(out, x)
-    return nothing
-end
-
 # Retargeting passthroughs for subspace-homotopy wrapping. Without these,
 # start_parameters!/target_parameters! would fall through to the AbstractHomotopy
 # no-op default and silently leave the inner homotopy on stale subspaces.

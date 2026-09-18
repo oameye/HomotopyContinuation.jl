@@ -178,26 +178,3 @@ function taylor!(
     end
     return nothing
 end
-
-## set_solution! / get_solution! — default identity (just copy)
-
-function set_solution!(
-        x::FSVec{ComplexF64}, ::StraightLineHomotopy,
-        y::FSVec{ComplexF64}, t::ComplexF64,
-    )::Nothing
-    copyto!(x, y)
-    return nothing
-end
-
-function get_solution!(
-        out::FSVec{ComplexF64}, ::StraightLineHomotopy,
-        x::FSVec{ComplexF64}, t::ComplexF64,
-    )::Nothing
-    copyto!(out, x)
-    return nothing
-end
-
-## start_parameters! / target_parameters! — no-op (no parameters)
-
-start_parameters!(::StraightLineHomotopy, ::FSVec{ComplexF64})::Nothing = nothing
-target_parameters!(::StraightLineHomotopy, ::FSVec{ComplexF64})::Nothing = nothing
