@@ -378,26 +378,3 @@ function taylor!(
     taylor!(u, Val(3), H.system, tx, H.tp3)
     return nothing
 end
-
-## ── set_solution! / get_solution! ────────────────────────────────────────────
-
-function set_solution!(
-        x::FSVec{ComplexF64}, ::ToricHomotopy,
-        y::FSVec{ComplexF64}, ::ComplexF64,
-    )::Nothing
-    copyto!(x, y)
-    return nothing
-end
-
-function get_solution!(
-        out::FSVec{ComplexF64}, ::ToricHomotopy,
-        x::FSVec{ComplexF64}, ::ComplexF64,
-    )::Nothing
-    copyto!(out, x)
-    return nothing
-end
-
-## ── start_parameters! / target_parameters! ───────────────────────────────────
-
-start_parameters!(::ToricHomotopy, ::FSVec{ComplexF64})::Nothing = nothing
-target_parameters!(::ToricHomotopy, ::FSVec{ComplexF64})::Nothing = nothing
