@@ -34,6 +34,21 @@ Run affected test files while iterating; reserve complete suites for tranche com
 
 v2/v3 live comparisons must run in isolated Julia environments/processes because both versions have the same registered package name and UUID.
 
+## PR goal audit
+
+Green CI is necessary but not sufficient. Before freezing or proposing any PR for merge, compare the final tree against its parent issue and original motivation.
+
+- Restate the specific goal the PR is supposed to solve.
+- Account for every relevant scope item and acceptance criterion as **done**, **already satisfied**, **deliberately retained**, or **explicitly deferred**.
+- Verify that stated non-goals were not crossed accidentally.
+- Search for residual instances of the problem instead of stopping after the first local fix.
+- Give every deferred item a clear owning issue or later tranche.
+- Record why any retained wrapper, boundary, command, or duplicate-looking path is intentional rather than forgotten cleanup.
+- Check that the final diff serves the stated goal without unrelated churn.
+- For umbrella issues implemented by several PRs, do not imply completion until the umbrella acceptance criteria have explicit completion accounting.
+
+Only after this goal audit should correctness, quality, performance, TTFX, specialization, and code-size evidence be used to freeze the exact tree.
+
 ## Quality gates
 
 Before a PR is considered ready:
