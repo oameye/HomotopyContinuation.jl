@@ -44,5 +44,29 @@ jobs:
       - uses: julia-actions/cache@v3
       - name: Instantiate test environment
         run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
-      - name: Run public API acceptance suite
-        run: julia --project=test --threads=1 --color=yes test/public_api/runtests.jl
+      - name: Run public API acceptance suite with coverage
+        run: julia --code-coverage=user --project=test --threads=1 --color=yes test/public_api/runtests.jl
+      - name: Process public-API coverage
+        uses: julia-actions/julia-processcoverage@v1
+        with:
+          directories: src,ext
+      - name: Validate public-API coverage
+        run: |
+          test -s lcov.info
+          grep -q '^SF:' lcov.info
+          grep -q '^DA:' lcov.info
+      - name: Archive public-API coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-api-lcov
+          path: lcov.info
+          if-no-files-found: error
+      - name: Upload public-API coverage
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          disable_search: true
+          flags: public-api
+          name: public-api
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
