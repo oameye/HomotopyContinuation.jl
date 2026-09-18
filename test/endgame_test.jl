@@ -82,8 +82,12 @@ const INSTRUMENTED = load_preference(HC, "dispatch_doctor_mode", "disable") != "
             HC.update!(val, pred, 0.4)
             HC.update!(val, pred, 0.3)
 
-            allocs = @allocated HC.update!(val, pred, 0.2)
-            @test allocs == 0
+            if !INSTRUMENTED
+                allocs = @allocated HC.update!(val, pred, 0.2)
+                @test allocs == 0
+            else
+                HC.update!(val, pred, 0.2)
+            end
         end
 
         @testset "direct Taylor derivative matches finite difference" begin
