@@ -100,13 +100,6 @@ variable_groups(::AbstractHomotopy)::Vector{Vector{Int}} = Vector{Int}[]
 # systems: taylor!(u, ::Val{K}, H, tx, t).
 # Required: Base.size(H) -> (nequations, nvariables)
 
-# Optional coordinate transforms. Keep the legacy three-argument copy helpers
-# and make the actual AbstractHomotopy interface delegate to them.
-set_solution!(x::AbstractVector, y::AbstractVector, ::ComplexF64)::Nothing =
-    (copyto!(x, y); nothing)
-get_solution!(out::AbstractVector, x::AbstractVector, ::ComplexF64)::Nothing =
-    (copyto!(out, x); nothing)
-
 """
     set_solution!(x, H::AbstractHomotopy, y, t) -> nothing
 
@@ -114,8 +107,8 @@ Map an external representative `y` to `H`'s internal coordinates at `t`.
 The default is an identity copy.
 """
 set_solution!(
-    x::AbstractVector, ::AbstractHomotopy, y::AbstractVector, t::ComplexF64,
-)::Nothing = set_solution!(x, y, t)
+    x::AbstractVector, ::AbstractHomotopy, y::AbstractVector, ::ComplexF64,
+)::Nothing = (copyto!(x, y); nothing)
 
 """
     get_solution!(out, H::AbstractHomotopy, x, t) -> nothing
@@ -124,8 +117,8 @@ Map `H`'s internal coordinates `x` back to the reported representative at `t`.
 The default is an identity copy.
 """
 get_solution!(
-    out::AbstractVector, ::AbstractHomotopy, x::AbstractVector, t::ComplexF64,
-)::Nothing = get_solution!(out, x, t)
+    out::AbstractVector, ::AbstractHomotopy, x::AbstractVector, ::ComplexF64,
+)::Nothing = (copyto!(out, x); nothing)
 
 # Rebuild `H` with its own mutable state, cloning the evaluators it holds.
 function _clone_homotopy end
@@ -133,11 +126,11 @@ function _clone_homotopy end
 _clone_homotopy(H::AbstractHomotopy) = deepcopy(H)
 
 """
-    start_parameters!(H::AbstractHomotopy, p) -> H
+    start_parameters!(H::AbstractHomotopy, p) -> nothing
 """
-start_parameters!(H::AbstractHomotopy, ::AbstractVector) = H
+start_parameters!(::AbstractHomotopy, ::AbstractVector)::Nothing = nothing
 
 """
-    target_parameters!(H::AbstractHomotopy, ::AbstractVector) -> H
+    target_parameters!(H::AbstractHomotopy, p) -> nothing
 """
-target_parameters!(H::AbstractHomotopy, ::AbstractVector) = H
+target_parameters!(::AbstractHomotopy, ::AbstractVector)::Nothing = nothing
