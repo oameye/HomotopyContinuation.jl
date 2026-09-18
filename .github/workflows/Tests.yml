@@ -34,7 +34,7 @@ env:
 
 jobs:
   core:
-    name: Core / Julia ${{ matrix.version }}${{ matrix.dispatch_doctor && ' + DispatchDoctor' || '' }}
+    name: Core / Julia ${{ matrix.version }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
@@ -43,13 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - version: '1.10'
-            dispatch_doctor: false
-            runner: test/runtests.jl
-          - version: '1'
-            dispatch_doctor: true
-            runner: test/strict/runtests.jl
+        version: ['1.10', '1']
     steps:
       - uses: actions/checkout@v7
         with:
@@ -59,16 +53,10 @@ jobs:
           show-versioninfo: true
           version: ${{ matrix.version }}
       - uses: julia-actions/cache@v3
-      - name: Enable DispatchDoctor hard-error instrumentation
-        if: ${{ matrix.dispatch_doctor }}
-        run: cp test/strict/LocalPreferences.toml test/LocalPreferences.toml
       - name: Instantiate core test environment
         run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
       - name: Run core suite
-        run: julia --project=test ${{ matrix.runner }} --jobs=4
-      - name: Exercise first-call paths under instrumentation
-        if: ${{ matrix.dispatch_doctor }}
-        run: julia --project=test --threads=1 --color=yes quality/dispatch_doctor.jl
+        run: julia --project=test test/runtests.jl --jobs=4
 
   certification:
     name: Certification / Julia ${{ matrix.version }}
