@@ -48,6 +48,8 @@ certify(F, solutions(result))
 
 The current architecture is documented in [`implementation_docs/00_architecture.md`](implementation_docs/00_architecture.md), with durable implementation constraints in [`implementation_docs/01_decisions.md`](implementation_docs/01_decisions.md). [`docs/src/dev.md`](docs/src/dev.md) is the short contributor guide.
 
+Historical migration/status/debt notes are intentionally not maintained as active documentation. Any still-actionable work from them must have an owning GitHub issue before the note is removed; Git history preserves the original analysis.
+
 Common commands:
 
 ```sh
