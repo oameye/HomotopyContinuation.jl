@@ -59,9 +59,6 @@ jobs:
           show-versioninfo: true
           version: ${{ matrix.version }}
       - uses: julia-actions/cache@v3
-      - name: Enable DispatchDoctor hard-error instrumentation
-        if: ${{ matrix.dispatch_doctor }}
-        run: cp test/strict/LocalPreferences.toml test/LocalPreferences.toml
       - name: Instantiate core test environment
         run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
       - name: Run core suite

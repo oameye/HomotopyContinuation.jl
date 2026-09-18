@@ -1,7 +1,8 @@
-# The production lane uses `test/LocalPreferences.toml`, where DispatchDoctor is
-# disabled. CI reuses this runner in the current-Julia core lane after replacing
-# that preference with the hard-error configuration from `test/strict/`.
-# Local developers can still run the same instrumented suite with `make test-strict`.
+# Enable DispatchDoctor in the active test environment before loading the package,
+# matching the supported package-testing pattern used by KeldyshContraction.jl.
+using Preferences: set_preferences!
+set_preferences!("HomotopyContinuation", "dispatch_doctor_mode" => "error"; force = true)
+
 using HomotopyContinuation
 using DispatchDoctor: DispatchDoctor
 using ParallelTestRunner: ParallelTestRunner, find_tests
