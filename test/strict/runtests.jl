@@ -1,9 +1,7 @@
-# The ordinary suite in `test/` runs the production configuration, where
-# DispatchDoctor is disabled. This environment turns it to `"error"` through
-# `LocalPreferences.toml` and reruns the same files, so a type instability
-# anywhere in the package fails a test rather than passing silently.
-#
-# Run with `make test-strict`.
+# The production lane uses `test/LocalPreferences.toml`, where DispatchDoctor is
+# disabled. CI reuses this runner in the current-Julia core lane after replacing
+# that preference with the hard-error configuration from `test/strict/`.
+# Local developers can still run the same instrumented suite with `make test-strict`.
 using HomotopyContinuation
 using DispatchDoctor: DispatchDoctor
 using ParallelTestRunner: ParallelTestRunner, find_tests
@@ -13,10 +11,10 @@ using ParallelTestRunner: ParallelTestRunner, find_tests
 DispatchDoctor.JULIA_OK ||
     error("DispatchDoctor does not instrument Julia $VERSION; this run would prove nothing.")
 
-# These files gate contracts other than type stability, and `make test` already
-# runs them against package code. AllocCheck and JET would additionally report on
-# the wrappers rather than on the package. Their analysis dependencies are absent
-# from this environment, so a file added here without thought fails loudly.
+# These files gate contracts other than runtime type stability. They must inspect
+# production package code rather than DispatchDoctor wrappers, so the instrumented
+# lane excludes them. The Julia 1.10 production lane and dedicated analysis
+# workflows retain those contracts.
 const OTHER_CONTRACTS = [
     "alloc_check_test",
     "aqua_test",
