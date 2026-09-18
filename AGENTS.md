@@ -17,7 +17,7 @@ A ground-up rewrite for solving polynomial systems via homotopy continuation, pr
 
 ## Git policy
 
-**Never commit or push.** Neither Claude nor any subagent may run `git commit`, `git push`, or any git command that modifies history. All commits are made by the user. Claude's job is to write code, run tests, and report results — the user decides when to commit.
+Agents may create commits, push branches, open pull requests, and close pull requests when useful for completing the requested work. **Never merge a pull request unless the user explicitly authorizes that specific merge.** Keep commits scoped and reviewable, preserve the requested branch/PR structure, and report the exact commit/PR state after mutations.
 
 ## Development workflow
 
@@ -73,7 +73,6 @@ Before merging any PR:
 - **A return annotation states a contract; an assertion in a body hides a defect.** `f(...)::T` on a definition is welcome. `x::T` inside a body means a value arrived untyped, so fix where it came from: type the struct field, annotate the callee's return, or restructure so the value is never read back out of an untyped container. The exceptions are boundaries the package does not own or erased on purpose — the unboxes behind the erasure, `make()` past its `@nospecialize` barrier, the `inferencebarrier` keeping `qr!` out of a square-only session, caller-supplied callbacks, and `Serialization.deserialize` in `ext/DistributedExt/`, where the wire hands back `Any`.
 
 ### Performance
-
 
 - **Zero allocations on hot paths.** Pre-allocate and mutate via `!` functions.
 - **Column-major access.** Inner loops over rows, outer loops over columns.
