@@ -13,7 +13,7 @@ end
 
     serial = solve(interpreted, algorithm, Serial())
     generated = solve(compiled, algorithm, Serial())
-    threaded = solve(interpreted, algorithm, Threaded(1))
+    threaded = solve(interpreted, algorithm, Threaded())
 
     @test nfailed(serial) == 0
     @test nsolutions(serial) == nsolutions(generated) == nsolutions(threaded)
