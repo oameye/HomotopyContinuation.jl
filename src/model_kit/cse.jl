@@ -172,7 +172,7 @@ end
 
 """Insert `number` into a sorted vector if not already present."""
 function _add_to_sorted_vec!(vec::Vector{UInt32}, number::UInt32)::Nothing
-    idx = searchsortedfirst(vec, number)
+    idx = searchsortedfirst(vec, number, Base.Order.Forward)
     if idx > length(vec) || vec[idx] != number
         insert!(vec, idx, number)
     end

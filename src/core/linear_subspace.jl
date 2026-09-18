@@ -61,6 +61,21 @@ struct ExtrinsicDescription{T}
 end
 (A::ExtrinsicDescription)(x::AbstractVector) = A.A * x - A.b
 
+function _all_zero(b::AbstractVector)::Bool
+    for i in eachindex(b)
+        iszero(b[i]) || return false
+    end
+    return true
+end
+.
+function _all_equal(A::AbstractArray, B::AbstractArray)::Bool
+    axes(A) == axes(B) || return false
+    for i in eachindex(A, B)
+        A[i] == B[i] || return false
+    end
+    return true
+end
+
 # Identity when the eltype already matches: convert may return its argument
 # (standard for convert(::Type{T}, ::T)), avoiding a needless orthonormal rebuild.
 Base.convert(::Type{ExtrinsicDescription{T}}, A::ExtrinsicDescription{T}) where {T} = A
@@ -88,7 +103,8 @@ Codimension of the (affine) linear subspace `A`.
 """
 codim(A::ExtrinsicDescription) = size(A.A, 1)
 
-Base.:(==)(A::ExtrinsicDescription, B::ExtrinsicDescription) = A.A == B.A && A.b == B.b
+Base.:(==)(A::ExtrinsicDescription, B::ExtrinsicDescription)::Bool =
+    _all_equal(A.A, B.A) && _all_equal(A.b, B.b)
 function Base.copy!(A::ExtrinsicDescription, B::ExtrinsicDescription)
     copy!(A.A, B.A)
     copy!(A.b, B.b)
@@ -146,7 +162,7 @@ function stiefel_coordinates_intrinsic(A::Matrix{T})::Matrix{T} where {T}
     SVD = LA.svd(A)
     return SVD.U
 end
-function stiefel_coordinates_intrinsic!(X, A::AbstractMatrix)
+function stiefel_coordinates_intrinsic!(X::Matrix{T}, A::Matrix{T})::Matrix{T} where {T}
     X .= A
     SVD = LA.svd!(X)
     X .= SVD.U
@@ -154,11 +170,11 @@ function stiefel_coordinates_intrinsic!(X, A::AbstractMatrix)
 end
 function stiefel_coordinates_intrinsic(A::Matrix{T}, b::Vector{T})::Matrix{T} where {T}
     n, k = size(A)
-    Y = zeros(T, n + 1, k + 1)
+    Y = fill!(Matrix{T}(undef, n + 1, k + 1), zero(T))
     stiefel_coordinates_intrinsic!(Y, A, b)
     return Y
 end
-function stiefel_coordinates_intrinsic!(Y, A::AbstractMatrix, b::AbstractVector)
+function stiefel_coordinates_intrinsic!(Y::Matrix{T}, A::Matrix{T}, b::Vector{T})::Matrix{T} where {T}
     γ = sqrt(1 + sum(abs2, b))
     n, k = size(A)
     Y[1:n, 1:k] .= A
@@ -183,8 +199,8 @@ Codimension of the (affine) linear subspace `A`.
 """
 codim(I::IntrinsicDescription) = size(I.A, 1) - size(I.A, 2)
 
-function Base.:(==)(A::IntrinsicDescription, B::IntrinsicDescription)
-    return A.A == B.A && A.b == B.b && A.Y == B.Y
+function Base.:(==)(A::IntrinsicDescription, B::IntrinsicDescription)::Bool
+    return _all_equal(A.A, B.A) && _all_equal(A.b, B.b) && _all_equal(A.Y, B.Y)
 end
 
 function Base.show(io::IO, A::IntrinsicDescription{T}) where {T}
@@ -212,7 +228,7 @@ function IntrinsicDescription(E::ExtrinsicDescription{T})::IntrinsicDescription{
     svd = LA.svd(E.A; full = true)
     m = size(E.A, 1)
     A = Matrix((@view svd.Vt[(m + 1):end, :])')
-    b = if iszero(E.b)
+    b = if _all_zero(E.b)
         zeros(eltype(E.b), size(A, 1))
     else
         svd \ E.b
@@ -224,7 +240,7 @@ function ExtrinsicDescription(I::IntrinsicDescription{T})::ExtrinsicDescription{
     svd = LA.svd(I.A; full = true)
     n = size(I.A, 2)
     A = Matrix((@view svd.U[:, (n + 1):end])')
-    b = if iszero(I.b)
+    b = if _all_zero(I.b)
         zeros(eltype(A), size(A, 1))
     else
         A * I.b
@@ -271,11 +287,6 @@ function LinearSubspace(
     )
 end
 
-# Identity when the eltype already matches. This is the hot case for monodromy:
-# set_subspaces! converts the loop's LinearSubspace{ComplexF64} on every
-# retarget, and without this it would rebuild both Stiefel frames via SVD each
-# time (~40% of set_subspaces!). convert(::Type{T}, ::T) returning its argument
-# is standard; the homotopy only reads the stored subspaces.
 Base.convert(::Type{LinearSubspace{T}}, A::LinearSubspace{T}) where {T} = A
 function Base.convert(::Type{LinearSubspace{T}}, A::LinearSubspace) where {T}
     return LinearSubspace(
@@ -335,7 +346,7 @@ ambient_dim(A::LinearSubspace) = dim(A) + codim(A)
 Returns `true` if the space is a proper linear subspace, i.e., described by
 ``L = \\{ x | Ax = 0 \\}``.
 """
-is_linear(A::LinearSubspace) = iszero(extrinsic(A).b)
+is_linear(A::LinearSubspace)::Bool = _all_zero(extrinsic(A).b)
 
 function Base.show(io::IO, A::LinearSubspace{T}) where {T}
     if is_linear(A)
@@ -373,7 +384,7 @@ function Base.copy!(A::LinearSubspace, B::LinearSubspace)
 end
 Base.copy(A::LinearSubspace) = LinearSubspace(copy(A.extrinsic), copy(A.intrinsic))
 
-function Base.:(==)(A::LinearSubspace, B::LinearSubspace)
+function Base.:(==)(A::LinearSubspace, B::LinearSubspace)::Bool
     return intrinsic(A) == intrinsic(B) && extrinsic(A) == extrinsic(B)
 end
 Base.isequal(A::LinearSubspace, B::LinearSubspace) = A === B

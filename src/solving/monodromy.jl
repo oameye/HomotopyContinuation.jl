@@ -2255,15 +2255,8 @@ function threaded_monodromy_solve!(
                             if is_success(res) && !res.singular
                                 loop_tracked!(stats)
 
-                                # 1) check whether the solution already exists.
-                                # Certifying the candidate dominates the cost of
-                                # filing it, so it happens before `data_lock` is
-                                # taken; the id it is filed under is still decided
-                                # under the lock. `n_results` only grows, so a
-                                # candidate skipped here is one the locked check
-                                # below drops too.
                                 candidate = n_results[] < target_count ?
-                                    certify_candidate(MS, res, tid) : nothing
+                                    certify_candidate(MS, res, tid) : NoCandidate()
                                 got_added = false
                                 id = 0
                                 Base.@lock data_lock begin
