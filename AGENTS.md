@@ -46,7 +46,7 @@ certify(F, solutions)
 
 ## Git policy
 
-**Never commit or push.** Neither Claude nor any subagent may run `git commit`, `git push`, or any git command that modifies history. All commits are made by the user. Claude's job is to write code, run tests, and report results — the user decides when to commit.
+Agents may create commits, push branches, and open or close pull requests when doing repository work. **Agents must never merge a pull request unless the user explicitly authorizes that specific merge.** Keep commits focused and attributable, do not rewrite shared history unless explicitly requested, and report the exact commit/PR state after repository mutations.
 
 ## Development workflow
 
