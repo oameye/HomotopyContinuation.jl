@@ -3,6 +3,17 @@ using HomotopyContinuation
 
 const HC_PUBLIC_NAMES = Set(names(HomotopyContinuation; all = false, imported = false))
 
+function hc_aliases(source::String)
+    aliases = Set(["HomotopyContinuation"])
+    for m in eachmatch(r"(?m)^\s*(?:using|import)\s+HomotopyContinuation\s+as\s+([A-Za-z_][A-Za-z0-9_]*)", source)
+        push!(aliases, m.captures[1])
+    end
+    for m in eachmatch(r"(?m)^\s*const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*HomotopyContinuation\s*$", source)
+        push!(aliases, m.captures[1])
+    end
+    return aliases
+end
+
 function explicit_hc_imports(source::String)
     imported = Symbol[]
     lines = split(source, '\n')
@@ -17,7 +28,7 @@ function explicit_hc_imports(source::String)
                 chunk *= " " * strip(lines[i])
             end
             for token in split(chunk, ',')
-                name = strip(token)
+                name = strip(first(split(strip(token), r"\s+as\s+"; limit = 2)))
                 isempty(name) && continue
                 push!(imported, Symbol(name))
             end
@@ -29,8 +40,13 @@ end
 
 function qualified_hc_references(source::String)
     refs = Symbol[]
-    for m in eachmatch(r"\bHomotopyContinuation\.(@?[A-Za-z_][A-Za-z0-9_!]*)", source)
-        push!(refs, Symbol(m.captures[1]))
+    for alias in hc_aliases(source)
+        pattern = Regex("\\b" * alias * "\\.(@?[A-Za-z_][A-Za-z0-9_!]*)")
+        for m in eachmatch(pattern, source)
+            name = Symbol(m.captures[1])
+            name === :jl && continue
+            push!(refs, name)
+        end
     end
     return refs
 end
