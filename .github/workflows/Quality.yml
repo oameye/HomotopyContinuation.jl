@@ -77,6 +77,7 @@ jobs:
           julia --project=test quality/tracking_kernel.jl
           julia --project=test quality/endgame_kernel.jl
           julia --project=test quality/subspace_homotopy_kernel.jl
+          julia --project=test quality/core_evaluator_kernel.jl
 
   strict-mode:
     name: StrictMode / Julia 1.13
