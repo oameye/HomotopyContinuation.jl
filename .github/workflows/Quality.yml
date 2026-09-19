@@ -70,6 +70,7 @@ jobs:
           julia --project=test quality/taylor_kernel.jl
           julia --project=test quality/linear_algebra_kernel.jl
           julia --project=test quality/randomized_system_kernel.jl
+          julia --project=test quality/norms_kernel.jl
 
   strict-mode:
     name: StrictMode / Julia 1.13
