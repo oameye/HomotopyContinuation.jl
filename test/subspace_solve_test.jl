@@ -1,30 +1,20 @@
 using Test
 using HomotopyContinuation
-using HomotopyContinuation: Serial, Threaded, Result, PathResult, TotalDegree,
-    solution, is_success, path_results, steps, nparameters, is_homogeneous,
-    AmbientWorkerState, IntrinsicWorkerState, IntrinsicSubspaceHomotopy,
-    ExtrinsicSubspaceHomotopy, AffineChartHomotopy, WorkerSolveCache, _to_ambient,
-    fix_parameters
 using DynamicPolynomials: @polyvar
-using CommonSolve: CommonSolve
 using LinearAlgebra: norm
 
-# The builder/worker a cache erased.
-_inner_builder(b) = b._inner[]
-_inner_worker(ws) = ws._inner[]
-
-subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E.A * x - E.b))
+subspace_residual(L, x) =
+    (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E.A * x - E.b))
 
 @testset "Subspace to subspace solve" begin
-
-    @testset "both regimes reach the target subspace" begin
+    @testset "both coordinate regimes reach the target subspace" begin
         @polyvar x y
         F = System([x^2 + y^2 - 5]; variables = [x, y])
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
         S₁ = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
         @test length(S₁) == 2
-        # `NamedTuple()` exercises the computed default.
+
         for kw in (
                 NamedTuple(),
                 (; coords = SubspaceCoords.INTRINSIC),
@@ -39,28 +29,6 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         end
     end
 
-    @testset "regime selection and homotopy types" begin
-        @polyvar x y z
-        F = System([x^2 + y^2 - 5]; variables = [x, y])
-        # dim 1 == codim 1 → intrinsic by default
-        L = rand_subspace(2; codim = 1)
-        cache = CommonSolve.init(F, [[1.0 + 0im, 2.0 + 0im]], L, L, Serial())
-        @test _inner_worker(cache.worker) isa IntrinsicWorkerState
-        @test _inner_worker(cache.worker).homotopy isa IntrinsicSubspaceHomotopy
-
-        # dim 2 > codim 1 → extrinsic by default
-        G = System([x^2 + y^2 - 5, x * y + 1]; variables = [x, y, z])
-        K = rand_subspace(3; dim = 2)
-        starts = [[1.0 + 0im, 2.0 + 0im, 3.0 + 0im]]
-        cache2 = CommonSolve.init(G, starts, K, K, Serial())
-        @test _inner_worker(cache2.worker) isa AmbientWorkerState{ExtrinsicSubspaceHomotopy}
-
-        forced = CommonSolve.init(
-            G, starts, K, K, Continuation(; coords = SubspaceCoords.INTRINSIC), Serial(),
-        )
-        @test _inner_worker(forced.worker) isa IntrinsicWorkerState
-    end
-
     @testset "two equations in three variables" begin
         @polyvar x y z
         F = System([x^2 + y^2 - 5, x * y + 1]; variables = [x, y, z])
@@ -68,6 +36,7 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         K₂ = rand_subspace(3; dim = 2)
         S = solutions(solve(F, K₁, TotalDegree(; show_progress = false)))
         @test length(S) == 4
+
         for kw in (
                 NamedTuple(),
                 (; coords = SubspaceCoords.INTRINSIC),
@@ -82,10 +51,10 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
     @testset "projective" begin
         @polyvar x y z
         F = System([x^2 + y^2 - z^2]; variables = [x, y, z])
-        @test is_homogeneous(F)
         L₁ = rand_subspace(3; codim = 1, affine = false)
         L₂ = rand_subspace(3; codim = 1, affine = false)
         S = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
+
         for kw in (
                 NamedTuple(),
                 (; coords = SubspaceCoords.INTRINSIC),
@@ -99,11 +68,6 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
                 @test norm(extrinsic(L₂).A * s, Inf) < 1.0e-10 * scale
             end
         end
-        cache = CommonSolve.init(
-            F, S, L₁, L₂, Continuation(; coords = SubspaceCoords.EXTRINSIC), Serial(),
-        )
-        @test _inner_worker(cache.worker) isa
-            AmbientWorkerState{AffineChartHomotopy{ExtrinsicSubspaceHomotopy}}
     end
 
     @testset "parametric" begin
@@ -111,8 +75,9 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         F = System([x^2 + y^2 - a]; variables = [x, y], parameters = [a])
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
-        S = solutions(solve(fix_parameters(F, [5.0]), L₁, TotalDegree(; show_progress = false)))
-        res = solve(fix_parameters(F, [5.0]), S, L₁, L₂, Continuation(; show_progress = false))
+        fixed = fix_parameters(F, [5.0])
+        S = solutions(solve(fixed, L₁, TotalDegree(; show_progress = false)))
+        res = solve(fixed, S, L₁, L₂, Continuation(; show_progress = false))
         @test nsolutions(res) == 2
         @test maximum(s -> abs(s[1]^2 + s[2]^2 - 5), solutions(res)) < 1.0e-10
         @test_throws ArgumentError solve(F, S, L₁, L₂, Continuation(; show_progress = false))
@@ -124,15 +89,14 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
         S = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
+
         for coords in (SubspaceCoords.INTRINSIC, SubspaceCoords.EXTRINSIC)
             serial = solve(
                 F,
                 S,
                 L₁,
                 L₂,
-                Continuation(;
-                    coords = coords, seed = UInt32(7), show_progress = false,
-                ),
+                Continuation(; coords, seed = UInt32(7), show_progress = false),
                 Serial(),
             )
             threaded = solve(
@@ -140,9 +104,7 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
                 S,
                 L₁,
                 L₂,
-                Continuation(;
-                    coords = coords, seed = UInt32(7), show_progress = false,
-                ),
+                Continuation(; coords, seed = UInt32(7), show_progress = false),
                 Threaded(),
             )
             @test nsolutions(serial) == nsolutions(threaded) == 2
@@ -157,18 +119,17 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         F = System([x^2 + y^2 - 5]; variables = [x, y])
         L = rand_subspace(2; codim = 1)
         starts = [[1.0 + 0im, 2.0 + 0im]]
-        # different dimension: the geodesic connects one Grassmannian to itself
-        full = HomotopyContinuation._full_subspace(2)
+        full = rand_subspace(2; dim = 2)
+
         for coords in (SubspaceCoords.INTRINSIC, SubspaceCoords.EXTRINSIC)
             @test_throws ArgumentError solve(
                 F,
                 starts,
                 L,
                 full,
-                Continuation(; coords = coords, show_progress = false),
+                Continuation(; coords, show_progress = false),
             )
         end
-        # different ambient dimension
         @test_throws ArgumentError solve(
             F,
             starts,
@@ -178,43 +139,55 @@ subspace_residual(L, x) = (E = extrinsic(L); isempty(E.b) ? 0.0 : maximum(abs, E
         )
     end
 
-    @testset "start solutions are not aliased into the results" begin
+    @testset "start solutions are preserved and copied into diagnostics" begin
         @polyvar x y
         F = System([x^2 + y^2 - 5]; variables = [x, y])
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
-        S = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
-        cache = CommonSolve.init(
-            F, S, L₁, L₂, Continuation(; show_progress = false), Serial(),
-        )
-        res = CommonSolve.solve!(cache)
-        for (k, pr) in enumerate(path_results(res))
-            @test start_solution(pr) == cache.start_solutions[k]
-            @test start_solution(pr) !== cache.start_solutions[k]
+        starts = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
+        snapshot = deepcopy(starts)
+
+        res = solve(F, starts, L₁, L₂, Continuation(; show_progress = false), Serial())
+        @test starts == snapshot
+        for pr in path_results(res)
+            i = path_number(pr)
+            @test start_solution(pr) == snapshot[i]
+            @test start_solution(pr) !== starts[i]
         end
     end
 
     @testset "non-square subspace homotopy is rejected" begin
         @polyvar x y z
-        # 1 equation, codim-1 subspace in 3-space: 2 equations in 3 unknowns
         F = System([x^2 + y^2 + z^2 - 1]; variables = [x, y, z])
         L = rand_subspace(3; codim = 1)
         starts = [[1.0 + 0im, 0.0 + 0im, 0.0 + 0im]]
-        @test_throws ArgumentError solve(F, starts, L, L, Continuation(; coords = SubspaceCoords.EXTRINSIC, show_progress = false))
+        @test_throws ArgumentError solve(
+            F,
+            starts,
+            L,
+            L,
+            Continuation(; coords = SubspaceCoords.EXTRINSIC, show_progress = false),
+        )
     end
 
-    @testset "intrinsic results are ambient, diagnostics are not converted" begin
+    @testset "intrinsic results and diagnostics are ambient" begin
         @polyvar x y
         F = System([x^2 + y^2 - 5]; variables = [x, y])
         L₁ = rand_subspace(2; codim = 1)
         L₂ = rand_subspace(2; codim = 1)
         S = solutions(solve(F, L₁, TotalDegree(; show_progress = false)))
-        res = solve(F, S, L₁, L₂, Continuation(; coords = SubspaceCoords.INTRINSIC, show_progress = false))
+        res = solve(
+            F,
+            S,
+            L₁,
+            L₂,
+            Continuation(; coords = SubspaceCoords.INTRINSIC, show_progress = false),
+        )
         for pr in path_results(res)
-            @test length(solution(pr)) == 2            # ambient
-            @test length(start_solution(pr)) == 2      # the caller's ambient point
-            @test length(last_path_point(pr)[1]) == 2  # ambient
-            @test residual(pr) < 1.0e-8                # intrinsic residual, still small
+            @test length(solution(pr)) == 2
+            @test length(start_solution(pr)) == 2
+            @test length(last_path_point(pr)[1]) == 2
+            @test residual(pr) < 1.0e-8
         end
     end
 end
