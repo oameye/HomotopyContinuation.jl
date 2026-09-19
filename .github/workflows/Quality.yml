@@ -81,6 +81,7 @@ jobs:
           julia --project=test quality/parameter_homotopy_kernel.jl
           julia --project=test quality/affine_chart_kernel.jl
           julia --project=test quality/fixed_parameter_kernel.jl
+          julia --project=test quality/valuation_kernel.jl
 
   strict-mode:
     name: StrictMode / Julia 1.13
