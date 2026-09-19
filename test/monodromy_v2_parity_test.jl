@@ -5,8 +5,6 @@ using HomotopyContinuation: find_start_pair, permutations,
     is_heuristic_stop, verify_solution_completeness, parameters, trace,
     SymmetricGroup, multiplicities, InfNorm
 using DynamicPolynomials: @polyvar, subs, differentiate, monomials, coefficient
-using HomotopyContinuation: FSVec, FSMat, evaluate!, evaluate_and_jacobian!,
-    nparameters
 
 include("test_systems.jl")
 
@@ -529,22 +527,11 @@ end
     f = System([coefficient(detμ, m, xs) for m in monomials(xs, d)]; variables = as)
     @test size(f) == (N, D)
 
-    evaluate_at(F, x, p = ComplexF64[])::Vector{ComplexF64} = begin
-        u = FSVec{ComplexF64}(zeros(ComplexF64, size(F)[1]))
-        evaluate!(
-            u, F.evaluator, FSVec{ComplexF64}(collect(ComplexF64, x)),
-            FSVec{ComplexF64}(collect(ComplexF64, p))
-        )
-        collect(u)
-    end
+    evaluate_at(F, x, p = ComplexF64[])::Vector{ComplexF64} =
+        collect(evaluate(F, collect(ComplexF64, x), collect(ComplexF64, p)))
 
-    u₀ = FSVec{ComplexF64}(zeros(ComplexF64, N))
-    J₀ = FSMat{ComplexF64}(zeros(ComplexF64, N, D))
-    evaluate_and_jacobian!(
-        u₀, J₀, f.evaluator, FSVec{ComplexF64}(randn(ComplexF64, D)),
-        FSVec{ComplexF64}(ComplexF64[]),
-    )
-    dimQ = rank(collect(J₀))
+    J₀ = jacobian(f, randn(ComplexF64, D))
+    dimQ = rank(J₀)
     @test dimQ == 16
 
     Q = Matrix(qr(randn(ComplexF64, D, D)).Q)
