@@ -23,6 +23,7 @@ using HomotopyContinuation
                 contains(msg, "AbstractHomotopy") && return false
             return true
         end
+        isempty(real_reports) || foreach(r -> println("JET_REAL_REPORT:\n", r), real_reports)
         @test length(real_reports) == 0
     end
 end
