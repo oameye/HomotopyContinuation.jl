@@ -50,7 +50,7 @@ function semantic_test_files(root::String)
     return sort(files)
 end
 
-violations = Dict{String,Vector{Symbol}}()
+violations = Dict{String, Vector{Symbol}}()
 for file in semantic_test_files(@__DIR__)
     source = read(file, String)
     refs = union(explicit_hc_imports(source), qualified_hc_references(source))
