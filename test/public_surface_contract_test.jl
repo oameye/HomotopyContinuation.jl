@@ -23,7 +23,7 @@ function explicit_hc_imports(source::String)
         m = match(r"^\s*(?:using|import)\s+HomotopyContinuation\s*:\s*(.*)$", line)
         if m !== nothing
             chunk = m.captures[1]
-            while endswith(strip(lines[i]), ",") && i < length(lines)
+            while i < length(lines) && (isempty(strip(chunk)) || endswith(strip(lines[i]), ","))
                 i += 1
                 chunk *= " " * strip(lines[i])
             end
