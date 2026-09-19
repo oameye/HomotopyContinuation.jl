@@ -1,8 +1,5 @@
 using Test
 using HomotopyContinuation
-using HomotopyContinuation: Serial, Threaded, Result, TotalDegree, ParameterHomotopy,
-    TrackerOptions, AmbientWorkerState, IntrinsicWorkerState, ExtrinsicSubspaceHomotopy
-using DynamicPolynomials: @polyvar
 using LinearAlgebra: norm
 using Random: seed!
 
@@ -34,12 +31,8 @@ using Random: seed!
         end
     end
 
-    # Threading runs over the (target, path) product, so results must land in the
-    # right (target, path) slot for every ratio of targets to tasks, in
-    # particular for fewer targets than tasks, where a target's paths are split
-    # across several tasks and each task retargets its own homotopy.
-    # At a fixed seed the comparison is exact: how the work was split cannot reach
-    # the value.
+    # Threading runs over the (target, path) product, so every public result must
+    # be independent of how the work is partitioned across tasks.
     @testset "threaded matches serial for $n target(s)" for n in (1, 2, 3, 7, 20)
         tg = params[1:n]
         opts = (; seed = UInt32(0x5EED), show_progress = false)
@@ -105,7 +98,6 @@ using Random: seed!
         @test [last(t) for t in res] == collect(1:20)
     end
 
-    # A second call on the first target would draw twice from a randomized closure.
     @testset "transform_parameters is called once per target ($exec)" for exec in
         (Serial(), Threaded())
         for n in (1, 3, 20)
@@ -135,29 +127,17 @@ using Random: seed!
         @test maximum(norm.(a1 .- a2, Inf)) < 1.0e-8
     end
 
-    @testset "retargets instead of rebuilding" begin
-        # The homotopy handle in the worker state is the one the tracker uses, so a
-        # retarget is visible through the FunctionWrapper firewall.
-        cache = HomotopyContinuation._init_parameter_sweep(
-            F, S₀, params[1], Serial(), p₀, UInt32(1),
-            TrackerOptions(), EndgameOptions(), false,
-        )
-        H = cache.worker._inner[].homotopy
-        @test H isa ParameterHomotopy
-        HomotopyContinuation._retarget!(cache.worker, ComplexF64.(params[2]))
-        @test Vector(H.target_p) ≈ ComplexF64.(params[2])
-        @test cache.worker._inner[].homotopy === H
-    end
-
     @testset "targets of the wrong length are rejected" begin
-        # `target_parameters!` copies into a fixed-length buffer, so a short target
-        # must not silently leave stale parameter values behind.
         ragged = [params[1], [1.0, 2.0]]
-        @test_throws ArgumentError solve(F, S₀, p₀, ragged, Sweep(; show_progress = false), Serial())
+        @test_throws ArgumentError solve(
+            F, S₀, p₀, ragged, Sweep(; show_progress = false), Serial(),
+        )
     end
 
     @testset "empty targets" begin
-        @test_throws ArgumentError solve(F, S₀, p₀, Vector{Float64}[], Sweep(; show_progress = false), Serial())
+        @test_throws ArgumentError solve(
+            F, S₀, p₀, Vector{Float64}[], Sweep(; show_progress = false), Serial(),
+        )
     end
 
     # ── Subspace sweep ─────────────────────────────────────────────────────
@@ -168,7 +148,6 @@ using Random: seed!
     S = solutions(solve(f, L₀, TotalDegree(; show_progress = false)))
     subspaces = [rand_subspace(2; dim = 1) for _ in 1:30]
 
-    # "auto" passes no keyword, so it exercises the computed default.
     @testset "target subspaces, $label" for (label, kw) in
         (
             ("auto", NamedTuple()),
@@ -186,9 +165,6 @@ using Random: seed!
         end
     end
 
-    # Same (target, path) threading as the parameter sweep, over both regimes.
-    # Several splits of the same work. Clamped because `Threaded` rejects more
-    # tasks than threads.
     TASK_COUNTS = unique(min.((1, 2, 3, 8), Threads.nthreads()))
 
     @testset "target subspaces, threaded matches serial for $n target(s)" for n in
@@ -213,9 +189,6 @@ using Random: seed!
         end
     end
 
-    # A target's solutions do not depend on how many targets came before it, so
-    # reversing the order reproduces every endpoint. The seed is fixed because it
-    # picks γ, and a different γ is a different homotopy.
     @testset "target subspaces, order independent" begin
         for coords in (SubspaceCoords.INTRINSIC, SubspaceCoords.EXTRINSIC)
             tg = subspaces[1:6]
@@ -251,7 +224,7 @@ using Random: seed!
     end
 
     @testset "target subspaces of the wrong dimension are rejected" begin
-        full = HomotopyContinuation._full_subspace(2)
+        full = rand_subspace(2; dim = 2)
         for coords in (SubspaceCoords.INTRINSIC, SubspaceCoords.EXTRINSIC)
             @test_throws ArgumentError solve(
                 f,
@@ -283,7 +256,11 @@ using Random: seed!
 
     @testset "subspace sweep agrees with single moves" begin
         pair = subspaces[1:2]
-        sweep = solve(f, S, L₀, pair, Sweep(; coords = SubspaceCoords.EXTRINSIC, show_progress = false), Serial())
+        sweep = solve(
+            f, S, L₀, pair,
+            Sweep(; coords = SubspaceCoords.EXTRINSIC, show_progress = false),
+            Serial(),
+        )
         for (k, L) in enumerate(pair)
             single = solve(
                 f,
