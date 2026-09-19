@@ -30,6 +30,67 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
 jobs:
+  static-contracts:
+    name: Static contracts / Julia ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: ${{ !github.event.pull_request.draft }}
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.10', '1']
+    env:
+      JULIA_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          show-versioninfo: true
+          version: ${{ matrix.version }}
+      - uses: julia-actions/cache@v3
+      - name: Instantiate test environment
+        run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Run package and compiler contracts
+        run: |
+          julia --project=test test/aqua_test.jl
+          julia --project=test test/alloc_check_test.jl
+          julia --project=test test/concrete_structs_test.jl
+          julia --project=test test/explicit_imports_test.jl
+          julia --project=test test/dispatch_doctor_test.jl
+          julia --project=test test/instruction_count_test.jl
+          julia --project=test quality/linear_subspace_compiler.jl
+          julia --project=test quality/monodromy_compiler.jl
+          julia --project=test quality/nid_compiler.jl
+      - name: Run numerical kernel contracts
+        run: |
+          julia --project=test quality/taylor_kernel.jl
+          julia --project=test quality/linear_algebra_kernel.jl
+          julia --project=test quality/randomized_system_kernel.jl
+          julia --project=test quality/norms_kernel.jl
+          julia --project=test quality/tracking_kernel.jl
+          julia --project=test quality/endgame_kernel.jl
+          julia --project=test quality/subspace_homotopy_kernel.jl
+          julia --project=test quality/core_evaluator_kernel.jl
+          julia --project=test quality/parameter_homotopy_kernel.jl
+          julia --project=test quality/affine_chart_kernel.jl
+          julia --project=test quality/fixed_parameter_kernel.jl
+          julia --project=test quality/valuation_kernel.jl
+          julia --project=test quality/tracker_warmstart_kernel.jl
+          julia --project=test quality/result_clustering_kernel.jl
+          julia --project=test quality/system_sweep_kernel.jl
+          julia --project=test quality/polynomial_input_kernel.jl
+          julia --project=test quality/variable_groups_kernel.jl
+          julia --project=test quality/sliced_solve_kernel.jl
+          julia --project=test quality/distributed_kernel.jl
+          julia --project=test quality/polyhedral_regression_kernel.jl
+
   strict-mode:
     name: StrictMode / Julia 1.13
     runs-on: ubuntu-latest
