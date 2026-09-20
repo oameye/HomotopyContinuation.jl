@@ -36,7 +36,7 @@ function Serialization.serialize(s::AbstractSer, sys::HCN.System)
     Serialization.serialize(s, collect(sys.polys))
     Serialization.serialize(s, collect(sys.parameters))
     Serialization.serialize(s, collect(sys.variables))
-    Serialization.serialize(s, HCN._lowered(sys))
+    Serialization.serialize(s, HCN.lowered_input(sys))
     Serialization.serialize(s, sys.compile_mode)
     return nothing
 end
