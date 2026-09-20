@@ -36,11 +36,6 @@ end
 _assignment_paths(D::Matrix{Int}, assignment::Vector{Int})::Int =
     prod(i -> D[assignment[i], i], eachindex(assignment); init = 1)
 
-# Multi-homogeneous Bezout number: `D` has one row per group, `k[j]` is the
-# number of affine coordinates of group j.
-_multi_bezout_count(D::Matrix{Int}, k::Vector{Int})::Int =
-    sum(a -> _assignment_paths(D, a), _bezout_assignments(D, k); init = 0)
-
 # `C[j][l, i]` multiplies the l-th affine coordinate of group j in the linear form
 # equation i uses. The leading identity block makes a single group reproduce xᵢ^dᵢ - 1.
 function _multi_start_coefficients(
