@@ -37,19 +37,19 @@ function Homotopy(
         parameters::AbstractVector = Expression[],
         compile::CompileMode.T = CompileMode.INTERPRETED,
     )::Homotopy
-    exprs = _as_expressions(h)
+    exprs = as_expressions(h)
     is_variable(t) ||
         throw(ArgumentError("the path parameter must be a variable, got `$t`"))
-    declared_vars = collect(Expression, _as_variables(vars))
-    params = collect(Expression, _as_variables(parameters))
-    _contains_variable(declared_vars, t) &&
+    declared_vars = collect(Expression, as_variables(vars))
+    params = collect(Expression, as_variables(parameters))
+    contains_variable(declared_vars, t) &&
         throw(ArgumentError("the path parameter `$t` is also listed as a variable"))
-    _contains_variable(params, t) &&
+    contains_variable(params, t) &&
         throw(ArgumentError("the path parameter `$t` is also listed as a parameter"))
 
     declared = Expression[declared_vars; t; params]
     for v in variables(exprs)
-        _contains_variable(declared, v) || throw(
+        contains_variable(declared, v) || throw(
             ArgumentError(
                 "`$v` occurs in the homotopy but is neither a variable, the path " *
                     "parameter, nor a parameter",

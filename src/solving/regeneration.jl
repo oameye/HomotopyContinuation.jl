@@ -770,7 +770,7 @@ function _run_intersection!(
             tracker_options, endgame_options, ntasks,
         )
     else
-        eg = _endgame_tracker(
+        eg = endgame_tracker(
             _u_homotopy(F₀.evaluator, G₀.evaluator, γ, chart, projective),
             tracker_options, endgame_options,
         )
@@ -847,7 +847,7 @@ function _threaded_intersection!(
     results = [ComplexF64[] for _ in 1:njobs]
     @tasks for k in 1:njobs
         @set ntasks = nt
-        @local eg = _endgame_tracker(
+        @local eg = endgame_tracker(
             _u_homotopy(
                 _clone_system_evaluator(F₀), _clone_system_evaluator(G₀),
                 γ, chart, projective,
@@ -933,7 +933,7 @@ function _is_contained(
     hom_ev = projective ?
         SystemEvaluator(AffineChartSystem(F.evaluator, chart)) : F.evaluator
     Hom = IntrinsicSubspaceHomotopy(hom_ev, LY, LY; gamma = _random_gamma(rng))
-    eg = _endgame_tracker(Hom, tracker_options, endgame_options)
+    eg = endgame_tracker(Hom, tracker_options, endgame_options)
     u_buf = FSVec{ComplexF64}(zeros(ComplexF64, size(Hom)[2]))
     amb_buf = FSVec{ComplexF64}(zeros(ComplexF64, n))
     q_chart = zeros(ComplexF64, n)
@@ -1227,7 +1227,7 @@ function Base.intersect(
     _check_front_end(system(W), true)
     rng = Random.MersenneTwister(_seed(alg))
     H = _hypersurface_witness_set(
-        f, _as_variables(collect(variables(system(W)))), rng, alg, exec, W.projective,
+        f, as_variables(collect(variables(system(W)))), rng, alg, exec, W.projective,
     )
     return intersect(W, H, _reseed(alg, rand(rng, UInt32)), exec)
 end
