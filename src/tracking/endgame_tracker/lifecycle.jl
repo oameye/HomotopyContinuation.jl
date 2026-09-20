@@ -2,7 +2,7 @@
 # State reset
 # ---------------------------------------------------------------------------
 
-function _reset_state!(state::EndgameState)::Nothing
+function reset_state!(state::EndgameState)::Nothing
     state.code = EndgameCode.TRACKING
     state.in_endgame = false
     state.in_singular_endgame = false
@@ -39,7 +39,7 @@ end
 # Code mapping
 # ---------------------------------------------------------------------------
 
-function _tracker_code_to_endgame_code(code::TrackerCode.T)::EndgameCode.T
+function tracker_code_to_endgame_code(code::TrackerCode.T)::EndgameCode.T
     if code == TrackerCode.TRACKER_SUCCESS
         return EndgameCode.SUCCESS
     elseif code == TrackerCode.TERMINATED_MAX_STEPS
@@ -74,7 +74,7 @@ function init!(
         max_initial_step_size::Float64 = Inf,
         keep_steps::Bool = false,
     )::EndgameCode.T
-    _reset_state!(eg.state)
+    reset_state!(eg.state)
     init!(eg.val)
 
     tracker_code = init!(
@@ -89,7 +89,7 @@ function init!(
         copyto!(eg.state.solution, eg.tracker.state.x)
         eg.state.accuracy = eg.tracker.state.accuracy
         eg.state.cond = eg.tracker.state.cond_J_ẋ
-        eg.state.code = _tracker_code_to_endgame_code(tracker_code)
+        eg.state.code = tracker_code_to_endgame_code(tracker_code)
         return eg.state.code
     end
 
@@ -144,7 +144,7 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
         # at-infinity rather than a success. Relative to the row scale, so the
         # threshold means the same whether the terms of H are O(1) at the endpoint
         # or O(10^40).
-        if _max_relative_residual(eg.tracker.corrector.r, ws.A, state.col_scaling) >
+        if max_relative_residual(eg.tracker.corrector.r, ws.A, state.col_scaling) >
                 opts.max_residual
             state.code = EndgameCode.AT_INFINITY
             return nothing
@@ -152,7 +152,7 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
 
         updated!(ws)
         factorize!(ws)
-        state.cond = _scaled_cond(ws, state.unit_scaling, state.col_scaling)
+        state.cond = scaled_cond(ws, state.unit_scaling, state.col_scaling)
         if state.cond > opts.sing_cond || state.accuracy > opts.sing_accuracy
             state.singular = true
         end
@@ -162,6 +162,6 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
         return nothing
     end
 
-    state.code = _tracker_code_to_endgame_code(ts.code)
+    state.code = tracker_code_to_endgame_code(ts.code)
     return nothing
 end

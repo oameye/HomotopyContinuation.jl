@@ -2,7 +2,7 @@
 # Endgame linear algebra helpers
 # ---------------------------------------------------------------------------
 
-@inline function _scaled_inf_norm_matrix(
+@inline function scaled_inf_norm_matrix(
         ws::MatrixWorkspace,
         row_scaling::FSVec{Float64},
         col_scaling::FSVec{Float64},
@@ -23,7 +23,7 @@ end
 # |H_i| against the size the terms of row i reach at this point, so the same
 # threshold works for a system whose Jacobian row sums are O(1) and one where
 # they are O(10^40). A zero row scale leaves the residual unscaled.
-@inline function _max_relative_residual(
+@inline function max_relative_residual(
         r::FSVec{ComplexF64},
         A::FSMat{ComplexF64},
         col_scaling::FSVec{Float64},
@@ -42,7 +42,7 @@ end
 end
 
 # Row-scaled-only inf norm for J₀ (no col_scaling — used for singular endgame acceptance)
-@inline function _row_scaled_inf_norm_matrix(
+@inline function row_scaled_inf_norm_matrix(
         ws::MatrixWorkspace,
         row_scaling::FSVec{Float64},
     )::Float64
@@ -59,7 +59,7 @@ end
     return norm_val
 end
 
-function _scaled_cond(
+function scaled_cond(
         ws::MatrixWorkspace,
         row_scaling::FSVec{Float64},
         col_scaling::FSVec{Float64},
@@ -79,7 +79,7 @@ function _scaled_cond(
         return rmax / rmin
     else
         ws.factorized || factorize!(ws)
-        return _scaled_inf_norm_matrix(ws, row_scaling, col_scaling) *
+        return scaled_inf_norm_matrix(ws, row_scaling, col_scaling) *
             _inverse_inf_norm_est(
             ws.lu, row_scaling, col_scaling, ws.row_scaling, ws.scaled,
             ws.inf_norm_est_work, ws.inf_norm_est_rwork,
@@ -88,7 +88,7 @@ function _scaled_cond(
 end
 
 # Raw tolerance: used by is_finite in valuation.jl
-@inline function _at_infinity_tol(
+@inline function at_infinity_tol(
         val_x::Float64,
         val_tẋ::Float64,
         Δval_x::Float64,
@@ -108,7 +108,7 @@ end
 # Gated version for check_at_infinity!: only returns finite ε∞ when the valuation
 # actually indicates divergence (val_x < 0 → ∞) or convergence to zero (val_x > 0 → 0).
 # Without this gate, regular coordinates with small ε∞ get spuriously marked.
-@inline function _at_infinity_tol_gated(
+@inline function at_infinity_tol_gated(
         val_x::Float64,
         val_tẋ::Float64,
         Δval_x::Float64,
@@ -116,7 +116,7 @@ end
         finite_tol::Float64,
         zero_is_at_infinity::Bool,
     )::Float64
-    ε∞ = _at_infinity_tol(val_x, val_tẋ, Δval_x, Δval_tẋ)
+    ε∞ = at_infinity_tol(val_x, val_tẋ, Δval_x, Δval_tẋ)
     if !isfinite(ε∞)
         return Inf
     end
@@ -140,7 +140,7 @@ function check_at_infinity_at_giveup!(eg::EndgameTracker)::Bool
     return check_at_infinity!(eg, true)
 end
 
-@inline function _clear_at_infinity_candidate!(state::EndgameState, i::Int)::Nothing
+@inline function clear_at_infinity_candidate!(state::EndgameState, i::Int)::Nothing
     state.at_inf_active[i] = false
     state.at_inf_starts[i] = NaN
     state.at_inf_abs_coords[i] = NaN
@@ -148,7 +148,7 @@ end
     return nothing
 end
 
-function _ensure_endgame_scaling!(state::EndgameState, tracker::Tracker)::Nothing
+function ensure_endgame_scaling!(state::EndgameState, tracker::Tracker)::Nothing
     if all(iszero, state.col_scaling)
         @inbounds for i in eachindex(state.col_scaling)
             state.col_scaling[i] = tracker.state.norm.weights[i]

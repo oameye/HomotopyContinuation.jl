@@ -130,7 +130,7 @@ function EndgameTracker(
     return EndgameTracker(tracker, EndgameState(n), Valuation(n), options)
 end
 
-function _endgame_tracker(
+function endgame_tracker(
         H::AbstractHomotopy, tracker_options::TrackerOptions,
         endgame_options::EndgameOptions,
     )::EndgameTracker

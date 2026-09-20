@@ -313,7 +313,7 @@ function _parameter_monodromy_worker(
         tracker_options::TrackerOptions,
     )::MonodromyWorkerState{ParameterHomotopy, Vector{ComplexF64}}
     H = ParameterHomotopy(sys_eval, p, p)
-    eg = _endgame_tracker(
+    eg = endgame_tracker(
         H, tracker_options, EndgameOptions(; endgame_start = 0.0),
     )
     return MonodromyWorkerState(
@@ -328,7 +328,7 @@ function _chart_parameter_monodromy_worker(
         AffineChartHomotopy{ParameterHomotopy}, Vector{ComplexF64},
     }
     H = AffineChartHomotopy(ParameterHomotopy(sys_eval, p, p), chart)
-    eg = _endgame_tracker(
+    eg = endgame_tracker(
         H, tracker_options, EndgameOptions(; endgame_start = 0.0),
     )
     return MonodromyWorkerState(
@@ -528,7 +528,7 @@ function _subspace_monodromy_worker(
         H::AbstractHomotopy, tracker_options::TrackerOptions,
         L::LinearSubspace{ComplexF64}, n::Int, worker_chart::Vector{ComplexF64},
     )
-    eg = _endgame_tracker(
+    eg = endgame_tracker(
         H, tracker_options, EndgameOptions(; endgame_start = 0.0),
     )
     n_u = size(H)[2]

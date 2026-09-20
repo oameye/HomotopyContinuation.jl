@@ -34,7 +34,7 @@ function (b::StraightLineBuilder)()::TrackingWorkerState
     start_eval = _total_degree_startevaluator(b.degrees)
     target_eval = _clone_system_evaluator(b.target_system)
     H = StraightLineHomotopy(start_eval, target_eval; γ = b.γ)
-    eg = _endgame_tracker(H, b.tracker_options, b.endgame_options)
+    eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return TrackingWorkerState(eg)
 end
 
@@ -61,7 +61,7 @@ function (b::RandomizedStraightLineBuilder)()::TrackingWorkerState
     inner_eval = _clone_system_evaluator(b.target_system)
     target_eval = _randomized_evaluator(inner_eval, b.A, b.perm)
     H = StraightLineHomotopy(start_eval, target_eval; γ = b.γ)
-    eg = _endgame_tracker(H, b.tracker_options, b.endgame_options)
+    eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return TrackingWorkerState(eg)
 end
 
@@ -92,7 +92,7 @@ function (b::MultiHomogeneousBuilder)()::TrackingWorkerState
     isempty(b.perm) ||
         (target_eval = _randomized_evaluator(target_eval, b.A, b.perm))
     H = StraightLineHomotopy(start_eval, target_eval; γ = b.γ)
-    eg = _endgame_tracker(H, b.tracker_options, b.endgame_options)
+    eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return TrackingWorkerState(eg)
 end
 
@@ -118,8 +118,8 @@ function (b::StartTargetBuilder)()::TrackingWorkerState
         γ = b.γ,
     )
     eg = isempty(b.chart) ?
-        _endgame_tracker(H, b.tracker_options, b.endgame_options) :
-        _endgame_tracker(
+        endgame_tracker(H, b.tracker_options, b.endgame_options) :
+        endgame_tracker(
             AffineChartHomotopy(H, b.chart), b.tracker_options, b.endgame_options,
         )
     return TrackingWorkerState(eg)
@@ -138,7 +138,7 @@ struct SharedHomotopyBuilder{H <: AbstractHomotopy} <: AbstractPathBuilder
 end
 
 (b::SharedHomotopyBuilder)()::TrackingWorkerState =
-    TrackingWorkerState(_endgame_tracker(b.homotopy, b.tracker_options, b.endgame_options))
+    TrackingWorkerState(endgame_tracker(b.homotopy, b.tracker_options, b.endgame_options))
 
 # The one exception to the `AbstractPathBuilder` contract: this builder wraps the
 # caller's homotopy as it stands, so two of its workers hold one evaluator's tapes.
@@ -157,7 +157,7 @@ struct ClonedHomotopyBuilder{H <: AbstractHomotopy} <: AbstractPathBuilder
 end
 
 (b::ClonedHomotopyBuilder)()::TrackingWorkerState = TrackingWorkerState(
-    _endgame_tracker(
+    endgame_tracker(
         _clone_homotopy(b.homotopy), b.tracker_options, b.endgame_options,
     ),
 )
@@ -174,7 +174,7 @@ struct HomotopyBuilder{F <: Function} <: AbstractPathBuilder
 end
 
 (b::HomotopyBuilder)()::TrackingWorkerState =
-    TrackingWorkerState(_endgame_tracker(b.build(), b.tracker_options, b.endgame_options))
+    TrackingWorkerState(endgame_tracker(b.build(), b.tracker_options, b.endgame_options))
 
 """
     ParameterBuilder
@@ -194,7 +194,7 @@ end
 function (b::ParameterBuilder)()::TrackingWorkerState
     sys_eval = _clone_system_evaluator(b.param_system)
     H = ParameterHomotopy(sys_eval, b.start_parameters, b.target_parameters)
-    eg = _endgame_tracker(H, b.tracker_options, b.endgame_options)
+    eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return TrackingWorkerState(eg)
 end
 
@@ -221,7 +221,7 @@ function (b::SlicedStraightLineBuilder)()::TrackingWorkerState
     inner_eval = _clone_system_evaluator(b.target_system)
     target_eval = _sliced_evaluator(inner_eval, b.subspace, b.chart)
     H = StraightLineHomotopy(start_eval, target_eval; γ = b.γ)
-    eg = _endgame_tracker(H, b.tracker_options, b.endgame_options)
+    eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return TrackingWorkerState(eg)
 end
 
@@ -243,7 +243,7 @@ end
 function (b::ParameterRetargetBuilder)()::AmbientWorkerState{ParameterHomotopy}
     sys_eval = _clone_system_evaluator(b.param_system)
     H = ParameterHomotopy(sys_eval, b.start_parameters, b.target_parameters)
-    eg = _endgame_tracker(H, b.tracker_options, b.endgame_options)
+    eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return AmbientWorkerState(H, eg)
 end
 
@@ -266,7 +266,7 @@ end
 function (b::ExtrinsicSubspaceBuilder)()::AmbientWorkerState{ExtrinsicSubspaceHomotopy}
     ev = _clone_system_evaluator(b.system)
     H = ExtrinsicSubspaceHomotopy(ev, b.start, b.target; gamma = b.gamma)
-    eg = _endgame_tracker(H, b.tracker_options, b.endgame_options)
+    eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return AmbientWorkerState(H, eg)
 end
 
@@ -294,7 +294,7 @@ function (b::ChartExtrinsicSubspaceBuilder)()::AmbientWorkerState{
     H = AffineChartHomotopy(
         ExtrinsicSubspaceHomotopy(ev, b.start, b.target; gamma = b.gamma), b.chart,
     )
-    eg = _endgame_tracker(H, b.tracker_options, b.endgame_options)
+    eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return AmbientWorkerState(H, eg)
 end
 
@@ -319,7 +319,7 @@ function (b::IntrinsicSubspaceBuilder)()::IntrinsicWorkerState
     ev = _clone_system_evaluator(b.system)
     inner = isempty(b.chart) ? ev : SystemEvaluator(AffineChartSystem(ev, b.chart))
     H = IntrinsicSubspaceHomotopy(inner, b.start, b.target; gamma = b.gamma)
-    eg = _endgame_tracker(H, b.tracker_options, b.endgame_options)
+    eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return IntrinsicWorkerState(
         H, eg, FSVec{ComplexF64}(zeros(ComplexF64, size(H)[2])),
     )
@@ -353,7 +353,7 @@ function (b::PolyhedralBuilder)()::PolyhedralWorkerState
     # Phase 2: coefficient
     coeff_eval = _clone_system_evaluator(b.support_system)
     coeff_H = CoefficientHomotopy(coeff_eval, b.flat_start, b.flat_target)
-    coeff_tracker = _endgame_tracker(coeff_H, b.tracker_options, b.endgame_options)
+    coeff_tracker = endgame_tracker(coeff_H, b.tracker_options, b.endgame_options)
 
     n = size(toric_eval)[2]
     return PolyhedralWorkerState(
