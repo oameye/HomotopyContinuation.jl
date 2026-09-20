@@ -14,6 +14,33 @@ const QUALITY_CONTRACTS = Set(
     ],
 )
 
+# Ordinary tests should exercise the supported accessor surface rather than opaque
+# storage of Result, PathResult, System, evaluator, or monodromy implementation
+# objects. Deliberately documented data carriers (for example NewtonResult,
+# PathInfo, StartPair, and ExtrinsicDescription) keep their documented fields.
+const HC_PRIVATE_STORAGE_PROPERTIES = Set(
+    [
+        :accepted_steps,
+        :clusters,
+        :condition_jacobian,
+        :evaluator,
+        :last_path_point,
+        :multiplicity,
+        :path_number,
+        :path_results,
+        :polys,
+        :rejected_steps,
+        :seed,
+        :solution,
+        :start_solution,
+        :statistics,
+        :tracked_loops,
+        :tracked_paths,
+        :valuation,
+        :winding_number,
+    ],
+)
+
 function hc_aliases(source::String)
     aliases = Set(["HomotopyContinuation"])
     for m in eachmatch(r"(?m)^\s*(?:using|import)\s+HomotopyContinuation\s+as\s+([A-Za-z_][A-Za-z0-9_]*)", source)
@@ -62,6 +89,34 @@ function qualified_hc_references(source::String)
     return refs
 end
 
+function collect_property_references!(refs::Set{Symbol}, ex)
+    ex isa Expr || return refs
+    if ex.head === :. && length(ex.args) >= 2
+        property = ex.args[2]
+        name = property isa QuoteNode ? property.value : property
+        name isa Symbol && push!(refs, name)
+    end
+    for arg in ex.args
+        collect_property_references!(refs, arg)
+    end
+    return refs
+end
+
+function property_references(source::String)
+    refs = Set{Symbol}()
+    pos = firstindex(source)
+    stop = ncodeunits(source)
+    while pos <= stop
+        ex, next = Meta.parse(source, pos; raise = false)
+        ex === nothing && break
+        ex isa Expr && ex.head === :error && error("failed to parse semantic-test source near byte $pos")
+        collect_property_references!(refs, ex)
+        next > pos || error("parser made no progress near byte $pos")
+        pos = next
+    end
+    return refs
+end
+
 function semantic_test_files(root::String)
     files = String[]
     for (dir, _, names) in walkdir(root)
@@ -78,21 +133,34 @@ function semantic_test_files(root::String)
     return sort(files)
 end
 
-violations = Dict{String, Vector{Symbol}}()
+name_violations = Dict{String, Vector{Symbol}}()
+property_violations = Dict{String, Vector{Symbol}}()
 for file in semantic_test_files(@__DIR__)
     source = read(file, String)
     refs = union(explicit_hc_imports(source), qualified_hc_references(source))
     private_refs = sort!(collect(setdiff(Set(refs), HC_PUBLIC_NAMES)); by = string)
-    isempty(private_refs) || (violations[relpath(file, @__DIR__)] = private_refs)
+    isempty(private_refs) || (name_violations[relpath(file, @__DIR__)] = private_refs)
+
+    private_properties = sort!(collect(intersect(property_references(source), HC_PRIVATE_STORAGE_PROPERTIES)); by = string)
+    isempty(private_properties) ||
+        (property_violations[relpath(file, @__DIR__)] = private_properties)
 end
 
-if !isempty(violations)
+if !isempty(name_violations)
     println(stderr, "Non-public HomotopyContinuation references in the ordinary semantic suite:")
-    for file in sort!(collect(keys(violations)))
-        println(stderr, "  ", file, ": ", join(string.(violations[file]), ", "))
+    for file in sort!(collect(keys(name_violations)))
+        println(stderr, "  ", file, ": ", join(string.(name_violations[file]), ", "))
+    end
+end
+
+if !isempty(property_violations)
+    println(stderr, "Opaque HomotopyContinuation storage properties in the ordinary semantic suite:")
+    for file in sort!(collect(keys(property_violations)))
+        println(stderr, "  ", file, ": ", join(string.(property_violations[file]), ", "))
     end
 end
 
 @testset "normal tests use only public HomotopyContinuation API" begin
-    @test isempty(violations)
+    @test isempty(name_violations)
+    @test isempty(property_violations)
 end

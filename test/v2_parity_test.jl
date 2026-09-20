@@ -105,7 +105,7 @@ using CommonSolve: CommonSolve
             System([2.3x^2 + 1.2y^2 + 3x - 2y + 3, 2.3x^2 + 1.2y^2 + 5x + 2y - 5]),
             TotalDegree(; show_progress = false),
         )
-        @test count(is_success, result.path_results) == 2
+        @test count(is_success, path_results(result)) == 2
         @test nat_infinity(result) == 2
     end
 
@@ -118,10 +118,10 @@ using CommonSolve: CommonSolve
     @testset "(x-10)^d singular roots, d=$d" for d in (2, 6)
         @var x
         result = solve(System([(x - 10)^d]), TotalDegree(; show_progress = false))
-        @test count(r -> r.winding_number == d, result.path_results) == d
+        @test count(r -> winding_number(r) == d, path_results(result)) == d
         @test nresults(result) == 1
         @test nsingular(result) == 1
-        @test only(only(results(result)).solution) ≈ 10 atol = 1.0e-8
+        @test only(solution(only(results(result)))) ≈ 10 atol = 1.0e-8
     end
 
     # ── From v2 endgame_test.jl: "Winding Number Family" ────────────────
@@ -132,7 +132,7 @@ using CommonSolve: CommonSolve
         f1 = (a[1] * x^d + a[2] * y) * (a[3] * x + a[4] * y) + 1
         f2 = (a[1] * x^d + a[2] * y) * (a[5] * x + a[6] * y) + 1
         result = solve(System([f1, f2]), TotalDegree(; show_progress = false))
-        @test count(is_success, result.path_results) == d + 1
+        @test count(is_success, path_results(result)) == d + 1
     end
 
     # ── From v2 endgame_test.jl: "Hyperbolic 6,6" ───────────────────────
@@ -149,8 +149,8 @@ using CommonSolve: CommonSolve
         result = solve(F, TotalDegree(; seed = UInt32(1), show_progress = false))
         # A dead path keeps its last winding number estimate, so the count below alone
         # does not catch one.
-        @test count(is_success, result.path_results) == 12
-        @test count(r -> r.winding_number == 3, result.path_results) == 12
+        @test count(is_success, path_results(result)) == 12
+        @test count(r -> winding_number(r) == 3, path_results(result)) == 12
         @test nresults(result) == 2
         @test nsingular(result) == 2
     end
@@ -232,8 +232,8 @@ using CommonSolve: CommonSolve
         @test paths_to_track(f, Polyhedral(; only_torus = true)) == 3
         @test mixed_volume(f) == 3
 
-        @test solve(f, TotalDegree(; show_progress = false)).tracked_paths == 16
-        @test solve(f, Polyhedral(; show_progress = false)).tracked_paths == 8
+        @test ntracked(solve(f, TotalDegree(; show_progress = false))) == 16
+        @test ntracked(solve(f, Polyhedral(; show_progress = false))) == 8
     end
 
     # ── From v2 endgame_test.jl: "Mohab" (large system) ─────────────────
@@ -260,7 +260,7 @@ using CommonSolve: CommonSolve
             ],
         )
         result = solve(F, TotalDegree(; show_progress = false))
-        @test result.tracked_paths == 900
+        @test ntracked(result) == 900
         @test nnonsingular(result) == 693
         @test nsingular(result) == 0
         @test nresults(result) == 693
@@ -274,14 +274,14 @@ using CommonSolve: CommonSolve
         f = System([2y + 3y^2 - x * y^3, x + 4x^2 - 2x^3 * y])
 
         affine = solve(f, Polyhedral(; only_torus = false, show_progress = false))
-        @test affine.tracked_paths == 8
-        @test count(is_success, affine.path_results) == 6
+        @test ntracked(affine) == 8
+        @test count(is_success, path_results(affine)) == 6
         @test nsolutions(affine) == 6
 
         # Dividing out the lowest monomial keeps only the roots with no zero coordinate.
         torus = solve(f, Polyhedral(; only_torus = true, show_progress = false))
-        @test torus.tracked_paths == 3
-        @test count(is_success, torus.path_results) == 3
+        @test ntracked(torus) == 3
+        @test count(is_success, path_results(torus)) == 3
         @test nsolutions(torus) == 3
     end
 

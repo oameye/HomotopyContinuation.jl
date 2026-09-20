@@ -96,9 +96,9 @@ same_points(a, b; tol = 1.0e-8) =
                 ),
                 DistributedExecutor(; batch_size = 1),
             )
-            @test 0 < stopped.tracked_paths < full.tracked_paths
+            @test 0 < ntracked(stopped) < ntracked(full)
             @test nfailed(stopped) == 0
-            @test length(path_results(stopped)) == stopped.tracked_paths
+            @test length(path_results(stopped)) == ntracked(stopped)
         end
 
         @testset "overdetermined and composition" begin
