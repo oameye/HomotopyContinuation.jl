@@ -1,0 +1,39 @@
+name: One-shot algorithm option naming audit
+
+on:
+  push:
+    branches:
+      - v3-algorithm-option-audit
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: v3-algorithm-option-audit
+          fetch-depth: 0
+      - name: Report references and collisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in \
+            _as_system as_system \
+            _tracker_options tracker_options \
+            _endgame_options endgame_options \
+            _seed \
+            _show_progress show_progress \
+            _with_seed with_seed \
+            _quiet without_progress \
+            _never_stop never_stop \
+            _early_stop as_early_stop \
+            _checked_excess_residual_tol checked_excess_residual_tol
+          do
+            echo "=== $name ==="
+            git grep -n -w "$name" -- '*.jl' || true
+          done
+          echo '=== canonical seed definitions/usages ==='
+          git grep -n -w seed -- 'src/**/*.jl' 'ext/**/*.jl' 'test/**/*.jl' 'quality/**/*.jl' || true
