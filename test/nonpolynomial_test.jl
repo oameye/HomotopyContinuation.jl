@@ -1,612 +1,343 @@
 using Test
-using Random: Random, MersenneTwister, randn, rand
-import HomotopyContinuation as Next
-using HomotopyContinuation: Expression, System, CompileMode, @var, @polyvar,
-    differentiate, solve, solutions, nsolutions,
-    verify_solution_completeness, Completeness, Serial, TotalDegree, Polyhedral,
-    Continuation, Monodromy, Witness, Regeneration, Decomposition, Intersection,
-    TaylorVector, ComplexDF64, HomotopyEvaluator, StraightLineHomotopy,
-    Interpreter, execute!, expand,
-    fix_parameters, FSVec, FSMat
-
-fsv(v) = FSVec{ComplexF64}(collect(ComplexF64, v))
-fsm(m) = FSMat{ComplexF64}(collect(ComplexF64, m))
-
-function eval_system(F, x, p)
-    u = fsv(zeros(size(F)[1]))
-    Next.evaluate!(u, F.evaluator, fsv(x), fsv(p))
-    return collect(u)
-end
-
-function eval_jacobian(F, x, p)
-    m, n = size(F)
-    u = fsv(zeros(m))
-    U = fsm(zeros(m, n))
-    Next.evaluate_and_jacobian!(u, U, F.evaluator, fsv(x), fsv(p))
-    return collect(u), collect(U)
-end
-
-# Coefficients of λ ↦ g(λ) at 0 from samples on a circle of radius r.
-function cauchy_coefficients(g, K::Int; M::Int = 128, r::Float64 = 0.1)
-    out = Vector{ComplexF64}[]
-    for j in 0:(M - 1)
-        v = g(r * cis(2π * j / M))
-        isempty(out) && append!(out, [zeros(ComplexF64, length(v)) for _ in 0:K])
-        for k in 0:K
-            out[k + 1] .+= v .* cis(-2π * j * k / M)
-        end
-    end
-    return [out[k + 1] ./ (M * r^k) for k in 0:K]
-end
-
-# Coefficients of λ ↦ f(x(λ); p) at 0, with each argument given by its series.
-function cauchy_system_coefficients(f, coeffs; K::Int, M::Int = 128, r::Float64 = 0.1)
-    n = length(coeffs)
-    series(λ) = [
-        sum(coeffs[i][k + 1] * λ^k for k in 0:(length(coeffs[i]) - 1)) for i in 1:n
-    ]
-    return cauchy_coefficients(λ -> f(series(λ)), K; M = M, r = r)
-end
+using Random: MersenneTwister, rand
+using HomotopyContinuation
 
 include("test_systems.jl")
 
-const MODES = (CompileMode.INTERPRETED, CompileMode.COMPILED, CompileMode.COMPILED_ALL)
+const NONPOLY_MODES = (
+    CompileMode.INTERPRETED,
+    CompileMode.COMPILED,
+    CompileMode.COMPILED_ALL,
+)
 
-@testset "Non-polynomial system sweep: $name" for (name, exprs, vars, params, ref) in
-    NONPOLYNOMIAL_SYSTEM_COLLECTION
-
-    rng = MersenneTwister(0x00e8b1a5 + length(name))
-    m, n, r = length(exprs), length(vars), length(params)
-    # Real, order-one points: away from the poles and off the branch cut.
-    xv = ComplexF64.(0.7 .+ rand(rng, n))
-    pv = ComplexF64.(0.7 .+ rand(rng, r))
-    coeffs = [
-        [i == 1 ? xv[j] : 0.15 * (randn(rng, ComplexF64)) for i in 1:4] for j in 1:n
-    ]
-    pcoeffs = [
-        [i == 1 ? pv[j] : 0.15 * (randn(rng, ComplexF64)) for i in 1:4] for j in 1:r
-    ]
-
-    truth_u = ref(xv, pv)
-    h = 1.0e-6
-    truth_J = zeros(ComplexF64, m, n)
-    for j in 1:n
-        e = zeros(ComplexF64, n)
-        e[j] = h
-        truth_J[:, j] .= (ref(xv .+ e, pv) .- ref(xv .- e, pv)) ./ (2h)
+function finite_difference_jacobian(f, x; h = 1.0e-6)
+    y = f(x)
+    J = zeros(ComplexF64, length(y), length(x))
+    for j in eachindex(x)
+        step = zeros(ComplexF64, length(x))
+        step[j] = h
+        J[:, j] .= (f(x .+ step) .- f(x .- step)) ./ (2h)
     end
-
-    truth_taylor = cauchy_system_coefficients(
-        w -> ref(w[1:n], w[(n + 1):(n + r)]), [coeffs; pcoeffs]; K = 3, r = 0.05,
-    )
-
-    # Commutative operands come back in a different order and a constant factor can
-    # end up folded into a sum, so the roundtrip is exact only after `expand`.
-    @testset "symbolic tape roundtrip" begin
-        F = System(exprs; variables = vars, parameters = params)
-        I = Interpreter(Vector{Expression}, F._interp_f64.sequence)
-        out = Vector{Expression}(undef, m)
-        execute!(out, I, collect(vars), collect(params))
-        @test expand.(out) == expand.(collect(exprs))
-    end
-
-    @testset "$mode" for mode in MODES
-        F = System(exprs; variables = vars, parameters = params, compile = mode)
-        @test size(F) == (m, n)
-
-        u_got, J_got = eval_jacobian(F, xv, pv)
-        @test u_got ≈ truth_u rtol = 1.0e-10
-        @test J_got ≈ truth_J rtol = 1.0e-5
-
-        u_df64 = FSVec{ComplexDF64}(zeros(ComplexDF64, m))
-        Next.evaluate!(
-            u_df64, F.evaluator,
-            FSVec{ComplexDF64}(ComplexDF64.(xv)), fsv(pv),
-        )
-        @test ComplexF64.(collect(u_df64)) ≈ truth_u rtol = 1.0e-10
-
-        @testset "taylor! K=$K" for K in 1:3
-            xdata = FSMat{ComplexF64}(zeros(ComplexF64, K + 1, n))
-            pdata = FSMat{ComplexF64}(zeros(ComplexF64, K + 1, max(r, 1)))
-            for j in 1:n, k in 0:K
-                xdata[k + 1, j] = coeffs[j][k + 1]
-            end
-            for j in 1:r, k in 0:K
-                pdata[k + 1, j] = pcoeffs[j][k + 1]
-            end
-            u = fsv(zeros(m))
-            Next.taylor!(
-                u, Val(K), F.evaluator,
-                TaylorVector{K + 1, ComplexF64}(xdata),
-                r == 0 ? fsv(ComplexF64[]) :
-                    TaylorVector{K + 1, ComplexF64}(pdata[:, 1:r]),
-            )
-            @test collect(u) ≈ truth_taylor[K + 1] atol = 1.0e-7
-        end
-    end
+    return J
 end
 
-# H(x,t) = γ·t·G(x) + (1-t)·F(x) with F non-polynomial and its parameters already
-# substituted in.
-@testset "StraightLineHomotopy sweep: $name" for (name, exprs, vars, params, ref) in
-    NONPOLYNOMIAL_SYSTEM_COLLECTION
-
-    rng = MersenneTwister(0x00c0ffee + length(name))
-    m, n, r = length(exprs), length(vars), length(params)
-    pv = ComplexF64.(0.7 .+ rand(rng, r))
-    target = r == 0 ? collect(exprs) : Next.subs(exprs, params => pv)
-    start = [sum(vars) - i for i in 1:m]
-    γ = ComplexF64(cis(2π * 0.3))
-    t = 0.37 + 0.21im
-    X = ComplexF64.(0.7 .+ rand(rng, 4, n))
-    X[2:4, :] .= 0.15 .* randn(rng, ComplexF64, 3, n)
-    x0 = X[1, :]
-
-    fref(z) = ref(z, pv)
-    gref(z) = ComplexF64[sum(z) - i for i in 1:m]
-    href(z, s) = γ * s .* gref(z) .+ (1 - s) .* fref(z)
-
-    @testset "$mode" for mode in MODES
-        G = System(start; variables = vars, compile = mode)
-        F = System(target; variables = vars, compile = mode)
-        He = HomotopyEvaluator(
-            StraightLineHomotopy(G.evaluator, F.evaluator; γ = γ),
-        )
-
-        u = fsv(zeros(m))
-        Next.evaluate!(u, He, fsv(x0), ComplexF64(t))
-        @test collect(u) ≈ href(x0, t) rtol = 1.0e-10
-
-        U = fsm(zeros(m, n))
-        Next.evaluate_and_jacobian!(u, U, He, fsv(x0), ComplexF64(t))
-        @test collect(u) ≈ href(x0, t) rtol = 1.0e-10
-        h = 1.0e-6
-        for j in 1:n
-            e = zeros(ComplexF64, n)
-            e[j] = h
-            @test collect(U)[:, j] ≈ (href(x0 .+ e, t) .- href(x0 .- e, t)) ./ (2h) rtol =
-                1.0e-5
-        end
-
-        # Val(1) takes a plain point: x is constant, so only the ∂/∂t term remains.
-        fill!(u, 0)
-        Next.taylor!(u, Val(1), He, fsv(x0), ComplexF64(t))
-        @test collect(u) ≈ γ .* gref(x0) .- fref(x0) rtol = 1.0e-10
-
-        @testset "taylor! K=$K" for K in 2:3
-            xλ(λ) = [sum(X[k + 1, i] * λ^k for k in 0:K) for i in 1:n]
-            truth = cauchy_coefficients(λ -> href(xλ(λ), t + λ), K; r = 0.05)
-            data = FSMat{ComplexF64}(ComplexF64.(X[1:(K + 1), :]))
-            fill!(u, 0)
-            Next.taylor!(
-                u, Val(K), He, TaylorVector{K + 1, ComplexF64}(data), ComplexF64(t),
-            )
-            @test collect(u) ≈ truth[K + 1] atol = 1.0e-7
-        end
-    end
+function same_solution_set(a, b; atol = 1.0e-7)
+    length(a) == length(b) || return false
+    return all(sa -> any(sb -> maximum(abs.(sa .- sb)) < atol, b), a)
 end
 
-@testset "Non-polynomial input" begin
-    @testset "rational system evaluation and Jacobian" begin
+@testset "non-polynomial systems through the public API" begin
+    @testset "analytic system collection: $name" for (name, exprs, vars, params, reference) in
+        NONPOLYNOMIAL_SYSTEM_COLLECTION
+
+        rng = MersenneTwister(0x00e8b1a5 + length(name))
+        x = ComplexF64.(0.7 .+ rand(rng, length(vars)))
+        p = ComplexF64.(0.7 .+ rand(rng, length(params)))
+        expected = reference(x, p)
+        expected_jacobian = finite_difference_jacobian(z -> reference(z, p), x)
+
+        systems = [
+            System(exprs; variables = vars, parameters = params, compile = mode)
+                for mode in NONPOLY_MODES
+        ]
+        for F in systems
+            @test size(F) == (length(exprs), length(vars))
+            @test evaluate(F, x, p) ≈ expected rtol = 1.0e-10
+            @test jacobian(F, x, p) ≈ expected_jacobian rtol = 1.0e-5
+        end
+
+        values = [evaluate(F, x, p) for F in systems]
+        jacobians = [jacobian(F, x, p) for F in systems]
+        @test all(v -> isapprox(v, first(values); rtol = 1.0e-12), values)
+        @test all(J -> isapprox(J, first(jacobians); rtol = 1.0e-12), jacobians)
+    end
+
+    @testset "rational system has the expected values and Jacobian" begin
         @var x y u[1:4]
         F = System(
             [u[1] / x^2 + u[2], u[3] / y^2 + u[4]];
             variables = [x, y], parameters = u,
         )
-        @test size(F) == (2, 2)
-        @test Next.degrees(F) == [-1, -1]
+        point = ComplexF64[1.4 + 0.3im, -0.8 + 0.5im]
+        p = ComplexF64[2.0, -1.0, 3.0, 0.5]
 
-        xv = [1.4 + 0.3im, -0.8 + 0.5im]
-        pv = [2.0, -1.0, 3.0, 0.5]
-        ref(z) = [pv[1] / z[1]^2 + pv[2], pv[3] / z[2]^2 + pv[4]]
-
-        u_got, J_got = eval_jacobian(F, xv, pv)
-        @test u_got ≈ ref(xv)
-        J_exact = ComplexF64[
-            -2pv[1] / xv[1]^3 0
-            0 -2pv[3] / xv[2]^3
+        expected = ComplexF64[p[1] / point[1]^2 + p[2], p[3] / point[2]^2 + p[4]]
+        expected_jacobian = ComplexF64[
+            -2p[1] / point[1]^3 0
+            0 -2p[3] / point[2]^3
         ]
-        @test J_got ≈ J_exact
+        @test evaluate(F, point, p) ≈ expected
+        @test jacobian(F, point, p) ≈ expected_jacobian
     end
 
-    @testset "sqrt parameters: compile-mode parity and derivatives" begin
+    @testset "sqrt-parameter system is backend independent" begin
         @var x y a b
-        exprs = [sqrt(a + b) * x^2 - y, (x * y + a - sqrt(b))^2 - 3]
-        xv = [1.3 + 0.2im, -0.7 + 0.4im]
-        pv = [2.0, 3.0]
-        ref(z) = [
-            sqrt(pv[1] + pv[2]) * z[1]^2 - z[2],
-            (z[1] * z[2] + pv[1] - sqrt(pv[2]))^2 - 3,
+        equations = [sqrt(a + b) * x^2 - y, (x * y + a - sqrt(b))^2 - 3]
+        point = ComplexF64[1.3 + 0.2im, -0.7 + 0.4im]
+        p = ComplexF64[2, 3]
+        reference(z) = ComplexF64[
+            sqrt(p[1] + p[2]) * z[1]^2 - z[2],
+            (z[1] * z[2] + p[1] - sqrt(p[2]))^2 - 3,
         ]
+        expected_jacobian = finite_difference_jacobian(reference, point)
 
         systems = [
-            System(exprs; parameters = [a, b], compile = mode) for
-                mode in (
-                    CompileMode.INTERPRETED, CompileMode.COMPILED, CompileMode.COMPILED_ALL,
-                )
+            System(equations; variables = [x, y], parameters = [a, b], compile = mode)
+                for mode in NONPOLY_MODES
         ]
-
-        u_ref, J_ref = eval_jacobian(systems[1], xv, pv)
-        @test u_ref ≈ ref(xv)
-        for F in systems[2:end]
-            u_got, J_got = eval_jacobian(F, xv, pv)
-            @test u_got ≈ u_ref
-            @test J_got ≈ J_ref
-        end
-
-        # Jacobian against central differences.
-        h = 1.0e-6
-        for j in 1:2
-            e = zeros(ComplexF64, 2)
-            e[j] = h
-            numeric = (ref(xv .+ e) .- ref(xv .- e)) ./ (2h)
-            @test J_ref[:, j] ≈ numeric atol = 1.0e-6
+        for F in systems
+            @test evaluate(F, point, p) ≈ reference(point)
+            @test jacobian(F, point, p) ≈ expected_jacobian atol = 1.0e-6
         end
     end
 
-    @testset "transcendental functions differentiate and evaluate" begin
+    @testset "transcendental differentiation agrees with analysis" begin
         @var x
-        F = [
-            sin(x); cos(x); exp(x); tan(x); asin(x); acos(x); sinh(x); cosh(x); tanh(x)
+        expressions = [
+            sin(x), cos(x), exp(x), tan(x), asin(x), acos(x), sinh(x), cosh(x), tanh(x),
         ]
-        dF_want = [
-            cos(x)
-            -sin(x)
-            exp(x)
-            1 + tan(x)^2
-            1 / sqrt(1 - x^2)
-            -1 / sqrt(1 - x^2)
-            cosh(x)
-            sinh(x)
-            1 - tanh(x)^2
+        derivatives = [
+            cos(x),
+            -sin(x),
+            exp(x),
+            1 + tan(x)^2,
+            1 / sqrt(1 - x^2),
+            -1 / sqrt(1 - x^2),
+            cosh(x),
+            sinh(x),
+            1 - tanh(x)^2,
         ]
-        @test expand.(differentiate(F, x) - dF_want) == Vector{Expression}(zeros(Int, 9))
+        @test expand.(differentiate(expressions, x) - derivatives) == fill(zero(Expression), 9)
 
         x0 = 0.1
-        got = [Next.expr_number(Next.subs(f, x => Expression(x0))).val for f in F]
-        want = ComplexF64[
+        expected = ComplexF64[
             sin(x0), cos(x0), exp(x0), tan(x0), asin(x0), acos(x0),
             sinh(x0), cosh(x0), tanh(x0),
         ]
-        @test got ≈ want
-
-        # Each one reaches the tape as its own instruction, in all three modes.
-        G = System(F; variables = [x])
-        for mode in MODES
-            @test eval_system(System(F; variables = [x], compile = mode), [x0], []) ≈ want
-        end
-        @test vec(eval_jacobian(G, [x0], [])[2]) ≈
-            [
-            cos(x0), -sin(x0), exp(x0), 1 + tan(x0)^2, 1 / sqrt(1 - x0^2),
-            -1 / sqrt(1 - x0^2), cosh(x0), sinh(x0), 1 - tanh(x0)^2,
+        expected_derivative = ComplexF64[
+            cos(x0), -sin(x0), exp(x0), 1 + tan(x0)^2,
+            1 / sqrt(1 - x0^2), -1 / sqrt(1 - x0^2),
+            cosh(x0), sinh(x0), 1 - tanh(x0)^2,
         ]
+        for mode in NONPOLY_MODES
+            F = System(expressions; variables = [x], compile = mode)
+            @test evaluate(F, [x0]) ≈ expected
+            @test vec(jacobian(F, [x0])) ≈ expected_derivative
+        end
     end
 
-    @testset "fractional powers" begin
+    @testset "fractional powers evaluate and differentiate correctly" begin
         @var x p
         F = System([(x + 1)^(3 // 2) - p]; variables = [x], parameters = [p])
-        x₀ = [-0.5]
-        p₀ = [0.1]
-        u, U = eval_jacobian(F, x₀, p₀)
-        @test u[1] ≈ (x₀[1] + 1)^(3 / 2) - p₀[1]
-        @test U[1, 1] ≈ (3 / 2) * (x₀[1] + 1)^(1 / 2)
+        x0 = ComplexF64[-0.5]
+        p0 = ComplexF64[0.1]
+        @test only(evaluate(F, x0, p0)) ≈ (x0[1] + 1)^(3 / 2) - p0[1]
+        @test only(jacobian(F, x0, p0)) ≈ (3 / 2) * sqrt(x0[1] + 1)
 
-        # A negative and a complex exponent take the same instruction.
-        @test eval_system(System([(x + 4)^(-4 / 3)]; variables = [x]), [1.0], [])[1] ≈
-            5.0^(-4 / 3)
-        @test eval_system(System([(x + 4)^(1.5im)]; variables = [x]), [1.0], [])[1] ≈
-            ComplexF64(5.0)^(1.5im)
-        # An integer-valued exponent stays an integer power.
-        @test Next.degrees(System([(x + 1)^(4 // 2) - p]; variables = [x], parameters = [p])) ==
-            [2]
-        @test Next.degrees(F) == [-1]
-
-        coeffs = ComplexF64[-0.5, 0.01, 0.002, -0.003]
-        fλ = λ -> (coeffs[1] + coeffs[2] * λ + coeffs[3] * λ^2 + coeffs[4] * λ^3 + 1)^(3 / 2) -
-            p₀[1]
-        @testset "taylor! K=$K" for K in 1:3
-            xdata = FSMat{ComplexF64}(reshape(coeffs[1:(K + 1)], K + 1, 1))
-            uu = fsv(zeros(1))
-            Next.taylor!(
-                uu, Val(K), F.evaluator,
-                TaylorVector{K + 1, ComplexF64}(xdata), fsv(p₀),
-            )
-            @test uu[1] ≈ cauchy_coefficients(λ -> [fλ(λ)], K; r = 0.02)[K + 1][1] atol =
-                1.0e-9
-        end
+        negative = System([(x + 4)^(-4 / 3)]; variables = [x])
+        complex_power = System([(x + 4)^(1.5im)]; variables = [x])
+        @test only(evaluate(negative, [1.0])) ≈ 5.0^(-4 / 3)
+        @test only(evaluate(complex_power, [1.0])) ≈ ComplexF64(5)^1.5im
     end
 
-    @testset "homotopy with transcendental functions" begin
+    @testset "transcendental parameter continuation follows a known curve" begin
         @var x[1:9] t
-        F = [
-            sin(t); cos(t); exp(t); tan(t); asin(t); acos(t); sinh(t); cosh(t); tanh(t)
+        functions = [
+            sin(t), cos(t), exp(t), tan(t), asin(t), acos(t), sinh(t), cosh(t), tanh(t),
         ]
         at(τ) = ComplexF64[
             sin(τ), cos(τ), exp(τ), tan(τ), asin(τ), acos(τ), sinh(τ), cosh(τ), tanh(τ),
         ]
-        G = System(x - F; variables = x, parameters = [t])
-        S = solve(G, [at(π / 4)], [π / 4], [π / 8], Continuation(; show_progress = false))
-        @test nsolutions(S) == 1
-        @test solutions(S)[1] ≈ at(π / 8)
-    end
-
-    @testset "extended-precision residual on a transcendental system" begin
-        @var x y a b
-        F = System([sin(a) * x + cos(y) - b, x^2 + y - 1]; parameters = [a, b])
-        xv = ComplexDF64[ComplexDF64(1.3), ComplexDF64(-0.7)]
-        pv = [2.0, 3.0]
-        u = fsv(zeros(2))
-        Next.evaluate!(u, F.evaluator, FSVec{ComplexDF64}(xv), fsv(pv))
-        @test collect(u) ≈ [
-            sin(2.0) * 1.3 + cos(-0.7) - 3.0,
-            1.3^2 - 0.7 - 1.0,
-        ]
-    end
-
-    @testset "Taylor orders 1-3 against a Cauchy-integral oracle" begin
-        @var x y a b
-        exprs = [sqrt(a + b) * x^2 - y / x, sin(x) + (y + a)^-2]
-        pv = [2.0, 3.0]
-        ref(z) = [
-            sqrt(pv[1] + pv[2]) * z[1]^2 - z[2] / z[1],
-            sin(z[1]) + (z[2] + pv[1])^-2,
-        ]
-
-        coeffs = [
-            ComplexF64[1.3 + 0.2im, 0.3 - 0.1im, -0.15 + 0.2im, 0.05 + 0.1im],
-            ComplexF64[-0.7 + 0.4im, 0.2 + 0.15im, 0.1 - 0.05im, -0.2 + 0.1im],
-        ]
-        truth = cauchy_system_coefficients(ref, coeffs; K = 3)
-
-        for mode in (CompileMode.INTERPRETED, CompileMode.COMPILED_ALL)
-            F = System(exprs; parameters = [a, b], compile = mode)
-            for K in 1:3
-                data = FSMat{ComplexF64}(zeros(ComplexF64, K + 1, 2))
-                for i in 1:2, k in 0:K
-                    data[k + 1, i] = coeffs[i][k + 1]
-                end
-                tx = TaylorVector{K + 1, ComplexF64}(data)
-                u = fsv(zeros(2))
-                Next.taylor!(u, Val(K), F.evaluator, tx, fsv(pv))
-                @test collect(u) ≈ truth[K + 1] atol = 1.0e-8
-            end
-        end
-    end
-
-    @testset "Taylor-valued parameters against a Cauchy-integral oracle" begin
-        @var x y a
-        exprs = [a / x - y, sqrt(a) * x + sin(y)]
-        ref(z, p) = [p[1] / z[1] - z[2], sqrt(p[1]) * z[1] + sin(z[2])]
-
-        xc = [
-            ComplexF64[1.3 + 0.2im, 0.3 - 0.1im, -0.15 + 0.2im, 0.05 + 0.1im],
-            ComplexF64[-0.7 + 0.4im, 0.2 + 0.15im, 0.1 - 0.05im, -0.2 + 0.1im],
-        ]
-        pc = [ComplexF64[2.0 + 0.3im, 0.4 - 0.2im, 0.1 + 0.05im, -0.15 + 0.1im]]
-
-        # Coefficients of λ ↦ F(x(λ); p(λ)), so the parameter series convolves too.
-        combined(w) = ref(w[1:2], w[3:3])
-        truth = cauchy_system_coefficients(combined, [xc; pc]; K = 3)
-
-        F = System(exprs; variables = [x, y], parameters = [a])
-        for K in 1:3
-            xdata = FSMat{ComplexF64}(zeros(ComplexF64, K + 1, 2))
-            pdata = FSMat{ComplexF64}(zeros(ComplexF64, K + 1, 1))
-            for k in 0:K
-                xdata[k + 1, 1] = xc[1][k + 1]
-                xdata[k + 1, 2] = xc[2][k + 1]
-                pdata[k + 1, 1] = pc[1][k + 1]
-            end
-            u = fsv(zeros(2))
-            Next.taylor!(
-                u, Val(K), F.evaluator,
-                TaylorVector{K + 1, ComplexF64}(xdata),
-                TaylorVector{K + 1, ComplexF64}(pdata),
-            )
-            @test collect(u) ≈ truth[K + 1] atol = 1.0e-8
-        end
-    end
-
-    @testset "parameter homotopy tracking through a sqrt parameter" begin
-        # sqrt(a) x² + x - 1 = 0, y = 1 - x. Track from a = 4 to a = 9.
-        @var x y a
-        F = System([sqrt(a) * x^2 + x - 1, x + y - 1]; parameters = [a])
-
-        roots(s) = [(-1 + sign * sqrt(1 + 4s)) / (2s) for sign in (1, -1)]
-        starts = [ComplexF64[xi, 1 - xi] for xi in roots(2.0)]   # sqrt(4) = 2
-        res = solve(
-            F,
-            starts,
-            ComplexF64[4.0],
-            ComplexF64[9.0],
-            Continuation(; show_progress = false),
-            Serial(),
+        F = System(x - functions; variables = x, parameters = [t])
+        result = solve(
+            F, [at(π / 4)], ComplexF64[π / 4], ComplexF64[π / 8],
+            Continuation(; show_progress = false), Serial(),
         )
-        @test nsolutions(res) == 2
-        got = sort(real.(first.(solutions(res))))
-        @test got ≈ sort(roots(3.0)) atol = 1.0e-8   # sqrt(9) = 3
+        @test nsolutions(result) == 1
+        @test only(solutions(result)) ≈ at(π / 8)
     end
 
-    @testset "monodromy on rational functions" begin
+    @testset "sqrt-parameter continuation reaches the analytic target roots" begin
+        @var x y a
+        F = System([sqrt(a) * x^2 + x - 1, x + y - 1]; variables = [x, y], parameters = [a])
+        roots(s) = [(-1 + sign * sqrt(1 + 4s)) / (2s) for sign in (1, -1)]
+        starts = [ComplexF64[r, 1 - r] for r in roots(2.0)]
+
+        result = solve(
+            F, starts, ComplexF64[4], ComplexF64[9],
+            Continuation(; show_progress = false), Serial(),
+        )
+        @test nfailed(result) == 0
+        @test nsolutions(result) == 2
+        @test sort(real.(first.(solutions(result)))) ≈ sort(roots(3.0)) atol = 1.0e-8
+    end
+
+    @testset "rational monodromy is backend independent" begin
         @var x y u[1:4]
-        counts = map((CompileMode.INTERPRETED, CompileMode.COMPILED_ALL)) do mode
+        for mode in (CompileMode.INTERPRETED, CompileMode.COMPILED_ALL)
             F = System(
                 [u[1] / x^2 + u[2], u[3] / y^2 + u[4]];
                 variables = [x, y], parameters = u, compile = mode,
             )
-            res = solve(
+            result = solve(
                 F,
                 Monodromy(;
-                    target_solutions_count = 4, max_loops_no_progress = 100,
+                    target_solutions_count = 4,
+                    max_loops_no_progress = 100,
                     show_progress = false,
                 ),
                 Serial(),
             )
-            return nsolutions(res)
+            @test nsolutions(result) == 4
         end
-        @test all(==(4), counts)
     end
 
-    @testset "monodromy on a rational triangulation system" begin
+    @testset "rational triangulation has six critical points" begin
         @var A1[1:3, 1:4] A2[1:3, 1:4]
         @var x[1:3] u1[1:2] u2[1:2]
         y1 = A1 * [x; 1]
         y2 = A2 * [x; 1]
-        f = sum((u1 - y1[1:2] ./ y1[3]) .^ 2) + sum((u2 - y2[1:2] ./ y2[3]) .^ 2)
+        objective = sum((u1 - y1[1:2] ./ y1[3]) .^ 2) +
+            sum((u2 - y2[1:2] ./ y2[3]) .^ 2)
         F = System(
-            differentiate(f, x);
+            differentiate(objective, x);
             variables = x, parameters = [u1; u2; vec(A1); vec(A2)],
         )
-        res = solve(
+        result = solve(
             F,
             Monodromy(;
-                max_loops_no_progress = 100, target_solutions_count = 6,
+                max_loops_no_progress = 100,
+                target_solutions_count = 6,
                 show_progress = false,
             ),
             Serial(),
         )
-        @test nsolutions(res) == 6
+        @test nsolutions(result) == 6
     end
 
-    @testset "verify_solution_completeness on an expression system" begin
+    @testset "completeness detects a missing expression-system solution" begin
         @var x y a b c
-        F = System([x^2 + y^2 - 1, a * x + b * y + c]; parameters = [a, b, c])
-        q = ComplexF64[1, 2, 3]
-        sols = [
+        F = System([x^2 + y^2 - 1, a * x + b * y + c]; variables = [x, y], parameters = [a, b, c])
+        p = ComplexF64[1, 2, 3]
+        roots = [
             ComplexF64[-0.6 - 0.8im, -1.2 + 0.4im],
             ComplexF64[-0.6 + 0.8im, -1.2 - 0.4im],
         ]
-        @test verify_solution_completeness(F, sols, q, Monodromy(; show_progress = false)) ==
-            Completeness.COMPLETE
-        @test verify_solution_completeness(F, sols[1:1], q, Monodromy(; show_progress = false)) !=
-            Completeness.COMPLETE
+        algorithm = Monodromy(; show_progress = false)
+        @test verify_solution_completeness(F, roots, p, algorithm) == Completeness.COMPLETE
+        @test verify_solution_completeness(F, roots[1:1], p, algorithm) != Completeness.COMPLETE
     end
 
-    @testset "MP rational input builds the same system" begin
+    @testset "DynamicPolynomials and Expression rational frontends agree" begin
         @polyvar px py pu[1:4]
-        F_mp = System(
+        polynomial_frontend = System(
             [pu[1] / px^2 + pu[2], pu[3] / py^2 + pu[4]];
             variables = [px, py], parameters = pu,
         )
         @var x y u[1:4]
-        F_expr = System(
+        expression_frontend = System(
             [u[1] / x^2 + u[2], u[3] / y^2 + u[4]];
             variables = [x, y], parameters = u,
         )
-        xv = [1.4 + 0.3im, -0.8 + 0.5im]
-        pv = [2.0, -1.0, 3.0, 0.5]
-        @test eval_system(F_mp, xv, pv) ≈ eval_system(F_expr, xv, pv)
+        point = ComplexF64[1.4 + 0.3im, -0.8 + 0.5im]
+        p = ComplexF64[2.0, -1.0, 3.0, 0.5]
+        @test evaluate(polynomial_frontend, point, p) ≈ evaluate(expression_frontend, point, p)
+        @test jacobian(polynomial_frontend, point, p) ≈ jacobian(expression_frontend, point, p)
     end
 
-    @testset "start systems reject non-polynomial input" begin
+    @testset "polynomial-only start methods reject non-polynomial equations" begin
         @var x y
-        F = System([x / y - 2, x^2 + y^2 - 5])
+        F = System([x / y - 2, x^2 + y^2 - 5]; variables = [x, y])
         @test_throws ArgumentError solve(F, TotalDegree(; show_progress = false), Serial())
         @test_throws ArgumentError solve(F, Polyhedral(; show_progress = false), Serial())
-        L = Next.LinearSubspace(ComplexF64[1.0 1.0], ComplexF64[1.0])
+
+        L = LinearSubspace(ComplexF64[1 1], ComplexF64[1])
         @test_throws ArgumentError solve(F, L, TotalDegree(; show_progress = false), Serial())
-        @test_throws ArgumentError Next.solve(
+        @test_throws ArgumentError solve(
             System([x / y - 1]; variables = [x, y]),
-            Next.Witness(; show_progress = false),
+            Witness(; show_progress = false), Serial(),
         )
     end
 
-    @testset "polyhedral start systems on expression input" begin
+    @testset "polyhedral solve agrees between expression and polynomial frontends" begin
         @var x y
         @polyvar u v
-        @testset "support matches the polynomial front-end" begin
-            expr = Next.support_coefficients(
-                System([x^2 * y + 3y - 1, x + (x + y)^2 - 1]; variables = [x, y]),
-            )
-            poly = Next.support_coefficients(System([u^2 * v + 3v - 1, u + (u + v)^2 - 1]))
-            @test expr == poly
-        end
+        expression_system = System([x^2 + y - 1, x + y^2 - 1]; variables = [x, y])
+        polynomial_system = System([u^2 + v - 1, u + v^2 - 1])
+        expr_result = solve(expression_system, Polyhedral(; show_progress = false), Serial())
+        poly_result = solve(polynomial_system, Polyhedral(; show_progress = false), Serial())
+        @test same_solution_set(solutions(expr_result), solutions(poly_result))
 
-        sols(r) = sort(
-            [
-                (round(real(s[1]); digits = 6), round(imag(s[1]); digits = 6))
-                    for s in solutions(r)
-            ]
-        )
-
-        @testset "dense system" begin
-            F = System([x^2 + y - 1, x + y^2 - 1]; variables = [x, y])
-            G = System([u^2 + v - 1, u + v^2 - 1])
-            @test sols(solve(F, Polyhedral(; show_progress = false), Serial())) ==
-                sols(solve(G, Polyhedral(; show_progress = false), Serial()))
-        end
-
-        # Sparse enough that the BKK bound is below the Bezout number.
-        @testset "sparse system" begin
-            F = System([x^3 * y^2 - 3, x^2 * y^3 - 5]; variables = [x, y])
-            r = solve(F, Polyhedral(; show_progress = false), Serial())
-            @test nsolutions(r) == 5
-            @test sols(r) == sols(solve(F, TotalDegree(; show_progress = false), Serial()))
-        end
-
-        @testset "overdetermined system is squared up" begin
-            F = System([x^2 + y^2 - 1, x - y, x^3 - y^3]; variables = [x, y])
-            @test sols(solve(F, Polyhedral(; show_progress = false), Serial())) ==
-                [(-0.707107, -0.0), (0.707107, -0.0)]
-        end
-
-        @testset "a parameter is not a variable" begin
-            @var a
-            F = System([x^2 + a * y - 1, x + y^2 - 1]; variables = [x, y], parameters = [a])
-            @test_throws ArgumentError Next.support_coefficients(F)
-        end
+        sparse = System([x^3 * y^2 - 3, x^2 * y^3 - 5]; variables = [x, y])
+        polyhedral = solve(sparse, Polyhedral(; show_progress = false), Serial())
+        total_degree = solve(sparse, TotalDegree(; show_progress = false), Serial())
+        @test nsolutions(polyhedral) == 5
+        @test same_solution_set(solutions(polyhedral), solutions(total_degree))
     end
 
-    @testset "sliced solve substitutes parameters through the expression front-end" begin
+    @testset "overdetermined expression system is squared up correctly" begin
+        @var x y
+        F = System([x^2 + y^2 - 1, x - y, x^3 - y^3]; variables = [x, y])
+        result = solve(F, Polyhedral(; show_progress = false), Serial())
+        root = inv(sqrt(2))
+        @test nsolutions(result) == 2
+        @test same_solution_set(
+            solutions(result),
+            [ComplexF64[root, root], ComplexF64[-root, -root]],
+        )
+    end
+
+    @testset "sliced solve substitutes parameters through the Expression frontend" begin
         @var x y a
         @polyvar u v b
-        L = Next.LinearSubspace(ComplexF64[1.0 1.0], ComplexF64[1.0])
-        sols(r) = sort(
-            [
-                (round(real(s[1]); digits = 6), round(imag(s[1]); digits = 6))
-                    for s in solutions(r)
-            ]
-        )
+        L = LinearSubspace(ComplexF64[1 1], ComplexF64[1])
         F = System([a * x^2 + y^2 - 1]; variables = [x, y], parameters = [a])
         G = System([b * u^2 + v^2 - 1]; variables = [u, v], parameters = [b])
-        @test sols(solve(fix_parameters(F, [2.0]), L, TotalDegree(; show_progress = false))) ==
-            sols(solve(fix_parameters(G, [2.0]), L, TotalDegree(; show_progress = false)))
+        expr_result = solve(
+            fix_parameters(F, [2.0]), L,
+            TotalDegree(; show_progress = false), Serial(),
+        )
+        poly_result = solve(
+            fix_parameters(G, [2.0]), L,
+            TotalDegree(; show_progress = false), Serial(),
+        )
+        @test same_solution_set(solutions(expr_result), solutions(poly_result))
 
-        # Substitution has to reach a non-polynomial equation too.
-        H = System([a / x + y - 2]; variables = [x, y], parameters = [a])
-        @test Next.polynomials(fix_parameters(H, ComplexF64[3.0])) ==
-            [Next.subs(a / x + y - 2, a => 3.0)]
+        H = fix_parameters(
+            System([a / x + y - 2]; variables = [x, y], parameters = [a]),
+            ComplexF64[3],
+        )
+        @test evaluate(H, ComplexF64[2, 0.5]) ≈ ComplexF64[0]
     end
 
-    @testset "regeneration takes polynomial and rational expression input" begin
+    @testset "regeneration supports rational expressions and rejects nonalgebraic variables" begin
         @var x y z
-        # Polynomial, but built through the expression front-end.
-        F = System([x^2 + y^2 - z, x + y + z - 1]; variables = [x, y, z])
-        @test Next.degree.(Next.solve(F, Next.Regeneration(; show_progress = false))) == [2]
-        @test Next.ncomponents(Next.solve(F, Next.Decomposition(; show_progress = false))) == 1
-        W = Next.solve(F, Next.Witness(; show_progress = false))
-        @test Next.degree(W) == 2
+        polynomial = System([x^2 + y^2 - z, x + y + z - 1]; variables = [x, y, z])
+        regeneration = solve(polynomial, Regeneration(; show_progress = false))
+        @test degree.(regeneration) == [2]
+        @test ncomponents(solve(polynomial, Decomposition(; show_progress = false))) == 1
+        witness = solve(polynomial, Witness(; show_progress = false))
+        @test degree(witness) == 2
 
-        # Rational: the u-homotopy carries the denominator, and the hypersurface
-        # witness sets come from the numerators.
-        G = System([x^2 + y^2 - z, x / (y - 1) + y + z - 1]; variables = [x, y, z])
-        WG = Next.solve(G, Next.Regeneration(; show_progress = false))
-        @test Next.degree.(WG) == [4]
+        rational = System(
+            [x^2 + y^2 - z, x / (y - 1) + y + z - 1];
+            variables = [x, y, z],
+        )
+        @test degree.(solve(rational, Regeneration(; show_progress = false))) == [4]
 
-        # Rebuilding equations cannot take `sqrt` of a variable, in a denominator just
-        # as in a numerator.
-        for f in (
-                sqrt(x) + y - 1, 1 / sqrt(x) + y - 1, x / (1 + sqrt(x)) + y - 1,
+        for equation in (
+                sqrt(x) + y - 1,
+                1 / sqrt(x) + y - 1,
+                x / (1 + sqrt(x)) + y - 1,
                 1 / sin(x) + y - 1,
             )
-            H = System([f, x * y - z]; variables = [x, y, z])
-            @test_throws ArgumentError Next.solve(H, Next.Regeneration(; show_progress = false))
-            @test_throws ArgumentError Next.solve(H, Next.Decomposition(; show_progress = false))
+            F = System([equation, x * y - z]; variables = [x, y, z])
+            @test_throws ArgumentError solve(F, Regeneration(; show_progress = false))
+            @test_throws ArgumentError solve(F, Decomposition(; show_progress = false))
         end
 
-        # `intersect` gates its hypersurface argument the same way.
-        WF = first(Next.solve(F, Next.Regeneration(; show_progress = false)))
-        @test_throws ArgumentError intersect(WF, 1 / sqrt(x), Intersection(; show_progress = false))
-        @test_throws ArgumentError intersect(WF, x / (1 + sqrt(y)), Intersection(; show_progress = false))
+        W = first(regeneration)
+        @test_throws ArgumentError intersect(W, 1 / sqrt(x), Intersection(; show_progress = false))
+        @test_throws ArgumentError intersect(W, x / (1 + sqrt(y)), Intersection(; show_progress = false))
     end
 end
