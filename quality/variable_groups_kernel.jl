@@ -6,7 +6,7 @@ using HomotopyContinuation: TotalDegree, Polyhedral, Serial, Threaded,
     variables, variable_groups, multi_degrees, degrees, fix_parameters,
     paths_to_track, rand_subspace, LinearSubspace, CompileMode,
     evaluate!, FSVec,
-    _group_dims, _bezout_assignments, _multi_bezout_count, _multi_start_coefficients,
+    _group_dims, _bezout_assignments, _multi_start_coefficients,
     _multi_start_system, _multi_start_solutions
 using DynamicPolynomials: @polyvar
 
@@ -30,6 +30,13 @@ same_group_points(a, b, groups) =
 
 run_td(F, seed, exec = Serial()) =
     solve(F, TotalDegree(; seed = UInt32(seed), show_progress = false), exec)
+
+function quality_multi_bezout_count(D, k)
+    assignments = _bezout_assignments(D, k)
+    return sum(assignments; init = 0) do assignment
+        prod(i -> D[assignment[i], i], eachindex(assignment); init = 1)
+    end
+end
 
 @testset "Variable groups" begin
 
@@ -69,13 +76,13 @@ run_td(F, seed, exec = Serial()) =
     @testset "multi-homogeneous Bezout number" begin
         # Two groups of one coordinate each: the two ways of assigning the
         # equations, minus the assignment through the zero degree.
-        @test _multi_bezout_count([1 2; 1 0], [1, 1]) == 2
+        @test quality_multi_bezout_count([1 2; 1 0], [1, 1]) == 2
         # Every degree 1, three groups: one path per permutation.
-        @test _multi_bezout_count(ones(Int, 3, 3), [1, 1, 1]) == 6
+        @test quality_multi_bezout_count(ones(Int, 3, 3), [1, 1, 1]) == 6
         # A single group covering everything is the plain Bezout number.
-        @test _multi_bezout_count(reshape([2, 3, 4], 1, 3), [3]) == 24
+        @test quality_multi_bezout_count(reshape([2, 3, 4], 1, 3), [3]) == 24
         # An equation of degree zero in every group cannot be assigned.
-        @test _multi_bezout_count([1 0; 1 0], [1, 1]) == 0
+        @test quality_multi_bezout_count([1 0; 1 0], [1, 1]) == 0
     end
 
     @testset "paths_to_track" begin
@@ -119,7 +126,7 @@ run_td(F, seed, exec = Serial()) =
             starts = _multi_start_solutions(
                 D, k, groups, C, homogeneous, n, _bezout_assignments(D, k),
             )
-            @test length(starts) == _multi_bezout_count(D, k)
+            @test length(starts) == quality_multi_bezout_count(D, k)
             @test size(G) == (n, n)
             u = FSVec{ComplexF64}(zeros(ComplexF64, n))
             p = FSVec{ComplexF64}(ComplexF64[])
