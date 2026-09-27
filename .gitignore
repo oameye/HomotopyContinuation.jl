@@ -19,3 +19,6 @@ test-cert.log
 test-extensive.log
 test-strict.log
 ttfx_benchmark.json
+coverage/
+coverage-union/
+coverage-artifacts/

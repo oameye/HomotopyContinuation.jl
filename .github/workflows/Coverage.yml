@@ -1,0 +1,92 @@
+name: Public Coverage
+
+on:
+  pull_request:
+    branches: [v3]
+    paths:
+      - '.github/workflows/Coverage.yml'
+      - 'src/**'
+      - 'ext/**'
+      - 'test/**'
+      - 'quality/coverage_runner.jl'
+      - 'quality/coverage_inventory.jl'
+      - 'quality/coverage_union.jl'
+      - 'Project.toml'
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+env:
+  JULIA_NUM_THREADS: '4'
+  OPENBLAS_NUM_THREADS: '1'
+  OMP_NUM_THREADS: '1'
+  HC_COVERAGE_JOBS: '4'
+  HC_COVERAGE_DIR: 'coverage'
+
+jobs:
+  coverage:
+    name: Ordinary suite / Julia ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.10', '1.13']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          show-versioninfo: true
+          version: ${{ matrix.version }}
+      - uses: julia-actions/cache@v3
+      - name: Instantiate test environment
+        run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Collect public semantic-suite coverage
+        run: julia --project=test quality/coverage_runner.jl
+      - name: Build runtime reachability inventory
+        run: julia --project=test quality/coverage_inventory.jl coverage coverage "julia-${{ matrix.version }}"
+      - name: Publish runtime coverage summary
+        run: cat coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload runtime coverage state
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-semantic-coverage-julia-${{ matrix.version }}
+          path: coverage/
+          if-no-files-found: error
+
+  aggregate:
+    name: Supported-runtime reachability union
+    needs: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          show-versioninfo: true
+          version: '1.13'
+      - name: Download runtime coverage states
+        uses: actions/download-artifact@v5
+        with:
+          path: coverage-artifacts
+      - name: Build supported-runtime union
+        run: julia quality/coverage_union.jl coverage-artifacts coverage-union
+      - name: Publish supported-runtime coverage summary
+        run: cat coverage-union/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload supported-runtime coverage inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-semantic-coverage-supported-runtime-union
+          path: coverage-union/
+          if-no-files-found: error
