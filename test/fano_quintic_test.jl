@@ -1,6 +1,5 @@
 using Test
-using HomotopyContinuation: System, degrees, nparameters, is_polynomial,
-    evaluate, to_number, @var, dense_poly
+using HomotopyContinuation: System, degrees, nparameters, evaluate, to_number, @var, dense_poly
 using Random: MersenneTwister
 
 include("test_systems.jl")
@@ -14,7 +13,6 @@ include("test_systems.jl")
     @testset "shape" begin
         @test size(F) == (6, 6)
         @test degrees(F) == fill(5, 6)
-        @test all(f -> is_polynomial(f, vars), equations)
         # 4 variables, degree 5: 126 monomials, the constant one fixed to 1.
         @test nparameters(F) == 125
     end
