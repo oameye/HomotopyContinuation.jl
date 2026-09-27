@@ -1,121 +1,79 @@
 using Test
-import HomotopyContinuation as HC
-using HomotopyContinuation: solve, System, TotalDegree,
-    solution, accuracy, residual, steps, accepted_steps, rejected_steps,
-    winding_number, condition_jacobian, last_path_point, path_results,
-    is_success, is_failed, is_finite, is_at_infinity, is_real,
-    path_number, start_solution, valuation, multiplicity,
-    seed, ntracked, failed, at_infinity, nonsingular, singular, nfailed,
-    statistics, ResultStatistics
-using DynamicPolynomials: @polyvar
 using LinearAlgebra: cond
+using HomotopyContinuation
 
-@testset "Path diagnostics accessors" begin
+@testset "path diagnostics on a two-solution problem" begin
     @polyvar x y
-    F = System([x^2 + y^2 - 1, x + y - 1])   # two finite solutions
-    res = solve(F, TotalDegree(; seed = UInt32(0x1234), show_progress = false))
-    prs = path_results(res)
-    @test !isempty(prs)
-    r = first(prs)
+    F = System([x^2 + y^2 - 1, x + y - 1])
+    result = solve(F, TotalDegree(; seed = UInt32(0x1234), show_progress = false), Serial())
+    paths = path_results(result)
 
-    @testset "value accessors mirror the stored fields" begin
-        @test solution(r) === r.solution
-        @test accuracy(r) == r.accuracy
-        @test winding_number(r) == r.winding_number
-        @test condition_jacobian(r) == r.condition_jacobian
-        @test accepted_steps(r) == r.accepted_steps
-        @test rejected_steps(r) == r.rejected_steps
-    end
+    @test nfailed(result) == 0
+    @test ntracked(result) == length(paths)
+    @test nsolutions(result) == 2
+    @test seed(result) == UInt32(0x1234)
 
-    @testset "steps is the total of accepted + rejected" begin
-        @test steps(r) == r.accepted_steps + r.rejected_steps
-        @test steps(r) >= accepted_steps(r)
-    end
-
-    @testset "residual is finite and small for a genuine success" begin
-        sr = first(filter(is_success, prs))
-        @test residual(sr) >= 0
-        @test isfinite(residual(sr))
-        @test residual(sr) < 1.0e-6
-    end
-
-    @testset "last_path_point returns (point, t)" begin
-        pt, t = last_path_point(r)
-        @test pt == r.last_path_point
-        @test t == r.last_path_t
-    end
-
-    @testset "show renders per-path diagnostics" begin
-        str = sprint(show, MIME"text/plain"(), r)
-        @test occursin("PathResult", str)
-        @test occursin("steps", str)
-    end
-
-    @testset "predicates partition the paths" begin
-        # Every path is exactly one of: success, at-infinity, excess, or failed.
-        for pr in prs
-            n = is_success(pr) + is_at_infinity(pr) + HC.is_excess_solution(pr) + is_failed(pr)
-            @test n == 1
-        end
-        # is_finite === is_success and Base.isfinite agrees.
-        for pr in prs
-            @test is_finite(pr) == is_success(pr)
-            @test isfinite(pr) == is_finite(pr)
+    @testset "successful endpoints satisfy the mathematical system" begin
+        for path in paths
+            @test is_success(path)
+            @test is_finite(path)
+            @test !is_failed(path)
+            @test !is_at_infinity(path)
+            @test !is_excess_solution(path)
+            @test residual(path) < 1.0e-6
+            @test maximum(abs.(evaluate(F, solution(path)))) < 1.0e-6
+            @test multiplicity(path) == 1
         end
     end
 
-    @testset "cond is an alias for condition_jacobian" begin
-        @test cond(r) == condition_jacobian(r)
-    end
+    @testset "diagnostics are internally consistent" begin
+        for path in paths
+            @test steps(path) == accepted_steps(path) + rejected_steps(path)
+            @test steps(path) >= accepted_steps(path)
+            @test accuracy(path) >= 0
+            @test isfinite(accuracy(path))
+            @test isfinite(condition_jacobian(path))
+            @test cond(path) == condition_jacobian(path)
 
-    @testset "path_number / start_solution are recorded" begin
-        # path_number is 1-based and unique across the successful paths.
-        nums = sort(path_number.(prs))
-        @test nums == collect(1:length(prs))
-        # start_solution is the (nonempty) start point for each path.
-        @test all(!isempty ∘ start_solution, prs)
-        @test length(start_solution(r)) == length(solution(r))
-    end
+            point, t = last_path_point(path)
+            @test length(point) == length(solution(path))
+            @test isfinite(real(t))
+            @test isfinite(imag(t))
 
-    @testset "valuation is empty or per-coordinate" begin
-        for pr in prs
-            v = valuation(pr)
-            @test isempty(v) || length(v) == length(solution(pr))
+            @test 1 <= path_number(path) <= ntracked(result)
+            @test length(start_solution(path)) == length(solution(path))
+            v = valuation(path)
+            @test isempty(v) || length(v) == length(solution(path))
         end
+        @test sort(path_number.(paths)) == collect(1:length(paths))
     end
 
-    @testset "multiplicity is the cluster size (1 for these simple roots)" begin
-        for pr in filter(is_success, prs)
-            @test multiplicity(pr) == HC.multiplicity(res, path_number(pr))
-            @test multiplicity(pr) >= 1
+    @testset "realness and result partitions agree" begin
+        for path in paths
+            @test isreal(path) == is_real(path)
+            @test is_real(path, 1.0e-6) == is_real(path; tol = 1.0e-6)
         end
+        @test isempty(failed(result))
+        @test isempty(at_infinity(result))
+        @test length(nonsingular(result)) == 2
+        @test isempty(singular(result))
     end
 
-    @testset "is_real positional and Base.isreal overloads" begin
-        sr = first(filter(is_success, prs))
-        @test is_real(sr, 1.0e-6) == is_real(sr; tol = 1.0e-6)
-        @test isreal(sr) == is_real(sr)
-        @test isreal(sr, 1.0e-6) == is_real(sr; tol = 1.0e-6)
+    @testset "aggregate statistics agree with public result queries" begin
+        stats = statistics(result)
+        @test stats isa ResultStatistics
+        @test stats.total == nsolutions(result)
+        @test stats.nonsingular == nnonsingular(result)
+        @test stats.singular == nsingular(result)
+        @test stats.real == nreal(result)
+        @test stats.at_infinity == nat_infinity(result)
+        @test stats.failed == nfailed(result)
     end
 
-    @testset "Result-level accessors" begin
-        @test seed(res) == UInt32(0x1234)
-        @test ntracked(res) == length(prs)
-        @test failed(res) == filter(is_failed, prs)
-        @test at_infinity(res) == filter(is_at_infinity, prs)
-        @test nfailed(res) == count(is_failed, prs)
-        @test nonsingular(res) == HC.results(res; only_nonsingular = true)
-        @test singular(res) == HC.results(res; only_singular = true)
-    end
-
-    @testset "statistics summarizes the result" begin
-        st = statistics(res)
-        @test st isa ResultStatistics
-        @test st.nonsingular == HC.nnonsingular(res)
-        @test st.singular == HC.nsingular(res)
-        @test st.total == st.nonsingular + st.singular
-        @test st.real == st.real_nonsingular + st.real_singular
-        @test st.at_infinity == HC.nat_infinity(res)
-        @test st.failed == nfailed(res)
+    @testset "text display exposes useful diagnostics" begin
+        rendered = sprint(show, MIME"text/plain"(), first(paths))
+        @test occursin("PathResult", rendered)
+        @test occursin("steps", rendered)
+        @test occursin("residual", rendered)
     end
 end
