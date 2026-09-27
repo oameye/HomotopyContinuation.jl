@@ -145,6 +145,7 @@ end
     include("tracking/predictor.jl")
     include("tracking/tracker.jl")
     include("tracking/path_info.jl")
+    include("tracking/path_info_api.jl")
     include("tracking/valuation.jl")
     include("tracking/endgame_tracker.jl")
     include("solving/group_actions.jl")
