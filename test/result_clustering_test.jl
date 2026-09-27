@@ -59,4 +59,26 @@ using DynamicPolynomials: @polyvar
         @test sort(length.(clusters(twice))) == [1, 1, 2]
         @test all(==(1), multiplicity.(path_results(twice)))
     end
+
+    @testset "a regular path onto a singular root joins its cluster" begin
+        @polyvar x y
+        # (1, 1) is both a total-degree start point and the double root, so one
+        # path never moves and is flagged singular while the other arrives
+        # through the regular tracker without the flag.
+        r = solve(System([(x - 1)^2, y - 1]), TotalDegree(; seed = UInt32(1), show_progress = false))
+        @test count(is_success, path_results(r)) == 2
+        @test sort(length.(clusters(r))) == [2]
+        @test all(is_singular, path_results(r))
+        @test nsingular(r) == 1
+        @test nsolutions(r) == 0
+    end
+
+    @testset "double root at x = 2 forms one cluster" begin
+        @polyvar x y
+        F = System([(x - 2)^2, y - 1])
+        r = solve(F, TotalDegree(; seed = UInt32(1), show_progress = false), Serial())
+        @test all(p -> maximum(abs.(solution(p) .- [2, 1])) < 1.0e-8, path_results(r))
+        @test count(is_success, path_results(r)) == 2
+        @test sort(length.(clusters(r))) == [2]
+    end
 end

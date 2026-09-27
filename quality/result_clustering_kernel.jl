@@ -128,9 +128,9 @@ normalize_clusters(clusters) = sort([sort(c) for c in clusters])
         # …and neither is relabeled singular by the count it did not get.
         @test all(HC.is_nonsingular, Result(regular, 2, UInt32(1)).path_results)
 
-        # One flagged endpoint is not enough; both have to be.
+        # One flagged endpoint is enough to merge the pair.
         half = [regular[1], fake_path_result(near; singular = true)]
-        @test length(first(_cluster_solutions(half, ATOL, RTOL, nothing))) == 2
+        @test length(first(_cluster_solutions(half, ATOL, RTOL, nothing))) == 1
         both = [fake_path_result(copy(s)), fake_path_result(near)]
         @test length(first(_cluster_solutions(both, ATOL, RTOL, nothing))) == 1
     end

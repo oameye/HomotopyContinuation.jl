@@ -24,6 +24,33 @@ include("test_systems.jl")
         @test count(path -> winding_number(path) == 6, path_results(sextic)) >= 4
     end
 
+    @testset "a coordinate that stays constant does not block a double root" begin
+        @polyvar x y
+        # y - 1 is also the total-degree start equation, so y is exactly 1 on
+        # every path and its derivatives vanish identically.
+        for c in (2, 3, -1.5), seed in UInt32.(1:3)
+            for F in (System([(x - c)^2, y - 1]), System([(x - c)^2 + (y - 1), y - 1]))
+                result = solve(F, TotalDegree(; seed = seed, show_progress = false), Serial())
+                @test count(is_success, path_results(result)) == 2
+                @test all(p -> winding_number(p) == 2, path_results(result))
+                @test nsingular(result) == 1
+                @test solution(only(results(result; only_singular = true))) ≈ [c, 1] atol = 1.0e-6
+            end
+        end
+    end
+
+    @testset "double roots are not mistaken for spurious endpoints" begin
+        @polyvar u
+        # At a double root both H and its Jacobian are pure rounding noise, so a
+        # residual measured against the Jacobian row size is noise over noise.
+        for c in (1.5, 3, -1.5, 10, 2 + 1im), seed in UInt32.(1:10)
+            result = solve(System([(u - c)^2]), TotalDegree(; seed = seed, show_progress = false))
+            @test count(is_success, path_results(result)) == 2
+            @test nat_infinity(result) == 0
+            @test nsingular(result) == 1
+        end
+    end
+
     @testset "an invalid singular start never enters the endgame" begin
         @polyvar x y
         G = System([x^2 - 1, y^2 - 1])

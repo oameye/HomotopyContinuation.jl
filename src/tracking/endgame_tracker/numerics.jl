@@ -20,9 +20,6 @@
     return norm_val
 end
 
-# |H_i| against the size the terms of row i reach at this point, so the same
-# threshold works for a system whose Jacobian row sums are O(1) and one where
-# they are O(10^40). A zero row scale leaves the residual unscaled.
 @inline function max_relative_residual(
         r::FSVec{ComplexF64},
         A::FSMat{ComplexF64},
@@ -36,7 +33,7 @@ end
             scale += fast_abs(A[i, j]) * col_scaling[j]
         end
         rᵢ = fast_abs(r[i])
-        worst = @fastmath max(worst, scale > 0.0 ? rᵢ / scale : rᵢ)
+        worst = @fastmath max(worst, rᵢ / max(scale, 1.0))
     end
     return worst
 end
