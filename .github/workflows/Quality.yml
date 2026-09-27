@@ -65,6 +65,7 @@ jobs:
           julia --project=test test/explicit_imports_test.jl
           julia --project=test test/dispatch_doctor_test.jl
           julia --project=test test/instruction_count_test.jl
+          julia --project=test quality/linear_subspace_compiler.jl
       - name: Run numerical kernel contracts
         run: |
           julia --project=test quality/taylor_kernel.jl

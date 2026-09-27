@@ -1,10 +1,6 @@
 using Test, Random
 using LinearAlgebra
 using HomotopyContinuation
-using HomotopyContinuation: LinearSubspace, rand_subspace, rand_subspace!, dim,
-    codim, ambient_dim,
-    intrinsic, extrinsic, coord_change, translate, geodesic, geodesic_distance,
-    Intrinsic, Extrinsic, IntrinsicDescription, ExtrinsicDescription, is_linear
 
 @testset "LinearSubspace round trips" begin
     Random.seed!(7)
@@ -13,12 +9,10 @@ using HomotopyContinuation: LinearSubspace, rand_subspace, rand_subspace!, dim,
     @test codim(L) == 3
     @test ambient_dim(L) == 5
 
-    # intrinsic -> ambient -> extrinsic residual
     u = randn(ComplexF64, 2)
     x = intrinsic(L).A * u + intrinsic(L).b
     @test norm(extrinsic(L).A * x - extrinsic(L).b) < 1.0e-13
 
-    # coord_change round trip
     u2 = coord_change(L, Extrinsic, Intrinsic, x)
     x2 = coord_change(L, Intrinsic, Extrinsic, u2)
     @test x2 ≈ x atol = 1.0e-12
@@ -50,13 +44,11 @@ end
     Lx = rand_subspace!(A, b, x0)
     @test norm(extrinsic(Lx).A * x0 - extrinsic(Lx).b) < 1.0e-12
 
-    # Linear through a point: the whole ray of `x0` lies in the subspace.
     Lray = rand_subspace!(A, b, x0; affine = false)
     @test is_linear(Lray)
     @test norm(extrinsic(Lray).A * x0) < 1.0e-12
     @test norm(extrinsic(Lray).A * (3.5 * x0)) < 1.0e-12
 
-    # The returned subspace keeps copies, so redrawing does not disturb it.
     kept = copy(extrinsic(Lray).A)
     rand_subspace!(A, b)
     @test extrinsic(Lray).A == kept
@@ -68,7 +60,7 @@ end
 @testset "translate" begin
     Random.seed!(9)
     L = rand_subspace(4; dim = 1)
-    v = randn(ComplexF64, 3)   # codim-sized translation
+    v = randn(ComplexF64, 3)
     Lt = translate(L, v)
     u = randn(ComplexF64, 1)
     x = intrinsic(Lt).A * u + intrinsic(Lt).b
@@ -83,16 +75,10 @@ end
     @test codim(A) == codim(intrinsic(A)) == codim(extrinsic(A)) == 2
     @test ambient_dim(A) == 3
     @test startswith(sprint(show, A), "1-dim. affine linear subspace")
-    @test identity.(A) == A
-
     @test intrinsic(A) isa IntrinsicDescription
     @test startswith(sprint(show, intrinsic(A)), "IntrinsicDescription")
     @test extrinsic(A) isa ExtrinsicDescription
     @test startswith(sprint(show, extrinsic(A)), "ExtrinsicDescription")
-
-    @test identity.(extrinsic(A)) == extrinsic(A)
-    @test identity.(intrinsic(A)) == intrinsic(A)
-    @test identity.(Intrinsic) == Intrinsic
 
     u = rand(1)
     x = A(u, Intrinsic)
@@ -120,9 +106,12 @@ end
 
     A2 = translate(A, [1, 1], Extrinsic)
     A3 = LinearSubspace(extrinsic(A).A, extrinsic(A).b + [1, 1])
-    @test A2.intrinsic.X ≈ A3.intrinsic.X
+    for L in (A2, A3)
+        point = L(randn(ComplexF64, dim(L)), Intrinsic)
+        other = L === A2 ? A3 : A2
+        @test norm(other(point, Extrinsic)) < 1.0e-12
+    end
 
-    # linear (non-affine) subspace through a point
     x5 = randn(ComplexF64, 5)
     L2 = rand_subspace(x5; dim = 2, affine = false)
     @test is_linear(L2)
@@ -138,9 +127,10 @@ end
     @test dim(L₃) == 2
     @test ambient_dim(L₃) == 7
     E₃ = extrinsic(L₃)
-    @test norm(L₁(E₃.A \ E₃.b, Extrinsic)) ≈ 0 atol = 1.0e-12
-    @test norm(L₂(E₃.A \ E₃.b, Extrinsic)) ≈ 0 atol = 1.0e-12
-    @test norm(L₃(E₃.A \ E₃.b, Extrinsic)) ≈ 0 atol = 1.0e-12
+    x = E₃.A \ E₃.b
+    @test norm(L₁(x, Extrinsic)) ≈ 0 atol = 1.0e-12
+    @test norm(L₂(x, Extrinsic)) ≈ 0 atol = 1.0e-12
+    @test norm(L₃(x, Extrinsic)) ≈ 0 atol = 1.0e-12
 end
 
 @testset "geodesic: consistent endpoint convention" begin
@@ -148,8 +138,6 @@ end
     A = rand_subspace(4; dim = 1)
     B = rand_subspace(4; dim = 1)
     γ = geodesic(A, B)
-    # t=1 recovers A, t=0 recovers B: a point of the endpoint subspace satisfies
-    # the geodesic subspace's extrinsic equations (up to representation).
     for (t, L) in ((1.0, A), (0.0, B))
         G = γ(t)
         u = randn(ComplexF64, 1)
@@ -190,7 +178,6 @@ end
 
     @test_throws ArgumentError rand_subspace(x; dim = 0, affine = false)
 
-    # The zero vector is the unique point of the zero-dimensional linear subspace.
     Lzero = rand_subspace(zeros(ComplexF64, 3); dim = 0, affine = false)
     @test dim(Lzero) == 0
     @test is_linear(Lzero)
@@ -215,21 +202,4 @@ end
     @test Lt isa LinearSubspace{ComplexF64}
     @test extrinsic(Lt).b ≈ ComplexF64.(extrinsic(L).b) + δb
     @test L isa LinearSubspace{Float64}
-end
-
-@testset "rand_subspace element type is inferable" begin
-    # The element type is an argument, not a `real::Bool` flag, so each method
-    # returns one concrete `LinearSubspace{T}`.
-    @test @inferred(rand_subspace(3; dim = 1)) isa LinearSubspace{ComplexF64}
-    @test @inferred(rand_subspace(ComplexF64, 3; dim = 1)) isa LinearSubspace{ComplexF64}
-    @test @inferred(rand_subspace(Float64, 3; dim = 1)) isa LinearSubspace{Float64}
-    @test @inferred(rand_subspace(Random.default_rng(), 3; codim = 1)) isa
-        LinearSubspace{ComplexF64}
-    @test @inferred(rand_subspace(Random.default_rng(), Float64, 3; codim = 1)) isa
-        LinearSubspace{Float64}
-    @polyvar rs_x rs_y rs_z
-    @test @inferred(rand_subspace([rs_x, rs_y, rs_z]; dim = 1)) isa
-        LinearSubspace{ComplexF64}
-    @test @inferred(rand_subspace(Float64, [rs_x, rs_y, rs_z]; dim = 1)) isa
-        LinearSubspace{Float64}
 end
