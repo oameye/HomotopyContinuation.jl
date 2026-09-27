@@ -51,6 +51,9 @@ using DynamicPolynomials: @polyvar
 
         @test is_failed(invalid)
         @test !is_success(invalid)
+        @test return_code(invalid) ==
+            PathResultCode.PATH_TERMINATED_INVALID_START_SINGULAR_JACOBIAN
+        @test return_code(valid) == PathResultCode.PATH_SUCCESS
         @test start_solution(invalid) == ComplexF64[0, 0]
         @test is_success(valid)
         @test solution(valid) ≈ ComplexF64[2, 3] atol = 1.0e-10

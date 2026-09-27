@@ -38,6 +38,7 @@ include("test_systems.jl")
 
         @test is_failed(path)
         @test !is_success(path)
+        @test return_code(path) == PathResultCode.PATH_TERMINATED_INVALID_START_SINGULAR_JACOBIAN
         @test !is_singular(path) && !is_at_infinity(path)
         @test steps(path) == 0
         @test last_path_point(path) == (ComplexF64[2, 0], 1.0)

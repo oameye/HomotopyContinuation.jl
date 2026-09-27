@@ -244,7 +244,7 @@ end
     @test rejected("@eval HomotopyContinuation f() = 1\n")
     @test rejected("Core.eval(HomotopyContinuation, :(x = 1))\n")
     @test rejected("HomotopyContinuation.eval(:(x = 1))\n")
-    @test rejected("using HomotopyContinuation: HomotopyContinuation as HC\nHC.PathResultCode\n")
+    @test rejected("using HomotopyContinuation: HomotopyContinuation as HC\nHC.TrackerCode\n")
     @test rejected("import HomotopyContinuation as HC\nHC.Tracker\n")
     @test !rejected("using HomotopyContinuation: HomotopyContinuation as HC\nHC.solve\n")
     @test !rejected("@eval f() = 1\ninfo.return_code\n")

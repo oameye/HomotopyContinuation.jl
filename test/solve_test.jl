@@ -36,6 +36,8 @@ include("solution_sets.jl")
         # roots, and the fourth total-degree path diverges.
         @test nsolutions(result) == 3
         @test nat_infinity(result) == 1
+        @test count(r -> return_code(r) == PathResultCode.PATH_SUCCESS, path_results(result)) == 3
+        @test count(r -> return_code(r) == PathResultCode.PATH_AT_INFINITY, path_results(result)) == 1
         for sol in solutions(result)
             @test abs(sol[1]^2 + sol[2] - 1) < 1.0e-6
             @test abs(sol[1] * sol[2] - 0.5) < 1.0e-6

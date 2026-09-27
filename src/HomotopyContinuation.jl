@@ -40,6 +40,7 @@ export solutions, real_solutions, nsolutions, nreal, nsingular, nnonsingular, na
 export nexcess_solutions, nfailed
 export nresults, results, multiplicity
 export is_success, is_singular, is_nonsingular, is_at_infinity, is_real, is_excess_solution
+export return_code, PathResultCode
 export is_failed, is_finite
 export AbstractResult, AbstractSolutionResult
 export TotalDegree, Polyhedral, Result, PathResult, paths_to_track, mixed_volume
@@ -69,7 +70,7 @@ export IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy, set_subspaces!
 export AffineChartHomotopy, on_affine_chart, with_linear_subspace_homotopy
 export find_start_pair, StartPair, is_parameterized
 export verify_solution_completeness, Completeness
-export MonodromyOptions, MonodromyResult, MonodromyCode, return_code, is_heuristic_stop, permutations, trace
+export MonodromyOptions, MonodromyResult, MonodromyCode, is_heuristic_stop, permutations, trace
 export ReuseLoops, DuplicateCheck, ncertified_distinct, ndiscarded_uncertified
 export independent_normal, weighted_normal
 # Witness sets / numerical irreducible decomposition
