@@ -14,7 +14,7 @@ using DynamicPolynomials: @polyvar
             ]
         )
         r = solve(F, Polyhedral(; seed = UInt32(42), show_progress = false))
-        @test r.tracked_paths == 16
+        @test ntracked(r) == 16
         @test count(is_success, path_results(r)) >= 14
         @test nresults(r) > 0
         for p in path_results(r)

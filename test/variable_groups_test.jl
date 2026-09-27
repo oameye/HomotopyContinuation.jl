@@ -60,7 +60,7 @@ run_td(F, seed_value, exec = Serial()) =
         @test paths_to_track(grouped) == 2
         for F in (plain, grouped, projective, overdetermined)
             alg = TotalDegree(; seed = UInt32(5), show_progress = false)
-            @test paths_to_track(F, alg) == solve(F, alg, Serial()).tracked_paths
+            @test paths_to_track(F, alg) == ntracked(solve(F, alg, Serial()))
         end
     end
 
@@ -69,8 +69,8 @@ run_td(F, seed_value, exec = Serial()) =
         F = System([x * y - 2, x^2 - 4]; variable_groups = [[x], [y]])
         grouped = run_td(F, 5)
         plain = run_td(System([x * y - 2, x^2 - 4]), 5)
-        @test grouped.tracked_paths == 2
-        @test plain.tracked_paths == 4
+        @test ntracked(grouped) == 2
+        @test ntracked(plain) == 4
         @test nsolutions(grouped) == nsolutions(plain) == 2
         @test same_points(solutions(grouped), solutions(plain))
 
@@ -78,7 +78,7 @@ run_td(F, seed_value, exec = Serial()) =
             [(x^2 - 4) * (x * y - 2), x * y - 2, x^2 - 4]; variable_groups = [[x], [y]],
         )
         result = run_td(overdetermined, 5)
-        @test result.tracked_paths == 5
+        @test ntracked(result) == 5
         @test nsolutions(result) == 2
         @test nexcess_solutions(result) == 2
         @test same_points(solutions(result), solutions(grouped))
@@ -89,7 +89,7 @@ run_td(F, seed_value, exec = Serial()) =
         groups = [[1, 2], [3, 4]]
         F = System([x * y - 2v * w, x^2 - 4 * v^2]; variable_groups = [[x, v], [y, w]])
         reference = run_td(F, 5)
-        @test reference.tracked_paths == 2
+        @test ntracked(reference) == 2
         @test nsolutions(reference) == 2
         for s in solutions(reference)
             @test abs(s[1] * s[3] - 2s[2] * s[4]) < 1.0e-8
@@ -111,7 +111,7 @@ run_td(F, seed_value, exec = Serial()) =
             variable_groups = [[x, v], [y, w]],
         )
         result = run_td(overdetermined, 5)
-        @test result.tracked_paths == 5
+        @test ntracked(result) == 5
         @test nsolutions(result) == 2
         @test nexcess_solutions(result) == 2
         for s in solutions(result)
@@ -127,7 +127,7 @@ run_td(F, seed_value, exec = Serial()) =
         plain = System(polys)
         rg = run_td(grouped, 4)
         rp = run_td(plain, 4)
-        @test rg.tracked_paths == rp.tracked_paths == 4
+        @test ntracked(rg) == ntracked(rp) == 4
         @test nsolutions(rg) == nsolutions(rp) == 4
         @test same_group_points(solutions(rg), solutions(rp), [[1, 2, 3]])
     end
@@ -141,7 +141,7 @@ run_td(F, seed_value, exec = Serial()) =
         G = fix_parameters(F, [2.0])
         @test variable_groups(G) == [[1, 2], [3, 4]]
         result = run_td(G, 5)
-        @test result.tracked_paths == 2
+        @test ntracked(result) == 2
         @test nsolutions(result) == 2
     end
 

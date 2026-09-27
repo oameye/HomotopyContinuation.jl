@@ -13,6 +13,18 @@ function rand_poly(vars, d::Int; homogeneous::Bool = false)
     return sum(randn(ComplexF64) * m for m in mons)
 end
 
+function toric_ed_raw_system()
+    A = [3 2 1 0; 0 1 2 3]
+    d, n = size(A)
+    @polyvar tv[1:d] yv[1:n] uv[1:n]
+    φ = [prod(tv[i]^A[i, j] for i in 1:d) for j in 1:n]
+    Dφ = [differentiate(φ[j], tv[i]) for j in 1:n, i in 1:d]
+    return System(
+        [φ .+ yv .- uv; transpose(Dφ) * yv];
+        variables = [tv; yv], parameters = uv,
+    )
+end
+
 @testset "toric ED: Monodromy options" begin
     F, uv = toric_ed_system()
 
@@ -34,16 +46,20 @@ end
     @test isempty(multiplicities(solutions(r)))
     @test isempty(sprint(show, r)) == false
 
-    # seed reproducibility: identical loop counts
+    # Same seed and serial execution reproduce the public solution sequence.
     r2 = solve(
         F,
         Monodromy(;
-            target_solutions_count = 21, max_loops_no_progress = 50, seed = r.seed,
+            target_solutions_count = 21, max_loops_no_progress = 50, seed = seed(r),
             show_progress = false,
         ),
         Serial(),
     )
-    @test r2.statistics.tracked_loops[] == r.statistics.tracked_loops[]
+    @test seed(r2) == seed(r)
+    @test length(solutions(r2)) == length(solutions(r))
+    @test all(zip(solutions(r2), solutions(r))) do (x, y)
+        maximum(abs.(x .- y)) < 1.0e-12
+    end
 
     # threading
     rt = solve(
@@ -88,9 +104,9 @@ end
     )
     @test nsolutions(r) == 21
 
-    # raw polynomial input with explicit parameters
+    # raw polynomial construction with explicit parameters
     r = solve(
-        System(collect(F.polys); parameters = collect(uv)),
+        toric_ed_raw_system(),
         [x₀],
         p₀,
         Monodromy(;
