@@ -4,7 +4,7 @@
 using Test
 using HomotopyContinuation
 using HomotopyContinuation: TotalDegree, Polyhedral, Result, PathResult,
-    PathResultCode, TrackerOptions, EndgameOptions,
+    TrackerOptions, EndgameOptions,
     solutions, real_solutions, nsolutions, nreal, nresults, results,
     nsingular, nnonsingular, nat_infinity, multiplicity,
     is_success, is_real, is_singular, paths_to_track, mixed_volume, @var
