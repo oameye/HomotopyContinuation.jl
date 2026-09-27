@@ -31,11 +31,19 @@ same_group_points(a, b, groups) =
 run_td(F, seed, exec = Serial()) =
     solve(F, TotalDegree(; seed = UInt32(seed), show_progress = false), exec)
 
-function quality_multi_bezout_count(D, k)
-    assignments = _bezout_assignments(D, k)
-    return sum(assignments; init = 0) do assignment
-        prod(i -> D[assignment[i], i], eachindex(assignment); init = 1)
+function quality_multi_bezout_count(D::Matrix{Int}, k::Vector{Int})::Int
+    terms = Dict(zeros(Int, length(k)) => 1)
+    for i in axes(D, 2)
+        expanded = Dict{Vector{Int}, Int}()
+        for (exponents, coefficient) in terms, j in eachindex(k)
+            exponents[j] < k[j] || continue
+            raised = copy(exponents)
+            raised[j] += 1
+            expanded[raised] = get(expanded, raised, 0) + coefficient * D[j, i]
+        end
+        terms = expanded
     end
+    return get(terms, k, 0)
 end
 
 @testset "Variable groups" begin
@@ -83,6 +91,15 @@ end
         @test quality_multi_bezout_count(reshape([2, 3, 4], 1, 3), [3]) == 24
         # An equation of degree zero in every group cannot be assigned.
         @test quality_multi_bezout_count([1 0; 1 0], [1, 1]) == 0
+        # The production assignment enumeration weighs to the same count.
+        rng = MersenneTwister(0x0b32)
+        for (k, n) in (([1, 2], 3), ([2, 1, 1], 4), ([1, 1, 1, 1], 4))
+            D = rand(rng, 0:3, length(k), n)
+            weighted = sum(_bezout_assignments(D, k); init = 0) do assignment
+                prod(i -> D[assignment[i], i], eachindex(assignment); init = 1)
+            end
+            @test weighted == quality_multi_bezout_count(D, k)
+        end
     end
 
     @testset "paths_to_track" begin

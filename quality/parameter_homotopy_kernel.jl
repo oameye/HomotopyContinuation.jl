@@ -53,7 +53,7 @@ using DynamicPolynomials: @polyvar, subs, differentiate
                 tv.data[1, :] .= ComplexF64.(xv)
                 taylor!(u, Val(k), H, tv, ComplexF64(t0))
             end
-            @test u ≈ expected atol = 1.0e-11
+            @test u ≈ expected atol = (k == 1 ? 1.0e-12 : 1.0e-11)
         end
     end
 

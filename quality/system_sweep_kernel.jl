@@ -1,4 +1,5 @@
 using Test, Random
+import HomotopyContinuation as HC
 using HomotopyContinuation: System, CompileMode, HomotopyEvaluator,
     StraightLineHomotopy, evaluate!, evaluate_and_jacobian!, taylor!,
     TaylorVector, ComplexDF64, FSVec, FSMat, _total_degree_startevaluator
@@ -8,6 +9,7 @@ using MultivariatePolynomials: MultivariatePolynomials as MP
 include("../test/test_systems.jl")
 # Data for the collection's `minors` entry, which only this sweep builds.
 include("../test/minors_polys.jl")
+include("cauchy_oracle.jl")
 
 const MODES = (CompileMode.INTERPRETED, CompileMode.COMPILED, CompileMode.COMPILED_ALL)
 
@@ -154,5 +156,72 @@ const SQUARE_SYSTEMS = filter(t -> length(t[2]) == length(t[3]), TEST_SYSTEMS)
         fill!(u, 0)
         taylor!(u, Val(K), He, taylor_vector(X[1:(K + 1), :]), ComplexF64(t))
         @test u ≈ h_taylor(K) rtol = 1.0e-9
+    end
+end
+
+# Real, order-one points keep every entry clear of its poles and branch cuts, and
+# `ref` is the plain-arithmetic reference each collection entry carries.
+@testset "Non-polynomial Taylor sweep: $name" for (name, exprs, vars, params, ref) in
+    NONPOLYNOMIAL_SYSTEM_COLLECTION
+
+    rng = MersenneTwister(0x00e8b1a5 + length(name))
+    m, n, r = length(exprs), length(vars), length(params)
+    X = vcat(ComplexF64.(0.7 .+ rand(rng, 1, n)), 0.15 .* randn(rng, ComplexF64, 3, n))
+    P = vcat(ComplexF64.(0.7 .+ rand(rng, 1, r)), 0.15 .* randn(rng, ComplexF64, 3, r))
+    pvals = P[1, :]
+    at(C, λ) = [sum(C[k + 1, i] * λ^k for k in 0:3) for i in axes(C, 2)]
+
+    truth_const = cauchy_coefficients(λ -> ref(at(X, λ), pvals), 3; M = 128, r = 0.05)
+    truth_series = cauchy_coefficients(λ -> ref(at(X, λ), at(P, λ)), 3; M = 128, r = 0.05)
+
+    @testset "$mode" for mode in MODES
+        S = System(exprs; variables = vars, parameters = params, compile = mode).evaluator
+        u = FSVec{ComplexF64}(zeros(ComplexF64, m))
+        @testset "taylor! K=$K" for K in 1:3
+            tx = taylor_vector(X[1:(K + 1), :])
+            fill!(u, 0)
+            taylor!(u, Val(K), S, tx, FSVec{ComplexF64}(pvals))
+            @test u ≈ truth_const[K + 1] atol = 1.0e-7
+
+            if r > 0
+                fill!(u, 0)
+                taylor!(u, Val(K), S, tx, taylor_vector(P[1:(K + 1), :]))
+                @test u ≈ truth_series[K + 1] atol = 1.0e-7
+            end
+        end
+    end
+end
+
+# H(x,t) = γ·t·G(x) + (1-t)·F(x) with F non-polynomial and its parameters substituted.
+@testset "Non-polynomial StraightLineHomotopy Taylor sweep: $name" for
+    (name, exprs, vars, params, ref) in NONPOLYNOMIAL_SYSTEM_COLLECTION
+
+    rng = MersenneTwister(0x00c0ffee + length(name))
+    m, n, r = length(exprs), length(vars), length(params)
+    pvals = ComplexF64.(0.7 .+ rand(rng, r))
+    target = r == 0 ? collect(exprs) : HC.subs(exprs, params => pvals)
+    start = [sum(vars) - i for i in 1:m]
+    γ = ComplexF64(cis(2π * 0.3))
+    t = 0.37 + 0.21im
+    X = vcat(ComplexF64.(0.7 .+ rand(rng, 1, n)), 0.15 .* randn(rng, ComplexF64, 3, n))
+    x0 = X[1, :]
+    at(λ) = [sum(X[k + 1, i] * λ^k for k in 0:3) for i in 1:n]
+    href(z, s) = γ * s .* ComplexF64[sum(z) - i for i in 1:m] .+ (1 - s) .* ref(z, pvals)
+    truth = cauchy_coefficients(λ -> href(at(λ), t + λ), 3; M = 128, r = 0.05)
+
+    @testset "$mode" for mode in MODES
+        G = System(start; variables = vars, compile = mode)
+        F = System(target; variables = vars, compile = mode)
+        He = HomotopyEvaluator(StraightLineHomotopy(G.evaluator, F.evaluator; γ = γ))
+        u = FSVec{ComplexF64}(zeros(ComplexF64, m))
+
+        taylor!(u, Val(1), He, FSVec{ComplexF64}(x0), ComplexF64(t))
+        @test u ≈ href(x0, t + 1) .- href(x0, t) rtol = 1.0e-10
+
+        @testset "taylor! K=$K" for K in 2:3
+            fill!(u, 0)
+            taylor!(u, Val(K), He, taylor_vector(X[1:(K + 1), :]), ComplexF64(t))
+            @test u ≈ truth[K + 1] atol = 1.0e-7
+        end
     end
 end

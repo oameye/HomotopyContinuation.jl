@@ -71,6 +71,7 @@ jobs:
       - name: Run numerical kernel contracts
         run: |
           julia --project=test quality/taylor_kernel.jl
+          julia --project=test quality/double_f64_kernel.jl
           julia --project=test quality/linear_algebra_kernel.jl
           julia --project=test quality/randomized_system_kernel.jl
           julia --project=test quality/norms_kernel.jl
