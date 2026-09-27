@@ -14,23 +14,27 @@ function same_path_semantics(a, b)
     seed(a) == seed(b) || return false
 
     for (u, v) in zip(pa, pb)
+        sprint(show, MIME("text/plain"), u) == sprint(show, MIME("text/plain"), v) ||
+            return false
         path_number(u) == path_number(v) || return false
         is_success(u) == is_success(v) || return false
         is_finite(u) == is_finite(v) || return false
         is_at_infinity(u) == is_at_infinity(v) || return false
         is_excess_solution(u) == is_excess_solution(v) || return false
+        is_singular(u) == is_singular(v) || return false
+        is_real(u) == is_real(v) || return false
+        winding_number(u) == winding_number(v) || return false
+        multiplicity(u) == multiplicity(v) || return false
         steps(u) == steps(v) || return false
         accepted_steps(u) == accepted_steps(v) || return false
         rejected_steps(u) == rejected_steps(v) || return false
-        length(solution(u)) == length(solution(v)) || return false
-        length(start_solution(u)) == length(start_solution(v)) || return false
-        maximum(abs.(solution(u) .- solution(v)); init = 0.0) < 1.0e-10 || return false
-        maximum(abs.(start_solution(u) .- start_solution(v)); init = 0.0) < 1.0e-12 || return false
-        if isfinite(residual(u)) && isfinite(residual(v))
-            isapprox(residual(u), residual(v); rtol = 1.0e-9, atol = 1.0e-12) || return false
-        else
-            isequal(residual(u), residual(v)) || return false
-        end
+        isequal(solution(u), solution(v)) || return false
+        isequal(start_solution(u), start_solution(v)) || return false
+        isequal(last_path_point(u), last_path_point(v)) || return false
+        isequal(accuracy(u), accuracy(v)) || return false
+        isequal(residual(u), residual(v)) || return false
+        isequal(condition_jacobian(u), condition_jacobian(v)) || return false
+        isequal(valuation(u), valuation(v)) || return false
     end
     return true
 end
@@ -43,8 +47,7 @@ function same_sweep_semantics(a, b)
     return all(same_path_semantics(_entry_result(a[k]), _entry_result(b[k])) for k in eachindex(a))
 end
 
-same_points(a, b; tol = 1.0e-8) =
-    length(a) == length(b) && all(u -> any(v -> maximum(abs.(u .- v)) < tol, b), a)
+include("solution_sets.jl")
 
 @testset "Distributed executor public behavior" begin
     @polyvar x y z a b
@@ -119,6 +122,10 @@ same_points(a, b; tol = 1.0e-8) =
                     System([u * s - 2, u^2 - 4]; variable_groups = [[u], [s]]),
                     System(
                         [u * s - 2v * t, u^2 - 4 * v^2];
+                        variable_groups = [[u, v], [s, t]],
+                    ),
+                    System(
+                        [(u^2 - 4 * v^2) * (u * s - v * t), u * s - v * t, u^2 - v^2];
                         variable_groups = [[u, v], [s, t]],
                     ),
                 )
@@ -246,8 +253,11 @@ same_points(a, b; tol = 1.0e-8) =
 
             for exec in (DistributedExecutor(), DistributedExecutor(; batch_size = 1), lockstep)
                 r = solve(G, Monodromy(; opts...), exec)
+                @test return_code(r) == return_code(serial)
+                @test is_success(r) == is_success(serial)
+                @test is_heuristic_stop(r) == is_heuristic_stop(serial)
                 @test nsolutions(r) == 4
-                @test same_points(solutions(serial), solutions(r))
+                @test same_solution_set(solutions(serial), solutions(r))
             end
 
             rperm = solve(
@@ -281,6 +291,8 @@ same_points(a, b; tol = 1.0e-8) =
                 DistributedExecutor(),
             )
             @test !is_success(timed)
+            @test !is_heuristic_stop(timed)
+            @test return_code(timed) == MonodromyCode.TIMEOUT
         end
 
         @testset "public error reporting" begin

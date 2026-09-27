@@ -1,17 +1,17 @@
 using Test, Random
 import HomotopyContinuation as HC
-using HomotopyContinuation: System, fix_parameters, evaluate!, evaluate_and_jacobian!, taylor!,
+using HomotopyContinuation: System, evaluate!, evaluate_and_jacobian!, taylor!,
     TaylorVector, ComplexDF64, FSVec, FSMat, nparameters
 using DynamicPolynomials: @polyvar
 using MultivariatePolynomials: MultivariatePolynomials as MP
 
 @testset "Fixed-parameter evaluator kernel" begin
     Random.seed!(0x1f3a55c1)
-    @polyvar x y a b
+    @polyvar x y a b λ
     polys = [x^2 + a * y^2 - b, x * y^3 - a * b + 2]
     pvals = ComplexF64[1.7 - 0.4im, 2.3]
     F = System(polys; variables = [x, y], parameters = [a, b])
-    G = fix_parameters(F, pvals)
+    substituted = [MP.subs(f, [a, b] => pvals) for f in polys]
 
     empty_p = FSVec{ComplexF64}(ComplexF64[])
     xvals = randn(ComplexF64, 2)
@@ -56,8 +56,8 @@ using MultivariatePolynomials: MultivariatePolynomials as MP
             taylor!(u, Val(K), bound, tx, TaylorVector{K + 1, ComplexF64}(0))
         end
 
-        expected = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-        taylor!(expected, Val(K), G.evaluator, tx, empty_p)
+        series = [sum(tx.data[k + 1, j] * λ^k for k in 0:K) for j in 1:2]
+        expected = [ComplexF64(MP.coefficient(f([x, y] => series), λ^K)) for f in substituted]
         @test u ≈ expected rtol = 1.0e-10
     end
 end

@@ -92,6 +92,16 @@ end
         @test !occursin("⋮", sprint(path_table, long))
     end
 
+    @testset "a path stopped by the step limit is not a success" begin
+        capped = path_info(
+            parameter_homotopy(), [1.0, 1.0], 1.0, 0.0;
+            tracker_options = TrackerOptions(; max_step_size = 0.01, max_steps = 5),
+        )
+        @test !is_success(capped)
+        @test steps(capped) <= 5
+        @test occursin("TERMINATED_MAX_STEPS", sprint(show, capped))
+    end
+
     @testset "tracking the same path twice gives the same table" begin
         again = path_info(parameter_homotopy(), [1.0, 1.0], 1.0, 0.0)
         @test map(step -> step.s, again) == map(step -> step.s, info)

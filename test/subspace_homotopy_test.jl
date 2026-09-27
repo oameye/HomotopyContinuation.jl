@@ -20,10 +20,7 @@ function exact_quadric_slice_points(L)
     return [vec(A .* u .+ b) for u in ((-β + Δ) / (2α), (-β - Δ) / (2α))]
 end
 
-function same_solution_set(a, b; atol = 1.0e-8)
-    length(a) == length(b) || return false
-    return all(x -> any(y -> isapprox(x, y; atol), b), a)
-end
+include("solution_sets.jl")
 
 @testset "Subspace homotopy through public continuation" begin
     @testset "intrinsic and extrinsic coordinates track exact witness points" begin
@@ -78,6 +75,48 @@ end
             @test nsolutions(result) == 2
             @test same_solution_set(solutions(result), expected)
             @test all(x -> norm(extrinsic(W).A * x - extrinsic(W).b) < 1.0e-9, solutions(result))
+        end
+    end
+
+    @testset "perpendicular subspaces (geodesic angle π/2)" begin
+        @polyvar x y w
+        p = (x * y - x^2) + 1 - w
+        q = x^4 + x^2 - y - 1
+        f = [
+            p * q * (x - 3) * (x - 5),
+            p * q * (y - 3) * (y - 5),
+            p * (w - 3) * (w - 5),
+        ]
+        # Subspace tracking needs a square system, so two fixed random
+        # combinations of f stand in for it. Every fᵢ vanishes on the curve
+        # C = {q = 0, w = 3}, so C remains a component of V(g).
+        g = [f[1] + (0.3 + 0.7im) * f[3], f[2] - (1.1 - 0.2im) * f[3]]
+        G = System(g; variables = [x, y, w])
+        at(h, v) = h(x => v[1], y => v[2], w => v[3])
+
+        L1 = LinearSubspace(reshape([1.0, 0.0, 0.0], 1, 3), [1.0])
+        L2 = LinearSubspace(reshape([-1.0, 1.0, 0.0], 1, 3), [1.0])
+        @test geodesic_distance(L1, L2) ≈ π / 2
+
+        # (1, 1, 3) ∈ C ∩ {x = 1}, where p = -2 ≠ 0 and the Jacobian of g
+        # restricted to {x = 1} is regular.
+        start = ComplexF64[1, 1, 3]
+        @test all(h -> at(h, start) == 0, f)
+
+        for coords in (SubspaceCoords.INTRINSIC, SubspaceCoords.EXTRINSIC)
+            result = solve(
+                G, [start], L1, L2,
+                Continuation(; coords, seed = UInt32(0x90), show_progress = false),
+                Serial(),
+            )
+            @test nfailed(result) == 0
+            @test nsolutions(result) == 1
+            endpoint = only(solutions(result))
+            @test maximum(h -> abs(at(h, endpoint)), f) < 1.0e-8
+            @test norm(extrinsic(L2).A * endpoint - extrinsic(L2).b) < 1.0e-10
+            # The path stays on C: C ∩ L2 is x⁴ + x² - x - 2 = 0, w = 3.
+            @test abs(at(q, endpoint)) < 1.0e-8
+            @test abs(endpoint[3] - 3) < 1.0e-8
         end
     end
 end

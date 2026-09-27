@@ -2,18 +2,12 @@
     iterator(H::AbstractHomotopy, x₀, t₁ = 1.0, t₀ = 0.0;
              tracker_options = TrackerOptions()) -> PathIterator
 
-Public single-path iterator for an `AbstractHomotopy`. A private tracker is built
-internally, so callers do not need to construct `Tracker` or `HomotopyEvaluator`.
+Iterate over the accepted steps of the path of `H` starting at `x₀` from `t₁` to
+`t₀`, yielding the tuple `(x, t)` in each iteration. `t` is a `Float64` when `t₁`
+and `t₀` are both real and a `ComplexF64` otherwise. The first iteration yields
+the start point; iteration ends at the target or as soon as the path fails.
 `tracker_options` configures the predictor-corrector path tracker.
 """
-function _path_iterator(
-        tracker::Tracker, x₀::AbstractVector{<:Number},
-        t₁::ComplexF64, t₀::ComplexF64, ::Type{T},
-    )::PathIterator{T} where {T <: Union{Float64, ComplexF64}}
-    init!(tracker, x₀, t₁, t₀)
-    return PathIterator{T}(tracker)
-end
-
 function iterator(
         H::AbstractHomotopy, x₀::AbstractVector{<:Number},
         t₁::Real = 1.0, t₀::Real = 0.0;
@@ -36,12 +30,20 @@ function iterator(
     )
 end
 
+function _path_iterator(
+        tracker::Tracker, x₀::AbstractVector{<:Number},
+        t₁::ComplexF64, t₀::ComplexF64, ::Type{T},
+    )::PathIterator{T} where {T <: Union{Float64, ComplexF64}}
+    init!(tracker, x₀, t₁, t₀)
+    return PathIterator{T}(tracker)
+end
+
 """
     path_info(H::AbstractHomotopy, x₀, t₁ = 1.0, t₀ = 0.0;
               tracker_options = TrackerOptions()) -> PathInfo
 
-Track one path of `H` and record every attempted step. The tracker is constructed
-internally; `tracker_options` exposes the same path-tracking controls used by the
+Track one path of `H` from `t₁` to `t₀` and record every attempted step.
+`tracker_options` exposes the same path-tracking controls used by the
 continuation algorithms.
 """
 function path_info(

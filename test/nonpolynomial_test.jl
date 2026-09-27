@@ -21,10 +21,7 @@ function finite_difference_jacobian(f, x; h = 1.0e-6)
     return J
 end
 
-function same_solution_set(a, b; atol = 1.0e-7)
-    length(a) == length(b) || return false
-    return all(sa -> any(sb -> maximum(abs.(sa .- sb)) < atol, b), a)
-end
+include("solution_sets.jl")
 
 @testset "non-polynomial systems through the public API" begin
     @testset "analytic system collection: $name" for (name, exprs, vars, params, reference) in
@@ -266,13 +263,13 @@ end
         polynomial_system = System([u^2 + v - 1, u + v^2 - 1])
         expr_result = solve(expression_system, Polyhedral(; show_progress = false), Serial())
         poly_result = solve(polynomial_system, Polyhedral(; show_progress = false), Serial())
-        @test same_solution_set(solutions(expr_result), solutions(poly_result))
+        @test same_solution_set(solutions(expr_result), solutions(poly_result); atol = 1.0e-7)
 
         sparse = System([x^3 * y^2 - 3, x^2 * y^3 - 5]; variables = [x, y])
         polyhedral = solve(sparse, Polyhedral(; show_progress = false), Serial())
         total_degree = solve(sparse, TotalDegree(; show_progress = false), Serial())
         @test nsolutions(polyhedral) == 5
-        @test same_solution_set(solutions(polyhedral), solutions(total_degree))
+        @test same_solution_set(solutions(polyhedral), solutions(total_degree); atol = 1.0e-7)
     end
 
     @testset "overdetermined expression system is squared up correctly" begin
@@ -283,7 +280,8 @@ end
         @test nsolutions(result) == 2
         @test same_solution_set(
             solutions(result),
-            [ComplexF64[root, root], ComplexF64[-root, -root]],
+            [ComplexF64[root, root], ComplexF64[-root, -root]];
+            atol = 1.0e-7,
         )
     end
 
@@ -301,7 +299,7 @@ end
             fix_parameters(G, [2.0]), L,
             TotalDegree(; show_progress = false), Serial(),
         )
-        @test same_solution_set(solutions(expr_result), solutions(poly_result))
+        @test same_solution_set(solutions(expr_result), solutions(poly_result); atol = 1.0e-7)
 
         H = fix_parameters(
             System([a / x + y - 2]; variables = [x, y], parameters = [a]),

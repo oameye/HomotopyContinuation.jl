@@ -129,8 +129,7 @@ using LinearAlgebra: norm
         @test length(prs) == 2
         # Only the selected start solutions were tracked.
         @test [path_number(pr) for pr in prs] == [1, 4]
-        @test [start_solution(pr) for pr in prs] ==
-            [cache.start_solutions[1], cache.start_solutions[4]]
+        @test [start_solution(pr) for pr in prs] == start_solutions(ri)[[1, 4]]
 
         @test_throws ArgumentError ResultIterator(cache, BitVector([true, false]))
     end

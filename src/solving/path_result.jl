@@ -70,6 +70,16 @@ _certified_endpoint(r::PathResult, e::CertifiedEndpoint)::PathResult = _with_fie
 is_success(r::PathResult)::Bool = r.return_code == PathResultCode.PATH_SUCCESS
 
 """
+    return_code(r::PathResult)::PathResultCode.T
+
+Return how the path ended: `PathResultCode.PATH_SUCCESS`, `PATH_AT_INFINITY`,
+`PATH_AT_ZERO`, `PATH_EXCESS_SOLUTION`, or one of the `PATH_TERMINATED_*` codes
+for a failed path (`ACCURACY`, `ILL_CONDITIONED`, `MAX_STEPS`, `STEP_SIZE`,
+`INVALID_START`, `INVALID_START_SINGULAR_JACOBIAN`).
+"""
+return_code(r::PathResult)::PathResultCode.T = r.return_code
+
+"""
     is_singular(r::PathResult)
 
 `true` if the path succeeded and its endpoint is a multiple root, or is too

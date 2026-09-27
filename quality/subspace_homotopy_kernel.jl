@@ -9,20 +9,19 @@ const QUADRIC = HC.System(
     variables = z,
 )
 
-function taylor_oracle(H, x::Vector{ComplexF64}, t0::ComplexF64, K::Int; r = 0.1, n = 64)
-    m = size(H)[1]
-    u = HC.FSVec{ComplexF64}(zeros(ComplexF64, m))
+include("cauchy_oracle.jl")
+
+function taylor_oracle(H, x::Vector{ComplexF64}, t0::ComplexF64, K::Int)
+    u = HC.FSVec{ComplexF64}(zeros(ComplexF64, size(H)[1]))
     xf = HC.FSVec{ComplexF64}(x)
-    vals = Matrix{ComplexF64}(undef, m, n)
-    for k in 0:(n - 1)
-        HC.evaluate!(u, H, xf, t0 + r * cis(2π * k / n))
-        vals[:, k + 1] .= Vector(u)
-    end
-    return [
-        sum(vals[i, k + 1] * cis(-2π * k * K / n) for k in 0:(n - 1)) / (n * r^K)
-            for i in 1:m
-    ]
+    return cauchy_coefficients(K) do λ
+        HC.evaluate!(u, H, xf, t0 + λ)
+        Vector(u)
+    end[K + 1]
 end
+
+geodesic_basis(path, t) =
+    path.Q_cos .* transpose(cos.(t .* path.Θ)) .+ path.Q .* transpose(sin.(t .* path.Θ))
 
 function taylor_constant_path(H, ::Val{K}, x::Vector{ComplexF64}, t0::ComplexF64) where {K}
     m, n = size(H)
@@ -68,9 +67,6 @@ end
         B = HC.rand_subspace(4; codim = 2)
         H = HC.ExtrinsicSubspaceHomotopy(F, A, B; gamma = one(ComplexF64))
 
-        Q, Q_cos, Θ = H.path.Q, H.path.Q_cos, H.path.Θ
-        γ_at(t) = Q_cos .* transpose(cos.(t .* Θ)) .+ Q .* transpose(sin.(t .* Θ))
-
         xv = randn(ComplexF64, 4)
         xf = HC.FSVec{ComplexF64}(xv)
         value = HC.FSVec{ComplexF64}(zeros(ComplexF64, 4))
@@ -78,7 +74,7 @@ end
             HC.evaluate!(value, H, xf, ComplexF64(t))
             expected = [
                 [ComplexF64(f(x => xv)) for f in polys]
-                transpose(γ_at(t)) * xv .- (t .* H.a0 .+ (1 .- t) .* H.b0)
+                transpose(geodesic_basis(H.path, t)) * xv .- (t .* H.a0 .+ (1 .- t) .* H.b0)
             ]
             @test Vector(value) ≈ expected rtol = 1.0e-12
         end
@@ -87,12 +83,12 @@ end
         jacobian = HC.FSMat{ComplexF64}(zeros(ComplexF64, 4, 4))
         HC.evaluate_and_jacobian!(value, jacobian, H, xf, ComplexF64(t))
         JF = [ComplexF64(differentiate(f, xj)(x => xv)) for f in polys, xj in x]
-        @test Matrix(jacobian) ≈ [JF; transpose(γ_at(t))] rtol = 1.0e-12
+        @test Matrix(jacobian) ≈ [JF; transpose(geodesic_basis(H.path, t))] rtol = 1.0e-12
 
         t0 = complex(0.42)
-        first = HC.FSVec{ComplexF64}(zeros(ComplexF64, 4))
-        HC.taylor!(first, Val(1), H, xf, t0)
-        @test Vector(first) ≈ taylor_oracle(H, xv, t0, 1) rtol = 1.0e-9
+        tangent = HC.FSVec{ComplexF64}(zeros(ComplexF64, 4))
+        HC.taylor!(tangent, Val(1), H, xf, t0)
+        @test Vector(tangent) ≈ taylor_oracle(H, xv, t0, 1) rtol = 1.0e-9
         @test taylor_constant_path(H, Val(2), xv, t0) ≈
             taylor_oracle(H, xv, t0, 2) rtol = 1.0e-8
         @test taylor_constant_path(H, Val(3), xv, t0) ≈
@@ -105,11 +101,9 @@ end
         W = HC.rand_subspace(3; dim = 1)
         H = HC.IntrinsicSubspaceHomotopy(QUADRIC.evaluator, V, W; gamma = one(ComplexF64))
 
-        Q, Q_cos, Θ = H.path.Q, H.path.Q_cos, H.path.Θ
-        γ_at(t) = Q_cos .* transpose(cos.(t .* Θ)) .+ Q .* transpose(sin.(t .* Θ))
         b_target = copy(HC.intrinsic(H.target).b)
         a_minus_b = copy(H.a_minus_b)
-        ambient(v, t) = γ_at(t) * v .+ b_target .+ t .* a_minus_b
+        ambient(v, t) = geodesic_basis(H.path, t) * v .+ b_target .+ t .* a_minus_b
 
         v = randn(ComplexF64, 1)
         value = HC.FSVec{ComplexF64}(zeros(ComplexF64, 1))
