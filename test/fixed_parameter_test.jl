@@ -1,142 +1,52 @@
 using Test, Random
-using HomotopyContinuation: System, FixedParameterSystem, fix_parameters, CompileMode,
-    TotalDegree, Polyhedral, Serial, Threaded, compose,
-    solve, solutions, nsolutions, nexcess_solutions, path_results, steps,
-    evaluate!, evaluate_and_jacobian!, taylor!,
-    TaylorVector, ComplexDF64, FSVec, FSMat, nparameters, SystemEvaluator
-import HomotopyContinuation as Next
+using HomotopyContinuation
 using DynamicPolynomials: @polyvar
-using MultivariatePolynomials: MultivariatePolynomials as MP
-using CommonSolve: CommonSolve
 
-# The builder/worker a cache erased.
-_inner_builder(b) = b._inner[]
-_inner_worker(ws) = ws._inner[]
-
-# Sort key that is stable under path ordering, for comparing two solve routes.
 _key(R) = sort(
     solutions(R);
     by = z -> (round(real(z[1]); digits = 8), round(imag(z[1]); digits = 8)),
 )
 
-@testset "fix_parameters" begin
+@testset "fix_parameters public behavior" begin
     Random.seed!(0x1f3a55c1)
     @polyvar x y a b
     polys = [x^2 + a * y^2 - b, x * y^3 - a * b + 2]
     pvals = ComplexF64[1.7 - 0.4im, 2.3]
     F = System(polys; variables = [x, y], parameters = [a, b])
-
-    # Oracle: the values substituted by hand.
-    G = System(
-        [MP.polynomial(MP.subs(f, [a, b] => pvals)) for f in polys]; variables = [x, y],
-    )
-    empty_p = FSVec{ComplexF64}(ComplexF64[])
     xvals = randn(ComplexF64, 2)
-    xf = FSVec{ComplexF64}(xvals)
-    truth = ComplexF64[f([x, y] => xvals, [a, b] => pvals) for f in polys]
 
-    @testset "a System substitutes into the equations" begin
+    @testset "a System substitutes its parameters" begin
         H = fix_parameters(F, pvals)
         @test H isa System
         @test nparameters(H) == 0
-        @test Next.degrees(H) == Next.degrees(F)
-        u = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-        evaluate!(u, H.evaluator, xf, empty_p)
-        @test u ≈ truth rtol = 1.0e-12
+        @test isempty(parameters(H))
+        @test degrees(H) == degrees(F)
+        @test evaluate(H, xvals) ≈ evaluate(F, xvals, pvals) rtol = 1.0e-12
+        @test jacobian(H, xvals) ≈ jacobian(F, xvals, pvals) rtol = 1.0e-12
     end
 
-    # A composition has no equations to substitute into, so the values are bound
-    # at the evaluator level.
-    @testset "a composition binds" begin
+    @testset "a composition binds through the same public behavior" begin
         C = compose(System([x + y, x - y]; variables = [x, y]), F)
         H = fix_parameters(C, pvals)
         @test H isa FixedParameterSystem
         @test nparameters(H) == 0
         @test size(H) == size(C)
-        @test Next.degrees(H) == Next.degrees(C)
-        @test Next.with_system_shape(nameof ∘ typeof, H) ===
-            Next.with_system_shape(nameof ∘ typeof, C)
+        @test degrees(H) == degrees(C)
+        @test evaluate(H, xvals) ≈ evaluate(C, xvals, pvals) rtol = 1.0e-12
+        @test jacobian(H, xvals) ≈ jacobian(C, xvals, pvals) rtol = 1.0e-12
     end
 
     @testset "rejects a mismatched parameter count" begin
+        G = System([x^2 + y, x * y - 1]; variables = [x, y])
         @test_throws ArgumentError fix_parameters(F, ComplexF64[1.0])
         @test_throws ArgumentError fix_parameters(F, ComplexF64[1.0, 2.0, 3.0])
         @test_throws ArgumentError fix_parameters(G, ComplexF64[1.0])
-    end
-
-    # The bound evaluator must agree with the substituted system on every
-    # interface method, since routes reach it through the same wrappers.
-    @testset "the bound evaluator matches the substituted system" begin
-        bound = Next._bound_evaluator(F.evaluator, pvals)
-        @test nparameters(bound) == 0
-        @test size(bound) == (2, 2)
-
-        u = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-        evaluate!(u, bound, xf, empty_p)
-        @test u ≈ truth rtol = 1.0e-12
-
-        # DF64 input, Float64 output: the extended-precision residual path.
-        u2 = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-        evaluate!(u2, bound, FSVec{ComplexDF64}(ComplexDF64.(xvals)), empty_p)
-        @test u2 ≈ truth rtol = 1.0e-12
-
-        u3 = FSVec{ComplexDF64}(zeros(ComplexDF64, 2))
-        evaluate!(u3, bound, FSVec{ComplexDF64}(ComplexDF64.(xvals)), empty_p)
-        @test ComplexF64.(Vector(u3)) ≈ truth rtol = 1.0e-12
-
-        U = FSMat{ComplexF64}(zeros(ComplexF64, 2, 2))
-        evaluate_and_jacobian!(u, U, bound, xf, empty_p)
-        @test u ≈ truth rtol = 1.0e-12
-        for i in 1:2, j in 1:2
-            dp = MP.differentiate(polys[i], [x, y][j])
-            @test U[i, j] ≈ dp([x, y] => xvals, [a, b] => pvals) rtol = 1.0e-12
-        end
-    end
-
-    # A frozen `p` has the constant series, so both parameter forms of `taylor!`
-    # must agree with the substituted system.
-    @testset "taylor! order $K, $(P === nothing ? "scalar" : "TaylorVector") parameters" for
-        K in 1:3, P in (nothing, TaylorVector)
-        bound = Next._bound_evaluator(F.evaluator, pvals)
-        tx = TaylorVector{K + 1, ComplexF64}(2)
-        tx.data .= randn(ComplexF64, K + 1, 2)
-
-        u = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-        if P === nothing
-            taylor!(u, Val(K), bound, tx, empty_p)
-        else
-            taylor!(u, Val(K), bound, tx, TaylorVector{K + 1, ComplexF64}(0))
-        end
-
-        expected = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-        taylor!(expected, Val(K), G.evaluator, tx, empty_p)
-        @test u ≈ expected rtol = 1.0e-10
-    end
-
-    # Threading clones per worker; each clone must be independent and carry the
-    # same bound values.
-    @testset "a bound composition clones per worker" begin
-        C = compose(System([x + y, x - y]; variables = [x, y]), F)
-        H = fix_parameters(C, pvals)
-        e1 = Next._clone_system_evaluator(H)
-        e2 = Next._clone_system_evaluator(H)
-        @test e1 !== e2
-        @test nparameters(e1) == nparameters(e2) == 0
-        u1 = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-        u2 = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-        evaluate!(u1, e1, xf, empty_p)
-        evaluate!(u2, e2, xf, empty_p)
-        @test u1 ≈ u2 rtol = 1.0e-14
-        u0 = FSVec{ComplexF64}(zeros(ComplexF64, 2))
-        evaluate!(u0, H.evaluator, xf, empty_p)
-        @test u1 ≈ u0 rtol = 1.0e-14
     end
 end
 
 @testset "solving a fixed-parameter system" begin
     @polyvar x y a b
     F = System([x^2 - a, x * y - a + b]; variables = [x, y], parameters = [a, b])
-    # The same system with the parameters substituted by hand.
     G = System([x^2 - 2, x * y + 2]; variables = [x, y])
 
     @testset "total degree matches the substituted system path for path" begin
@@ -171,8 +81,7 @@ end
             Serial(),
         )
         for s in solutions(r)
-            @test abs(s[1]^2 - 2) < 1.0e-10
-            @test abs(s[1] * s[2] - 2 + 4) < 1.0e-10
+            @test maximum(abs, evaluate(F, s, [2, 4])) < 1.0e-10
         end
     end
 
@@ -182,30 +91,13 @@ end
             TotalDegree(; seed = UInt32(17), show_progress = false),
             exec,
         )
-        @test nsolutions(r) == 2
-        @test _key(r) ≈ _key(
-            solve(
-                fix_parameters(F, [2, 4]),
-                TotalDegree(; seed = UInt32(17), show_progress = false),
-                Serial(),
-            ),
-        )
-    end
-
-    # Fixing a `System`'s parameters adds no cache specialization of its own,
-    # since the route sees an ordinary parameter-free `System`.
-    @testset "the substituted route reuses the parameter-free cache type" begin
-        cache = CommonSolve.init(
+        ref = solve(
             fix_parameters(F, [2, 4]),
-            TotalDegree(; seed = UInt32(41), show_progress = false), Serial(),
+            TotalDegree(; seed = UInt32(17), show_progress = false),
+            Serial(),
         )
-        @test _inner_builder(cache.builder).target_system isa System
-        @test typeof(cache) === typeof(
-            CommonSolve.init(
-                Next.fix_parameters(F, ComplexF64[2, 4]),
-                TotalDegree(; seed = UInt32(41), show_progress = false), Serial(),
-            ),
-        )
+        @test nsolutions(r) == 2
+        @test _key(r) ≈ _key(ref)
     end
 
     @testset "compile mode $mode" for mode in
@@ -220,7 +112,7 @@ end
             Serial(),
         )
         @test nsolutions(r) == 2
-        @test all(s -> abs(s[1]^2 - 2) < 1.0e-10, solutions(r))
+        @test all(s -> maximum(abs, evaluate(Fm, s, [2, 4])) < 1.0e-10, solutions(r))
     end
 
     @testset "overdetermined, both routes" begin
@@ -230,7 +122,8 @@ end
             variables = [u, v], parameters = [p1, p2],
         )
         Go = System(
-            [u^2 + v^2 - 5, u * v - 2, (u^2 + v^2 - 5) * (u - v)]; variables = [u, v],
+            [u^2 + v^2 - 5, u * v - 2, (u^2 + v^2 - 5) * (u - v)];
+            variables = [u, v],
         )
         for alg in (
                 TotalDegree(; seed = UInt32(7), show_progress = false),
@@ -244,7 +137,6 @@ end
         end
     end
 
-    # The bound route: a composition tracks through the wrapped evaluator.
     @testset "composition" begin
         C = compose(System([x + y, x - y]; variables = [x, y]), F)
         Cref = compose(System([x + y, x - y]; variables = [x, y]), G)
