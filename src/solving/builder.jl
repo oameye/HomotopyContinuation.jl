@@ -442,8 +442,6 @@ end
 WorkerPathBuilder(b::AbstractPathBuilder)::WorkerPathBuilder =
     WorkerPathBuilder(BuilderBox(b), _builds_independent_workers(b))
 
-WorkerPathBuilder(b::WorkerPathBuilder)::WorkerPathBuilder = b
-
 (b::WorkerPathBuilder)()::PathWorker = PathWorker((b._inner[])())
 
 _builds_independent_workers(b::WorkerPathBuilder)::Bool = b._independent

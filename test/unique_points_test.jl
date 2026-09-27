@@ -426,14 +426,26 @@ end
     @test satisfies_triangle_inequality(InfNorm())
     @test !satisfies_triangle_inequality(non_metric)
 
+    # Squared distance violates the triangle inequality. With eight root entries
+    # at 0, 10, ..., 70, the point 4.9 lands below the entry at 0, while the
+    # query 5.05 is nearest to the entry at 10, so pruning skips 4.9's subtree.
+    squared = (x, y) -> sum(abs2, x .- y)
+    function misses_near_duplicate(up)
+        for (i, r) in enumerate(0.0:10.0:70.0)
+            add!(up, ComplexF64[r], i, 0.03)
+        end
+        add!(up, ComplexF64[4.9], 9, 0.03)
+        return iszero(search_in_radius(up, ComplexF64[5.05], 0.03))
+    end
     Random.seed!(11)
-    a = UniquePoints(3; distance = non_metric)
+    a = UniquePoints(1; distance = squared)
     Random.seed!(999)
-    b = UniquePoints(3; distance = non_metric)
-    @test a.tree.triangle_inequality == b.tree.triangle_inequality == false
-    @test UniquePoints(3).tree.triangle_inequality
-    opted_in = UniquePoints(3; distance = non_metric, triangle_inequality = true)
-    @test opted_in.tree.triangle_inequality
+    b = UniquePoints(1; distance = squared)
+    @test !misses_near_duplicate(a)
+    @test !misses_near_duplicate(b)
+    @test search_in_radius(a, ComplexF64[5.05], 0.03) == 9
+    opted_in = UniquePoints(1; distance = squared, triangle_inequality = true)
+    @test misses_near_duplicate(opted_in)
 
     # Constructing one must not advance the ambient stream.
     Random.seed!(7)

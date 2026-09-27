@@ -1,7 +1,5 @@
 # EndgameTracker — wraps Tracker with endgame detection and singular endpoint handling.
 
-using LinearAlgebra: LinearAlgebra as LA
-
 @kwdef struct EndgameOptions
     endgame_start::Float64 = 0.1
     max_endgame_steps::Int = 2000
