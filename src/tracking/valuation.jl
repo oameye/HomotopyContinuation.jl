@@ -139,7 +139,7 @@ function is_finite(
                 return false
             end
         elseif zero_is_finite && val_xi > (δ - finite_tol)
-            ε∞ = _at_infinity_tol(val_xi, val_tẋi, val.Δval_x[i], val.Δval_tẋ[i])
+            ε∞ = at_infinity_tol(val_xi, val_tẋi, val.Δval_x[i], val.Δval_tẋ[i])
             if !(ε∞ < finite_tol)
                 return false
             end

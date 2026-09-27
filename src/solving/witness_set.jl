@@ -286,9 +286,9 @@ function _move_witness_points(
         (isempty(chart) ? randn(rng, ComplexF64, nvariables(F)) : chart) :
         ComplexF64[]
     eg = if projective
-        _endgame_tracker(AffineChartHomotopy(base, c), tracker_options, endgame_options)
+        endgame_tracker(AffineChartHomotopy(base, c), tracker_options, endgame_options)
     else
-        _endgame_tracker(base, tracker_options, endgame_options)
+        endgame_tracker(base, tracker_options, endgame_options)
     end
     out = Vector{Vector{ComplexF64}}()
     for s in starts
@@ -546,7 +546,7 @@ function MembershipState(
     ev = _clone_system_evaluator(F)
     hom_ev = projective ? SystemEvaluator(AffineChartSystem(ev, chart)) : ev
     homotopy = IntrinsicSubspaceHomotopy(hom_ev, L, L; gamma = gamma)
-    tracker = _endgame_tracker(homotopy, tracker_options, endgame_options)
+    tracker = endgame_tracker(homotopy, tracker_options, endgame_options)
     return MembershipState(
         ev, homotopy, tracker,
         FSVec{ComplexF64}(zeros(ComplexF64, m)),

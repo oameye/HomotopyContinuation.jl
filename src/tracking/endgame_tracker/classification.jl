@@ -66,7 +66,7 @@ function switch_to_singular!(eg::EndgameTracker, t::Float64)::Nothing
     end
 
     # Initialize row/col scaling if not yet done.
-    _ensure_endgame_scaling!(state, tracker)
+    ensure_endgame_scaling!(state, tracker)
 
     add_sample!(eg, 0)
     tracker.predictor.winding_number = state.winding_number
@@ -81,7 +81,7 @@ end
 # came from: zero-clamping moves the vector away from the point the prediction
 # error was measured on, and `tracking_stopped!` compares the latched accuracy
 # against a regular endpoint's.
-function _latch_best_singular!(
+function latch_best_singular!(
         state::EndgameState, opts::EndgameOptions, acc::Float64,
     )::Nothing
     if acc < min(opts.singular_min_accuracy, state.best_singular_accuracy)
@@ -122,16 +122,16 @@ function check_at_infinity!(eg::EndgameTracker, relaxed::Bool = false)::Bool
         vtx = val.val_tẋ[i]
         dvx = val.Δval_x[i]
         dvtx = val.Δval_tẋ[i]
-        ε∞ = _at_infinity_tol_gated(vx, vtx, dvx, dvtx, opts.val_finite_tol, opts.zero_is_at_infinity)
+        ε∞ = at_infinity_tol_gated(vx, vtx, dvx, dvtx, opts.val_finite_tol, opts.zero_is_at_infinity)
 
         if !state.at_inf_active[i]
             # Stage 1: mark candidates
             if ε∞ < opts.val_at_infinity_tol
                 if all(!, state.at_inf_active)
-                    _ensure_endgame_scaling!(state, tracker)
+                    ensure_endgame_scaling!(state, tracker)
                 end
                 if isnan(κ)
-                    κ = _scaled_cond(
+                    κ = scaled_cond(
                         tracker.state.jacobian.workspace,
                         state.unit_scaling,
                         state.col_scaling,
@@ -144,13 +144,13 @@ function check_at_infinity!(eg::EndgameTracker, relaxed::Bool = false)::Bool
             end
         else
             if !(ε∞ < opts.val_at_infinity_tol)
-                _clear_at_infinity_candidate!(state, i)
+                clear_at_infinity_candidate!(state, i)
                 continue
             end
 
-            _ensure_endgame_scaling!(state, tracker)
+            ensure_endgame_scaling!(state, tracker)
             if isnan(κ)
-                κ = _scaled_cond(
+                κ = scaled_cond(
                     tracker.state.jacobian.workspace,
                     state.unit_scaling,
                     state.col_scaling,
@@ -185,7 +185,7 @@ function check_at_infinity!(eg::EndgameTracker, relaxed::Bool = false)::Bool
                 return true
             elseif coord_growth < 1.0
                 # Growth reversed — deactivate stale candidate
-                _clear_at_infinity_candidate!(state, i)
+                clear_at_infinity_candidate!(state, i)
             end
         end
     end

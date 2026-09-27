@@ -27,7 +27,7 @@ function add_sample!(eg::EndgameTracker, idx::Int)::Nothing
         state.samples[slot].data[2, i] = μ_s * tracker.predictor.tx3.data[2, i]
     end
     state.sample_times[slot] = s
-    state.sample_conds[slot] = _scaled_cond(
+    state.sample_conds[slot] = scaled_cond(
         tracker.state.jacobian.workspace,
         state.unit_scaling,
         state.col_scaling,
@@ -94,7 +94,7 @@ function predict_endpoint!(eg::EndgameTracker)::Float64
     return acc
 end
 
-function _predict_and_finalize!(eg::EndgameTracker, max_steps::Bool)::Nothing
+function predict_and_finalize!(eg::EndgameTracker, max_steps::Bool)::Nothing
     state = eg.state
     tracker = eg.tracker
     val = eg.val
@@ -127,8 +127,8 @@ function _predict_and_finalize!(eg::EndgameTracker, max_steps::Bool)::Nothing
         state.solution, complex(0.0),
     )
     updated!(ws)
-    κ_0 = _scaled_cond(ws, state.unit_scaling, state.col_scaling)
-    J0_norm = _row_scaled_inf_norm_matrix(ws, state.unit_scaling)
+    κ_0 = scaled_cond(ws, state.unit_scaling, state.col_scaling)
+    J0_norm = row_scaled_inf_norm_matrix(ws, state.unit_scaling)
 
     # Acceptance criteria for singular endpoint prediction
     accepted = state.accuracy < opts.singular_min_accuracy && (
@@ -146,7 +146,7 @@ function _predict_and_finalize!(eg::EndgameTracker, max_steps::Bool)::Nothing
         state.singular = true
         state.code = EndgameCode.SUCCESS
     elseif !max_steps
-        _latch_best_singular!(state, opts, acc_clamped)
+        latch_best_singular!(state, opts, acc_clamped)
         switch_to_regular!(eg)
     else
         state.code = EndgameCode.TERMINATED_MAX_STEPS
@@ -191,7 +191,7 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
                 state.singular = true
                 state.code = EndgameCode.SUCCESS
             elseif state.singular_steps >= 2
-                _predict_and_finalize!(eg, true)
+                predict_and_finalize!(eg, true)
             elseif !check_at_infinity_at_giveup!(eg)
                 state.code = EndgameCode.TERMINATED_MAX_STEPS
             end
@@ -203,12 +203,12 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
     # samples if we have enough, otherwise give up.
     if tracker.state.code != TrackerCode.TRACKER_SUCCESS
         if state.singular_steps >= 2
-            _predict_and_finalize!(eg, true)
+            predict_and_finalize!(eg, true)
         else
             state.accuracy = tracker.state.accuracy
             copyto!(state.solution, tracker.state.x)
             state.cond = tracker.state.cond_J_ẋ
-            state.code = _tracker_code_to_endgame_code(tracker.state.code)
+            state.code = tracker_code_to_endgame_code(tracker.state.code)
         end
         return nothing
     end
@@ -220,7 +220,7 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
     n = length(state.solution)
     m̂, m̂_err = estimate_winding_number(eg.val, n, opts.max_winding_number)
     if m̂_err > 0.1 || m̂ != state.winding_number
-        _latch_best_singular!(state, opts, state.accuracy)
+        latch_best_singular!(state, opts, state.accuracy)
         switch_to_regular!(eg)
         return nothing
     end
@@ -239,7 +239,7 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
 
     if state.singular_steps == 2
         # Always store the first prediction. Convergence acceptance
-        # happens in _predict_and_finalize!, not here.
+        # happens in predict_and_finalize!, not here.
         state.accuracy = acc
         copyto!(state.solution, state.prediction)
         return nothing
@@ -250,7 +250,7 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
         state.accuracy = acc
         copyto!(state.solution, state.prediction)
     else
-        _predict_and_finalize!(eg, false)
+        predict_and_finalize!(eg, false)
     end
 
     return nothing

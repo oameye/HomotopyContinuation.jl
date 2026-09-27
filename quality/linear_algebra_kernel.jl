@@ -10,7 +10,7 @@ using HomotopyContinuation:
     skeel_row_scaling!,
     apply_row_scaling!,
     mixed_precision_iterative_refinement!,
-    _scaled_cond
+    scaled_cond
 
 const LA = LinearAlgebra
 
@@ -42,7 +42,7 @@ const LA = LinearAlgebra
         skeel_row_scaling!(row, workspace.A, col)
         factorize!(workspace)
 
-        estimate = _scaled_cond(workspace, row, col)
+        estimate = scaled_cond(workspace, row, col)
         exact = LA.cond(diagm(collect(row)) * A * diagm(collect(col)), Inf)
         @test 1.0 <= estimate <= exact * (1 + 1.0e-8)
         @test estimate >= exact / 10
@@ -53,7 +53,7 @@ const LA = LinearAlgebra
         skeel_row_scaling!(scaled_workspace, col)
         apply_row_scaling!(scaled_workspace)
         factorize!(scaled_workspace)
-        @test _scaled_cond(scaled_workspace, row, col) ≈ estimate rtol = 1.0e-10
+        @test scaled_cond(scaled_workspace, row, col) ≈ estimate rtol = 1.0e-10
     end
 
     @testset "iterative refinement does not degrade a badly scaled solve" begin
