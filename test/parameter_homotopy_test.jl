@@ -1,6 +1,15 @@
 using Test
 using HomotopyContinuation
-using DynamicPolynomials: @polyvar
+using HomotopyContinuation: TaylorVector
+using DynamicPolynomials: @polyvar, subs, differentiate
+using MultivariatePolynomials: coefficient
+
+@static if VERSION < v"1.11"
+    buffer(A::AbstractArray) = collect(A)
+else
+    using FixedSizeArrays: FixedSizeArrayDefault
+    buffer(A::AbstractArray) = FixedSizeArrayDefault(A)
+end
 
 function _parameter_solution_distance(a, b)
     isempty(a) && return Inf
@@ -126,5 +135,61 @@ end
 
         @test_throws ArgumentError ParameterHomotopy(F, Float64[], [9.0])
         @test_throws ArgumentError ParameterHomotopy(F, [1.0], Float64[])
+    end
+
+    @testset "evaluate!, Jacobian and taylor! follow the parameter line" begin
+        @polyvar x[1:2] p[1:2] s
+        polys = [
+            x[1]^2 * p[1]^2 + x[2] * p[2]^3 + p[1] * p[2] * x[1] * x[2] - 1,
+            x[1] + x[2] - p[1],
+        ]
+        F = System(polys; variables = x, parameters = p)
+        pstart = ComplexF64[1.0 + 0.2im, -0.7 + 1.1im]
+        ptarget = ComplexF64[0.3 - 0.9im, 1.4 + 0.5im]
+        H = ParameterHomotopy(F, pstart, ptarget)
+        # H(x, t) = F(x, t * pstart + (1 - t) * ptarget).
+        p_of(t) = t .* pstart .+ (1 .- t) .* ptarget
+        xv = ComplexF64[0.4 + 0.3im, -1.2 + 0.1im]
+        u = buffer(zeros(ComplexF64, 2))
+        U = buffer(zeros(ComplexF64, 2, 2))
+
+        for t in (complex(0.37), 0.2 + 0.6im)
+            evaluate!(u, H, buffer(xv), t)
+            @test u ≈ [ComplexF64(f(x => xv, p => p_of(t))) for f in polys] atol = 1.0e-13
+
+            evaluate_and_jacobian!(u, U, H, buffer(xv), t)
+            @test u ≈ [ComplexF64(f(x => xv, p => p_of(t))) for f in polys] atol = 1.0e-13
+            @test U ≈ [
+                ComplexF64(differentiate(f, xj)(x => xv, p => p_of(t)))
+                    for f in polys, xj in x
+            ] atol = 1.0e-13
+        end
+
+        # The order-K coefficient in λ of H(x₀ + x₁λ + … + x_Kλ^K, t₀ + λ),
+        # computed symbolically.
+        t0 = complex(0.37)
+        X = ComplexF64[
+            0.4 + 0.3im -1.2 + 0.1im
+            0.7 - 0.2im 0.3 + 0.5im
+            -0.1 + 0.6im 0.9 - 0.4im
+            0.5 + 0.5im -0.3 - 0.8im
+        ]
+        taylor!(u, Val(1), H, buffer(xv), t0)
+        @test u ≈ [
+            ComplexF64(
+                differentiate(subs(f, x => xv, p => p_of(t0) .+ s .* (pstart .- ptarget)), s)(s => 0),
+            ) for f in polys
+        ] atol = 1.0e-12
+        for K in 2:3
+            tx = TaylorVector{K + 1, ComplexF64}(2)
+            for i in 1:2
+                tx[i] = Tuple(X[1:(K + 1), i])
+            end
+            taylor!(u, Val(K), H, tx, t0)
+            path = [sum(X[k + 1, i] * s^k for k in 0:K) for i in 1:2]
+            params = p_of(t0) .+ s .* (pstart .- ptarget)
+            expected = [ComplexF64(coefficient(f(x => path, p => params), s^K)) for f in polys]
+            @test u ≈ expected atol = 1.0e-11
+        end
     end
 end

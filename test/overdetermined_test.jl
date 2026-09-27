@@ -49,6 +49,33 @@ include("minors_polys.jl")
         @test nexcess_solutions(r1) == nexcess_solutions(r2)
     end
 
+    # x = y, x² + y² = 1, xy = 1/2 has exactly the roots ±(1/√2, 1/√2). The excess
+    # endpoints solve the randomized square system to working precision yet leave
+    # an O(1) residual in the original equations.
+    @testset "excess endpoints are roots of the square-up only (seed $s)" for s in
+        UInt32.(1:5)
+        @polyvar x y
+        F = System([x^2 + y^2 - 1, x - y, x * y - 1 // 2])
+        result = solve(F, TotalDegree(; seed = s, show_progress = false), Serial())
+
+        @test ntracked(result) == 4
+        @test nsolutions(result) == 2
+        @test nexcess_solutions(result) == 2
+        exact = [fill(-1 / sqrt(2), 2), fill(1 / sqrt(2), 2)]
+        @test sort(real_solutions(result); by = first) ≈ exact atol = 1.0e-12
+        for sol in solutions(result)
+            @test maximum(abs.(evaluate(F, sol))) < 1.0e-12
+        end
+
+        excess = filter(is_excess_solution, path_results(result))
+        for pr in excess
+            @test residual(pr) < 1.0e-12
+            @test maximum(abs.(evaluate(F, solution(pr)))) > 0.1
+            @test minimum(e -> maximum(abs.(solution(pr) .- e)), exact) > 0.1
+        end
+        @test maximum(abs.(solution(excess[1]) .- solution(excess[2]))) > 0.1
+    end
+
     @testset "singular solution of an overdetermined system is retained" begin
         @polyvar x y
         F = System([(x - 1)^2, y - 1, (x - 1) * y])

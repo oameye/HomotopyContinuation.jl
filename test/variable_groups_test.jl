@@ -2,6 +2,7 @@ using Test
 using Random: MersenneTwister
 using HomotopyContinuation
 using DynamicPolynomials: @polyvar
+using MultivariatePolynomials: MultivariatePolynomials as MP
 
 same_points(a, b) =
     length(a) == length(b) && all(u -> any(v -> maximum(abs.(u .- v)) < 1.0e-7, b), a)
@@ -23,6 +24,47 @@ same_group_points(a, b, groups) =
 
 run_td(F, seed_value, exec = Serial()) =
     solve(F, TotalDegree(; seed = UInt32(seed_value), show_progress = false), exec)
+
+# Multihomogeneous Bezout number: the coefficient of ∏ⱼ aⱼ^kⱼ in ∏ᵢ Σⱼ D[j, i]·aⱼ,
+# expanded one equation at a time.
+function multi_bezout_count(D::Matrix{Int}, k::Vector{Int})::Int
+    terms = Dict(zeros(Int, length(k)) => 1)
+    for i in axes(D, 2)
+        expanded = Dict{Vector{Int}, Int}()
+        for (exponents, coefficient) in terms, j in eachindex(k)
+            exponents[j] < k[j] || continue
+            raised = copy(exponents)
+            raised[j] += 1
+            expanded[raised] = get(expanded, raised, 0) + coefficient * D[j, i]
+        end
+        terms = expanded
+    end
+    return get(terms, k, 0)
+end
+
+# Degree of each polynomial in each group of variables, read off its terms.
+group_degree(f, group) = maximum(t -> sum(v -> MP.degree(t, v), group), MP.terms(f))
+group_degrees(polys, groups) = [group_degree(f, g) for g in groups, f in polys]
+
+# A group in which every polynomial is homogeneous is projective and loses one
+# dimension; an affine group contributes all of its variables.
+function group_dimensions(polys, groups)
+    return map(groups) do g
+        projective = all(polys) do f
+            allequal(sum(v -> MP.degree(t, v), g) for t in MP.terms(f))
+        end
+        length(g) - projective
+    end
+end
+
+oracle_count(polys, groups) =
+    multi_bezout_count(group_degrees(polys, groups), group_dimensions(polys, groups))
+
+# A generic polynomial whose degree in the i-th group is at most `degs[i]`.
+function generic_poly(rng, groups, degs)
+    factors = [MP.monomials(g, 0:d) for (g, d) in zip(groups, degs)]
+    return sum(randn(rng, ComplexF64) * prod(ms) for ms in Iterators.product(factors...))
+end
 
 @testset "Variable groups public behavior" begin
     @testset "construction and validation" begin
@@ -176,5 +218,56 @@ run_td(F, seed_value, exec = Serial()) =
         @test nsolutions(
             solve(projective, Polyhedral(; seed = UInt32(1), show_progress = false), Serial()),
         ) == 4
+    end
+
+    @testset "multihomogeneous Bezout oracle" begin
+        # Two groups of one coordinate each: two ways to assign the equations,
+        # minus the one through the zero degree.
+        @test multi_bezout_count([1 2; 1 0], [1, 1]) == 2
+        # Every degree 1 in three groups: one assignment per permutation.
+        @test multi_bezout_count(ones(Int, 3, 3), [1, 1, 1]) == 6
+        # One group covering everything is the plain Bezout number.
+        @test multi_bezout_count(reshape([2, 3, 4], 1, 3), [3]) == 24
+        # An equation of degree zero in every group cannot be assigned.
+        @test multi_bezout_count([1 0; 1 0], [1, 1]) == 0
+    end
+
+    @testset "path count is the multihomogeneous Bezout number" begin
+        @polyvar x y v w
+        for (polys, groups) in (
+                ([x * y - 2, x^2 - 4], [[x], [y]]),
+                ([x * y - 2v * w, x^2 - 4v^2], [[x, v], [y, w]]),
+                ([x * y - 2, x^2 - 4], [[x, y]]),
+                ([x^2 + y^2 - v^2, x * y - v^2], [[x, y, v]]),
+            )
+            F = System(polys; variable_groups = groups)
+            @test paths_to_track(F) == oracle_count(polys, groups)
+        end
+    end
+
+    # A generic system with prescribed group degrees has exactly the
+    # multihomogeneous Bezout number of isolated solutions, so every tracked path
+    # ends at a distinct solution.
+    @testset "generic grouped systems attain the Bezout number" begin
+        rng = MersenneTwister(0x0b32)
+        @polyvar x1 x2 y1 z1
+        cases = (
+            ([[x1, x2], [y1]], [[1, 1], [1, 1], [2, 0]], 4),
+            ([[x1], [y1], [z1]], [[1, 1, 1], [1, 1, 1], [1, 1, 1]], 6),
+            ([[x1, x2], [y1]], [[2, 1], [1, 2], [1, 1]], 7),
+        )
+        for (groups, degs, expected) in cases
+            polys = [generic_poly(rng, groups, d) for d in degs]
+            @test group_degrees(polys, groups) == reduce(hcat, degs)
+            @test oracle_count(polys, groups) == expected
+            F = System(polys; variable_groups = groups)
+            alg = TotalDegree(; seed = UInt32(0x51), show_progress = false)
+            @test paths_to_track(F, alg) == expected
+            result = solve(F, alg, Serial())
+            @test ntracked(result) == expected
+            @test nsolutions(result) == expected
+            @test nnonsingular(result) == expected
+            @test all(s -> maximum(abs, evaluate(F, s)) < 1.0e-8, solutions(result))
+        end
     end
 end

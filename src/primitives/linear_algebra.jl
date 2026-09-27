@@ -22,10 +22,14 @@ _tall_qr_ops()::Tuple{QRFactorizeFW, QRSolveFW} =
     (QRFactorizeFW(qr!), QRSolveFW(qr_ldiv!))
 
 """
-    MatrixWorkspace
+    MatrixWorkspace(m::Integer, n::Integer)
 
-Data structure for the efficient repeated solution of a square or
-overdetermined linear system `Ax = b`.
+Workspace for repeatedly solving a square (`m == n`) or overdetermined (`m > n`)
+complex linear system `Ax = b`. Set the entries with `WS[i, j] = aᵢⱼ` or
+`copyto!(WS, A)`, call [`updated!`](@ref) after changing them, and solve with
+`LinearAlgebra.ldiv!(x, WS, b)`, which factorizes on first use: LU for square
+systems and least squares by QR otherwise. `LinearAlgebra.cond(WS)` estimates
+the condition number in the infinity norm.
 """
 mutable struct MatrixWorkspace <: AbstractMatrix{ComplexF64}
     const A::FSMat{ComplexF64}
@@ -97,17 +101,15 @@ Base.@propagate_inbounds Base.setindex!(MW::MatrixWorkspace, x, i::Integer) =
 Base.@propagate_inbounds Base.setindex!(MW::MatrixWorkspace, x, i::Integer, j::Integer) =
     setindex!(MW.A, x, i, j)
 # Note: copyto! not overloaded for MatrixWorkspace to avoid SparseArrays ambiguities.
-# Use copyto!(WS.A, data) directly.
 
 # ---------------------------------------------------------------------------
 # updated! / factorize!
 # ---------------------------------------------------------------------------
 
 """
-    updated!(MW::MatrixWorkspace)
+    updated!(WS::MatrixWorkspace) -> WS
 
-Indicate that the matrix `MW` got updated. Copies A into the appropriate
-factorization buffer and resets flags.
+Mark the entries of `WS` as changed, so the next solve refactorizes.
 """
 function updated!(MW::MatrixWorkspace)
     MW.factorized = false
@@ -125,11 +127,13 @@ function updated!(MW::MatrixWorkspace)
 end
 
 """
-    factorize!(WS::MatrixWorkspace)
+    factorize!(WS::MatrixWorkspace) -> WS
 
-Compute the LU (square) or QR (overdetermined) factorization in-place.
+Factorize `WS` in place: LU if it is square, QR if it is overdetermined. Does
+nothing if `WS` is already factorized and unchanged since.
 """
 function factorize!(WS::MatrixWorkspace)
+    WS.factorized && return WS
     m, n = size(WS)
     if m == n
         lu!(WS.lu.factors, WS.lu.ipiv)
@@ -600,15 +604,6 @@ end
 # Multi-round Mixed-Precision Iterative Refinement
 # ---------------------------------------------------------------------------
 
-"""
-    iterative_refinement!(x, M, b, norm, tol, max_iters)
-    iterative_refinement!(x, M, b, norm; tol, max_iters)
-
-Perform multiple rounds of mixed-precision iterative refinement until the
-relative correction reaches `tol` or convergence stalls.
-
-Uses weighted-norm refinement with the given `norm`.
-"""
 function iterative_refinement!(
         x::AbstractVector{ComplexF64},
         M::MatrixWorkspace,
@@ -634,13 +629,13 @@ function iterative_refinement!(
 end
 
 """
-    iterative_refinement!(x, M, b, tol, max_iters)
-    iterative_refinement!(x, M, b; tol, max_iters)
+    iterative_refinement!(x, WS::MatrixWorkspace, b; tol = sqrt(eps()), max_iters = 3)
 
-Perform multiple rounds of mixed-precision iterative refinement until the
-relative correction reaches `tol` or convergence stalls.
-
-Uses inf-norm refinement (appropriate for dx/dt coefficients).
+Improve an approximate solution `x` of `WS * x = b` in place by mixed-precision
+iterative refinement, with residuals computed in double-double precision. Stops
+once the relative correction in the infinity norm is below `tol`, when it stops
+decreasing, or after `max_iters` rounds, and returns `(accuracy, diverged)`: the
+last relative correction and whether the refinement stopped because it grew.
 """
 function iterative_refinement!(
         x::AbstractVector{ComplexF64},
@@ -1057,14 +1052,14 @@ function inf_norm_matrix(WS::MatrixWorkspace)::Float64
 end
 
 """
-    LA.cond(WS::MatrixWorkspace)
+    LinearAlgebra.cond(WS::MatrixWorkspace)
 
-Estimate the condition number of `WS.A` w.r.t. the infinity norm.
+Estimate the condition number of `WS` in the infinity norm.
 """
 function LA.cond(WS::MatrixWorkspace)
     m, n = size(WS)
     if m == n == 1
-        return inv(fast_abs(WS.A[1, 1]))
+        return iszero(WS.A[1, 1]) ? Inf : 1.0
     end
     return inf_norm_matrix(WS) * inverse_inf_norm_est(WS)
 end

@@ -24,6 +24,24 @@ include("test_systems.jl")
         @test count(path -> winding_number(path) == 6, path_results(sextic)) >= 4
     end
 
+    @testset "the winding number of a triple root is 3" begin
+        @polyvar x
+        result = solve(
+            System([(x - 10)^3 * (x - 1)]),
+            TotalDegree(; seed = UInt32(3), show_progress = false),
+            Serial(),
+        )
+        paths = path_results(result)
+        @test all(is_success, paths)
+        triple = filter(path -> abs(solution(path)[1] - 10) < 1.0e-4, paths)
+        simple = filter(path -> abs(solution(path)[1] - 1) < 1.0e-8, paths)
+        @test length(triple) == 3
+        @test length(simple) == 1
+        @test all(path -> winding_number(path) == 3, triple)
+        @test multiplicity(only(singular(result))) == 3
+        @test is_nonsingular(only(simple))
+    end
+
     @testset "a coordinate that stays constant does not block a double root" begin
         @polyvar x y
         # y - 1 is also the total-degree start equation, so y is exactly 1 on

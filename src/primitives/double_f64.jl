@@ -80,6 +80,11 @@ struct DoubleF64 <: AbstractFloat
     lo::Float64
 end
 
+"""
+    ComplexDF64
+
+`Complex{DoubleF64}`, a complex number with double-double real and imaginary parts.
+"""
 const ComplexDF64 = Complex{DoubleF64}
 
 # Disambiguate with (::Type{T})(x::Real, r::RoundingMode) from Base.Rounding

@@ -1,7 +1,16 @@
 using Test
 using HomotopyContinuation
 
-const HC_PUBLIC_NAMES = Set(names(HomotopyContinuation; all = false, imported = false))
+const HC_DECLARED_PUBLIC = let
+    source = read(joinpath(pkgdir(HomotopyContinuation), "src", "HomotopyContinuation.jl"), String)
+    declared = Symbol[]
+    for m in eachmatch(r"(?m)^@public\s+(.+)$", source)
+        append!(declared, Symbol.(strip.(split(m.captures[1], ","))))
+    end
+    declared
+end
+const HC_PUBLIC_NAMES =
+    union(Set(names(HomotopyContinuation; all = false, imported = false)), HC_DECLARED_PUBLIC)
 const QUALITY_CONTRACTS = Set(
     [
         "alloc_check_test.jl",
@@ -236,7 +245,14 @@ end
 end
 
 @testset "the guard rejects known bypasses" begin
+    @test Set(HC_DECLARED_PUBLIC) == Set(
+        [
+            :TaylorVector, :DoubleF64, :ComplexDF64,
+            :MatrixWorkspace, :updated!, :factorize!, :iterative_refinement!,
+        ]
+    )
     rejected(source) = any(!isempty, surface_violations(source))
+    @test !rejected("using HomotopyContinuation: MatrixWorkspace, updated!\n")
     @test rejected("a = UniquePoints(3)\na.tree.triangle_inequality\n")
     @test rejected("cache.start_solutions[1]\n")
     @test rejected("getfield(r, :returncode)\n")

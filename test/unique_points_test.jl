@@ -454,3 +454,62 @@ end
     UniquePoints(3; distance = non_metric)
     @test x == rand()
 end
+
+@testset "InfNorm and EuclideanNorm distances" begin
+    Random.seed!(0x75b5)
+    @test satisfies_triangle_inequality(InfNorm())
+    @test satisfies_triangle_inequality(EuclideanNorm())
+
+    # Radius search against brute-force max-modulus and Euclidean distances.
+    for (distance, oracle) in (
+            (InfNorm(), (u, v) -> maximum(abs.(u .- v))),
+            (EuclideanNorm(), (u, v) -> sqrt(sum(abs2, u .- v))),
+        )
+        points = [randn(ComplexF64, 3) for _ in 1:200]
+        up = UniquePoints(3; distance = distance)
+        for (i, p) in enumerate(points)
+            add!(up, p, i, 0.0)
+        end
+        @test length(up) == 200
+        for _ in 1:200
+            q = randn(ComplexF64, 3)
+            r = 0.5 * rand()
+            id = search_in_radius(up, q, r)
+            inside = findall(p -> oracle(p, q) <= r, points)
+            if isempty(inside)
+                @test id == 0
+            else
+                @test id in inside
+            end
+        end
+    end
+
+    # |(3, 4) - 0| is 4 in the max-modulus norm and 5 in the Euclidean one.
+    inf_up = UniquePoints(2; distance = InfNorm())
+    euc_up = UniquePoints(2; distance = EuclideanNorm())
+    add!(inf_up, ComplexF64[0, 0], 1, 0.0)
+    add!(euc_up, ComplexF64[0, 0], 1, 0.0)
+    @test search_in_radius(inf_up, ComplexF64[3, 4], 4.001) == 1
+    @test search_in_radius(inf_up, ComplexF64[3, 4], 3.999) == 0
+    @test search_in_radius(euc_up, ComplexF64[3, 4], 5.001) == 1
+    @test search_in_radius(euc_up, ComplexF64[3, 4], 4.999) == 0
+end
+
+@testset "InfNorm stays finite at extreme scale" begin
+    # Squared moduli of these entries overflow Float64; the distance must not.
+    s = exp2(700)
+    x = s .* ComplexF64[2im, 3 - 1im, 5 + 2im]
+    y = s .* ComplexF64[-2im, 3 - 1im, 5 + 2im]
+    up = UniquePoints(3; distance = InfNorm())
+    @test add!(up, x, 1, 0.0) == (1, true)
+    @test search_in_radius(up, x, 1.0) == 1
+    @test search_in_radius(up, y, 4.001 * s) == 1
+    @test search_in_radius(up, y, 3.999 * s) == 0
+    # The relative tolerance is measured against ‖y‖∞ = |5 + 2i|·2⁷⁰⁰.
+    @test add!(up, y, 2; atol = 0.0, rtol = 0.75) == (1, false)
+    @test add!(up, y, 2; atol = 0.0, rtol = 0.7) == (2, true)
+
+    euc_up = UniquePoints(3; distance = EuclideanNorm())
+    add!(euc_up, x, 1, 0.0)
+    @test_broken search_in_radius(euc_up, y, 4.001 * s) == 1
+end

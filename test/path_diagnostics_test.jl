@@ -77,3 +77,67 @@ using HomotopyContinuation
         @test occursin("residual", rendered)
     end
 end
+
+@testset "valuation estimates the Puiseux exponents of the endpoint" begin
+    @testset "(x - 10)^5: finite nonzero limit on a cycle of winding number 5" begin
+        @polyvar x
+        result = solve(
+            System([(x - 10)^5]),
+            TotalDegree(; seed = UInt32(1), show_progress = false),
+            Serial(),
+        )
+        paths = path_results(result)
+        @test length(paths) == 5
+        for path in paths
+            @test winding_number(path) == 5
+            @test only(valuation(path)) ≈ 0 atol = 1.0e-2
+        end
+    end
+
+    @testset "two finite and two diverging paths" begin
+        # Two roots are finite; the other two paths go to infinity like 1/t.
+        @polyvar x y
+        result = solve(
+            System(
+                [
+                    2.3x^2 + 1.2y^2 + 3x - 2y + 3,
+                    2.3x^2 + 1.2y^2 + 5x + 2y - 5,
+                ],
+            ),
+            TotalDegree(; seed = UInt32(0x1f1f), show_progress = false),
+            Serial(),
+        )
+        paths = path_results(result)
+        finite = filter(is_success, paths)
+        diverging = filter(is_at_infinity, paths)
+        @test length(finite) == length(diverging) == 2
+        for path in diverging
+            @test valuation(path) ≈ [-1, -1] atol = 1.0e-3
+        end
+        for path in finite
+            @test all(v -> abs(v) < 0.2, valuation(path))
+        end
+    end
+
+    @testset "fractional valuations on a branch of winding number 6" begin
+        # Three paths reach the three roots; the other six diverge along a
+        # branch x ~ t^(-1/6), y ~ t^(-2/6).
+        a = [0.257, -0.139, -1.73, -0.199, 1.79, -1.32]
+        @polyvar x y
+        f1 = (a[1] * x^2 + a[2] * y) * (a[3] * x + a[4] * y) + 1
+        f2 = (a[1] * x^2 + a[2] * y) * (a[5] * x + a[6] * y) + 1
+        result = solve(
+            System([f1, f2]),
+            TotalDegree(; seed = UInt32(0x1002), show_progress = false),
+            Serial(),
+        )
+        paths = path_results(result)
+        @test length(paths) == 9
+        @test count(is_success, paths) == 3
+        diverging = filter(is_at_infinity, paths)
+        @test length(diverging) == 6
+        for path in diverging
+            @test valuation(path) ≈ [-1 / 6, -2 / 6] atol = 1.0e-2
+        end
+    end
+end

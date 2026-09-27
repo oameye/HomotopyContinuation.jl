@@ -96,23 +96,17 @@ Base.:-(x::TTS{N, T}) where {N, T} = TTS(ntuple(i -> -x.val[i], Val(N)))
 ## TaylorVector
 
 """
-    TaylorVector{N,T} <: AbstractVector{TruncatedTaylorSeries{N,T}}
+    TaylorVector{N,T}(n::Integer)
 
-A vector of `TruncatedTaylorSeries{N,T}` backed by an `FSMat{T}`.
-
-The backing matrix has shape `N × n`: `N` rows for Taylor coefficient orders
-(0 to N-1) and `n` columns for elements.
+A vector of `n` truncated Taylor series with `N` coefficients of type `T`, the
+input and output type of [`taylor!`](@ref). `tv[i] = (x₀, x₁, …)` sets the
+coefficients of entry `i`, and `tv[i][k]` returns its order-`k` coefficient for
+`k = 0, …, N-1`. A new `TaylorVector` is zero.
 """
 struct TaylorVector{N, T} <: AbstractVector{TTS{N, T}}
     data::FSMat{T}
 end
 
-"""
-    TaylorVector{N,T}(n::Integer)
-
-Allocate a `TaylorVector` of length `n` with element type `T` and `N` Taylor orders.
-All coefficients are initialised to zero.
-"""
 function TaylorVector{N, T}(n::Integer) where {N, T}
     return TaylorVector{N, T}(FSMat{T}(zeros(T, N, n)))
 end

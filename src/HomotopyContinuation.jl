@@ -5,6 +5,7 @@ using Random: Random
 using Printf: Printf
 using ProgressMeter: ProgressMeter
 using DispatchDoctor: @stable
+using SciMLPublic: @public
 
 using EnumX: @enumx
 using Moshi.Data: @data, isa_variant
@@ -88,6 +89,9 @@ export newton, NewtonResult, NewtonCache, NewtonReturnCode
 export Serial, Threaded, DistributedExecutor
 export SemialgebraicSetsHCSolver
 export write_solutions, read_solutions, write_parameters, read_parameters
+
+@public TaylorVector, DoubleF64, ComplexDF64
+@public MatrixWorkspace, updated!, factorize!, iterative_refinement!
 
 const MP = MultivariatePolynomials
 @static if VERSION < v"1.11"

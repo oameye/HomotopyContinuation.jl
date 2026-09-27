@@ -61,4 +61,37 @@ using DynamicPolynomials: @polyvar
         @test nsolutions(result) == 1
         @test only(solutions(result)) ≈ ComplexF64[2, 3] atol = 1.0e-10
     end
+
+    @testset "a non-finite start is invalid without a singular-Jacobian verdict" begin
+        @polyvar x y
+        G = System([x^2 - 1, y^2 - 1])
+        F = System([x^2 - 4, y^2 - 9])
+        result = solve(
+            G, F, [ComplexF64[NaN, 1], ComplexF64[1, 0]],
+            Continuation(; seed = UInt32(0x53), show_progress = false),
+            Serial(),
+        )
+        nonfinite, singular_start = path_results(result)
+        @test is_failed(nonfinite)
+        @test return_code(nonfinite) == PathResultCode.PATH_TERMINATED_INVALID_START
+        # G's Jacobian diag(2, 0) at (1, 0) has corank 1 and G(1, 0) ≠ 0.
+        @test return_code(singular_start) ==
+            PathResultCode.PATH_TERMINATED_INVALID_START_SINGULAR_JACOBIAN
+        @test nsolutions(result) == 0
+    end
+
+    @testset "a path linear in t is tracked exactly in a few steps" begin
+        # y(t) = t + 9(1 - t): every Taylor coefficient beyond the first vanishes.
+        @polyvar y q
+        F = System([y - q]; variables = [y], parameters = [q])
+        result = solve(
+            F, [[1.0 + 0.0im]], [1.0 + 0im], [9.0 + 0im],
+            Continuation(; seed = UInt32(0x54), show_progress = false),
+            Serial(),
+        )
+        path = only(path_results(result))
+        @test is_success(path)
+        @test solution(path)[1] ≈ 9 atol = 1.0e-12
+        @test steps(path) < 10
+    end
 end
