@@ -24,6 +24,29 @@ include("test_systems.jl")
         @test count(path -> winding_number(path) == 6, path_results(sextic)) >= 4
     end
 
+    @testset "an invalid singular start never enters the endgame" begin
+        @polyvar x y
+        G = System([x^2 - 1, y^2 - 1])
+        F = System([x^2 - 4, y^2 - 9])
+        # At (2, 0) the row 2y of G's Jacobian vanishes and G does not vanish.
+        result = solve(
+            G, F, [ComplexF64[2, 0]],
+            Continuation(; seed = UInt32(0x52), show_progress = false),
+            Serial(),
+        )
+        path = only(path_results(result))
+
+        @test is_failed(path)
+        @test !is_success(path)
+        @test !is_singular(path) && !is_at_infinity(path)
+        @test steps(path) == 0
+        @test last_path_point(path) == (ComplexF64[2, 0], 1.0)
+        @test nfailed(result) == 1
+        @test nsolutions(result) == 0
+        @test nsingular(result) == 0
+        @test nat_infinity(result) == 0
+    end
+
     @testset "paths at infinity are distinguished from finite solutions" begin
         @polyvar x y
         result = solve(

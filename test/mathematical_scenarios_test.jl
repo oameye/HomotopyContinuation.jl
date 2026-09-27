@@ -1,10 +1,7 @@
 using Test
 using HomotopyContinuation
 
-function _same_solution_set(a, b; atol = 1.0e-8)
-    length(a) == length(b) || return false
-    return all(sa -> any(sb -> maximum(abs.(sa .- sb)) < atol, b), a)
-end
+include("solution_sets.jl")
 
 @testset "mathematical scenarios across numerical backends" begin
     @testset "Katsura-3 is backend independent" begin
@@ -30,7 +27,7 @@ end
         results = [solve(F, algorithm, Serial()) for F in systems]
         @test all(r -> nfailed(r) == 0, results)
         @test all(r -> nsolutions(r) == nsolutions(first(results)), results)
-        @test all(r -> _same_solution_set(solutions(r), solutions(first(results))), results)
+        @test all(r -> same_solution_set(solutions(r), solutions(first(results))), results)
         for (F, result) in zip(systems, results), sol in solutions(result)
             @test maximum(abs.(evaluate(F, sol))) < 1.0e-8
         end
@@ -67,14 +64,22 @@ end
     end
 
     @testset "ill-conditioned root is recovered with extended precision" begin
-        @polyvar x y
-        eps = 1.0e-8
-        F = System([x + y - 2, x + (1 + eps) * y - (2 + eps)])
-        result = newton(F, ComplexF64[1.2, 0.8]; extended_precision = true)
+        # x² - 2x + (1 - δ) has the root r = 1 + √δ. With δ = 3·2⁻⁵², f'(r) ≈ 7e-8
+        # while the Float64 residual near x = 1 carries a rounding error of order
+        # eps, so Float64 residuals pin r only to about eps / f'(r) ≈ 3e-9.
+        # Residuals in double-double precision recover r to working precision.
+        @polyvar x
+        δ = 3 * 2.0^-52
+        F = System([x^2 - 2x + (1 - δ)])
+        r = 1 + sqrt(big(3) * big(2.0)^-52)
+        x0 = ComplexF64[1 + 1.1 * sqrt(δ)]
 
-        @test is_success(result)
-        @test result.residual < 1.0e-12
-        @test isapprox(result.x, ComplexF64[1, 1]; atol = 1.0e-7)
+        plain = newton(F, x0)
+        extended = newton(F, x0; extended_precision = true)
+
+        @test is_success(extended)
+        @test abs(extended.x[1] - r) < 1.0e-14
+        @test abs(plain.x[1] - r) > 1.0e-12
     end
 
     @testset "transcendental Newton problem agrees across compile modes" begin

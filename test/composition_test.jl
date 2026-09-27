@@ -5,12 +5,17 @@ using HomotopyContinuation
 
 composition_relerr(a, b) = maximum(abs, a .- b) / max(maximum(abs, b), 1.0)
 
-function same_solution_set(a, b; atol = 1.0e-8)
-    length(a) == length(b) || return false
-    return all(sa -> any(sb -> maximum(abs.(sa .- sb)) < atol, b), a)
-end
+include("solution_sets.jl")
 
 @testset "CompositionSystem public mathematics" begin
+    @testset "same_solution_set is a bijection" begin
+        p, q = ComplexF64[1, 2], ComplexF64[3, 4]
+        @test same_solution_set([p, q], [q, p])
+        @test !same_solution_set([p, p, q], [p, q, q])
+        @test !same_solution_set([p], [p, p])
+        @test same_solution_set([p, p .+ 1.0e-9], [p .+ 1.0e-9, p])
+    end
+
     @testset "shape, variables and parameters compose predictably" begin
         @var x y a b
         inner = System([y^2 + 2x + 3, x - 1]; variables = [x, y])

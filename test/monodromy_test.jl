@@ -2,6 +2,8 @@ using Test, Random
 using HomotopyContinuation
 using DynamicPolynomials: @polyvar
 
+include("solution_sets.jl")
+
 @testset "Monodromy" begin
     @testset "find_start_pair" begin
         Random.seed!(0xf00d)
@@ -202,9 +204,81 @@ using DynamicPolynomials: @polyvar
             F,
             [solutions(result)[1]],
             Vector(parameters(result)),
-            Monodromy(; show_progress = false),
+            Monodromy(; seed = UInt32(1), show_progress = false),
         )
-        @test incomplete != Completeness.COMPLETE
+        @test incomplete == Completeness.INCOMPLETE
+
+        s = solutions(result)
+        q0 = Vector(parameters(result))
+        verdict(sols) = verify_solution_completeness(
+            F, sols, q0, Monodromy(; seed = UInt32(1), show_progress = false), Serial(),
+        )
+        # A repeated point is one witness, not two.
+        @test verdict([s[1], s[1]]) == Completeness.INCOMPLETE
+        # A non-solution cannot be continued, so the trace is short a summand
+        # and no verdict is possible.
+        @test verdict([s[1], s[1] .+ 0.3]) == Completeness.INCONCLUSIVE
+    end
+
+    @testset "an incomplete witness set is never reported complete" begin
+        @polyvar z[1:3]
+        Q = System([z[1]^4 + 2z[2]^4 + 3z[3]^4 + z[1] * z[2] - 1]; variables = z)
+        W = solve(Q, Witness(; seed = UInt32(5), show_progress = false))
+        L = linear_subspace(W)
+        P = points(W)
+        @test degree(W) == length(P) == 4
+
+        @test trace_test(W; seed = UInt32(1)) < 1.0e-10
+        for k in 1:3
+            @test trace_test(WitnessSet(Q, L, P[1:k]); seed = UInt32(1)) > 1.0e-3
+        end
+
+        incomplete_runs = 0
+        for seed in 1:10, loops in (1, 2)
+            r = solve(
+                Q, [P[1]], L,
+                Monodromy(;
+                    dim = 2, max_loops_no_progress = loops,
+                    seed = UInt32(seed), show_progress = false,
+                ),
+                Serial(),
+            )
+            @test nsolutions(r) <= 4
+            @test is_success(r) == (nsolutions(r) == 4)
+            if nsolutions(r) < 4
+                incomplete_runs += 1
+                @test is_heuristic_stop(r)
+                @test trace(r) > 1.0e-6
+            end
+        end
+        # The budget is tight enough that some runs stop short of the fiber.
+        @test incomplete_runs >= 1
+    end
+
+    @testset "start admission: singular non-roots are rejected, near-roots refined" begin
+        @polyvar x p
+        F = System([x^2 - p]; variables = [x], parameters = [p])
+        run(starts) = solve(
+            F, starts, ComplexF64[1],
+            Monodromy(;
+                target_solutions_count = 2, max_loops_no_progress = 5,
+                seed = UInt32(3), show_progress = false,
+            ),
+            Serial(),
+        )
+
+        # x = 0 is not a root of x² - 1 and has a singular derivative.
+        rejected = @test_logs (:warn,) run([ComplexF64[0]])
+        @test nsolutions(rejected) == 0
+        @test !is_success(rejected)
+
+        for starts in ([ComplexF64[1.01]], [ComplexF64[0], ComplexF64[1.01]])
+            refined = run(starts)
+            @test nsolutions(refined) == 2
+            @test is_success(refined)
+            @test all(s -> abs(s[1]^2 - 1) < 1.0e-10, solutions(refined))
+            @test same_solution_set(solutions(refined), [ComplexF64[1], ComplexF64[-1]])
+        end
     end
 
     @testset "trace discriminates a complete slice" begin

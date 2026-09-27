@@ -1,10 +1,7 @@
 using Test
 using HomotopyContinuation
 
-function same_solution_set(a, b; atol = 1.0e-8)
-    length(a) == length(b) || return false
-    return all(sa -> any(sb -> maximum(abs.(sa .- sb)) < atol, b), a)
-end
+include("solution_sets.jl")
 
 @testset "public solve workflows" begin
     @testset "basic solve and result inspection" begin

@@ -3,6 +3,8 @@ using HomotopyContinuation
 using DynamicPolynomials: @polyvar
 using CommonSolve: CommonSolve
 
+include("solution_sets.jl")
+
 @testset "Solve" begin
     @testset "TotalDegree: basic solver semantics" begin
         @polyvar x y
@@ -30,16 +32,18 @@ using CommonSolve: CommonSolve
         F = System([x^2 + y - 1, x * y - 0.5])
 
         result = solve(F, TotalDegree(; seed = UInt32(42), show_progress = false))
+        # y = 1 - x² reduces the system to x³ - x + 1/2 = 0: three finite
+        # roots, and the fourth total-degree path diverges.
+        @test nsolutions(result) == 3
+        @test nat_infinity(result) == 1
         for sol in solutions(result)
             @test abs(sol[1]^2 + sol[2] - 1) < 1.0e-6
             @test abs(sol[1] * sol[2] - 0.5) < 1.0e-6
         end
 
         repeated = solve(F, TotalDegree(; seed = UInt32(42), show_progress = false))
-        @test nsolutions(result) == nsolutions(repeated)
-        for a in solutions(result)
-            @test any(b -> isapprox(a, b; atol = 1.0e-10), solutions(repeated))
-        end
+        @test nsolutions(repeated) == 3
+        @test same_solution_set(solutions(result), solutions(repeated); atol = 1.0e-10)
     end
 
     @testset "TotalDegree: Katsura-3" begin
@@ -53,7 +57,9 @@ using CommonSolve: CommonSolve
             ],
         )
         result = solve(F, TotalDegree(; show_progress = false))
-        @test nsolutions(result) >= 2
+        # Katsura-3 has 2³ = 8 isolated nonsingular roots, the Bezout number.
+        @test nsolutions(result) == 8
+        @test nnonsingular(result) == 8
         for sol in solutions(result)
             residual = maximum(
                 abs.(
@@ -110,13 +116,17 @@ using CommonSolve: CommonSolve
         @polyvar x y
         sparse = System([x^2 + y - 1, x * y - 2])
         result = solve(sparse, Polyhedral(; show_progress = false))
+        # y = 1 - x² reduces the system to x³ - x + 2 = 0.
+        @test mixed_volume(sparse) == 3
+        @test nsolutions(result) == 3
         for sol in solutions(result)
             @test abs(sol[1]^2 + sol[2] - 1) < 1.0e-6
             @test abs(sol[1] * sol[2] - 2) < 1.0e-6
         end
 
         td = solve(sparse, TotalDegree(; show_progress = false))
-        @test nsolutions(td) == nsolutions(result)
+        @test nsolutions(td) == 3
+        @test same_solution_set(solutions(td), solutions(result))
 
         dense = System(
             [
@@ -165,21 +175,14 @@ using CommonSolve: CommonSolve
             )
             td = solve(F, TotalDegree(; seed = UInt32(1), show_progress = false))
             ph = solve(F, Polyhedral(; seed = UInt32(1), show_progress = false))
-            @test nsolutions(td) == nsolutions(ph)
-            for sol in solutions(td)
-                @test any(other -> isapprox(sol, other; atol = 1.0e-8), solutions(ph))
-            end
+            @test nsolutions(td) == nsolutions(ph) == 4
+            @test same_solution_set(solutions(td), solutions(ph))
         end
     end
 
     projective_normalize(sols) = [s ./ s[argmax(abs.(s))] for s in sols]
-    function same_point_set(a, b)
-        normalized_b = projective_normalize(b)
-        return length(a) == length(b) && all(
-            u -> any(v -> maximum(abs.(u .- v)) < 1.0e-7, normalized_b),
-            projective_normalize(a),
-        )
-    end
+    same_point_set(a, b) =
+        same_solution_set(projective_normalize(a), projective_normalize(b); atol = 1.0e-7)
 
     @testset "projective solve: chart-independent roots" begin
         @polyvar x y z
@@ -304,7 +307,9 @@ using CommonSolve: CommonSolve
             [2.0, 1.0],
             Continuation(; show_progress = false),
         )
-        @test nsolutions(result) >= 2
+        # Both fibers reduce to a cubic in x: x³ - x + 1/2 and x³ - x + 2.
+        @test length(starts) == 3
+        @test nsolutions(result) == 3
         for sol in solutions(result)
             @test abs(sol[1]^2 + 2.0 * sol[2] - 1) < 1.0e-6
             @test abs(sol[1] * sol[2] - 1.0) < 1.0e-6
@@ -369,16 +374,17 @@ using CommonSolve: CommonSolve
             serial = solve(F, alg, Serial())
             threaded = solve(F, alg, Threaded())
 
-            @test nsolutions(serial) == nsolutions(threaded)
+            @test nsolutions(serial) == nsolutions(threaded) == 3
             @test nreal(serial) == nreal(threaded)
             @test ntracked(serial) == ntracked(threaded)
-
-            serial_solutions = sort(solutions(serial); by = s -> (real(s[1]), imag(s[1])))
-            threaded_solutions =
-                sort(solutions(threaded); by = s -> (real(s[1]), imag(s[1])))
-            for (a, b) in zip(serial_solutions, threaded_solutions)
-                @test a ≈ b atol = 1.0e-6
-            end
+            @test nsingular(serial) == nsingular(threaded)
+            @test nnonsingular(serial) == nnonsingular(threaded) == 3
+            # Three finite roots; every further path (one for TotalDegree,
+            # none for Polyhedral) diverges.
+            @test nat_infinity(serial) == nat_infinity(threaded) == ntracked(serial) - 3
+            @test count(is_success, path_results(serial)) ==
+                count(is_success, path_results(threaded))
+            @test same_solution_set(solutions(serial), solutions(threaded); atol = 1.0e-6)
         end
     end
 
@@ -406,9 +412,7 @@ using CommonSolve: CommonSolve
             Threaded(),
         )
         @test nsolutions(serial) == nsolutions(threaded) == 4
-        for sol in real_solutions(serial)
-            @test any(other -> isapprox(sol, other; atol = 1.0e-8), real_solutions(threaded))
-        end
+        @test same_solution_set(solutions(serial), solutions(threaded))
     end
 
     @testset "Serial and Threaded preserve cluster structure" begin

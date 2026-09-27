@@ -35,4 +35,27 @@ using DynamicPolynomials: @polyvar
         @test steps(constrained_path) ==
             accepted_steps(constrained_path) + rejected_steps(constrained_path)
     end
+
+    @testset "a start point with a singular Jacobian fails without a solution" begin
+        @polyvar x y
+        G = System([x^2 - 1, y^2 - 1])
+        F = System([x^2 - 4, y^2 - 9])
+        # G's Jacobian diag(2x, 2y) vanishes at the origin, which is also not a
+        # root of G. (1, 1) is a regular root and continues to (2, 3).
+        result = solve(
+            G, F, [ComplexF64[0, 0], ComplexF64[1, 1]],
+            Continuation(; seed = UInt32(0x51), show_progress = false),
+            Serial(),
+        )
+        invalid, valid = path_results(result)
+
+        @test is_failed(invalid)
+        @test !is_success(invalid)
+        @test start_solution(invalid) == ComplexF64[0, 0]
+        @test is_success(valid)
+        @test solution(valid) ≈ ComplexF64[2, 3] atol = 1.0e-10
+        @test nfailed(result) == 1
+        @test nsolutions(result) == 1
+        @test only(solutions(result)) ≈ ComplexF64[2, 3] atol = 1.0e-10
+    end
 end
