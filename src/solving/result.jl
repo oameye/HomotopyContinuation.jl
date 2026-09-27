@@ -94,14 +94,13 @@ function _cluster_solutions(
     mergeable = BitVector(path_results[i].singular for i in success_idx)
     for a in 1:k
         j = order[a]
-        mergeable[j] || continue
         sol_j = path_results[success_idx[j]].solution
         norm_j = norms[j]
         key_j = keys[j]
         for b in (a + 1):k
             l = order[b]
             keys[l] - key_j > window && break
-            mergeable[l] || continue
+            (mergeable[j] || mergeable[l]) || continue
             d = inf_distance(sol_j, path_results[success_idx[l]].solution)
             tol = max(atol, rtol * max(norm_j, norms[l]))
             if d <= tol
@@ -241,9 +240,9 @@ symmetry group: an orbit is collapsed whole even when each action returns a sing
 image, as long as the orbit's points are all present among the solutions.
 
 `atol` and `rtol` set the merge tolerance: points are treated as one when their
-infinity-norm distance is at most `max(atol, rtol * norm(solution))`. Only
-singular endpoints are merged by proximity; two regular roots are distinct
-solutions however close they lie. Orbit collapse uses the same tolerance to match
+infinity-norm distance is at most `max(atol, rtol * norm(solution))`. A pair is
+merged by proximity only if at least one of the two endpoints is singular; two
+regular roots are distinct solutions however close they lie. Orbit collapse uses the same tolerance to match
 a solution against the image of another, and applies to regular endpoints too.
 
 ## Example
