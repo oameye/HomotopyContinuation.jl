@@ -416,8 +416,6 @@ end
 PathWorker(worker)::PathWorker =
     PathWorker(WorkerTrackFW(_WorkerTracker(worker)), WorkerBox(worker))
 
-PathWorker(worker::PathWorker)::PathWorker = worker
-
 _track_path!(ws::PathWorker, x₀::Vector{ComplexF64}, k::Int)::PathResult =
     ws._track!(x₀, k)
 
