@@ -129,9 +129,11 @@ end
 """
     factorize!(WS::MatrixWorkspace) -> WS
 
-Factorize `WS` in place: LU if it is square, QR if it is overdetermined.
+Factorize `WS` in place: LU if it is square, QR if it is overdetermined. Does
+nothing if `WS` is already factorized and unchanged since.
 """
 function factorize!(WS::MatrixWorkspace)
+    WS.factorized && return WS
     m, n = size(WS)
     if m == n
         lu!(WS.lu.factors, WS.lu.ipiv)
@@ -1050,14 +1052,14 @@ function inf_norm_matrix(WS::MatrixWorkspace)::Float64
 end
 
 """
-    LA.cond(WS::MatrixWorkspace)
+    LinearAlgebra.cond(WS::MatrixWorkspace)
 
-Estimate the condition number of `WS.A` w.r.t. the infinity norm.
+Estimate the condition number of `WS` in the infinity norm.
 """
 function LA.cond(WS::MatrixWorkspace)
     m, n = size(WS)
     if m == n == 1
-        return inv(fast_abs(WS.A[1, 1]))
+        return iszero(WS.A[1, 1]) ? Inf : 1.0
     end
     return inf_norm_matrix(WS) * inverse_inf_norm_est(WS)
 end
