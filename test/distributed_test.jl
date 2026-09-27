@@ -47,10 +47,6 @@ function same_sweep_semantics(a, b)
     return all(same_path_semantics(_entry_result(a[k]), _entry_result(b[k])) for k in eachindex(a))
 end
 
-monodromy_return_code(r) = only(
-    m.captures[1] for m in eachmatch(r"return_code → (\S+)", sprint(show, r))
-)
-
 include("solution_sets.jl")
 
 @testset "Distributed executor public behavior" begin
@@ -257,7 +253,7 @@ include("solution_sets.jl")
 
             for exec in (DistributedExecutor(), DistributedExecutor(; batch_size = 1), lockstep)
                 r = solve(G, Monodromy(; opts...), exec)
-                @test monodromy_return_code(r) == monodromy_return_code(serial)
+                @test return_code(r) == return_code(serial)
                 @test is_success(r) == is_success(serial)
                 @test is_heuristic_stop(r) == is_heuristic_stop(serial)
                 @test nsolutions(r) == 4
@@ -296,7 +292,7 @@ include("solution_sets.jl")
             )
             @test !is_success(timed)
             @test !is_heuristic_stop(timed)
-            @test monodromy_return_code(timed) == "TIMEOUT"
+            @test return_code(timed) == MonodromyCode.TIMEOUT
         end
 
         @testset "public error reporting" begin

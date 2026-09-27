@@ -69,6 +69,7 @@ include("solution_sets.jl")
         )
         @test nsolutions(counted) == 2
         @test is_success(counted)
+        @test return_code(counted) == MonodromyCode.SUCCESS
     end
 
     @testset "public start-solution routes" begin
@@ -271,6 +272,7 @@ include("solution_sets.jl")
         rejected = @test_logs (:warn,) run([ComplexF64[0]])
         @test nsolutions(rejected) == 0
         @test !is_success(rejected)
+        @test return_code(rejected) == MonodromyCode.INVALID_STARTVALUE
 
         for starts in ([ComplexF64[1.01]], [ComplexF64[0], ComplexF64[1.01]])
             refined = run(starts)
@@ -328,6 +330,7 @@ include("solution_sets.jl")
         )
         @test nsolutions(stopped) == 2
         @test is_heuristic_stop(stopped)
+        @test return_code(stopped) == MonodromyCode.HEURISTIC_STOP
     end
 
     @testset "duplicate-check public modes" begin

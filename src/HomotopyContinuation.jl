@@ -69,7 +69,7 @@ export IntrinsicSubspaceHomotopy, ExtrinsicSubspaceHomotopy, set_subspaces!
 export AffineChartHomotopy, on_affine_chart, with_linear_subspace_homotopy
 export find_start_pair, StartPair, is_parameterized
 export verify_solution_completeness, Completeness
-export MonodromyOptions, MonodromyResult, is_heuristic_stop, permutations, trace
+export MonodromyOptions, MonodromyResult, MonodromyCode, return_code, is_heuristic_stop, permutations, trace
 export ReuseLoops, DuplicateCheck, ncertified_distinct, ndiscarded_uncertified
 export independent_normal, weighted_normal
 # Witness sets / numerical irreducible decomposition

@@ -67,6 +67,15 @@ is_heuristic_stop(result::MonodromyResult)::Bool =
     result.returncode == MonodromyCode.HEURISTIC_STOP
 
 """
+    return_code(result::MonodromyResult)::MonodromyCode.T
+
+Return why the monodromy computation stopped: `MonodromyCode.SUCCESS`,
+`HEURISTIC_STOP`, `TIMEOUT`, `TERMINATED_CALLBACK`, `INVALID_STARTVALUE` or
+`INTERRUPTED`.
+"""
+return_code(result::MonodromyResult)::MonodromyCode.T = result.returncode
+
+"""
     ncertified_distinct(result::MonodromyResult)
 
 Return the number of solutions that certified as pairwise distinct, which is `0`
