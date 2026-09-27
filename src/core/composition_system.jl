@@ -237,7 +237,7 @@ struct _StageEquations{S <: System}
 end
 
 (eqs::_StageEquations)()::Vector{Expression} =
-    _as_expressions(collect(eqs.system.polys))
+    as_expressions(collect(eqs.system.polys))
 
 struct CompositionStage
     factory::SystemFactory

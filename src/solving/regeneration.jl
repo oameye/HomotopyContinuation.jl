@@ -1227,7 +1227,7 @@ function Base.intersect(
     _check_front_end(system(W), true)
     rng = Random.MersenneTwister(_seed(alg))
     H = _hypersurface_witness_set(
-        f, _as_variables(collect(variables(system(W)))), rng, alg, exec, W.projective,
+        f, as_variables(collect(variables(system(W)))), rng, alg, exec, W.projective,
     )
     return intersect(W, H, _reseed(alg, rand(rng, UInt32)), exec)
 end

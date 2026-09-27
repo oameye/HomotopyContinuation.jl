@@ -68,9 +68,9 @@ function System(
     else
         _build_codegen_all_system
     end
-    normalized, lowered = _lower_input(polys, variables, parameters)
+    normalized, lowered = lower_input(polys, variables, parameters)
     isempty(variable_groups) ||
-        (lowered = _group_input(lowered, normalized, variables, variable_groups))
+        (lowered = group_input(lowered, normalized, variables, variable_groups))
     return _dispatch_system_build(
         builder, normalized, variables, parameters, lowered, neqs, nvars, nparams,
     )
@@ -118,7 +118,7 @@ function System(
     end
     return System(
         polys, parameters, variables, compile,
-        _variable_group_indices(variable_groups, variables),
+        variable_group_indices(variable_groups, variables),
     )
 end
 
@@ -141,16 +141,16 @@ function System(
         variable_groups = nothing,
         compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
-    params = parameters === nothing ? Expression[] : _as_variables(parameters)
+    params = parameters === nothing ? Expression[] : as_variables(parameters)
     vars = if variables !== nothing
-        _as_variables(variables)
+        as_variables(variables)
     elseif variable_groups !== nothing
-        _as_variables(reduce(vcat, variable_groups))
+        as_variables(reduce(vcat, variable_groups))
     else
         _default_variables(exprs, params)
     end
     return System(
-        exprs, params, vars, compile, _variable_group_indices(variable_groups, vars),
+        exprs, params, vars, compile, variable_group_indices(variable_groups, vars),
     )
 end
 
@@ -163,23 +163,23 @@ function System(
         variable_groups = nothing,
         compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
-    params = parameters === nothing ? Expression[] : _as_variables(parameters)
+    params = parameters === nothing ? Expression[] : as_variables(parameters)
     vars = if variables !== nothing
-        _as_variables(variables)
+        as_variables(variables)
     elseif variable_groups !== nothing
-        _as_variables(reduce(vcat, variable_groups))
+        as_variables(reduce(vcat, variable_groups))
     else
-        _as_variables(
+        as_variables(
             _rational_variables(polys, parameters === nothing ? () : parameters),
         )
     end
     return System(
-        _as_expressions(polys), params, vars, compile,
-        _variable_group_indices(variable_groups, vars),
+        as_expressions(polys), params, vars, compile,
+        variable_group_indices(variable_groups, vars),
     )
 end
 
-function _as_variables(vars::AbstractVector)::Vector{Expression}
+function as_variables(vars::AbstractVector)::Vector{Expression}
     Base.@nospecialize vars
     out = Vector{Expression}(undef, length(vars))
     for (i, v) in enumerate(vars)
@@ -188,9 +188,9 @@ function _as_variables(vars::AbstractVector)::Vector{Expression}
     return out
 end
 
-_as_variables(vars::Vector{Expression})::Vector{Expression} = vars
+as_variables(vars::Vector{Expression})::Vector{Expression} = vars
 
-function _as_expressions(polys::AbstractVector)::Vector{Expression}
+function as_expressions(polys::AbstractVector)::Vector{Expression}
     Base.@nospecialize polys
     out = Vector{Expression}(undef, length(polys))
     for (i, p) in enumerate(polys)
@@ -254,7 +254,7 @@ end
 
 # Linear scan: a `Set` costs more to compile than the scan costs to run, as long
 # as callers keep the scan off the innermost loop.
-function _contains_variable(variables::AbstractVector, var)::Bool
+function contains_variable(variables::AbstractVector, var)::Bool
     Base.@nospecialize variables var
     for v in variables
         v == var && return true
@@ -264,7 +264,7 @@ end
 
 # Per-polynomial degree in `variables` only, and homogeneity in them, in one pass.
 # `MP.maxdegree` would count parameters and inflate the Bezout number.
-function _variable_degrees(
+function variable_degrees(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         variables::AbstractVector,
     )::Tuple{Vector{Int}, Bool}
@@ -284,7 +284,7 @@ function _variable_degrees(
             if mono_variables !== mask_variables
                 resize!(mask, length(mono_variables))
                 for (k, var) in enumerate(mono_variables)
-                    mask[k] = _contains_variable(variables, var)
+                    mask[k] = contains_variable(variables, var)
                 end
                 mask_variables = mono_variables
             end
@@ -305,10 +305,10 @@ end
 
 ## ── Variable groups ─────────────────────────────────────────────────────────
 
-_variable_group_indices(::Nothing, ::AbstractVector)::Vector{Vector{Int}} = Vector{Int}[]
+variable_group_indices(::Nothing, ::AbstractVector)::Vector{Vector{Int}} = Vector{Int}[]
 
 # Matched by name, so either front-end's variable type is accepted.
-@noinline function _variable_group_indices(
+@noinline function variable_group_indices(
         groups, variables::AbstractVector,
     )::Vector{Vector{Int}}
     Base.@nospecialize groups variables
@@ -340,13 +340,13 @@ _variable_group_indices(::Nothing, ::AbstractVector)::Vector{Vector{Int}} = Vect
     return out
 end
 
-_group_degrees(
+group_degrees(
     polys::AbstractVector{<:MP.AbstractPolynomialLike}, vars::AbstractVector,
-)::Tuple{Vector{Int}, Bool} = _variable_degrees(polys, vars)
+)::Tuple{Vector{Int}, Bool} = variable_degrees(polys, vars)
 
-_group_degrees(
+group_degrees(
     exprs::AbstractVector{Expression}, vars::AbstractVector,
-)::Tuple{Vector{Int}, Bool} = _expression_degrees(exprs, _as_variables(vars))
+)::Tuple{Vector{Int}, Bool} = _expression_degrees(exprs, as_variables(vars))
 
 ## ── Front-end lowering ──────────────────────────────────────────────────────
 
@@ -372,12 +372,12 @@ LoweredInput(
     Vector{Int}[], Matrix{Int}(undef, 0, 0),
 )
 
-_lowered(sys::System)::LoweredInput = LoweredInput(
+lowered_input(sys::System)::LoweredInput = LoweredInput(
     sys._interp_f64.sequence, sys._interp_jac.sequence, sys.degrees,
     sys.is_homogeneous, sys.equation_scales, sys.variable_groups, sys.group_degrees,
 )
 
-@noinline function _group_input(
+@noinline function group_input(
         lowered::LoweredInput, polys::AbstractVector, variables::AbstractVector,
         groups::Vector{Vector{Int}},
     )::LoweredInput
@@ -385,7 +385,7 @@ _lowered(sys::System)::LoweredInput = LoweredInput(
     D = Matrix{Int}(undef, length(groups), length(lowered.degrees))
     homogeneous = true
     for (j, group) in enumerate(groups)
-        degs, hom = _group_degrees(polys, variables[group])
+        degs, hom = group_degrees(polys, variables[group])
         D[j, :] .= degs
         homogeneous &= hom
     end
@@ -398,13 +398,13 @@ end
 # Called from a frame that still knows the concrete input type: dispatching behind
 # the `@nospecialize` builder chain makes inference walk both front-ends on every
 # build.
-@noinline function _lower_input(
+@noinline function lower_input(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         variables::AbstractVector,
         parameters::AbstractVector,
     )
-    normalized, scales = _normalize_polys(polys)
-    degs, is_homogeneous = _variable_degrees(normalized, variables)
+    normalized, scales = normalize_polys(polys)
+    degs, is_homogeneous = variable_degrees(normalized, variables)
     return normalized, LoweredInput(
             _build_instruction_sequence(normalized, variables, parameters, false),
             _build_instruction_sequence(normalized, variables, parameters, true),
@@ -412,14 +412,14 @@ end
         )
 end
 
-@noinline function _lower_input(
+@noinline function lower_input(
         exprs::AbstractVector{Expression},
         variables::AbstractVector,
         parameters::AbstractVector,
     )
-    normalized, scales = _normalize_expressions(exprs)
-    vars = _as_variables(variables)
-    params = _as_variables(parameters)
+    normalized, scales = normalize_expressions(exprs)
+    vars = as_variables(variables)
+    params = as_variables(parameters)
     degs, is_homogeneous = _expression_degrees(normalized, vars)
     return normalized, LoweredInput(
             _build_instruction_sequence_from_expressions(normalized, vars, params, false),
@@ -429,15 +429,15 @@ end
 end
 
 # Rational input reaching the positional constructor.
-@noinline function _lower_input(
+@noinline function lower_input(
         polys::AbstractVector{<:MP.RationalPoly},
         variables::AbstractVector,
         parameters::AbstractVector,
     )
-    return _lower_input(_as_expressions(polys), variables, parameters)
+    return lower_input(as_expressions(polys), variables, parameters)
 end
 
-@noinline function _lower_input(
+@noinline function lower_input(
         polys::AbstractVector,
         variables::AbstractVector,
         parameters::AbstractVector,
@@ -453,7 +453,7 @@ end
 
 ## ── Polynomial normalization ────────────────────────────────────────────────
 
-function _normalize_polys(
+function normalize_polys(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
     )
     Base.@nospecialize polys
@@ -465,7 +465,7 @@ function _normalize_polys(
     normalized = map(enumerate(polys)) do (i, p)
         coeffs = MP.coefficients(p)
         nrm = maximum(c -> Float64(abs(c)), coeffs)
-        scale = _normalization_scale(nrm)
+        scale = normalization_scale(nrm)
         scales[i] = scale
         return p / scale
     end
@@ -478,7 +478,7 @@ end
 const _MIN_NORM_SCALE = 1.0e-6
 const _MAX_NORM_SCALE = 1.0e8
 
-function _normalization_scale(nrm::Float64)::Float64
+function normalization_scale(nrm::Float64)::Float64
     (iszero(nrm) || !isfinite(nrm)) && return 1.0
     _MIN_NORM_SCALE <= nrm <= _MAX_NORM_SCALE && return 1.0
     return nrm
@@ -486,12 +486,12 @@ end
 
 # Scale measured by `expression_scale` rather than by the largest coefficient, which
 # an expression tree does not carry.
-function _normalize_expressions(
+function normalize_expressions(
         exprs::AbstractVector{Expression},
     )::Tuple{Vector{Expression}, Vector{Float64}}
     scales = Vector{Float64}(undef, length(exprs))
     normalized = map(enumerate(exprs)) do (i, e)
-        scale = _normalization_scale(expression_scale(e))
+        scale = normalization_scale(expression_scale(e))
         scales[i] = scale
         return e / scale
     end
