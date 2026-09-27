@@ -1,13 +1,14 @@
 using Test
-using HomotopyContinuation: System, ParameterHomotopy, HomotopyEvaluator,
-    Tracker, TrackerCode, track!
+using HomotopyContinuation
 
 include("test_systems.jl")
 
-# Parameter pairs that drive the path close to a singularity: the predictor needs
-# iterative refinement and the corrector needs extended-precision residuals.
+# Parameter pairs that drive continuation close to a singularity. These are
+# end-to-end robustness scenarios: the public continuation route must reach the
+# correct target accurately, independent of which internal precision mechanism
+# makes that possible.
 
-@testset "FourBar: predictor refinement on a near-singular path" begin
+@testset "FourBar: near-singular parameter continuation" begin
     polys, vars, params = four_bar_system()
     F = System(polys; variables = vars, parameters = params)
 
@@ -74,13 +75,25 @@ include("test_systems.jl")
         1.2021910424897007 - 1.1148794002014533im,
     ]
 
-    H = ParameterHomotopy(F.evaluator, p, q)
-    tracker = Tracker(HomotopyEvaluator(H))
-    @test track!(tracker, s) == TrackerCode.TRACKER_SUCCESS
-    @test tracker.state.used_extended_prec
+    result = solve(
+        F,
+        [s],
+        p,
+        q,
+        Continuation(; show_progress = false),
+        Serial(),
+    )
+    @test ntracked(result) == 1
+    @test nfailed(result) == 0
+
+    path = only(path_results(result))
+    @test is_success(path)
+    @test start_solution(path) ≈ s
+    @test residual(path) < 1.0e-8
+    @test maximum(abs.(evaluate(F, solution(path), q))) < 1.0e-8
 end
 
-@testset "Steiner: extended-precision residual near a singularity" begin
+@testset "Steiner: accurate and reversible near-singular continuation" begin
     polys, vars, params = steiner_system()
     F = System(polys; variables = vars, parameters = params)
 
@@ -117,16 +130,36 @@ end
         0.06217289908817691 - 1.268704027512965im,
     ]
     q = ComplexF64[
-        0.18802370367009363, -1.9260285280414342, 0.6835970218915922,
-        -0.5817725614568748, -0.5033365002810842, 0.6894548688621689,
-        0.03748633251693155, -0.12168863868778622, -1.6197914296308757,
-        -2.2192790882018585, 1.4133360740976828, 1.6335108803709772,
-        0.13316023698203722, 0.6415334044239753, 0.36899573610352765,
-        -0.6026231774364099, 1.086473021454091, -0.7385757989526022,
-        1.4247229002869566, -0.2974094335738924, -0.2651970300878602,
-        -1.0758341565830896, -0.2676109895616729, -1.0203047093858557,
-        -0.2897673462238505, 1.950855352655958, -1.3290748919968962,
-        -0.6377519368264665, 0.850257024568716, 0.2844129100094346,
+        0.18802370367009363,
+        -1.9260285280414342,
+        0.6835970218915922,
+        -0.5817725614568748,
+        -0.5033365002810842,
+        0.6894548688621689,
+        0.03748633251693155,
+        -0.12168863868778622,
+        -1.6197914296308757,
+        -2.2192790882018585,
+        1.4133360740976828,
+        1.6335108803709772,
+        0.13316023698203722,
+        0.6415334044239753,
+        0.36899573610352765,
+        -0.6026231774364099,
+        1.086473021454091,
+        -0.7385757989526022,
+        1.4247229002869566,
+        -0.2974094335738924,
+        -0.2651970300878602,
+        -1.0758341565830896,
+        -0.2676109895616729,
+        -1.0203047093858557,
+        -0.2897673462238505,
+        1.950855352655958,
+        -1.3290748919968962,
+        -0.6377519368264665,
+        0.850257024568716,
+        0.2844129100094346,
     ]
     s_p = ComplexF64[
         5.7580258277373275 - 4.533830475896814im,
@@ -163,16 +196,36 @@ end
         0.8690167435198312 - 0.5157825273396847im,
     ]
 
-    H = ParameterHomotopy(F.evaluator, p, q)
-    tracker = Tracker(HomotopyEvaluator(H))
+    forward = solve(
+        F,
+        [s_p],
+        p,
+        q,
+        Continuation(; show_progress = false),
+        Serial(),
+    )
+    @test ntracked(forward) == 1
+    @test nfailed(forward) == 0
 
-    @test track!(tracker, s_p) == TrackerCode.TRACKER_SUCCESS
-    x_q = copy(Vector(tracker.state.x))
+    forward_path = only(path_results(forward))
+    @test is_success(forward_path)
+    x_q = solution(forward_path)
     @test x_q ≈ s_q rtol = 1.0e-10
-    @test tracker.state.used_extended_prec
+    @test maximum(abs.(evaluate(F, x_q, q))) < 1.0e-8
 
-    # The path is reversible: tracking back recovers the start solution.
-    @test track!(tracker, x_q; t₁ = complex(0.0), t₀ = complex(1.0)) ==
-        TrackerCode.TRACKER_SUCCESS
-    @test Vector(tracker.state.x) ≈ s_p rtol = 1.0e-10
+    reverse = solve(
+        F,
+        [x_q],
+        q,
+        p,
+        Continuation(; show_progress = false),
+        Serial(),
+    )
+    @test ntracked(reverse) == 1
+    @test nfailed(reverse) == 0
+
+    reverse_path = only(path_results(reverse))
+    @test is_success(reverse_path)
+    @test solution(reverse_path) ≈ s_p rtol = 1.0e-10
+    @test maximum(abs.(evaluate(F, solution(reverse_path), p))) < 1.0e-8
 end
