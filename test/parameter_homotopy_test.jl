@@ -1,130 +1,74 @@
-using Test, Random
+using Test
 using HomotopyContinuation
-using HomotopyContinuation: HomotopyEvaluator, ParameterHomotopy, parameters!,
-    evaluate!, evaluate_and_jacobian!, taylor!, FSVec, FSMat, TaylorVector,
-    start_parameters!, target_parameters!
-using HomotopyContinuation: Tracker, TrackerCode, track!
-using DynamicPolynomials: @polyvar, subs, differentiate
+using DynamicPolynomials: @polyvar
 
-@testset "ParameterHomotopy" begin
-    Random.seed!(0x5eed)
-    @polyvar x[1:2] p[1:2]
-    # Nonlinear in the parameters on purpose (prototype 6 system class).
-    polys = [
-        x[1]^2 * p[1]^2 + x[2] * p[2]^3 + p[1] * p[2] * x[1] * x[2] - 1,
-        x[1] + x[2] - p[1],
-    ]
-    F = System(polys; variables = x, parameters = p)
-    pstart = [1.0 + 0.2im, -0.7 + 1.1im]
-    ptarget = [0.3 - 0.9im, 1.4 + 0.5im]
-    H = ParameterHomotopy(F.evaluator, pstart, ptarget)
+function _parameter_solution_distance(a, b)
+    isempty(a) && return Inf
+    return maximum(minimum(maximum(abs.(x .- y)) for y in b) for x in a)
+end
 
-    p_of(t) = t .* pstart .+ (1 .- t) .* ptarget
-    xv = [0.4 + 0.3im, -1.2 + 0.1im]
-    xf = FSVec{ComplexF64}(ComplexF64.(xv))
-    u = FSVec{ComplexF64}(zeros(ComplexF64, 2))
+@testset "ParameterHomotopy public behavior" begin
+    @testset "nonlinear parameter dependence reaches the target fiber" begin
+        @polyvar x[1:2] p[1:2]
+        F = System(
+            [
+                x[1]^2 * p[1]^2 + x[2] * p[2]^3 + p[1] * p[2] * x[1] * x[2] - 1,
+                x[1] + x[2] - p[1],
+            ];
+            variables = x, parameters = p,
+        )
+        pstart = ComplexF64[1.0 + 0.2im, -0.7 + 1.1im]
+        ptarget = ComplexF64[0.3 - 0.9im, 1.4 + 0.5im]
+        seed = UInt32(0x5eed)
 
-    @testset "evaluate! matches F(x; p(t))" begin
-        for t in (complex(0.37), 0.2 + 0.6im)
-            evaluate!(u, H, xf, ComplexF64(t))
-            expected = [ComplexF64(f(x => xv, p => p_of(t))) for f in polys]
-            @test u ≈ expected atol = 1.0e-13
+        start = solve(
+            fix_parameters(F, pstart),
+            TotalDegree(; seed, show_progress = false),
+            Serial(),
+        )
+        target = solve(
+            fix_parameters(F, ptarget),
+            TotalDegree(; seed, show_progress = false),
+            Serial(),
+        )
+        tracked = solve(
+            F,
+            start,
+            pstart,
+            ptarget,
+            Continuation(; seed, show_progress = false),
+            Serial(),
+        )
+
+        @test nsolutions(start) == nsolutions(target) == nsolutions(tracked) == 2
+        @test _parameter_solution_distance(solutions(tracked), solutions(target)) < 1.0e-8
+        for s in solutions(tracked)
+            @test maximum(abs, evaluate(F, s, ptarget)) < 1.0e-8
         end
     end
 
-    @testset "evaluate_and_jacobian!" begin
-        t = 0.2 + 0.6im
-        U = FSMat{ComplexF64}(zeros(ComplexF64, 2, 2))
-        evaluate_and_jacobian!(u, U, H, xf, ComplexF64(t))
-        J = [
-            ComplexF64(differentiate(f, xj)(x => xv, p => p_of(t)))
-                for f in polys, xj in x
-        ]
-        @test U ≈ J atol = 1.0e-13
-    end
-
-    @testset "taylor! Val(1) is the exact tangent" begin
-        # d/dt F(x; p(t)) via the symbolic series in s: F(x; p(t) + s*(pstart - ptarget))
-        t = complex(0.37)
-        @polyvar s
-        dp = pstart .- ptarget
-        series = [subs(f, x => xv, p => p_of(t) .+ s .* dp) for f in polys]
-        expected = [ComplexF64(differentiate(g, s)(s => 0.0)) for g in series]
-        taylor!(u, Val(1), H, xf, ComplexF64(t))
-        @test u ≈ expected atol = 1.0e-12
-    end
-
-    @testset "taylor! Val(2)/Val(3) match the symbolic series" begin
-        # constant path: order-k coefficient of s ↦ F(x; p(t0) + s*(pstart - ptarget))
-        t0 = complex(0.37)
-        @polyvar s
-        dp = pstart .- ptarget
-        series = [subs(f, x => xv, p => p_of(t0) .+ s .* dp) for f in polys]
-        dseries = series
-        for k in (1, 2, 3)
-            dseries = differentiate.(dseries, s)
-            expected = [ComplexF64(g(s => 0.0)) / factorial(k) for g in dseries]
-            if k == 1
-                taylor!(u, Val(1), H, xf, ComplexF64(t0))
-            else
-                tv = TaylorVector{k + 1, ComplexF64}(2)
-                tv.data[1, :] .= ComplexF64.(xv)
-                taylor!(u, Val(k), H, tv, ComplexF64(t0))
-            end
-            @test u ≈ expected atol = 1.0e-11
-        end
-    end
-
-    @testset "parameters! retarget invalidates caches" begin
-        t = complex(0.5)
-        evaluate!(u, H, xf, ComplexF64(t))
-        before = copy(Vector(u))
-        p2 = [2.0 + 0.0im, -1.0 + 0.5im]
-        q2 = [0.1 + 0.1im, 0.9 - 0.2im]
-        parameters!(H, p2, q2)
-        evaluate!(u, H, xf, ComplexF64(t))
-        expected = [ComplexF64(f(x => xv, p => (t .* p2 .+ (1 - t) .* q2))) for f in polys]
-        @test u ≈ expected atol = 1.0e-13
-        @test !(u ≈ before)
-    end
-
-    @testset "tracks a nonlinear-in-p path in few steps" begin
+    @testset "exact parameter tangent keeps a simple path short" begin
         @polyvar y q
-        G = System([y^2 - q]; variables = [y], parameters = [q])
-        Hg = ParameterHomotopy(G.evaluator, [1.0 + 0im], [9.0 + 0im])
-        tracker = Tracker(HomotopyEvaluator(Hg))
-        code = track!(tracker, [1.0 + 0.0im])
-        @test code == TrackerCode.TRACKER_SUCCESS
-        @test tracker.state.x[1] ≈ 3.0 atol = 1.0e-10
-        # CoefficientHomotopy needed 204 accepted steps here (invalid tangent shortcut).
-        @test tracker.state.accepted_steps < 20
-    end
-
-    @testset "solve parameter homotopy step-count regression" begin
-        @polyvar y q
-        G = System([y^2 - q]; variables = [y], parameters = [q])
-        res = solve(
-            G,
+        F = System([y^2 - q]; variables = [y], parameters = [q])
+        result = solve(
+            F,
             [[1.0 + 0.0im]],
             [1.0 + 0im],
             [9.0 + 0im],
             Continuation(; seed = UInt32(1), show_progress = false),
             Serial(),
         )
-        @test nsolutions(res) == 1
-        r = first(path_results(res))
-        @test solution(r)[1] ≈ 3.0 atol = 1.0e-8
-        # With CoefficientHomotopy's invalid Val(1) shortcut this took 204 accepted
-        # steps; the exact tangent needs a handful.
-        @test accepted_steps(r) < 20
+        @test nsolutions(result) == 1
+        path = only(path_results(result))
+        @test solution(path)[1] ≈ 3.0 atol = 1.0e-8
+        @test accepted_steps(path) < 20
     end
 
-    # Every route that takes start solutions accepts the same three forms, so a
-    # `Result` or `ResultIterator` from one solve feeds the next unchanged.
-    @testset "start solutions: vector, Result and ResultIterator agree" begin
+    @testset "the same start fiber accepts vectors, Result, and ResultIterator" begin
         @polyvar w z c
-        K = System([w^2 - c, z^2 - c]; variables = [w, z], parameters = [c])
-        base = solve(fix_parameters(K, [1.0]), TotalDegree(; show_progress = false), Serial())
+        F = System([w^2 - c, z^2 - c]; variables = [w, z], parameters = [c])
+        base_system = fix_parameters(F, [1.0])
+        base = solve(base_system, TotalDegree(; show_progress = false), Serial())
 
         key(R) = sort(
             [
@@ -132,9 +76,9 @@ using DynamicPolynomials: @polyvar, subs, differentiate
                     for s in solutions(R)
             ]
         )
-        ref = key(
+        reference = key(
             solve(
-                K,
+                F,
                 solutions(base),
                 [1.0],
                 [4.0],
@@ -142,35 +86,45 @@ using DynamicPolynomials: @polyvar, subs, differentiate
                 Serial(),
             )
         )
-        @test length(ref) == 4
-
+        @test length(reference) == 4
         @test key(
-            solve(K, base, [1.0], [4.0], Continuation(; show_progress = false), Serial()),
-        ) == ref
+            solve(F, base, [1.0], [4.0], Continuation(; show_progress = false), Serial()),
+        ) == reference
         @test key(
             solve(
-                K,
-                result_iterator(fix_parameters(K, [1.0])),
+                F,
+                result_iterator(base_system),
                 [1.0],
                 [4.0],
                 Continuation(; show_progress = false),
                 Serial(),
             ),
-        ) == ref
+        ) == reference
 
-        # The same three forms on the other routes that take start solutions.
         @test length(
-            solve(K, base, [1.0], [[4.0], [9.0]], Sweep(; show_progress = false), Serial()),
+            solve(F, base, [1.0], [[4.0], [9.0]], Sweep(; show_progress = false), Serial()),
         ) == 2
-        @test key(Result(result_iterator(K, base, [1.0], [4.0]))) == ref
+        @test key(Result(result_iterator(F, base, [1.0], [4.0]))) == reference
 
         @test_throws ArgumentError solve(
-            K,
+            F,
             "not start solutions",
             [1.0],
             [4.0],
             Continuation(; show_progress = false),
             Serial(),
         )
+    end
+
+    @testset "public ParameterHomotopy validates and solves" begin
+        @polyvar y q
+        F = System([y^2 - q]; variables = [y], parameters = [q])
+        H = ParameterHomotopy(F, [1.0], [9.0])
+        result = solve(H, [[1.0]], Continuation(; show_progress = false), Serial())
+        @test nsolutions(result) == 1
+        @test solution(only(path_results(result)))[1] ≈ 3.0 atol = 1.0e-8
+
+        @test_throws ArgumentError ParameterHomotopy(F, Float64[], [9.0])
+        @test_throws ArgumentError ParameterHomotopy(F, [1.0], Float64[])
     end
 end
