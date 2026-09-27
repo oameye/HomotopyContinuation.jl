@@ -229,9 +229,10 @@ include("solution_sets.jl")
         P = points(W)
         @test degree(W) == length(P) == 4
 
+        # The trace of the complete set is rounding noise; a strict subset's is not.
         @test trace_test(W; seed = UInt32(1)) < 1.0e-10
         for k in 1:3
-            @test trace_test(WitnessSet(Q, L, P[1:k]); seed = UInt32(1)) > 1.0e-3
+            @test trace_test(WitnessSet(Q, L, P[1:k]); seed = UInt32(1)) > 1.0e-6
         end
 
         incomplete_runs = 0

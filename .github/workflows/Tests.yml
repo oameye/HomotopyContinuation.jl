@@ -12,7 +12,6 @@ on:
       - 'quality/**'
       - 'Project.toml'
   pull_request:
-    branches: [v3]
     paths:
       - '.github/workflows/Tests.yml'
       - 'src/**'

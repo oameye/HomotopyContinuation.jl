@@ -2,7 +2,6 @@ name: Public Coverage
 
 on:
   pull_request:
-    branches: [v3]
     paths:
       - '.github/workflows/Coverage.yml'
       - 'src/**'

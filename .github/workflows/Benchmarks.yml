@@ -10,7 +10,6 @@ on:
       - 'benchmark/**'
       - 'Project.toml'
   pull_request:
-    branches: [v3]
     paths:
       - '.github/workflows/Benchmarks.yml'
       - 'src/**'
