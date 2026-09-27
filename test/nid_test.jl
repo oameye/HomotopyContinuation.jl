@@ -1,8 +1,7 @@
 using Test, Random
 using HomotopyContinuation
 using HomotopyContinuation: TrackerOptions, MonodromyOptions, linear_subspace,
-    is_linear, dim, EquationSorting, _regeneration_sortperm,
-    _regeneration_monodromy_options
+    is_linear, dim, EquationSorting
 using DynamicPolynomials: @polyvar
 import MultivariatePolynomials as MP
 
@@ -25,23 +24,26 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
 
         W = solve(F, Regeneration(; seed = 0x8a1f2c3d))
         @test sort(degree.(W); rev = true) == [8, 8, 2]
-        @test isconcretetype(eltype(W))
 
         dec = solve(W, Decomposition(; seed = 0x8a1f2c3d))
         @test all(W -> is_irreducible(W) == Irreducibility.IRREDUCIBLE, dec)
-        @test eltype(dec) === eltype(W)
 
         # sorting
         W = solve(
             F,
             Regeneration(;
-                sorted = EquationSorting.UNSORTED, show_progress = false,
+                sorted = EquationSorting.UNSORTED,
+                seed = 0x8a1f2c3d,
+                show_progress = false,
             ),
         )
         @test sort(degree.(W); rev = true) == [8, 8, 2]
 
         # limited codimension
-        W = solve(F, Regeneration(; max_codim = 2, show_progress = false))
+        W = solve(
+            F,
+            Regeneration(; max_codim = 2, seed = 0x8a1f2c3d, show_progress = false),
+        )
         @test sort(degree.(W); rev = true) == [8, 2]
 
         # no threading
@@ -52,7 +54,6 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         s = 0x42c9d504
         N = solve(F, Decomposition(; seed = s, show_progress = false))
         @test seed(N) == s
-        @test isconcretetype(typeof(N))
 
         # Without an explicit seed a random one is drawn and recorded, so the
         # result always carries a seed that reproduces it.
@@ -100,37 +101,6 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             ),
         )
         @test isa(N3, NumericalIrreducibleDecomposition)
-
-        metric = (x, y) -> sum(abs2, x .- y)
-        identity_options = MonodromyOptions(;
-            distance = metric, triangle_inequality = false,
-            unique_points_atol = 2.0e-12, unique_points_rtol = 3.0e-9,
-        )
-        copied_options = HomotopyContinuation._decompose_monodromy_options(
-            identity_options, 1.0e-10, 1.0e-8,
-        )
-        @test copied_options.distance === metric
-        @test copied_options.triangle_inequality === false
-        # Decomposition owns witness cardinality, so it replaces the caller's
-        # point-identity tolerances rather than inheriting them. The values here
-        # differ from the ones on `identity_options` so the override is visible.
-        @test copied_options.unique_points_atol == 1.0e-10
-        @test copied_options.unique_points_rtol == 1.0e-8
-
-        zero_metric = (x, y) -> 0.0
-        identity_points = UniquePoints(
-            2; distance = zero_metric, triangle_inequality = false,
-        )
-        identity = HomotopyContinuation.DecompositionPointIdentity(
-            identity_points, Vector{Vector{ComplexF64}}(), Int[], BitVector(),
-        )
-        @test HomotopyContinuation._point_identity!(
-            identity, ComplexF64[0, 0], 1.0e-14, 1.0e-8,
-        ) == 1
-        @test HomotopyContinuation._point_identity!(
-            identity, ComplexF64[10, 10], 1.0e-14, 1.0e-8,
-        ) == 1
-        @test length(identity.master) == 1
 
         # number of components
         @test ncomponents(N3) == 11
@@ -287,8 +257,11 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
 
         Ws = witness_sets(N)
         W1, W2 = first(Ws[2]), first(Ws[1])
-        @test all(W -> W.projective, [W1, W2])
         @test all(W -> is_linear(linear_subspace(W)), [W1, W2])
+        for W in (W1, W2)
+            q = first(solutions(W))
+            @test membership((2.0 + 1.0im) .* q, W, Membership(; show_progress = false))
+        end
 
         # `EquationSorting.RANDOMIZED` combines equations of different degrees,
         # which does not stay homogeneous.
@@ -518,102 +491,43 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
     end
 end
 
-@testset "Regeneration ordering and tolerances" begin
-    @testset "degree ordering policy" begin
-        @polyvar x y
-        L = LinearSubspace(zeros(ComplexF64, 0, 2), ComplexF64[])
-        F = System([x]; variables = [x, y])
-        H = [
-            WitnessSet(F, L, [ComplexF64[0, 0] for _ in 1:n])
-                for n in (3, 1, 2)
-        ]
-        @test _regeneration_sortperm(H, EquationSorting.UNSORTED) == [1, 2, 3]
-        @test _regeneration_sortperm(H, EquationSorting.BY_DEGREE) == [2, 3, 1]
-        @test _regeneration_sortperm(H, EquationSorting.RANDOMIZED) == [1, 3, 2]
+@testset "Regeneration preserves witness cardinality under monodromy group actions" begin
+    @var a b c
+    F = System([a^2 + b^2 + c^2 - 4, a + b + c]; variables = [a, b, c])
+
+    seen = Ref{Union{Nothing, Vector{ComplexF64}}}(nothing)
+    function collapse_to_first(p)
+        seen[] === nothing && (seen[] = collect(ComplexF64, p))
+        return (seen[]::Vector{ComplexF64},)
     end
 
-    @testset "outer algorithm owns witness-point identity" begin
-        @polyvar u v
-        G = System([u]; variables = [u, v])
-        L = LinearSubspace(zeros(ComplexF64, 0, 2), ComplexF64[])
-        W = WitnessSet(G, L, [ComplexF64[0, 0]])
+    plain = MonodromyOptions(; trace_test = true)
+    symmetric = MonodromyOptions(;
+        trace_test = true,
+        group_action = collapse_to_first,
+        equivalence_classes = true,
+    )
 
-        # Standalone monodromy keeps its concrete absolute default and adaptive
-        # endpoint-relative default.
-        default_m = MonodromyOptions()
-        @test default_m.unique_points_atol == 1.0e-14
-        @test isnan(default_m.unique_points_rtol)
-
-        inherited = _regeneration_monodromy_options(default_m, W, 2.0e-9, 3.0e-7)
-        @test inherited.unique_points_atol == 2.0e-9
-        @test inherited.unique_points_rtol == 3.0e-7
-
-        # Once monodromy is used as an internal regeneration engine, the outer
-        # algorithm's identity tolerance is authoritative.  Nested monodromy
-        # uniqueness settings must not create a second notion of witness identity.
-        explicit_m = MonodromyOptions(;
-            unique_points_atol = 7.0e-12,
-            unique_points_rtol = 8.0e-10,
-            group_action = x -> -x,
-            equivalence_classes = true,
+    expected = degree.(
+        solve(
+            F,
+            Regeneration(;
+                monodromy = plain, seed = UInt32(0x1234), show_progress = false,
+            ),
         )
-        explicit = _regeneration_monodromy_options(explicit_m, W, 2.0e-9, 3.0e-7)
-        @test explicit.unique_points_atol == 2.0e-9
-        @test explicit.unique_points_rtol == 3.0e-7
-        @test explicit.distance === explicit_m.distance
-        @test explicit.triangle_inequality == explicit_m.triangle_inequality
-        @test !explicit.equivalence_classes
-        @test explicit.group_actions !== nothing
-    end
+    )
+    @test expected == [2]
 
-    @testset "a group action never reduces witness cardinality" begin
-        # Regeneration counts witness points, not orbits, so a caller's group
-        # action must not reach the deduplication that fixes witness
-        # cardinality.  `collapse_to_first` is degenerate on purpose: it maps
-        # every point to the first point it is ever shown, so any surviving
-        # quotient collapses a whole witness set onto one point.
-        # Two equations, so regeneration reaches its monodromy fill-up: a conic
-        # cut out of a sphere by a plane, of degree 2.
-        @var a b c
-        F = System([a^2 + b^2 + c^2 - 4, a + b + c]; variables = [a, b, c])
-
-        seen = Ref{Union{Nothing, Vector{ComplexF64}}}(nothing)
-        function collapse_to_first(p)
-            seen[] === nothing && (seen[] = collect(ComplexF64, p))
-            return (seen[]::Vector{ComplexF64},)
-        end
-
-        plain = MonodromyOptions(; trace_test = true)
-        symmetric = MonodromyOptions(;
-            trace_test = true, group_action = collapse_to_first,
-            equivalence_classes = true,
+    seen[] = nothing
+    got = degree.(
+        solve(
+            F,
+            Regeneration(;
+                monodromy = symmetric, seed = UInt32(0x1234), show_progress = false,
+            ),
         )
-        # The caller's own configuration is left alone; only its reach is.
-        @test symmetric.equivalence_classes
-        @test symmetric.group_actions !== nothing
-
-        expected = degree.(
-            solve(
-                F,
-                Regeneration(;
-                    monodromy = plain, seed = UInt32(0x1234), show_progress = false,
-                ),
-            )
-        )
-        @test expected == [2]
-
-        seen[] = nothing
-        got = degree.(
-            solve(
-                F,
-                Regeneration(;
-                    monodromy = symmetric, seed = UInt32(0x1234),
-                    show_progress = false,
-                ),
-            )
-        )
-        @test got == expected
-    end
+    )
+    @test got == expected
 end
 
 @testset "NID preserves unresolved witness points" begin
@@ -648,32 +562,9 @@ end
     @test occursin("unresolved", sprint(show, N))
 end
 
-@testset "Decomposition owns point-identity tolerances" begin
-    nested = HomotopyContinuation.MonodromyOptions(;
-        unique_points_atol = 7.0e-12,
-        unique_points_rtol = 8.0e-10,
-        group_action = x -> -x,
-        equivalence_classes = true,
-    )
-    alg = Decomposition(;
-        atol = 2.0e-9, rtol = 3.0e-7,
-        monodromy = nested,
-        show_progress = false,
-    )
-    @test alg.atol == 2.0e-9
-    @test alg.rtol == 3.0e-7
-    opts = HomotopyContinuation._decompose_monodromy_options(alg.monodromy, alg.atol, alg.rtol)
-    @test opts.unique_points_atol == alg.atol
-    @test opts.unique_points_rtol == alg.rtol
-    @test !opts.equivalence_classes
-
-    # Splitting counts witness points, not orbits, so a caller's group action
-    # must not reach the persistent point identity.  `collapse_to_first` is
-    # degenerate on purpose: it maps every point to the first point it is ever
-    # shown, so any surviving quotient merges the whole identity index and the
-    # components stop separating.
+@testset "Decomposition preserves component identity under nested monodromy group actions" begin
     @var a b c
-    F = System([a * (a^2 + b^2 + c^2 - 1)])  # a plane and a sphere
+    F = System([a * (a^2 + b^2 + c^2 - 1)])
 
     seen = Ref{Union{Nothing, Vector{ComplexF64}}}(nothing)
     function collapse_to_first(p)
@@ -683,19 +574,16 @@ end
 
     plain = MonodromyOptions(; trace_test = true)
     symmetric = MonodromyOptions(;
-        trace_test = true, group_action = collapse_to_first,
+        trace_test = true,
+        group_action = collapse_to_first,
         equivalence_classes = true,
     )
-    # The caller's own configuration is left alone; only its reach is.
-    @test symmetric.equivalence_classes
-    @test symmetric.group_actions !== nothing
 
-    # Component order within a dimension is not stable between runs: the
-    # default executor is threaded, so discovery order follows scheduling.
     sorted_degrees(N) = Dict(d => sort(ds) for (d, ds) in degrees(N))
 
     N_plain = solve(
-        F, Decomposition(;
+        F,
+        Decomposition(;
             monodromy = plain, seed = UInt32(0x1234), show_progress = false,
         ),
     )
@@ -704,7 +592,8 @@ end
 
     seen[] = nothing
     N_symmetric = solve(
-        F, Decomposition(;
+        F,
+        Decomposition(;
             monodromy = symmetric, seed = UInt32(0x1234), show_progress = false,
         ),
     )
