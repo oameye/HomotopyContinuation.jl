@@ -1,6 +1,19 @@
 using Test, Random
 using HomotopyContinuation
+using HomotopyContinuation: TaylorVector, ComplexDF64
 using DynamicPolynomials: @polyvar
+using MultivariatePolynomials: MultivariatePolynomials as MP
+using FixedSizeArrays: FixedSizeVectorDefault
+
+@static if VERSION < v"1.11"
+    buffer(v::AbstractVector{T}) where {T} = Vector{T}(v)
+else
+    buffer(v::AbstractVector{T}) where {T} = FixedSizeVectorDefault{T}(v)
+end
+
+value_at(polys, vars, x) = ComplexF64[f(vars => x) for f in polys]
+jacobian_at(polys, vars, x) =
+    ComplexF64[MP.differentiate(f, v)(vars => x) for f in polys, v in vars]
 
 _key(R) = sort(
     solutions(R);
@@ -34,6 +47,39 @@ _key(R) = sort(
         @test degrees(H) == degrees(C)
         @test evaluate(H, xvals) ≈ evaluate(C, xvals, pvals) rtol = 1.0e-12
         @test jacobian(H, xvals) ≈ jacobian(C, xvals, pvals) rtol = 1.0e-12
+    end
+
+    # The independent oracle substitutes the parameter values into the
+    # polynomials symbolically, then evaluates and differentiates them.
+    @testset "agrees with symbolic substitution" begin
+        @polyvar λ
+        substituted = [MP.subs(f, [a, b] => pvals) for f in polys]
+        H = fix_parameters(F, pvals)
+        scales = equation_scales(H)
+        @test evaluate(H, xvals) .* scales ≈ value_at(substituted, [x, y], xvals) rtol = 1.0e-12
+        @test jacobian(H, xvals) .* scales ≈ jacobian_at(substituted, [x, y], xvals) rtol = 1.0e-12
+
+        outer = [x + y, x - y]
+        C = fix_parameters(compose(System(outer; variables = [x, y]), F), pvals)
+        composed = [MP.subs(g, [x, y] => substituted) for g in outer]
+        @test evaluate(C, xvals) ≈ value_at(composed, [x, y], xvals) rtol = 1.0e-12
+        @test jacobian(C, xvals) ≈ jacobian_at(composed, [x, y], xvals) rtol = 1.0e-12
+
+        # Mutating evaluation, in double-double precision and to Taylor order 3.
+        P = ParameterHomotopy(H, ComplexF64[], ComplexF64[])
+        u = buffer(zeros(ComplexF64, 2))
+        evaluate!(u, P, buffer(ComplexDF64.(xvals)), complex(0.0))
+        @test u .* scales ≈ value_at(substituted, [x, y], xvals) rtol = 1.0e-12
+        for K in 2:3
+            X = randn(K + 1, 2) .+ im .* randn(K + 1, 2)
+            tx = TaylorVector{K + 1, ComplexF64}(2)
+            tx[1] = Tuple(X[:, 1])
+            tx[2] = Tuple(X[:, 2])
+            taylor!(u, Val(K), P, tx, complex(0.0))
+            series = [sum(X[k + 1, j] * λ^k for k in 0:K) for j in 1:2]
+            expected = [MP.coefficient(f([x, y] => series), λ^K) for f in substituted]
+            @test u .* scales ≈ expected rtol = 1.0e-10
+        end
     end
 
     @testset "rejects a mismatched parameter count" begin

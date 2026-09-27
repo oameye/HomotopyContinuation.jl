@@ -1,7 +1,41 @@
 using Test, Random
-using LinearAlgebra: norm
+using LinearAlgebra: I, norm
 using HomotopyContinuation
-using DynamicPolynomials: @polyvar
+using HomotopyContinuation: TaylorVector
+using DynamicPolynomials: @polyvar, differentiate
+
+@static if VERSION < v"1.11"
+    buffer(A::AbstractArray) = collect(A)
+else
+    using FixedSizeArrays: FixedSizeArrayDefault
+    buffer(A::AbstractArray) = FixedSizeArrayDefault(A)
+end
+
+include("cauchy_oracle.jl")
+
+function hom_value(H, x::Vector{ComplexF64}, t::ComplexF64)
+    u = buffer(zeros(ComplexF64, size(H, 1)))
+    evaluate!(u, H, buffer(x), t)
+    return Vector(u)
+end
+
+# Order-K coefficient in λ of H(x₀ + x₁λ + … + x_{K-1}λ^{K-1}, t₀ + λ) from
+# taylor! and from the Cauchy integral over evaluate!. The order-K slot of the
+# path is left zero, as the predictor leaves the unknown coefficient.
+function hom_taylor(H, X::Matrix{ComplexF64}, t0::ComplexF64, K::Int)
+    tx = TaylorVector{K + 1, ComplexF64}(size(X, 2))
+    for i in axes(X, 2)
+        tx[i] = (X[1:K, i]..., zero(ComplexF64))
+    end
+    u = buffer(zeros(ComplexF64, size(H, 1)))
+    taylor!(u, Val(K), H, tx, t0)
+    return Vector(u)
+end
+function cauchy_hom_taylor(H, X::Matrix{ComplexF64}, t0::ComplexF64, K::Int)
+    return cauchy_coefficients(K) do λ
+        hom_value(H, [sum(X[k + 1, i] * λ^k for k in 0:(K - 1)) for i in axes(X, 2)], t0 + λ)
+    end[K + 1]
+end
 
 @polyvar z[1:3]
 const SUBSPACE_QUADRIC =
@@ -117,6 +151,84 @@ include("solution_sets.jl")
             # The path stays on C: C ∩ L2 is x⁴ + x² - x - 2 = 0, w = 3.
             @test abs(at(q, endpoint)) < 1.0e-8
             @test abs(endpoint[3] - 3) < 1.0e-8
+        end
+    end
+
+    @testset "intrinsic evaluate!, Jacobian and taylor! agree with evaluate! derivatives" begin
+        Random.seed!(12)
+        V = rand_subspace(3; dim = 1)
+        W = rand_subspace(3; dim = 1)
+        H = IntrinsicSubspaceHomotopy(SUBSPACE_QUADRIC, V, W)
+        @test size(H) == (1, 1)
+        v = randn(ComplexF64, 1)
+        h = 1.0e-6
+
+        for t in (complex(0.6), 0.3 + 0.2im)
+            u = buffer(zeros(ComplexF64, 1))
+            taylor!(u, Val(1), H, buffer(v), t)
+            @test Vector(u) ≈ (hom_value(H, v, t + h) .- hom_value(H, v, t - h)) ./ (2h) atol = 1.0e-6
+
+            U = buffer(zeros(ComplexF64, 1, 1))
+            evaluate_and_jacobian!(u, U, H, buffer(v), t)
+            @test Vector(u) ≈ hom_value(H, v, t) rtol = 1.0e-14
+            @test U[1, 1] ≈ (hom_value(H, v .+ h, t)[1] - hom_value(H, v .- h, t)[1]) / (2h) rtol = 1.0e-7
+        end
+
+        X = randn(ComplexF64, 4, 1)
+        for K in 2:3
+            @test hom_taylor(H, X, complex(0.37), K) ≈
+                cauchy_hom_taylor(H, X, complex(0.37), K) rtol = 1.0e-8
+        end
+    end
+
+    @testset "extrinsic homotopy keeps the system and moves the slice from A to B" begin
+        Random.seed!(41)
+        @polyvar x[1:4]
+        polys = [
+            sum(randn(ComplexF64) * x[i] * x[j] for i in 1:4 for j in i:4) +
+                sum(randn(ComplexF64, 4) .* x) + randn(ComplexF64)
+                for _ in 1:2
+        ]
+        F = System(polys; variables = x)
+        A = rand_subspace(4; codim = 2)
+        B = rand_subspace(4; codim = 2)
+        H = ExtrinsicSubspaceHomotopy(F, A, B; gamma = one(ComplexF64))
+        @test size(H) == (4, 4)
+        on(L) = intrinsic(L).A * randn(ComplexF64, 2) .+ intrinsic(L).b
+
+        # The system rows are F itself for every t; the slice rows vanish on A at
+        # t = 1 and on B at t = 0.
+        for (t, L) in ((1.0, A), (0.0, B)), _ in 1:3
+            xv = on(L)
+            value = hom_value(H, xv, complex(t))
+            @test value[1:2] ≈ [ComplexF64(f(x => xv)) for f in polys] rtol = 1.0e-12
+            @test norm(value[3:4]) < 1.0e-12
+        end
+        xv = randn(ComplexF64, 4)
+        for t in (complex(0.3), 0.8 - 0.4im)
+            @test hom_value(H, xv, t)[1:2] ≈ [ComplexF64(f(x => xv)) for f in polys] rtol = 1.0e-12
+        end
+
+        # The slice rows are affine in x with orthonormal normals along the
+        # Grassmannian geodesic.
+        δ = randn(ComplexF64, 4)
+        for t in (0.3, 0.7)
+            u = buffer(zeros(ComplexF64, 4))
+            U = buffer(zeros(ComplexF64, 4, 4))
+            evaluate_and_jacobian!(u, U, H, buffer(xv), complex(t))
+            J = Matrix(U)
+            @test J[1:2, :] ≈ [ComplexF64(differentiate(f, xj)(x => xv)) for f in polys, xj in x] rtol = 1.0e-12
+            @test J[3:4, :] * J[3:4, :]' ≈ I atol = 1.0e-12
+            @test hom_value(H, xv .+ δ, complex(t))[3:4] - Vector(u)[3:4] ≈ J[3:4, :] * δ atol = 1.0e-12
+        end
+
+        t0 = complex(0.42)
+        u = buffer(zeros(ComplexF64, 4))
+        taylor!(u, Val(1), H, buffer(xv), t0)
+        @test Vector(u) ≈ cauchy_coefficients(λ -> hom_value(H, xv, t0 + λ), 1)[2] rtol = 1.0e-9
+        X = randn(ComplexF64, 4, 4)
+        for K in 2:3
+            @test hom_taylor(H, X, t0, K) ≈ cauchy_hom_taylor(H, X, t0, K) rtol = 1.0e-8
         end
     end
 end

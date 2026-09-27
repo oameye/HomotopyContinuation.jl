@@ -1,8 +1,7 @@
 using HomotopyContinuation
 using ParallelTestRunner: ParallelTestRunner, find_tests
 
-# Coverage must exercise exactly the ordinary semantic suite, not the private
-# compiler/numerical contracts that live in Quality.
+# Coverage must exercise exactly the ordinary suite, not the static contracts.
 const QUALITY_CONTRACTS = Set(
     [
         "alloc_check_test",
