@@ -89,6 +89,7 @@ jobs:
           julia --project=test quality/variable_groups_kernel.jl
           julia --project=test quality/sliced_solve_kernel.jl
           julia --project=test quality/distributed_kernel.jl
+          julia --project=test quality/polyhedral_regression_kernel.jl
 
   strict-mode:
     name: StrictMode / Julia 1.13
