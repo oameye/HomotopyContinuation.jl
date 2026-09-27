@@ -32,8 +32,9 @@ using HomotopyContinuation
 
         @test nfailed(result) == 0
         @test ntracked(result) == 2
-        @test nsolutions(result) == 1
+        @test nsolutions(result) == 0
         @test nsingular(result) == 1
+        @test sort(length.(clusters(result))) == [2]
         root = only(singular(result))
         @test abs(solution(root)[1] - 1) < 1.0e-8
         @test residual(root) < 1.0e-8

@@ -140,10 +140,6 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
             state.solution, complex(0.0),
         )
 
-        # A spurious endpoint leaves ‖H(solution, 0)‖ far from zero; call it
-        # at-infinity rather than a success. Relative to the row scale, so the
-        # threshold means the same whether the terms of H are O(1) at the endpoint
-        # or O(10^40).
         if max_relative_residual(eg.tracker.corrector.r, ws.A, state.col_scaling) >
                 opts.max_residual
             state.code = EndgameCode.AT_INFINITY

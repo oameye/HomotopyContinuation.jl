@@ -182,16 +182,21 @@ function update!(val::Valuation, pred::Predictor, t::Float64)::Nothing
             val.val_x[i] = νi
             val.Δval_x[i] = Δνi
 
-            val_ẋi = _finite_diff(
-                logẋi, logt, val.logẋ_2[i], val.logt_2,
-                val.logẋ_1[i], val.logt_1
-            )
-            Δval_ẋi = _finite_diff(
-                val_ẋi, logt, val.val_ẋ_2[i], val.logt_2,
-                val.val_ẋ_1[i], val.logt_1
-            )
-            val.val_tẋ[i] = val_ẋi + 1.0
-            val.Δval_tẋ[i] = Δval_ẋi
+            if iszero(ẋi)
+                val.val_tẋ[i] = 1.0
+                val.Δval_tẋ[i] = 0.0
+            else
+                val_ẋi = _finite_diff(
+                    logẋi, logt, val.logẋ_2[i], val.logt_2,
+                    val.logẋ_1[i], val.logt_1
+                )
+                Δval_ẋi = _finite_diff(
+                    val_ẋi, logt, val.val_ẋ_2[i], val.logt_2,
+                    val.val_ẋ_1[i], val.logt_1
+                )
+                val.val_tẋ[i] = val_ẋi + 1.0
+                val.Δval_tẋ[i] = Δval_ẋi
+            end
         else
             # Direct Taylor path (m == 1 or insufficient history)
             νi, ν1i = _val_dval(xi, ẋi, 2.0 * x2i, t)
