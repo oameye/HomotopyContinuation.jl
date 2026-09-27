@@ -83,6 +83,7 @@ jobs:
           julia --project=test quality/fixed_parameter_kernel.jl
           julia --project=test quality/valuation_kernel.jl
           julia --project=test quality/tracker_warmstart_kernel.jl
+          julia --project=test quality/result_clustering_kernel.jl
 
   strict-mode:
     name: StrictMode / Julia 1.13
