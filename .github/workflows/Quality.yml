@@ -88,6 +88,7 @@ jobs:
           julia --project=test quality/polynomial_input_kernel.jl
           julia --project=test quality/variable_groups_kernel.jl
           julia --project=test quality/sliced_solve_kernel.jl
+          julia --project=test quality/distributed_kernel.jl
 
   strict-mode:
     name: StrictMode / Julia 1.13
