@@ -66,10 +66,10 @@
 
         @var a₁ᵣ a₁ᵢ c₀ₛ c₀ₒ
         named = [a₁ᵣ, a₁ᵢ, c₀ₛ, c₀ₒ]
-        @test sort(named) == sort(named; by=string)
+        @test sort(named) == sort(named; by = string)
         unicode_system = System([a₁ᵣ + a₁ᵢ, c₀ₛ - c₀ₒ])
         @test Set(variables(unicode_system)) == Set(named)
-        explicit_system = System([a₁ᵣ + a₁ᵢ, c₀ₛ - c₀ₒ]; variables=named)
+        explicit_system = System([a₁ᵣ + a₁ᵢ, c₀ₛ - c₀ₒ]; variables = named)
         @test variables(explicit_system) == named
         @test explicit_system([1, 2, 3, 4]) == [3, -1]
 
