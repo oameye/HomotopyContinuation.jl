@@ -1,0 +1,829 @@
+## System — compiled polynomial system with cached interpreter pipeline.
+#
+# The System constructor runs the full pipeline:
+#   MP polynomials → SExpr → CSE → InstructionSequence → Interpreters → FunctionWrappers
+abstract type SystemShape end
+struct UnderdeterminedShape <: SystemShape end
+struct SquareShape <: SystemShape end
+struct OverdeterminedShape <: SystemShape end
+
+const SupportCoefficients = Tuple{Vector{Matrix{Int32}}, Vector{Vector{ComplexF64}}}
+
+"""
+    System
+
+Compiled, ready-to-evaluate polynomial system. Caches the interpreter pipeline
+so users pay the compilation cost once and reuse across multiple `solve` calls.
+
+Construct from MultivariatePolynomials:
+
+    F = System(polys; parameters=[], variables=...)
+
+# Examples
+```julia
+@polyvar x y
+F = System([x^2 + y - 1, x*y - 2])
+solve(F)
+solve(F, Polyhedral())
+```
+"""
+struct System{P, V}
+    polys::FSVec{P}
+    parameters::FSVec{V}
+    variables::FSVec{V}
+    evaluator::SystemEvaluator
+    degrees::Vector{Int}
+    equation_scales::Vector{Float64}
+    nvars::Int
+    nparams::Int
+    variable_groups::Vector{Vector{Int}}
+    group_degrees::Matrix{Int}
+    is_homogeneous::Bool
+    _support_coefficients::LazyRef{SupportCoefficients}
+    _interp_f64::Interpreter{Vector{ComplexF64}}
+    _interp_df64::Interpreter{Vector{ComplexDF64}}
+    _interp_jac::Interpreter{Vector{ComplexF64}}
+    _interp_t1::Interpreter{Vector{TruncatedTaylorSeries{2, ComplexF64}}}
+    _interp_t2::Interpreter{Vector{TruncatedTaylorSeries{3, ComplexF64}}}
+    _interp_t3::Interpreter{Vector{TruncatedTaylorSeries{4, ComplexF64}}}
+    compile_mode::CompileMode.T
+end
+
+## ── System constructor ──────────────────────────────────────────────────────
+
+function System(
+        polys::AbstractVector,
+        parameters::AbstractVector,
+        variables::AbstractVector,
+        compile::CompileMode.T = CompileMode.INTERPRETED,
+        variable_groups::Vector{Vector{Int}} = Vector{Int}[],
+    )
+    neqs = length(polys)
+    nvars = length(variables)
+    nparams = length(parameters)
+    builder = if compile == CompileMode.INTERPRETED
+        _build_interpreted_system
+    elseif compile == CompileMode.COMPILED
+        _build_codegen_system
+    else
+        _build_codegen_all_system
+    end
+    normalized, lowered = lower_input(polys, variables, parameters)
+    isempty(variable_groups) ||
+        (lowered = group_input(lowered, normalized, variables, variable_groups))
+    return _dispatch_system_build(
+        builder, normalized, variables, parameters, lowered, neqs, nvars, nparams,
+    )
+end
+
+"""
+    System(polys; parameters=[], variables=..., variable_groups=nothing,
+           compile=CompileMode.INTERPRETED) -> System
+
+Build a `System` from a vector of MultivariatePolynomials polynomials.
+Compiles the full interpreter pipeline and caches everything for reuse.
+
+`compile` controls the evaluation backend:
+- `CompileMode.INTERPRETED` (default): tape-based interpreter
+- `CompileMode.COMPILED`: RuntimeGeneratedFunctions compiled eval + Jacobian, interpreter Taylor
+- `CompileMode.COMPILED_ALL`: additionally compiles the Taylor kernels
+
+`INTERPRETED` is the default because it skips runtime code generation, so the
+first `solve` starts tracking immediately. The compiled modes trade a
+per-system compilation pause for modestly faster solves; worthwhile when
+repeatedly solving the same system.
+
+`variable_groups` partitions the variables into groups, one degree per group
+instead of one total degree. [`solve`](@ref) with [`TotalDegree`](@ref) then
+tracks the multi-homogeneous Bezout number of paths, which is at most the total
+Bezout number and usually far below it. The groups must cover every variable
+exactly once, and when `variables` is omitted they also fix the variable order.
+
+```julia
+@polyvar x y v w
+System([x * y - 2v * w, x^2 - 4v^2]; variable_groups = [[x, v], [y, w]])
+```
+"""
+function System(
+        polys::AbstractVector{<:MP.AbstractPolynomialLike};
+        parameters = nothing,
+        variables = nothing,
+        variable_groups = nothing,
+        compile::CompileMode.T = CompileMode.INTERPRETED,
+    )::System
+    parameters === nothing && (parameters = _empty_vars(polys))
+    if variables === nothing
+        variables = variable_groups === nothing ?
+            _effective_variables(polys, parameters) : reduce(vcat, variable_groups)
+    end
+    return System(
+        polys, parameters, variables, compile,
+        variable_group_indices(variable_groups, variables),
+    )
+end
+
+"""
+    System(exprs::AbstractVector{Expression}; parameters=[], variables=..., compile=...) -> System
+
+Build a `System` from symbolic [`Expression`](@ref)s. This is the front-end for
+input that is not a polynomial: division, negative integer powers, `sqrt`, `sin`
+and `cos`.
+
+```julia
+@var x y a b
+System([sqrt(a + b) * x^2 - y, (x * y + a - sqrt(b))^2 - 3]; parameters = [a, b])
+```
+"""
+function System(
+        exprs::AbstractVector{Expression};
+        parameters = nothing,
+        variables = nothing,
+        variable_groups = nothing,
+        compile::CompileMode.T = CompileMode.INTERPRETED,
+    )::System
+    params = parameters === nothing ? Expression[] : as_variables(parameters)
+    vars = if variables !== nothing
+        as_variables(variables)
+    elseif variable_groups !== nothing
+        as_variables(reduce(vcat, variable_groups))
+    else
+        _default_variables(exprs, params)
+    end
+    return System(
+        exprs, params, vars, compile, variable_group_indices(variable_groups, vars),
+    )
+end
+
+# `MP.RationalPoly` has no polynomial representation, so it routes through the
+# expression front-end, keeping the MP variable order.
+function System(
+        polys::AbstractVector{<:MP.RationalPoly};
+        parameters = nothing,
+        variables = nothing,
+        variable_groups = nothing,
+        compile::CompileMode.T = CompileMode.INTERPRETED,
+    )::System
+    params = parameters === nothing ? Expression[] : as_variables(parameters)
+    vars = if variables !== nothing
+        as_variables(variables)
+    elseif variable_groups !== nothing
+        as_variables(reduce(vcat, variable_groups))
+    else
+        as_variables(
+            _rational_variables(polys, parameters === nothing ? () : parameters),
+        )
+    end
+    return System(
+        as_expressions(polys), params, vars, compile,
+        variable_group_indices(variable_groups, vars),
+    )
+end
+
+function as_variables(vars::AbstractVector)::Vector{Expression}
+    Base.@nospecialize vars
+    out = Vector{Expression}(undef, length(vars))
+    for (i, v) in enumerate(vars)
+        out[i] = v isa Expression ? v : variable(Symbol(v))
+    end
+    return out
+end
+
+as_variables(vars::Vector{Expression})::Vector{Expression} = vars
+
+function as_expressions(polys::AbstractVector)::Vector{Expression}
+    Base.@nospecialize polys
+    out = Vector{Expression}(undef, length(polys))
+    for (i, p) in enumerate(polys)
+        out[i] = convert(Expression, p)
+    end
+    return out
+end
+
+
+## ── Accessors ────────────────────────────────────────────────────────────────
+
+Base.size(F::System)::Tuple{Int, Int} = size(F.evaluator)
+@inline function with_system_shape(f::F, S::System) where {F}
+    m, n = size(S)
+    return m < n ? f(UnderdeterminedShape()) :
+        m == n ? f(SquareShape()) : f(OverdeterminedShape())
+end
+degrees(F::System)::Vector{Int} = F.degrees
+
+"""
+    equation_scales(F) -> Vector{Float64}
+
+Factor each equation given to `F` was divided by at construction, one entry per
+equation and `1.0` where nothing was divided. An equation whose coefficients sit
+far from unit scale is normalized for tracker conditioning; that leaves the
+solution set alone but changes the value of the map, so multiplying
+[`evaluate`](@ref) entrywise by these factors recovers the equations as given.
+
+Defined for a [`System`](@ref) and a [`Homotopy`](@ref).
+"""
+equation_scales(F::System)::Vector{Float64} = F.equation_scales
+nvariables(F::System)::Int = F.nvars
+nparameters(F::System)::Int = F.nparams
+polynomials(F::System) = F.polys
+variables(F::System) = F.variables
+parameters(F::System) = F.parameters
+variable_groups(F::System) = F.variable_groups
+
+"""
+    multi_degrees(F::System) -> Matrix{Int}
+
+Degree of every equation of `F` in every variable group: one row per group of
+`variable_groups(F)`, one column per equation. An ungrouped system has the
+single row `degrees(F)`.
+"""
+multi_degrees(F::System)::Matrix{Int} =
+    isempty(F.variable_groups) ? reshape(F.degrees, 1, :) : F.group_degrees
+# For a grouped system: homogeneous in every group separately.
+is_homogeneous(F::System)::Bool = F.is_homogeneous
+function support_coefficients(F::System)::SupportCoefficients
+    nparameters(F) == 0 ||
+        throw(ArgumentError("support_coefficients(::System) is only defined for parameter-free systems"))
+    cache = F._support_coefficients
+    if !is_installed(cache)
+        install!(cache, support_coefficients(F.polys, F.variables))
+    end
+    return cache[]
+end
+
+@inline _to_fsvec(xs::AbstractVector{T}) where {T} = FSVec{T}(collect(xs))
+
+# Linear scan: a `Set` costs more to compile than the scan costs to run, as long
+# as callers keep the scan off the innermost loop.
+function contains_variable(variables::AbstractVector, var)::Bool
+    Base.@nospecialize variables var
+    for v in variables
+        v == var && return true
+    end
+    return false
+end
+
+# Per-polynomial degree in `variables` only, and homogeneity in them, in one pass.
+# `MP.maxdegree` would count parameters and inflate the Bezout number.
+function variable_degrees(
+        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+        variables::AbstractVector,
+    )::Tuple{Vector{Int}, Bool}
+    Base.@nospecialize polys variables
+    degs = Vector{Int}(undef, length(polys))
+    homogeneous = true
+
+    mask = Bool[]
+    mask_variables = nothing
+    for (i, poly) in enumerate(polys)
+        maxdeg = 0
+        mindeg = typemax(Int)
+        for term in MP.terms(poly)
+            iszero(MP.coefficient(term)) && continue
+            mono = MP.monomial(term)
+            mono_variables = MP.variables(mono)
+            if mono_variables !== mask_variables
+                resize!(mask, length(mono_variables))
+                for (k, var) in enumerate(mono_variables)
+                    mask[k] = contains_variable(variables, var)
+                end
+                mask_variables = mono_variables
+            end
+            degree = 0
+            for (keep, exp) in zip(mask, MP.exponents(mono))
+                keep || continue
+                degree += exp
+            end
+            degree > maxdeg && (maxdeg = degree)
+            degree < mindeg && (mindeg = degree)
+        end
+        degs[i] = maxdeg
+        # A polynomial with no nonzero term counts as homogeneous.
+        homogeneous &= mindeg == typemax(Int) || mindeg == maxdeg
+    end
+    return degs, homogeneous
+end
+
+## ── Variable groups ─────────────────────────────────────────────────────────
+
+variable_group_indices(::Nothing, ::AbstractVector)::Vector{Vector{Int}} = Vector{Int}[]
+
+# Matched by name, so either front-end's variable type is accepted.
+@noinline function variable_group_indices(
+        groups, variables::AbstractVector,
+    )::Vector{Vector{Int}}
+    Base.@nospecialize groups variables
+    index = Dict{Symbol, Int}(Symbol(v) => i for (i, v) in enumerate(variables))
+    assigned = fill(0, length(variables))
+    out = Vector{Vector{Int}}(undef, length(groups))
+    for (j, group) in enumerate(groups)
+        idx = Vector{Int}(undef, length(group))
+        for (l, v) in enumerate(group)
+            i = get(index, Symbol(v), 0)
+            i == 0 && throw(
+                ArgumentError("`$v` is in a variable group but not a variable of the system."),
+            )
+            assigned[i] == 0 || throw(
+                ArgumentError("`$v` is in variable group $(assigned[i]) and in group $j."),
+            )
+            assigned[i] = j
+            idx[l] = i
+        end
+        out[j] = idx
+    end
+    missing_var = findfirst(iszero, assigned)
+    missing_var === nothing || throw(
+        ArgumentError(
+            "`$(variables[missing_var])` is a variable of the system but is in no " *
+                "variable group; the groups must cover every variable.",
+        ),
+    )
+    return out
+end
+
+group_degrees(
+    polys::AbstractVector{<:MP.AbstractPolynomialLike}, vars::AbstractVector,
+)::Tuple{Vector{Int}, Bool} = variable_degrees(polys, vars)
+
+group_degrees(
+    exprs::AbstractVector{Expression}, vars::AbstractVector,
+)::Tuple{Vector{Int}, Bool} = _expression_degrees(exprs, as_variables(vars))
+
+## ── Front-end lowering ──────────────────────────────────────────────────────
+
+"""
+Everything the builder needs from the input, independent of its representation.
+"""
+struct LoweredInput
+    seq_eval::InstructionSequence
+    seq_jac::InstructionSequence
+    degrees::Vector{Int}
+    is_homogeneous::Bool
+    # factor each input equation was divided by
+    scales::Vector{Float64}
+    variable_groups::Vector{Vector{Int}}
+    group_degrees::Matrix{Int}
+end
+
+LoweredInput(
+    seq_eval::InstructionSequence, seq_jac::InstructionSequence, degrees::Vector{Int},
+    is_homogeneous::Bool, scales::Vector{Float64},
+) = LoweredInput(
+    seq_eval, seq_jac, degrees, is_homogeneous, scales,
+    Vector{Int}[], Matrix{Int}(undef, 0, 0),
+)
+
+lowered_input(sys::System)::LoweredInput = LoweredInput(
+    sys._interp_f64.sequence, sys._interp_jac.sequence, sys.degrees,
+    sys.is_homogeneous, sys.equation_scales, sys.variable_groups, sys.group_degrees,
+)
+
+@noinline function group_input(
+        lowered::LoweredInput, polys::AbstractVector, variables::AbstractVector,
+        groups::Vector{Vector{Int}},
+    )::LoweredInput
+    Base.@nospecialize polys variables
+    D = Matrix{Int}(undef, length(groups), length(lowered.degrees))
+    homogeneous = true
+    for (j, group) in enumerate(groups)
+        degs, hom = group_degrees(polys, variables[group])
+        D[j, :] .= degs
+        homogeneous &= hom
+    end
+    return LoweredInput(
+        lowered.seq_eval, lowered.seq_jac, lowered.degrees, homogeneous,
+        lowered.scales, groups, D,
+    )
+end
+
+# Called from a frame that still knows the concrete input type: dispatching behind
+# the `@nospecialize` builder chain makes inference walk both front-ends on every
+# build.
+@noinline function lower_input(
+        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+        variables::AbstractVector,
+        parameters::AbstractVector,
+    )
+    normalized, scales = normalize_polys(polys)
+    degs, is_homogeneous = variable_degrees(normalized, variables)
+    return normalized, LoweredInput(
+            _build_instruction_sequence(normalized, variables, parameters, false),
+            _build_instruction_sequence(normalized, variables, parameters, true),
+            degs, is_homogeneous, scales,
+        )
+end
+
+@noinline function lower_input(
+        exprs::AbstractVector{Expression},
+        variables::AbstractVector,
+        parameters::AbstractVector,
+    )
+    normalized, scales = normalize_expressions(exprs)
+    vars = as_variables(variables)
+    params = as_variables(parameters)
+    degs, is_homogeneous = _expression_degrees(normalized, vars)
+    return normalized, LoweredInput(
+            _build_instruction_sequence_from_expressions(normalized, vars, params, false),
+            _build_instruction_sequence_from_expressions(normalized, vars, params, true),
+            degs, is_homogeneous, scales,
+        )
+end
+
+# Rational input reaching the positional constructor.
+@noinline function lower_input(
+        polys::AbstractVector{<:MP.RationalPoly},
+        variables::AbstractVector,
+        parameters::AbstractVector,
+    )
+    return lower_input(as_expressions(polys), variables, parameters)
+end
+
+@noinline function lower_input(
+        polys::AbstractVector,
+        variables::AbstractVector,
+        parameters::AbstractVector,
+    )
+    Base.@nospecialize polys variables parameters
+    throw(
+        ArgumentError(
+            "cannot build a `System` from input of type $(typeof(polys)): expected a " *
+                "vector of MultivariatePolynomials polynomials or of `Expression`s.",
+        ),
+    )
+end
+
+## ── Polynomial normalization ────────────────────────────────────────────────
+
+function normalize_polys(
+        polys::AbstractVector{<:MP.AbstractPolynomialLike},
+    )
+    Base.@nospecialize polys
+    # Canonicalize coefficients to a floating polynomial type even when no
+    # rescaling is required. Returning either the original integer polynomial
+    # or a divided floating polynomial made the rest of construction infer an
+    # abstract polynomial element type.
+    scales = Vector{Float64}(undef, length(polys))
+    normalized = map(enumerate(polys)) do (i, p)
+        coeffs = MP.coefficients(p)
+        nrm = maximum(c -> Float64(abs(c)), coeffs)
+        scale = normalization_scale(nrm)
+        scales[i] = scale
+        return p / scale
+    end
+    return normalized, scales
+end
+
+# Dividing an equation by a constant leaves `V(F)` unchanged, so one whose scale sits
+# outside this band is brought back towards unity. A scale of `0` (the zero equation) or
+# a non-finite one carries no information and is left alone.
+const _MIN_NORM_SCALE = 1.0e-6
+const _MAX_NORM_SCALE = 1.0e8
+
+function normalization_scale(nrm::Float64)::Float64
+    (iszero(nrm) || !isfinite(nrm)) && return 1.0
+    _MIN_NORM_SCALE <= nrm <= _MAX_NORM_SCALE && return 1.0
+    return nrm
+end
+
+# Scale measured by `expression_scale` rather than by the largest coefficient, which
+# an expression tree does not carry.
+function normalize_expressions(
+        exprs::AbstractVector{Expression},
+    )::Tuple{Vector{Expression}, Vector{Float64}}
+    scales = Vector{Float64}(undef, length(exprs))
+    normalized = map(enumerate(exprs)) do (i, e)
+        scale = normalization_scale(expression_scale(e))
+        scales[i] = scale
+        return e / scale
+    end
+    return normalized, scales
+end
+
+## ── FW-compatible wrapper functions ──────────────────────────────────────────
+
+
+@noinline function _dispatch_system_build(
+        builder::Function,
+        polys::AbstractVector,
+        variables::AbstractVector,
+        parameters::AbstractVector,
+        lowered::LoweredInput,
+        neqs::Int,
+        nvars::Int,
+        nparams::Int,
+    )
+    Base.@nospecialize builder polys variables parameters
+    return builder(polys, variables, parameters, lowered, neqs, nvars, nparams)
+end
+
+@noinline function _build_interpreted_system(
+        polys, variables, parameters, lowered::LoweredInput,
+        neqs::Int, nvars::Int, nparams::Int,
+    )
+    Base.@nospecialize polys variables parameters
+    return _build_compiled_system(
+        InterpretedCompile(), polys, variables, parameters, lowered,
+        neqs, nvars, nparams,
+    )
+end
+
+@noinline function _build_codegen_system(
+        polys, variables, parameters, lowered::LoweredInput,
+        neqs::Int, nvars::Int, nparams::Int,
+    )
+    Base.@nospecialize polys variables parameters
+    return _build_compiled_system(
+        CompiledCompile(), polys, variables, parameters, lowered,
+        neqs, nvars, nparams,
+    )
+end
+
+@noinline function _build_codegen_all_system(
+        polys, variables, parameters, lowered::LoweredInput,
+        neqs::Int, nvars::Int, nparams::Int,
+    )
+    Base.@nospecialize polys variables parameters
+    return _build_compiled_system(
+        CompiledAllCompile(), polys, variables, parameters, lowered,
+        neqs, nvars, nparams,
+    )
+end
+
+@noinline function _build_compiled_system(
+        strategy::C,
+        polys::AbstractVector,
+        variables::AbstractVector,
+        parameters::AbstractVector,
+        lowered::LoweredInput,
+        neqs::Int,
+        nvars::Int,
+        nparams::Int,
+    ) where {C <: SystemCompileStrategy}
+    Base.@nospecialize polys variables parameters
+    seq_eval = lowered.seq_eval
+    seq_jac = lowered.seq_jac
+
+    interp_f64 = Interpreter(Vector{ComplexF64}, seq_eval)
+    interp_df64 = Interpreter(Vector{ComplexDF64}, seq_eval)
+    interp_jac = Interpreter(Vector{ComplexF64}, seq_jac)
+    interp_t1 = Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, seq_eval)
+    interp_t2 = Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval)
+    interp_t3 = Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval)
+
+    evaluator = _build_mode_evaluator(
+        strategy, seq_eval, seq_jac,
+        interp_f64, interp_df64, interp_jac,
+        interp_t1, interp_t2, interp_t3,
+        neqs, nvars, nparams,
+    )
+    M = _compile_mode(strategy)
+
+    fs_polys = _to_fsvec(polys)
+    fs_parameters = _to_fsvec(parameters)
+    fs_variables = _to_fsvec(variables)
+    return System{eltype(fs_polys), eltype(fs_variables)}(
+        fs_polys,
+        fs_parameters,
+        fs_variables,
+        evaluator, lowered.degrees, lowered.scales, nvars, nparams,
+        lowered.variable_groups, lowered.group_degrees, lowered.is_homogeneous,
+        LazyRef{SupportCoefficients}(),
+        interp_f64, interp_df64, interp_jac,
+        interp_t1, interp_t2, interp_t3,
+        M,
+    )
+end
+
+@inline _compile_mode(::InterpretedCompile) = CompileMode.INTERPRETED
+@inline _compile_mode(::CompiledCompile) = CompileMode.COMPILED
+@inline _compile_mode(::CompiledAllCompile) = CompileMode.COMPILED_ALL
+
+function _build_mode_evaluator(
+        ::InterpretedCompile, ::InstructionSequence, ::InstructionSequence,
+        interp_f64, interp_df64, interp_jac, interp_t1, interp_t2, interp_t3,
+        neqs::Int, nvars::Int, nparams::Int,
+    )::SystemEvaluator
+    return _build_system_evaluator(
+        interp_f64, interp_df64, interp_jac,
+        interp_t1, interp_t2, interp_t3,
+        neqs, nvars, nparams,
+    )
+end
+
+function _build_mode_evaluator(
+        mode::CompiledCompile, seq_eval::InstructionSequence,
+        seq_jac::InstructionSequence,
+        ::Interpreter{Vector{ComplexF64}}, interp_df64,
+        ::Interpreter{Vector{ComplexF64}}, interp_t1, interp_t2, interp_t3,
+        neqs::Int, nvars::Int, nparams::Int,
+    )::SystemEvaluator
+    return _build_compiled_evaluator(
+        mode, seq_eval, seq_jac, interp_df64,
+        _build_taylor_fws(interp_t1, interp_t2, interp_t3),
+        neqs, nvars, nparams,
+    )
+end
+
+function _build_mode_evaluator(
+        mode::CompiledAllCompile, seq_eval::InstructionSequence,
+        seq_jac::InstructionSequence,
+        ::Interpreter{Vector{ComplexF64}}, interp_df64,
+        ::Interpreter{Vector{ComplexF64}}, ::Interpreter, ::Interpreter, ::Interpreter,
+        neqs::Int, nvars::Int, nparams::Int,
+    )::SystemEvaluator
+    return _build_compiled_evaluator(
+        mode, seq_eval, seq_jac, interp_df64, _build_taylor_fws(seq_eval),
+        neqs, nvars, nparams,
+    )
+end
+
+# One cloner per compile mode: the sequences are the whole recipe, the tapes
+# around them are what must not be shared.
+
+struct _InterpretedCloner
+    seq_eval::InstructionSequence
+    seq_jac::InstructionSequence
+    neqs::Int
+    nvars::Int
+    nparams::Int
+end
+
+function (c::_InterpretedCloner)()::SystemEvaluator
+    seq_eval, seq_jac = c.seq_eval, c.seq_jac
+    return _build_system_evaluator(
+        Interpreter(Vector{ComplexF64}, seq_eval),
+        Interpreter(Vector{ComplexDF64}, seq_eval),
+        Interpreter(Vector{ComplexF64}, seq_jac),
+        Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, seq_eval),
+        Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval),
+        Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval),
+        c.neqs, c.nvars, c.nparams,
+    )
+end
+
+struct _CompiledCloner{M <: Union{CompiledCompile, CompiledAllCompile}}
+    mode::M
+    seq_eval::InstructionSequence
+    seq_jac::InstructionSequence
+    neqs::Int
+    nvars::Int
+    nparams::Int
+end
+
+function (c::_CompiledCloner)()::SystemEvaluator
+    seq_eval = c.seq_eval
+    return _build_compiled_evaluator(
+        c.mode, seq_eval, c.seq_jac,
+        Interpreter(Vector{ComplexDF64}, seq_eval),
+        _clone_taylor_fws(c.mode, seq_eval),
+        c.neqs, c.nvars, c.nparams,
+    )
+end
+
+_clone_taylor_fws(::CompiledCompile, seq_eval::InstructionSequence) =
+    _build_taylor_fws(
+    Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, seq_eval),
+    Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval),
+    Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval),
+)
+
+_clone_taylor_fws(::CompiledAllCompile, seq_eval::InstructionSequence) =
+    _build_taylor_fws(seq_eval)
+
+@noinline function _execute_eval_fw!(
+        u::AbstractVector, interp::Interpreter, x::AbstractVector, p::AbstractVector,
+    )::Nothing
+    if isempty(interp.sequence.parameters_range)
+        _load_inputs!(interp, x)
+    else
+        _load_inputs!(interp, x, p)
+    end
+    _execute_eval!(u, interp)
+    return nothing
+end
+
+@noinline function _execute_jac_fw!(
+        u::AbstractVector, U::AbstractMatrix, interp::Interpreter,
+        x::AbstractVector, p::AbstractVector,
+    )::Nothing
+    if isempty(interp.sequence.parameters_range)
+        _load_inputs!(interp, x)
+    else
+        _load_inputs!(interp, x, p)
+    end
+    _execute_jac!(u, U, interp)
+    return nothing
+end
+
+function _lazy_df64_interpreted(interp_df64::Interpreter{Vector{ComplexDF64}})
+    return _lazy_df64(
+        () -> (
+            SysEvalDF64FW(
+                (u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing),
+            ),
+            SysEvalDF64OutFW(
+                (u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing),
+            ),
+        ),
+    )
+end
+
+function _build_interpreted_evaluation_fws(
+        interp_f64::Interpreter{Vector{ComplexF64}},
+        interp_df64::Interpreter{Vector{ComplexDF64}},
+        interp_jac::Interpreter{Vector{ComplexF64}},
+    )
+    return (
+        SysEvalFW(
+            (u, x, p) -> (_execute_eval_fw!(u, interp_f64, x, p); nothing),
+        ),
+        _lazy_df64_interpreted(interp_df64)...,
+        SysEvalJacFW(
+            (u, U, x, p) -> (_execute_jac_fw!(u, U, interp_jac, x, p); nothing),
+        ),
+    )
+end
+
+function _build_system_evaluator(
+        interp_f64::Interpreter{Vector{ComplexF64}},
+        interp_df64::Interpreter{Vector{ComplexDF64}},
+        interp_jac::Interpreter{Vector{ComplexF64}},
+        interp_t1::Interpreter{Vector{TruncatedTaylorSeries{2, ComplexF64}}},
+        interp_t2::Interpreter{Vector{TruncatedTaylorSeries{3, ComplexF64}}},
+        interp_t3::Interpreter{Vector{TruncatedTaylorSeries{4, ComplexF64}}},
+        neqs::Int,
+        nvars::Int,
+        nparams::Int,
+    )::SystemEvaluator
+    taylor_1 = SysTaylor1FW(
+        (u, tx, p) -> (execute_taylor!(u, Val(1), interp_t1, tx, p); nothing),
+    )
+    taylor_2 = SysTaylor2FW(
+        (u, tx, p) -> (execute_taylor!(u, Val(2), interp_t2, tx, p); nothing),
+    )
+    taylor_3 = SysTaylor3FW(
+        (u, tx, p) -> (execute_taylor!(u, Val(3), interp_t3, tx, p); nothing),
+    )
+    param_builder = if iszero(nparams)
+        _build_zero_parameter_taylor_fws
+    else
+        _build_parameter_taylor_fws
+    end
+    param_builder = Base.inferencebarrier(param_builder)
+    param_taylor = _dispatch_parameter_taylor_fws(
+        param_builder, taylor_1, taylor_2, taylor_3, interp_t1, interp_t2, interp_t3,
+    )
+    evaluation_fws = _build_interpreted_evaluation_fws(
+        interp_f64, interp_df64, interp_jac,
+    )
+    clone = SystemFactory(
+        _InterpretedCloner(
+            interp_f64.sequence, interp_jac.sequence, neqs, nvars, nparams,
+        ),
+    )
+    return SystemEvaluator(
+        evaluation_fws...,
+        taylor_1,
+        taylor_2,
+        taylor_3,
+        param_taylor...,
+        (neqs, nvars),
+        nparams,
+        clone,
+    )
+end
+
+@noinline function _dispatch_parameter_taylor_fws(
+        builder::Function, taylor_1, taylor_2, taylor_3,
+        interp_t1, interp_t2, interp_t3,
+    )
+    Base.@nospecialize builder taylor_1 taylor_2 taylor_3 interp_t1 interp_t2 interp_t3
+    return builder(taylor_1, taylor_2, taylor_3, interp_t1, interp_t2, interp_t3)
+end
+
+function _build_zero_parameter_taylor_fws(
+        taylor_1::SysTaylor1FW,
+        taylor_2::SysTaylor2FW,
+        taylor_3::SysTaylor3FW,
+        ::Interpreter{Vector{TruncatedTaylorSeries{2, ComplexF64}}},
+        ::Interpreter{Vector{TruncatedTaylorSeries{3, ComplexF64}}},
+        ::Interpreter{Vector{TruncatedTaylorSeries{4, ComplexF64}}},
+    )
+    return (
+        SysTaylor1ParamFW((u, tx, ::TaylorVector{2, ComplexF64}) -> (taylor_1(u, tx, _EMPTY_PARAMS); nothing)),
+        SysTaylor2ParamFW((u, tx, ::TaylorVector{3, ComplexF64}) -> (taylor_2(u, tx, _EMPTY_PARAMS); nothing)),
+        SysTaylor3ParamFW((u, tx, ::TaylorVector{4, ComplexF64}) -> (taylor_3(u, tx, _EMPTY_PARAMS); nothing)),
+    )
+end
+
+function _build_parameter_taylor_fws(
+        ::SysTaylor1FW, ::SysTaylor2FW, ::SysTaylor3FW,
+        interp_t1::Interpreter{Vector{TruncatedTaylorSeries{2, ComplexF64}}},
+        interp_t2::Interpreter{Vector{TruncatedTaylorSeries{3, ComplexF64}}},
+        interp_t3::Interpreter{Vector{TruncatedTaylorSeries{4, ComplexF64}}},
+    )
+    return (
+        SysTaylor1ParamFW((u, tx, tp) -> (execute_taylor!(u, Val(1), interp_t1, tx, tp); nothing)),
+        SysTaylor2ParamFW((u, tx, tp) -> (execute_taylor!(u, Val(2), interp_t2, tx, tp); nothing)),
+        SysTaylor3ParamFW((u, tx, tp) -> (execute_taylor!(u, Val(3), interp_t3, tx, tp); nothing)),
+    )
+end

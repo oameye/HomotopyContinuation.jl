@@ -1,0 +1,6 @@
+include("endgame_tracker/types.jl")
+include("endgame_tracker/lifecycle.jl")
+include("endgame_tracker/numerics.jl")
+include("endgame_tracker/tracking.jl")
+include("endgame_tracker/classification.jl")
+include("endgame_tracker/singular.jl")

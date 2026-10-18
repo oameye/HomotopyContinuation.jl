@@ -1,0 +1,755 @@
+## LinearSubspace machinery: intrinsic/extrinsic descriptions, Grassmannian geodesics.
+#
+# Cold path: all fields are plain Matrix/Vector (they feed LAPACK svd/qr).
+
+# References
+const _LKK19 = """Lim, Lek-Heng, Ken Sze-Wai Wong, and Ke Ye. "Numerical algorithms on the affine Grassmannian." SIAM Journal on Matrix Analysis and Applications 40.2 (2019): 371-393"""
+
+abstract type AbstractSubspace{T} end
+
+"""
+    Coordinates
+
+A type used for encoding the used coordinates and for performing coordinate changes.
+
+Currently supported coordinates are:
+- [`Intrinsic`](@ref)
+- [`Extrinsic`](@ref)
+"""
+struct Coordinates{T} end
+Base.broadcastable(C::Coordinates) = Ref(C)
+
+"""
+    Intrinsic
+
+Indicates the use of the intrinsic description of an (affine) linear subspace.
+See also [`IntrinsicDescription`](@ref).
+"""
+const Intrinsic = Coordinates{:Intrinsic}()
+
+"""
+    Extrinsic
+
+Indicates the use of the extrinsic description of an (affine) linear subspace.
+See also [`ExtrinsicDescription`](@ref).
+"""
+const Extrinsic = Coordinates{:Extrinsic}()
+
+"""
+    ExtrinsicDescription(A, b)
+
+Extrinsic description of an ``m``-dimensional (affine) linear subspace ``L`` in
+``n``-dimensional space. That is ``L = \\{ x | A x = b \\}``. Note that
+internally `A` and `b` are stored such that the rows of `A` are orthonormal.
+"""
+struct ExtrinsicDescription{T}
+    A::Matrix{T}
+    b::Vector{T}
+
+    function ExtrinsicDescription(
+            A::Matrix{T},
+            b::Vector{T};
+            orthonormal::Bool = false,
+        )::ExtrinsicDescription{T} where {T}
+        return if orthonormal || size(A, 1) == 0
+            new{T}(A, b)
+        else
+            svd = LA.svd(A)
+            new{T}(svd.Vt, (inv.(svd.S) .* (svd.U' * b)))
+        end
+    end
+end
+(A::ExtrinsicDescription)(x::AbstractVector) = A.A * x - A.b
+
+function _all_zero(b::AbstractVector)::Bool
+    for i in eachindex(b)
+        iszero(b[i]) || return false
+    end
+    return true
+end
+
+function _all_equal(A::AbstractArray, B::AbstractArray)::Bool
+    axes(A) == axes(B) || return false
+    for i in eachindex(A, B)
+        A[i] == B[i] || return false
+    end
+    return true
+end
+
+# Identity when the eltype already matches: convert may return its argument
+# (standard for convert(::Type{T}, ::T)), avoiding a needless orthonormal rebuild.
+Base.convert(::Type{ExtrinsicDescription{T}}, A::ExtrinsicDescription{T}) where {T} = A
+function Base.convert(
+        ::Type{ExtrinsicDescription{T}}, A::ExtrinsicDescription,
+    )::ExtrinsicDescription{T} where {T}
+    return ExtrinsicDescription(
+        convert(Matrix{T}, A.A),
+        convert(Vector{T}, A.b);
+        orthonormal = true,
+    )
+end
+
+"""
+    dim(A::ExtrinsicDescription)
+
+Dimension of the (affine) linear subspace `A`.
+"""
+dim(A::ExtrinsicDescription) = size(A.A, 2) - size(A.A, 1)
+
+"""
+    codim(A::ExtrinsicDescription)
+
+Codimension of the (affine) linear subspace `A`.
+"""
+codim(A::ExtrinsicDescription) = size(A.A, 1)
+
+Base.:(==)(A::ExtrinsicDescription, B::ExtrinsicDescription)::Bool =
+    _all_equal(A.A, B.A) && _all_equal(A.b, B.b)
+function Base.copy!(A::ExtrinsicDescription, B::ExtrinsicDescription)
+    copy!(A.A, B.A)
+    copy!(A.b, B.b)
+    return A
+end
+Base.copy(A::ExtrinsicDescription{T}) where {T} =
+    ExtrinsicDescription(copy(A.A), copy(A.b); orthonormal = true)
+
+function Base.show(io::IO, A::ExtrinsicDescription{T}) where {T}
+    println(io, "ExtrinsicDescription{$T}:")
+    println(io, "A:")
+    show(io, A.A)
+    println(io, "\nb:")
+    show(io, A.b)
+    return
+end
+
+Base.broadcastable(A::ExtrinsicDescription) = Ref(A)
+
+"""
+    IntrinsicDescription(A, b)
+
+Intrinsic description of an ``m``-dimensional (affine) linear subspace ``L`` in
+``n``-dimensional space. That is ``L = \\{ A u + b \\}``. Here, ``A`` and ``b``
+are in orthogonal coordinates: the columns of ``A`` are orthonormal and
+``A' b = 0``.
+"""
+struct IntrinsicDescription{T}
+    # orthogonal coordinates
+    A::Matrix{T}
+    b::Vector{T}
+    # stiefel coordinates for A
+    X::Matrix{T}
+    # stiefel coordinates for [A b]
+    Y::Matrix{T}
+end
+function IntrinsicDescription(A::Matrix{T}, b::Vector{T}) where {T}
+    X = stiefel_coordinates_intrinsic(A)
+    Y = stiefel_coordinates_intrinsic(A, b)
+    return IntrinsicDescription{T}(A, b, X, Y)
+end
+
+# Identity when the eltype already matches: skips the Stiefel-coordinate SVD
+# rebuild that the general method performs.
+Base.convert(::Type{IntrinsicDescription{T}}, A::IntrinsicDescription{T}) where {T} = A
+function Base.convert(
+        ::Type{IntrinsicDescription{T}}, A::IntrinsicDescription,
+    )::IntrinsicDescription{T} where {T}
+    return IntrinsicDescription(convert(Matrix{T}, A.A), convert(Vector{T}, A.b))
+end
+
+(A::IntrinsicDescription)(u::AbstractVector, ::Coordinates{:Intrinsic}) = A.A * u + A.b
+
+function stiefel_coordinates_intrinsic(A::Matrix{T})::Matrix{T} where {T}
+    SVD = LA.svd(A)
+    return SVD.U
+end
+function stiefel_coordinates_intrinsic!(X::Matrix{T}, A::Matrix{T})::Matrix{T} where {T}
+    X .= A
+    SVD = LA.svd!(X)
+    X .= SVD.U
+    return X
+end
+function stiefel_coordinates_intrinsic(A::Matrix{T}, b::Vector{T})::Matrix{T} where {T}
+    n, k = size(A)
+    Y = fill!(Matrix{T}(undef, n + 1, k + 1), zero(T))
+    stiefel_coordinates_intrinsic!(Y, A, b)
+    return Y
+end
+function stiefel_coordinates_intrinsic!(Y::Matrix{T}, A::Matrix{T}, b::Vector{T})::Matrix{T} where {T}
+    γ = sqrt(1 + sum(abs2, b))
+    n, k = size(A)
+    Y[1:n, 1:k] .= A
+    Y[1:n, k + 1] .= b ./ γ
+    Y[n + 1, k + 1] = 1 / γ
+    SVD = LA.svd!(Y)
+    Y .= SVD.U
+    return Y
+end
+
+"""
+    dim(A::IntrinsicDescription)
+
+Dimension of the (affine) linear subspace `A`.
+"""
+dim(I::IntrinsicDescription) = size(I.A, 2)
+
+"""
+    codim(A::IntrinsicDescription)
+
+Codimension of the (affine) linear subspace `A`.
+"""
+codim(I::IntrinsicDescription) = size(I.A, 1) - size(I.A, 2)
+
+function Base.:(==)(A::IntrinsicDescription, B::IntrinsicDescription)::Bool
+    return _all_equal(A.A, B.A) && _all_equal(A.b, B.b) && _all_equal(A.Y, B.Y)
+end
+
+function Base.show(io::IO, A::IntrinsicDescription{T}) where {T}
+    println(io, "IntrinsicDescription{$T}:")
+    println(io, "A:")
+    show(io, A.A)
+    println(io, "\nb:")
+    show(io, A.b)
+    return
+end
+
+function Base.copy!(A::IntrinsicDescription, B::IntrinsicDescription)
+    copy!(A.A, B.A)
+    copy!(A.b, B.b)
+    copy!(A.X, B.X)
+    copy!(A.Y, B.Y)
+    return A
+end
+Base.copy(A::IntrinsicDescription{T}) where {T} =
+    IntrinsicDescription(copy(A.A), copy(A.b), copy(A.X), copy(A.Y))
+
+Base.broadcastable(A::IntrinsicDescription) = Ref(A)
+
+function IntrinsicDescription(E::ExtrinsicDescription{T})::IntrinsicDescription{T} where {T}
+    svd = LA.svd(E.A; full = true)
+    m = size(E.A, 1)
+    A = Matrix((@view svd.Vt[(m + 1):end, :])')
+    b = if _all_zero(E.b)
+        zeros(eltype(E.b), size(A, 1))
+    else
+        svd \ E.b
+    end
+    return IntrinsicDescription(A, b)
+end
+
+function ExtrinsicDescription(I::IntrinsicDescription{T})::ExtrinsicDescription{T} where {T}
+    svd = LA.svd(I.A; full = true)
+    n = size(I.A, 2)
+    A = Matrix((@view svd.U[:, (n + 1):end])')
+    b = if _all_zero(I.b)
+        zeros(eltype(A), size(A, 1))
+    else
+        A * I.b
+    end
+    return ExtrinsicDescription(A, b; orthonormal = true)
+end
+
+"""
+    LinearSubspace(A, b)
+
+An ``m``-dimensional (affine) linear subspace ``L`` in ``n``-dimensional space
+given by the extrinsic description ``L = \\{ x | A x = b \\}``.
+
+A `LinearSubspace` always holds both its [`extrinsic`](@ref) description, see
+[`ExtrinsicDescription`](@ref), and its [`intrinsic`](@ref) description, see
+[`IntrinsicDescription`](@ref). It can be evaluated with either
+[`Intrinsic`](@ref) or [`Extrinsic`](@ref) coordinates; to change between them
+use [`coord_change`](@ref).
+"""
+struct LinearSubspace{T} <: AbstractSubspace{T}
+    extrinsic::ExtrinsicDescription{T}
+    intrinsic::IntrinsicDescription{T}
+end
+
+LinearSubspace(I::IntrinsicDescription{T}) where {T} =
+    LinearSubspace{T}(ExtrinsicDescription(I), I)
+LinearSubspace(E::ExtrinsicDescription{T}) where {T} =
+    LinearSubspace{T}(E, IntrinsicDescription(E))
+
+function LinearSubspace(
+        A::AbstractMatrix{T},
+        b::AbstractVector{T} = zeros(eltype(A), size(A, 1)),
+    ) where {T}
+    size(A, 1) == length(b) || throw(ArgumentError("Size of A and b not compatible."))
+    0 <= size(A, 1) <= size(A, 2) || throw(
+        ArgumentError(
+            "Affine subspace has to be given in extrinsic coordinates, i.e., by A x = b.",
+        ),
+    )
+
+    F = float(T)
+    return LinearSubspace(
+        ExtrinsicDescription(Matrix{F}(A), Vector{F}(b)),
+    )
+end
+
+Base.convert(::Type{LinearSubspace{T}}, A::LinearSubspace{T}) where {T} = A
+function Base.convert(::Type{LinearSubspace{T}}, A::LinearSubspace) where {T}
+    return LinearSubspace(
+        convert(ExtrinsicDescription{T}, A.extrinsic),
+        convert(IntrinsicDescription{T}, A.intrinsic),
+    )
+end
+
+Base.broadcastable(A::LinearSubspace) = Ref(A)
+
+"""
+    dim(A::LinearSubspace)
+
+Dimension of the (affine) linear subspace `A`.
+"""
+dim(A::LinearSubspace) = dim(A.intrinsic)
+
+"""
+    codim(A::LinearSubspace)
+
+Codimension of the (affine) linear subspace `A`.
+"""
+codim(A::LinearSubspace) = codim(A.intrinsic)
+
+_default_intrinsic(A::LinearSubspace)::Bool = dim(A) <= codim(A)
+
+"""
+    SubspaceCoords.AUTO
+    SubspaceCoords.INTRINSIC
+    SubspaceCoords.EXTRINSIC
+
+Which coordinates a subspace homotopy tracks in. `AUTO` picks intrinsic when
+`dim(L) <= codim(L)`, which is the cheaper of the two.
+"""
+@enumx SubspaceCoords::Int8 begin
+    AUTO
+    INTRINSIC
+    EXTRINSIC
+end
+
+# The choice is made against the start subspace, which the algorithm struct does
+# not know, so `AUTO` is resolved here rather than at construction.
+_use_intrinsic(coords::SubspaceCoords.T, L::LinearSubspace)::Bool =
+    coords == SubspaceCoords.AUTO ? _default_intrinsic(L) :
+    coords == SubspaceCoords.INTRINSIC
+
+"""
+    ambient_dim(A::LinearSubspace)
+
+Dimension of the ambient space of the (affine) linear subspace `A`.
+"""
+ambient_dim(A::LinearSubspace) = dim(A) + codim(A)
+
+"""
+    is_linear(L::LinearSubspace)
+
+Returns `true` if the space is a proper linear subspace, i.e., described by
+``L = \\{ x | Ax = 0 \\}``.
+"""
+is_linear(A::LinearSubspace)::Bool = _all_zero(extrinsic(A).b)
+
+function Base.show(io::IO, A::LinearSubspace{T}) where {T}
+    if is_linear(A)
+        println(io, "$(dim(A))-dim. linear subspace {x | Ax=0} with eltype $T:")
+        println(io, "A:")
+        show(io, A.extrinsic.A)
+    else
+        println(io, "$(dim(A))-dim. affine linear subspace {x | Ax=b} with eltype $T:")
+        println(io, "A:")
+        show(io, A.extrinsic.A)
+        println(io, "\nb:")
+        show(io, A.extrinsic.b)
+    end
+    return
+end
+
+"""
+    intrinsic(A::LinearSubspace)
+
+Obtain the intrinsic description of `A`, see also [`IntrinsicDescription`](@ref).
+"""
+intrinsic(A::LinearSubspace) = A.intrinsic
+
+"""
+    extrinsic(A::LinearSubspace)
+
+Obtain the extrinsic description of `A`, see also [`ExtrinsicDescription`](@ref).
+"""
+extrinsic(A::LinearSubspace) = A.extrinsic
+
+function Base.copy!(A::LinearSubspace, B::LinearSubspace)
+    copy!(A.intrinsic, B.intrinsic)
+    copy!(A.extrinsic, B.extrinsic)
+    return A
+end
+Base.copy(A::LinearSubspace) = LinearSubspace(copy(A.extrinsic), copy(A.intrinsic))
+
+function Base.:(==)(A::LinearSubspace, B::LinearSubspace)::Bool
+    return intrinsic(A) == intrinsic(B) && extrinsic(A) == extrinsic(B)
+end
+Base.isequal(A::LinearSubspace, B::LinearSubspace) = A === B
+
+function (A::LinearSubspace)(x::AbstractVector, ::Coordinates{:Intrinsic})
+    return intrinsic(A)(x, Intrinsic)
+end
+function (A::LinearSubspace)(x::AbstractVector, ::Coordinates{:Extrinsic} = Extrinsic)
+    return extrinsic(A)(x)
+end
+
+# `-1` marks an unset dimension. A given `dim` or `codim` is non-negative, so the
+# sentinel cannot collide with a real value, and demanding exactly one of them
+# turns a silently ignored argument into an error.
+function _subspace_dim(dim::Int, codim::Int, n::Int)::Int
+    dim >= 0 || codim >= 0 ||
+        throw(ArgumentError("Neither `dim` nor `codim` specified."))
+    dim >= 0 && codim >= 0 && throw(
+        ArgumentError("Both `dim` and `codim` specified; give exactly one."),
+    )
+    if dim >= 0
+        dim <= n || throw(ArgumentError("`dim` has to be between 0 and `n`."))
+        return dim
+    end
+    codim <= n || throw(ArgumentError("`codim` has to be between 0 and `n`."))
+    return n - codim
+end
+
+"""
+    rand_subspace([rng], [T::Type], n::Integer; dim | codim, affine = true)
+
+Generate a random [`LinearSubspace`](@ref) with given dimension `dim` or
+codimension `codim` (one of them has to be provided) in ambient space of
+dimension `n`. The element type `T` defaults to `ComplexF64`; pass `Float64` for
+a real extrinsic description. If `affine`, then an affine linear subspace is
+generated. The matrix `A` of the extrinsic description is drawn independently
+from a normal distribution using `randn`.
+
+    rand_subspace([rng], x::AbstractVector; dim | codim, affine = true)
+
+Generate a random [`LinearSubspace`](@ref) with given dimension `dim` or
+codimension `codim` in ambient space of dimension `length(x)` going through the
+given point `x`.
+
+As with `rand` and `randn`, pass a random number generator `rng` as the first
+argument to draw from it instead of the global one, and the element type `T` as
+the argument after it.
+"""
+function rand_subspace(
+        rng::Random.AbstractRNG, ::Type{T}, n::Integer;
+        dim::Int = -1,
+        codim::Int = -1,
+        affine::Bool = true,
+    )::LinearSubspace{T} where {T}
+    k = _subspace_dim(dim, codim, Int(n))
+    A = randn(rng, T, n - k, n)
+    return if affine
+        LinearSubspace(A, randn(rng, T, n - k))
+    else
+        LinearSubspace(A)
+    end
+end
+rand_subspace(
+    rng::Random.AbstractRNG, n::Integer;
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+)::LinearSubspace{ComplexF64} = rand_subspace(
+    rng, ComplexF64, n; dim = dim, codim = codim, affine = affine,
+)
+rand_subspace(
+    ::Type{T}, n::Integer;
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+) where {T} = rand_subspace(
+    Random.default_rng(), T, n; dim = dim, codim = codim, affine = affine,
+)
+rand_subspace(
+    n::Integer;
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+)::LinearSubspace{ComplexF64} = rand_subspace(
+    Random.default_rng(), ComplexF64, n; dim = dim, codim = codim, affine = affine,
+)
+rand_subspace(
+    ::Type{T}, x::AbstractVector{<:MP.AbstractVariable};
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+) where {T} = rand_subspace(
+    T, length(x); dim = dim, codim = codim, affine = affine,
+)
+rand_subspace(
+    x::AbstractVector{<:MP.AbstractVariable};
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+)::LinearSubspace{ComplexF64} = rand_subspace(
+    ComplexF64, length(x); dim = dim, codim = codim, affine = affine,
+)
+rand_subspace(
+    rng::Random.AbstractRNG, ::Type{T},
+    x::AbstractVector{<:MP.AbstractVariable};
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+) where {T} = rand_subspace(
+    rng, T, length(x); dim = dim, codim = codim, affine = affine,
+)
+rand_subspace(
+    rng::Random.AbstractRNG,
+    x::AbstractVector{<:MP.AbstractVariable};
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+)::LinearSubspace{ComplexF64} = rand_subspace(
+    rng, ComplexF64, length(x); dim = dim, codim = codim, affine = affine,
+)
+function rand_subspace(
+        rng::Random.AbstractRNG, x::AbstractVector;
+        dim::Int = -1,
+        codim::Int = -1,
+        affine::Bool = true,
+    )
+    n = length(x)
+    k = _subspace_dim(dim, codim, n)
+
+    if !affine && k == 0 && !all(iszero, x)
+        throw(
+            ArgumentError(
+                "A zero-dimensional linear subspace is {0} and cannot contain a nonzero point.",
+            ),
+        )
+    end
+
+    return if affine
+        A = randn(rng, eltype(x), n - k, n)
+        b = A * x
+        LinearSubspace(A, b)
+    else
+        N = LA.nullspace(Matrix(x'))'
+        A = randn(rng, eltype(N), n - k, size(N, 1)) * N
+        LinearSubspace(A)
+    end
+end
+rand_subspace(
+    x::AbstractVector;
+    dim::Int = -1,
+    codim::Int = -1,
+    affine::Bool = true,
+) = rand_subspace(
+    Random.default_rng(), x; dim = dim, codim = codim, affine = affine,
+)
+
+"""
+    rand_subspace!([rng], A::AbstractMatrix, b::AbstractVector; affine = true)
+
+Redraw a random [`LinearSubspace`](@ref) into the given extrinsic description
+buffers `A` and `b`, whose sizes fix the codimension, and return it. `b` is
+zeroed unless `affine`.
+
+    rand_subspace!([rng], A::AbstractMatrix, b::AbstractVector, x::AbstractVector; affine = true)
+
+Redraw a random subspace through the point `x`. When `affine` is `false` the rows
+of `A` are projected off `x`, so the subspace contains the whole ray of `x`.
+
+The returned subspace holds copies of `A` and `b`, so redrawing into the same
+buffers does not disturb a subspace handed out earlier.
+"""
+function rand_subspace!(
+        rng::Random.AbstractRNG, A::AbstractMatrix, b::AbstractVector;
+        affine::Bool = true,
+    )
+    size(A, 1) == length(b) ||
+        throw(ArgumentError("`A` has $(size(A, 1)) rows but `b` has $(length(b))."))
+    Random.randn!(rng, A)
+    affine ? Random.randn!(rng, b) : fill!(b, zero(eltype(b)))
+    return LinearSubspace(Matrix(A), Vector(b))
+end
+
+function rand_subspace!(
+        rng::Random.AbstractRNG, A::AbstractMatrix, b::AbstractVector,
+        x::AbstractVector; affine::Bool = true,
+    )
+    size(A, 2) == length(x) || throw(
+        ArgumentError("`A` has $(size(A, 2)) columns but `x` has $(length(x)) entries."),
+    )
+    size(A, 1) == length(b) ||
+        throw(ArgumentError("`A` has $(size(A, 1)) rows but `b` has $(length(b))."))
+    Random.randn!(rng, A)
+    if affine
+        LA.mul!(b, A, x)
+    else
+        fill!(b, zero(eltype(b)))
+        nrmsq = sum(abs2, x)
+        if !iszero(nrmsq)
+            for i in axes(A, 1)
+                α = zero(eltype(A))
+                for j in axes(A, 2)
+                    α += A[i, j] * x[j]
+                end
+                α /= nrmsq
+                for j in axes(A, 2)
+                    A[i, j] -= α * conj(x[j])
+                end
+            end
+        end
+    end
+    return LinearSubspace(Matrix(A), Vector(b))
+end
+
+rand_subspace!(A::AbstractMatrix, b::AbstractVector; affine::Bool = true) =
+    rand_subspace!(Random.default_rng(), A, b; affine = affine)
+rand_subspace!(
+    A::AbstractMatrix, b::AbstractVector, x::AbstractVector; affine::Bool = true,
+) = rand_subspace!(Random.default_rng(), A, b, x; affine = affine)
+
+# Coordinate changes
+"""
+    coord_change(A::LinearSubspace, C₁::Coordinates, C₂::Coordinates, p)
+
+Given an (affine) linear subspace `A` and a point `p` in coordinates `C₁`
+compute the point `x` describing `p` in coordinates `C₂`.
+"""
+coord_change(A::LinearSubspace, ::C, ::C, x) where {C <: Coordinates} = x
+coord_change(A::LinearSubspace, ::Coordinates{:Intrinsic}, ::Coordinates{:Extrinsic}, u) =
+    A(u, Intrinsic)
+coord_change(A::LinearSubspace, ::Coordinates{:Extrinsic}, ::Coordinates{:Intrinsic}, x) =
+    A.intrinsic.A' * (x - A.intrinsic.b)
+
+"""
+    geodesic_distance(V::LinearSubspace, W::LinearSubspace)
+
+Compute the geodesic distance between `V = {x | Ax = a}` and `W = {x | Bx = b}`
+as `sqrt(d^2 + ||a-b||^2)`, where `d` is the distance from the column span of
+`A` to the column span of `B` in the Grassmannian, following [^LKK19].
+
+[^LKK19]: $_LKK19.
+"""
+geodesic_distance(A::LinearSubspace, B::LinearSubspace) =
+    geodesic_distance(A.intrinsic, B.intrinsic)
+function geodesic_distance(A::IntrinsicDescription, B::IntrinsicDescription)
+    return sqrt(sum(σᵢ -> acos(min(σᵢ, 1.0))^2, LA.svdvals(A.Y' * B.Y)))
+end
+
+# geodesic
+"""
+    grassmannian_svd(A::LinearSubspace, B::LinearSubspace)
+
+Computes the factors ``Q``, ``Θ`` and ``U`` from Corollary 4.3 in [^LKK19].
+These values are necessary to construct the geodesic path from `A` to `B`
+(parameter 0 at `A`, parameter 1 at `B`).
+
+[^LKK19]: $_LKK19
+"""
+grassmannian_svd(A::LinearSubspace, B::LinearSubspace) =
+    grassmannian_svd(extrinsic(A), extrinsic(B))
+grassmannian_svd(A::E1, B::E2) where {E1 <: ExtrinsicDescription, E2 <: ExtrinsicDescription} =
+    grassmannian_svd(transpose(A.A), transpose(B.A))
+function grassmannian_svd(
+        A::I1,
+        B::I2;
+        embedded_projective::Bool = false,
+    ) where {I1 <: IntrinsicDescription, I2 <: IntrinsicDescription}
+    return if !embedded_projective
+        grassmannian_svd(A.X, B.X)
+    else
+        grassmannian_svd(A.Y, B.Y)
+    end
+end
+
+function grassmannian_svd(A::AbstractMatrix, B::AbstractMatrix)
+    # Here A and B are assumed to be Stiefel matrices representing linear spaces.
+    n, k = size(A)
+    U, Σ, V = LA.svd!(A' * B)
+    # M = (LA.I - A * A') * B
+    # Have to compute an SVD of M s.t. M = Q sinΘ V'
+    # Equivalently M * V = Q sin(Θ)
+    # We can achieve this by using a *pivoted* QR
+    # since then R will be a diagonal matrix s.t. the absolute value of R_ii is θ_{k-i}
+    MV = (LA.I - A * A') * B * V
+
+    # Θ = acos.(min.(Σ, 1.0))
+    # We have acos(1-eps()) = 2.1073424255447017e-8
+    # So this is numerically super unstable if the singular value is off by only eps()
+    # We try to correct this fact by treating σ >= 1 - 2eps() as 1.0
+    Θ = map(σ -> σ + 2 * eps() > 1.0 ? 0.0 : acos(σ), Σ)
+
+    F = LA.qr!(MV, LA.ColumnNorm())
+    Q, R = F.Q, F.R
+    # correct signs and ordering of Q
+    Q′ = Q[:, k:-1:1]
+    for j in 1:k
+        # Look if we need to flip signs
+        real(R[k - j + 1, k - j + 1]) < 0 || continue
+        for i in 1:n
+            Q′[i, j] = -Q′[i, j]
+        end
+    end
+
+    return Q′, Θ, U
+end
+
+"""
+    geodesic(V::LinearSubspace, W::LinearSubspace)
+
+Returns the geodesic ``γ(t)`` connecting `V = {x | Ax = a}` and
+`W = {x | Bx = b}`. `A` and `B` are interpolated in the Grassmannian using
+Stiefel coordinates (Corollary 4.3 in [^LKK19]); `a` and `b` are interpolated
+linearly.
+
+Convention: `γ(1) == V` and `γ(0) == W` for BOTH the direction and the
+offset, matching the homotopy convention where tracking runs from `t = 1`
+(start) to `t = 0` (target).
+
+[^LKK19]: $_LKK19
+"""
+geodesic(A::LinearSubspace, B::LinearSubspace) = geodesic(A.intrinsic, B.intrinsic)
+function geodesic(A::IntrinsicDescription, B::IntrinsicDescription)
+    # Direction from B (t = 0) to A (t = 1), offset t*a + (1-t)*b.
+    Q, Θ, U = grassmannian_svd(B, A)
+    return t -> LinearSubspace(
+        IntrinsicDescription(
+            B.X * U * LA.diagm(cos.(t .* Θ)) * U' + Q * LA.diagm(sin.(t .* Θ)) * U',
+            t .* A.b + (1 - t) .* B.b,
+        ),
+    )
+end
+
+"""
+    translate(L::LinearSubspace, δb, ::Coordinates = Extrinsic)
+
+Translate the (affine) linear subspace `L` by `δb`.
+"""
+function translate(
+        L::LinearSubspace{T₁},
+        δb::AbstractVector{T₂},
+        ::Coordinates{:Extrinsic} = Extrinsic,
+    ) where {T₁, T₂ <: Number}
+    T = promote_type(T₁, T₂)
+    L′ = T === T₁ ? copy(L) : convert(LinearSubspace{T}, L)
+    return translate!(L′, Vector{T}(δb), Extrinsic)
+end
+function translate!(L::LinearSubspace, δb, ::Coordinates{:Extrinsic} = Extrinsic)
+    ext = extrinsic(L)
+    ext.b .+= δb
+    int = intrinsic(L)
+    LA.mul!(int.b, ext.A', δb, true, true)
+    stiefel_coordinates_intrinsic!(int.Y, int.A, int.b)
+    return L
+end
+
+"""
+    Base.intersect(L₁::LinearSubspace, L₂::LinearSubspace)
+
+Intersect the two given linear subspaces. Throws an `ErrorException` if the sum
+of the codimensions is larger than the ambient dimension.
+"""
+function Base.intersect(L₁::LinearSubspace, L₂::LinearSubspace)
+    ambient_dim(L₁) == ambient_dim(L₂) || error("Ambient dimensions don't match.")
+    codim(L₁) + codim(L₂) <= ambient_dim(L₁) ||
+        error("Sum of codimensions larger than ambient dimension.")
+    ext₁ = extrinsic(L₁)
+    ext₂ = extrinsic(L₂)
+    return LinearSubspace([ext₁.A; ext₂.A], [ext₁.b; ext₂.b])
+end

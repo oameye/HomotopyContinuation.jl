@@ -1,0 +1,303 @@
+## Affine charts for projective (homogeneous) problems.
+#
+# A SINGLE projective chart only: the chart is one Vector{ComplexF64} and one
+# appended normalization row v'x - 1; there is no PVector/multiprojective
+# machinery.
+
+"""
+    AffineChartSystem(system::SystemEvaluator, chart::Vector{ComplexF64})
+
+Given a homogeneous system ``F(x): ℙ^{n-1} → ℂ^m`` this creates a new affine
+system operating on the affine chart defined by ``v`` and the augmented
+condition ``v'x = 1``.
+"""
+struct AffineChartSystem <: AbstractSystem
+    system::SystemEvaluator
+    chart::Vector{ComplexF64}
+end
+
+Base.size(F::AffineChartSystem) = (size(F.system)[1] + 1, size(F.system)[2])
+_clone_system(F::AffineChartSystem)::AffineChartSystem =
+    AffineChartSystem(_clone_system_evaluator(F.system), copy(F.chart))
+nparameters(F::AffineChartSystem)::Int = nparameters(F.system)
+
+"""
+    AffineChartHomotopy(homotopy::AbstractHomotopy, chart::Vector{ComplexF64})
+
+Given a homotopy ``H(x, t): ℙ^{n-1} × ℂ → ℂ^m`` this creates a new affine
+homotopy operating on the affine chart defined by ``v`` and the augmented
+condition ``v'x = 1``.
+"""
+struct AffineChartHomotopy{H <: AbstractHomotopy} <: AbstractHomotopy
+    homotopy::H
+    chart::Vector{ComplexF64}
+end
+
+Base.size(H::AffineChartHomotopy) = (size(H.homotopy)[1] + 1, size(H.homotopy)[2])
+
+_clone_homotopy(H::AffineChartHomotopy)::AffineChartHomotopy =
+    AffineChartHomotopy(_clone_homotopy(H.homotopy), copy(H.chart))
+
+"""
+    on_affine_chart(F::System)
+    on_affine_chart(H::AbstractHomotopy[, chart])
+
+Construct an `AffineChartSystem` (resp. `AffineChartHomotopy`) on a randomly
+generated chart `v`. Each entry is drawn independently from a normal
+distribution.
+"""
+on_affine_chart(F::System) =
+    AffineChartSystem(F.evaluator, randn(ComplexF64, size(F.evaluator)[2]))
+on_affine_chart(
+    H::AbstractHomotopy,
+    chart::Vector{ComplexF64} = randn(ComplexF64, size(H)[2]),
+) = AffineChartHomotopy(H, chart)
+
+"""
+    on_chart!(x, H::AffineChartHomotopy)
+
+Rescale `x` in place so that the chart row is satisfied: `v'x = 1`.
+"""
+function on_chart!(x::AbstractVector{ComplexF64}, H::AffineChartHomotopy)::Nothing
+    on_chart!(x, H.chart)
+    return nothing
+end
+
+function on_chart!(x::AbstractVector{ComplexF64}, chart::Vector{ComplexF64})::Nothing
+    λ = zero(ComplexF64)
+    @inbounds for i in eachindex(chart)
+        λ += chart[i] * x[i]
+    end
+    # A point orthogonal to the chart normal (v'x = 0) cannot be placed on the
+    # chart; guard rather than silently scaling by inv(0) = Inf/NaN (the plain
+    # `inv` avoids `@fastmath` swallowing the non-finite result).
+    iszero(λ) && throw(
+        ArgumentError(
+            "point cannot be placed on the affine chart: it is orthogonal to the chart normal (v'x = 0)",
+        ),
+    )
+    λ⁻¹ = inv(λ)
+    @inbounds for i in eachindex(chart)
+        x[i] *= λ⁻¹
+    end
+    return nothing
+end
+
+@inline function evaluate_chart(chart::Vector{ComplexF64}, x::AbstractVector)
+    out = zero(promote_type(ComplexF64, eltype(x)))
+    @inbounds for i in eachindex(chart)
+        out += chart[i] * x[i]
+    end
+    return out - 1.0
+end
+
+## AffineChartSystem: AbstractSystem interface (consumed by SystemEvaluator)
+
+function evaluate!(
+        u::FSVec{ComplexF64}, F::AffineChartSystem,
+        x::FSVec{ComplexF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    evaluate!(u, F.system, x, p)
+    u[size(F.system)[1] + 1] = evaluate_chart(F.chart, x)
+    return nothing
+end
+
+function evaluate!(
+        u::FSVec{ComplexF64}, F::AffineChartSystem,
+        x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    evaluate!(u, F.system, x, p)
+    u[size(F.system)[1] + 1] = ComplexF64(evaluate_chart(F.chart, x))
+    return nothing
+end
+
+function evaluate!(
+        u::FSVec{ComplexDF64}, F::AffineChartSystem,
+        x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    evaluate!(u, F.system, x, p)
+    u[size(F.system)[1] + 1] = evaluate_chart(F.chart, x)
+    return nothing
+end
+
+function evaluate_and_jacobian!(
+        u::FSVec{ComplexF64}, U::FSMat{ComplexF64}, F::AffineChartSystem,
+        x::FSVec{ComplexF64}, p::FSVec{ComplexF64},
+    )::Nothing
+    # The interpreter writes only the first m rows (Cartesian indexing);
+    # the chart row is written afterwards.
+    evaluate_and_jacobian!(u, U, F.system, x, p)
+    m = size(F.system)[1]
+    u[m + 1] = evaluate_chart(F.chart, x)
+    n = size(F.system)[2]
+    @inbounds for j in 1:n
+        U[m + 1, j] = F.chart[j]
+    end
+    return nothing
+end
+
+# The order-K coefficient of the affine row `v'x - 1` is `v'x_K`, not zero.
+@inline function _chart_taylor_row(
+        chart::Vector{ComplexF64}, tx::TaylorVector{N, ComplexF64}, ::Val{K},
+    )::ComplexF64 where {N, K}
+    x_K = vectors(tx)[K + 1]
+    acc = zero(ComplexF64)
+    @inbounds for j in eachindex(chart)
+        acc = muladd(chart[j], x_K[j], acc)
+    end
+    return acc
+end
+
+function taylor!(
+        u::FSVec{ComplexF64}, v::Val{K}, F::AffineChartSystem,
+        tx::TaylorVector{N, ComplexF64}, p::FSVec{ComplexF64},
+    )::Nothing where {K, N}
+    taylor!(u, v, F.system, tx, p)
+    u[size(F.system)[1] + 1] = _chart_taylor_row(F.chart, tx, v)
+    return nothing
+end
+
+function taylor!(
+        u::FSVec{ComplexF64}, v::Val{K}, F::AffineChartSystem,
+        tx::TaylorVector{N, ComplexF64}, tp::TaylorVector{M, ComplexF64},
+    )::Nothing where {K, N, M}
+    taylor!(u, v, F.system, tx, tp)
+    u[size(F.system)[1] + 1] = _chart_taylor_row(F.chart, tx, v)
+    return nothing
+end
+
+## AffineChartHomotopy: AbstractHomotopy interface
+
+function evaluate!(
+        u::FSVec{ComplexF64}, H::AffineChartHomotopy,
+        x::FSVec{ComplexF64}, t::ComplexF64,
+    )::Nothing
+    evaluate!(u, H.homotopy, x, t)
+    u[size(H.homotopy)[1] + 1] = evaluate_chart(H.chart, x)
+    return nothing
+end
+
+function evaluate!(
+        u::FSVec{ComplexF64}, H::AffineChartHomotopy,
+        x::FSVec{ComplexDF64}, t::ComplexF64,
+    )::Nothing
+    evaluate!(u, H.homotopy, x, t)
+    u[size(H.homotopy)[1] + 1] = ComplexF64(evaluate_chart(H.chart, x))
+    return nothing
+end
+
+function evaluate_and_jacobian!(
+        u::FSVec{ComplexF64}, U::FSMat{ComplexF64},
+        H::AffineChartHomotopy, x::FSVec{ComplexF64}, t::ComplexF64,
+    )::Nothing
+    # The wrapped homotopy writes its rows with explicit 2D indexing; the chart
+    # row is written afterwards.
+    evaluate_and_jacobian!(u, U, H.homotopy, x, t)
+    m = size(H.homotopy)[1]
+    u[m + 1] = evaluate_chart(H.chart, x)
+    n = size(H.homotopy)[2]
+    @inbounds for j in 1:n
+        U[m + 1, j] = H.chart[j]
+    end
+    return nothing
+end
+
+# Zero here: a homotopy is the outermost wrapper and the predictor zeroes the
+# highest-order row of `tx` before each call.
+function taylor!(
+        u::FSVec{ComplexF64}, ::Val{1}, H::AffineChartHomotopy,
+        x::FSVec{ComplexF64}, t::ComplexF64,
+    )::Nothing
+    taylor!(u, Val(1), H.homotopy, x, t)
+    u[size(H.homotopy)[1] + 1] = zero(ComplexF64)
+    return nothing
+end
+
+function taylor!(
+        u::FSVec{ComplexF64}, ::Val{2}, H::AffineChartHomotopy,
+        tx::TaylorVector{3, ComplexF64}, t::ComplexF64,
+    )::Nothing
+    taylor!(u, Val(2), H.homotopy, tx, t)
+    u[size(H.homotopy)[1] + 1] = zero(ComplexF64)
+    return nothing
+end
+
+function taylor!(
+        u::FSVec{ComplexF64}, ::Val{3}, H::AffineChartHomotopy,
+        tx::TaylorVector{4, ComplexF64}, t::ComplexF64,
+    )::Nothing
+    taylor!(u, Val(3), H.homotopy, tx, t)
+    u[size(H.homotopy)[1] + 1] = zero(ComplexF64)
+    return nothing
+end
+
+# Retargeting passthroughs for subspace-homotopy wrapping. Without these,
+# start_parameters!/target_parameters! would fall through to the AbstractHomotopy
+# no-op default and silently leave the inner homotopy on stale subspaces.
+set_subspaces!(
+    H::AffineChartHomotopy{<:SubspaceHomotopy},
+    start::LinearSubspace, target::LinearSubspace,
+)::Nothing = set_subspaces!(H.homotopy, start, target)
+start_parameters!(
+    H::AffineChartHomotopy{<:SubspaceHomotopy}, p::LinearSubspace,
+)::Nothing = start_parameters!(H.homotopy, p)
+target_parameters!(
+    H::AffineChartHomotopy{<:SubspaceHomotopy}, q::LinearSubspace,
+)::Nothing = target_parameters!(H.homotopy, q)
+
+# Retargeting passthroughs for parameter-homotopy wrapping (projective systems
+# with parameters).
+parameters!(
+    H::AffineChartHomotopy{ParameterHomotopy},
+    p::Vector{ComplexF64}, q::Vector{ComplexF64},
+)::Nothing = parameters!(H.homotopy, p, q)
+start_parameters!(
+    H::AffineChartHomotopy{ParameterHomotopy}, p::AbstractVector{<:Number},
+)::Nothing = start_parameters!(H.homotopy, p)
+target_parameters!(
+    H::AffineChartHomotopy{ParameterHomotopy}, q::AbstractVector{<:Number},
+)::Nothing = target_parameters!(H.homotopy, q)
+
+"""
+    with_linear_subspace_homotopy(f, F::System, V::LinearSubspace, W::LinearSubspace;
+                                  intrinsic, gamma = cis(2π * rand()))
+
+Run `f` on the homotopy that moves `V` to `W`: an
+[`IntrinsicSubspaceHomotopy`](@ref) (if `dim(V) <= codim(V)`, or forced via
+`intrinsic = true`) or an [`ExtrinsicSubspaceHomotopy`](@ref) (if
+`dim(V) > codim(V)`, or forced via `intrinsic = false`). For a homogeneous
+system with linear subspaces the problem is put on a random affine chart: the
+intrinsic route appends the chart row to the system, the extrinsic route wraps
+the homotopy in an [`AffineChartHomotopy`](@ref), which is what makes
+[`solve`](@ref) place the start points on that chart.
+
+The homotopy is handed to `f` rather than returned, so that `f` receives it as
+the concrete type the branch built.
+
+```julia
+with_linear_subspace_homotopy(F, V, W) do H
+    solve(H, starts)
+end
+```
+"""
+function with_linear_subspace_homotopy(
+        f::Fn,
+        F::System,
+        V::LinearSubspace,
+        W::LinearSubspace;
+        intrinsic::Bool = _default_intrinsic(V),
+        gamma::ComplexF64 = cis(2 * pi * rand()),
+    ) where {Fn}
+    projective = is_linear(V) && is_linear(W) && is_homogeneous(F)
+    if intrinsic
+        return projective ?
+            f(
+                IntrinsicSubspaceHomotopy(
+                    SystemEvaluator(on_affine_chart(F)), V, W; gamma = gamma,
+                ),
+            ) :
+            f(IntrinsicSubspaceHomotopy(F.evaluator, V, W; gamma = gamma))
+    end
+    H = ExtrinsicSubspaceHomotopy(F.evaluator, V, W; gamma = gamma)
+    return projective ? f(on_affine_chart(H)) : f(H)
+end

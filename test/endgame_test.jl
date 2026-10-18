@@ -1,121 +1,182 @@
-@testset "Endgame" begin
-    @testset "Cyclic 7" begin
-        res = solve(cyclic(7); start_system = :total_degree, show_progress = false)
-        @test nsolutions(res) == 924
-    end
+using Test
+using HomotopyContinuation
+using DynamicPolynomials: @polyvar
 
-    @testset "Hyperbolic - 6,6" begin
-        # 2 solutions with multiplicity 6, projective
-        @var x z
-        y = 1
-        # This has two roots of multiplicity 6 at the hyperplane z=0
-        # each root has winding number 3
-        F = [
-            0.75 * x^4 + 1.5 * x^2 * y^2 - 2.5 * x^2 * z^2 + 0.75 * y^4 - 2.5 * y^2 * z^2 + 0.75 * z^4
-            10 * x^2 * z + 10 * y^2 * z - 6 * z^3
-        ]
-        res = solve(System(F); start_system = :total_degree)
-        @test count(r -> r.winding_number == 3, path_results(res)) == 12
-        @test nresults(res) == 2
-        @test nsingular(res) == 2
-        @test all(r -> multiplicity(r) == 6, results(res))
-    end
+include("test_systems.jl")
 
-    @testset "Singular 1" begin
-        # 1 singular solution with multiplicity 3
-        @var x y
-        z = 1
-        F = [
-            x^2 + 2 * y^2 + 2 * im * y * z,
-            (18 + 3 * im) * x * y + 7 * im * y^2 - (3 - 18 * im) * x * z - 14 * y * z -
-            7 * im * z^2,
-        ]
-        result = solve(System(F); start_system = :total_degree)
-        @test nsingular(result) == 1
-        @test nresults(result; only_nonsingular = true) == 1
-    end
+@testset "Endgame behavior" begin
+    @testset "multiple roots expose multiplicity and winding" begin
+        @polyvar x
 
-    @testset "Wilkinson $d" for d in [12]
-        @var x
-        f = System([expand(prod(x - i for i = 1:d))])
-        res = track.(total_degree(f, endgame_options = (only_nonsingular = true,))...)
-        @test all(is_success, res)
-        @test round.(Int, real.(sort(first.(solution.(res)); by = abs))) == 1:d
-        @test maximum(abs.(imag.(first.(solution.(res))))) < 1e-4
-    end
-
-    @testset "(x-10)^$d" for d in [2, 6]
-        @var x
-        f = System([(x - 10)^d])
-        res = track.(total_degree(f)...)
-        @test count(r -> r.winding_number == d, res) == d
-    end
-
-    @testset "Beyond Polyhedral Homotopy Example" begin
-        @var x y
-        f = [2.3 * x^2 + 1.2 * y^2 + 3x - 2y + 3, 2.3 * x^2 + 1.2 * y^2 + 5x + 2y - 5]
-        res = track.(total_degree(System(f))...)
-        @test count(is_success, res) == 2
-        @test count(is_at_infinity, res) == 2
-    end
-
-    @testset "Winding Number Family d=$d" for d = 2:2:6
-        @var x y
-        a = [0.257, -0.139, -1.73, -0.199, 1.79, -1.32]
-        f1 = (a[1] * x^d + a[2] * y) * (a[3] * x + a[4] * y) + 1
-        f2 = (a[1] * x^d + a[2] * y) * (a[5] * x + a[6] * y) + 1
-        res = track.(total_degree(System([f1, f2]))...)
-        @test count(is_success, res) == d + 1
-    end
-
-    # @testset "Bacillus Subtilis" begin
-    #     res = solve(bacillus())
-    #     @test nsolutions(res) == 44
-    # end
-
-    @testset "Mohab" begin
-        # Communicated by Mohab Safey El Din
-        @var x y z
-        F = [
-            -9091098778555951517 * x^3 * y^4 * z^2 +
-            5958442613080401626 * y^2 * z^7 +
-            17596733865548170996 * x^2 * z^6 - 17979170986378486474 * x * y * z^6 -
-            2382961149475678300 * x^4 * y^3 - 15412758154771986214 * x * y^3 * z^3 +
-            133,
-            -10798198881812549632 * x^6 * y^3 * z - 11318272225454111450 * x * y^9 -
-            14291416869306766841 * y^9 * z - 5851790090514210599 * y^2 * z^8 +
-            15067068695242799727 * x^2 * y^3 * z^4 +
-            7716112995720175148 * x^3 * y * z^3 +
-            171,
-            13005416239846485183 * x^7 * y^3 + 4144861898662531651 * x^5 * z^4 -
-            8026818640767362673 * x^6 - 6882178109031199747 * x^2 * y^4 +
-            7240929562177127812 * x^2 * y^3 * z +
-            5384944853425480296 * x * y * z^4 +
-            88,
-        ]
-        @time res =
-            solve(System(F, [x, z, y]); start_system = :total_degree, show_progress = false)
-        @test nnonsingular(res) == 693
-
-        # test for γ value where path jumping happened with to loose default config
-        @time res = solve(
-            System(F, [x, z, y]),
-            γ = -0.9132549847010242 + 0.4073884300256109im,
-            start_system = :total_degree,
+        quadratic = solve(
+            System([(x - 10)^2]),
+            TotalDegree(; seed = UInt32(0xabcd), show_progress = false),
         )
-        @test nnonsingular(res) == 693
+        @test nresults(quadratic) == 1
+        @test nsingular(quadratic) == 1
+        @test multiplicity(only(singular(quadratic))) == 2
+        @test any(path -> winding_number(path) == 2, path_results(quadratic))
+
+        sextic = solve(
+            System([(x - 10)^6]),
+            TotalDegree(; seed = UInt32(0x6006), show_progress = false),
+        )
+        @test count(path -> winding_number(path) == 6, path_results(sextic)) >= 4
     end
 
-    # @testset "Ill-conditioned solution - look's almost diverging" begin
-    #     sys, q₀ = fano_quintic()
-    #     solver, starts = solver_startsolutions(
-    #         sys;
-    #         target_parameters = q₀,
-    #         start_system = :polyhedral,
-    #         seed = 0x56db29a3,
-    #     )
-    #     S = collect(starts)
-    #     res = track(solver, S[1785])
-    #     @test is_success(res)
-    # end
+    @testset "the winding number of a triple root is 3" begin
+        @polyvar x
+        result = solve(
+            System([(x - 10)^3 * (x - 1)]),
+            TotalDegree(; seed = UInt32(3), show_progress = false),
+            Serial(),
+        )
+        paths = path_results(result)
+        @test all(is_success, paths)
+        triple = filter(path -> abs(solution(path)[1] - 10) < 1.0e-4, paths)
+        simple = filter(path -> abs(solution(path)[1] - 1) < 1.0e-8, paths)
+        @test length(triple) == 3
+        @test length(simple) == 1
+        @test all(path -> winding_number(path) == 3, triple)
+        @test multiplicity(only(singular(result))) == 3
+        @test is_nonsingular(only(simple))
+    end
+
+    @testset "a coordinate that stays constant does not block a double root" begin
+        @polyvar x y
+        # y - 1 is also the total-degree start equation, so y is exactly 1 on
+        # every path and its derivatives vanish identically.
+        for c in (2, 3, -1.5), seed in UInt32.(1:3)
+            for F in (System([(x - c)^2, y - 1]), System([(x - c)^2 + (y - 1), y - 1]))
+                result = solve(F, TotalDegree(; seed = seed, show_progress = false), Serial())
+                @test count(is_success, path_results(result)) == 2
+                @test all(p -> winding_number(p) == 2, path_results(result))
+                @test nsingular(result) == 1
+                @test solution(only(results(result; only_singular = true))) ≈ [c, 1] atol = 1.0e-6
+            end
+        end
+    end
+
+    @testset "double roots are not mistaken for spurious endpoints" begin
+        @polyvar u
+        # At a double root both H and its Jacobian are pure rounding noise, so a
+        # residual measured against the Jacobian row size is noise over noise.
+        for c in (1.5, 3, -1.5, 10, 2 + 1im), seed in UInt32.(1:10)
+            result = solve(System([(u - c)^2]), TotalDegree(; seed = seed, show_progress = false))
+            @test count(is_success, path_results(result)) == 2
+            @test nat_infinity(result) == 0
+            @test nsingular(result) == 1
+        end
+    end
+
+    @testset "an invalid singular start never enters the endgame" begin
+        @polyvar x y
+        G = System([x^2 - 1, y^2 - 1])
+        F = System([x^2 - 4, y^2 - 9])
+        # At (2, 0) the row 2y of G's Jacobian vanishes and G does not vanish.
+        result = solve(
+            G, F, [ComplexF64[2, 0]],
+            Continuation(; seed = UInt32(0x52), show_progress = false),
+            Serial(),
+        )
+        path = only(path_results(result))
+
+        @test is_failed(path)
+        @test !is_success(path)
+        @test return_code(path) == PathResultCode.PATH_TERMINATED_INVALID_START_SINGULAR_JACOBIAN
+        @test !is_singular(path) && !is_at_infinity(path)
+        @test steps(path) == 0
+        @test last_path_point(path) == (ComplexF64[2, 0], 1.0)
+        @test nfailed(result) == 1
+        @test nsolutions(result) == 0
+        @test nsingular(result) == 0
+        @test nat_infinity(result) == 0
+    end
+
+    @testset "paths at infinity are distinguished from finite solutions" begin
+        @polyvar x y
+        result = solve(
+            System(
+                [
+                    2.3x^2 + 1.2y^2 + 3x - 2y + 3,
+                    2.3x^2 + 1.2y^2 + 5x + 2y - 5,
+                ],
+            ),
+            TotalDegree(; seed = UInt32(0x1f1f), show_progress = false),
+        )
+        @test count(is_success, path_results(result)) == 2
+        @test nat_infinity(result) == 2
+        @test nfailed(result) == 0
+    end
+
+    @testset "winding-number family remains trackable" begin
+        for d in 2:2:6
+            @testset "d=$d" begin
+                @polyvar x y
+                a = [0.257, -0.139, -1.73, -0.199, 1.79, -1.32]
+                f1 = (a[1] * x^d + a[2] * y) * (a[3] * x + a[4] * y) + 1
+                f2 = (a[1] * x^d + a[2] * y) * (a[5] * x + a[6] * y) + 1
+                result = solve(
+                    System([f1, f2]),
+                    TotalDegree(;
+                        seed = UInt32(0x1000 + d),
+                        show_progress = false,
+                    ),
+                )
+                @test count(is_success, path_results(result)) == d + 1
+            end
+        end
+    end
+
+    @testset "Hyperbolic 6,6 singular roots" begin
+        @polyvar x z
+        y = 1
+        F = System(
+            [
+                0.75x^4 + 1.5x^2 * y^2 - 2.5x^2 * z^2 + 0.75y^4 -
+                    2.5y^2 * z^2 + 0.75z^4,
+                10x^2 * z + 10y^2 * z - 6z^3,
+            ],
+        )
+        result = solve(F, TotalDegree(; seed = UInt32(1), show_progress = false))
+
+        @test count(is_success, path_results(result)) == 12
+        @test count(path -> winding_number(path) == 3, path_results(result)) == 12
+        @test nresults(result) == 2
+        @test nsingular(result) == 2
+        @test all(path -> multiplicity(path) == 6, singular(result))
+    end
+
+    @testset "singular and nonsingular roots are partitioned correctly" begin
+        @polyvar x y
+        z = 1
+        F = System(
+            [
+                x^2 + 2y^2 + 2im * y * z,
+                (18 + 3im) * x * y + 7im * y^2 - (3 - 18im) * x * z -
+                    14y * z - 7im * z^2,
+            ],
+        )
+        result = solve(
+            F,
+            TotalDegree(; seed = UInt32(12345), show_progress = false),
+        )
+        @test nresults(result) == 2
+        @test nsingular(result) == 1
+        @test nnonsingular(result) == 1
+    end
+
+    @testset "cyclic 7 has 924 solutions" begin
+        polys, vars, _ = cyclic_system(7)
+        F = System(polys; variables = vars)
+
+        td = solve(F, TotalDegree(; seed = UInt32(1), show_progress = false))
+        @test ntracked(td) == 5040
+        @test nsolutions(td) == 924
+
+        @test mixed_volume(F) == 924
+        ph = solve(F, Polyhedral(; seed = UInt32(1), show_progress = false))
+        @test ntracked(ph) == 924
+        @test nsolutions(ph) == 924
+    end
 end

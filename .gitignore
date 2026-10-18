@@ -9,4 +9,16 @@ docs/build/
 **/**/tmp_params.txt
 **/**/tmp_sols.txt
 **/**/tmp_cert.txt
+benchmarks_output.json
+ttfx_output.json
+.DS_Store
 .claude/*
+*.codex
+test-run.log
+test-cert.log
+test-extensive.log
+test-strict.log
+ttfx_benchmark.json
+coverage/
+coverage-union/
+coverage-artifacts/

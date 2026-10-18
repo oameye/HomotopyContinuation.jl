@@ -1,642 +1,719 @@
-struct TruncatedTaylorSeries{N,T}
-    val::NTuple{N,T}
+## TruncatedTaylorSeries, TaylorVector, and taylor_op_* functions
+#
+# TruncatedTaylorSeries{N,T} stores N Taylor coefficients (orders 0 to N-1).
+# Indexed 0-based externally: t[k] returns the k-th order coefficient.
+#
+# TaylorVector{N,T} is a vector of TruncatedTaylorSeries backed by an FSMat{T}.
+# The matrix is N×n: N rows for coefficient orders, n columns for elements.
+
+struct TruncatedTaylorSeries{N, T}
+    val::NTuple{N, T}
+
+    function TruncatedTaylorSeries{N, T}(val::Tuple{T, Vararg{T}}) where {N, T}
+        return new{N, T}(val)
+    end
+
+    function TruncatedTaylorSeries(val::Tuple{T, Vararg{T}}) where {T}
+        return new{length(val), T}(val)
+    end
 end
-TruncatedTaylorSeries(v::AbstractVector) = TruncatedTaylorSeries(tuple(v...))
-TruncatedTaylorSeries(v::Number) = TruncatedTaylorSeries((v,))
-TruncatedTaylorSeries(v::Tuple) = TruncatedTaylorSeries(promote(v...))
+const TTS{N, T} = TruncatedTaylorSeries{N, T}
+
+# Construct from tuple (promotes element types)
+TTS(v::Tuple) = TTS(promote(v...))
+
+# Construct order-0 series from a scalar (N=1 inferred from value)
+TTS(x::Number) = TTS((x,))
+
+# Construct fixed-N series from a scalar: TruncatedTaylorSeries{N,T}(x)
+# places x at order 0 and fills remaining orders with zero(T).
+function TTS{N, T}(x::S) where {N, T, S <: Number}
+    return convert(TTS{N, T}, x)
+end
 
 Base.show(io::IO, x::TruncatedTaylorSeries) = show(io, x.val)
-Base.eltype(::TruncatedTaylorSeries{N,T}) where {N,T} = T
-Base.length(x::TruncatedTaylorSeries) = length(x.val)
-Base.iterate(x::TruncatedTaylorSeries{N,T}) where {N,T} = iterate(x.val)
-Base.iterate(x::TruncatedTaylorSeries{N,T}, s) where {N,T} = iterate(x.val, s)
-Base.getindex(x::TruncatedTaylorSeries{N,T}, k) where {N,T} = getindex(x.val, k + 1)
-Base.zero(::TruncatedTaylorSeries{N,T}) where {N,T} =
-    convert(TruncatedTaylorSeries{N,T}, zero(T))
-Base.zero(::Type{TruncatedTaylorSeries{N,T}}) where {N,T} =
-    convert(TruncatedTaylorSeries{N,T}, zero(T))
+Base.eltype(::TTS{N, T}) where {N, T} = T
+Base.length(::TTS{N, T}) where {N, T} = N
+
+# 0-indexed externally
+Base.getindex(x::TTS{N, T}, k::Integer) where {N, T} = x.val[k + 1]
+
+Base.iterate(x::TruncatedTaylorSeries) = iterate(x.val)
+Base.iterate(x::TruncatedTaylorSeries, s) = iterate(x.val, s)
+
 Base.:(==)(tx::TruncatedTaylorSeries, ty::TruncatedTaylorSeries) = tx.val == ty.val
 
+Base.zero(::TTS{N, T}) where {N, T} = convert(TTS{N, T}, zero(T))
+Base.zero(::Type{TTS{N, T}}) where {N, T} = convert(TTS{N, T}, zero(T))
+Base.one(::TTS{N, T}) where {N, T} = convert(TTS{N, T}, one(T))
+Base.one(::Type{TTS{N, T}}) where {N, T} = convert(TTS{N, T}, one(T))
+
+# Convert from same-or-smaller TTS (zero-padding) or scalar
 function Base.convert(
-    ::Type{TruncatedTaylorSeries{N,T}},
-    x::TruncatedTaylorSeries{K1,T1},
-) where {N,T,K1,T1}
-    TruncatedTaylorSeries(ntuple(Val(N)) do i
-        if i <= length(x.val)
-            convert(T, x.val[i])
-        else
-            zero(T)
+        ::Type{TTS{N, T}},
+        x::TTS{K, S},
+    ) where {N, T, K, S}
+    return TTS(
+        ntuple(Val(N)) do i
+            if i <= K
+                convert(T, x.val[i])
+            else
+                zero(T)
+            end
         end
-    end)
+    )
 end
-function Base.convert(::Type{TruncatedTaylorSeries{N,T}}, x::T1) where {N,T,T1<:Number}
-    TruncatedTaylorSeries(ntuple(Val(N)) do i
-        if i == 1
-            convert(T, x)
-        else
-            zero(T)
+
+function Base.convert(
+        ::Type{TTS{N, T}},
+        x::S,
+    ) where {N, T, S <: Number}
+    return TTS(
+        ntuple(Val(N)) do i
+            if i == 1
+                convert(T, x)
+            else
+                zero(T)
+            end
         end
-    end)
-end
-function Base.convert(::Type{TruncatedTaylorSeries{N,T}}, x::Tuple) where {N,T}
-    convert(TruncatedTaylorSeries{N,T}, TruncatedTaylorSeries(x))
+    )
 end
 
-expression(x, ε = Variable(:ε)) = x
-function expression(x::TruncatedTaylorSeries, ε = Variable(:ε))
-    ex = zero(Expression)
-    for (k, xk) in enumerate(x)
-        ex += xk * ε^(k - 1)
-    end
-    ex
+function Base.convert(
+        ::Type{TTS{N, T}},
+        x::Tuple,
+    ) where {N, T}
+    return convert(TTS{N, T}, TTS(x))
 end
+
+# Arithmetic with scalars
+Base.:*(c::Number, x::TTS{N, T}) where {N, T} = TTS(ntuple(i -> c * x.val[i], Val(N)))
+Base.:*(x::TTS{N, T}, c::Number) where {N, T} = TTS(ntuple(i -> x.val[i] * c, Val(N)))
+Base.:+(x::TTS{N, T}, y::TTS{N, T}) where {N, T} = TTS(ntuple(i -> x.val[i] + y.val[i], Val(N)))
+Base.:-(x::TTS{N, T}, y::TTS{N, T}) where {N, T} = TTS(ntuple(i -> x.val[i] - y.val[i], Val(N)))
+Base.:-(x::TTS{N, T}) where {N, T} = TTS(ntuple(i -> -x.val[i], Val(N)))
+
+## TaylorVector
 
 """
-    TaylorVector{N,T}
+    TaylorVector{N,T}(n::Integer)
 
-A data structure representing a vector of Taylor series with `N` terms.
-Each element is an `NTuple{N,T}`.
-
-    TaylorVector(T, N::Integer, n::Integer)
-
-Create a vector of `n` `NTuple{N,T}`s.
+A vector of `n` truncated Taylor series with `N` coefficients of type `T`, the
+input and output type of [`taylor!`](@ref). `tv[i] = (x₀, x₁, …)` sets the
+coefficients of entry `i`, and `tv[i][k]` returns its order-`k` coefficient for
+`k = 0, …, N-1`. A new `TaylorVector` is zero.
 """
-struct TaylorVector{N,T} <: AbstractVector{TruncatedTaylorSeries{N,T}}
-    data::Matrix{T}
-end
-TaylorVector{N}(data::Matrix{T}) where {N,T} = TaylorVector{N,T}(data)
-TaylorVector{N}(TV::TaylorVector{M,T}) where {N,M,T} = TaylorVector{N,T}(TV.data)
-TaylorVector{N}(T, n::Integer) where {N} = TaylorVector{N}(zeros(T, N, n))
-TaylorVector{N,T}(::UndefInitializer, dims::Tuple{Int}) where {N,T} =
-    TaylorVector{N,T}(similar(Matrix{T}, N, dims[1]))
-
-
-function Base.show(io::IO, ::MIME"text/plain", X::TaylorVector)
-    summary(io, X)
-    isempty(X) && return
-    println(io, ":")
-    Base.print_array(io, map(i -> X[i], 1:length(X)))
+struct TaylorVector{N, T} <: AbstractVector{TTS{N, T}}
+    data::FSMat{T}
 end
 
-Base.length(TV::TaylorVector) = size(TV.data, 2)
-Base.size(TV::TaylorVector) = (length(TV),)
-Base.eltype(::Type{TaylorVector{N,T}}) where {N,T} = TruncatedTaylorSeries{N,T}
-Base.IndexStyle(::TaylorVector) = Base.IndexLinear()
-
-Base.fill!(v::TaylorVector, x) = fill!(v.data, x)
-
-"""
-    vectors(TV::TaylorVec{N})
-
-Return the Taylor series as `N` seperate vectors.
-"""
-@generated function vectors(TV::TaylorVector{N}) where {N}
-    Expr(:tuple, (:(view(TV.data, $k, :)) for k = 1:N)...)
+function TaylorVector{N, T}(n::Integer) where {N, T}
+    return TaylorVector{N, T}(FSMat{T}(zeros(T, N, n)))
 end
 
-@generated function Base.getindex(TV::TaylorVector{N}, i::Integer) where {N}
-    quote
+Base.length(tv::TaylorVector) = size(tv.data, 2)
+Base.size(tv::TaylorVector) = (length(tv),)
+Base.eltype(::Type{TaylorVector{N, T}}) where {N, T} = TTS{N, T}
+Base.IndexStyle(::Type{<:TaylorVector}) = IndexLinear()
+Base.fill!(tv::TaylorVector, x) = (fill!(tv.data, x); tv)
+
+"""
+    vectors(tv::TaylorVector{N}) -> NTuple{N, AbstractVector}
+
+Split `tv` into `N` views — one per Taylor coefficient order.
+`vectors(tv)[k]` is the view of all order-`(k-1)` coefficients across elements.
+"""
+@generated function vectors(tv::TaylorVector{N}) where {N}
+    return Expr(:tuple, (:(view(tv.data, $k, :)) for k in 1:N)...)
+end
+
+@generated function Base.getindex(tv::TaylorVector{N, T}, i::Integer) where {N, T}
+    return quote
         Base.@_propagate_inbounds_meta
-        x = TV.data
-        TruncatedTaylorSeries($(Expr(:tuple, (:(x[$k, i]) for k = 1:N)...)))
+        x = tv.data
+        TTS($(Expr(:tuple, (:(x[$k, i]) for k in 1:N)...)))
     end
 end
-Base.getindex(TV::TaylorVector, i::Integer, j::Integer) = getindex(TV.data, j, i)
 
-function Base.setindex!(TV::TaylorVector{N,T}, x, i::Integer) where {N,T}
-    setindex!(TV, convert(TruncatedTaylorSeries{N,T}, x), i)
+function Base.setindex!(tv::TaylorVector{N, T}, x, i::Integer) where {N, T}
+    return setindex!(tv, convert(TTS{N, T}, x), i)
 end
+
 @generated function Base.setindex!(
-    TV::TaylorVector{N,T},
-    x::TruncatedTaylorSeries{N,T},
-    i::Integer,
-) where {N,T}
-    quote
+        tv::TaylorVector{N, T},
+        x::TTS{N, T},
+        i::Integer,
+    ) where {N, T}
+    return quote
         Base.@_propagate_inbounds_meta
-        d = TV.data
-        $((:(d[$k, i] = x.val[$k]) for k = 1:N)...)
+        d = tv.data
+        $((:(d[$k, i] = x.val[$k]) for k in 1:N)...)
         x
     end
 end
-Base.setindex!(TV::TaylorVector, x, i::Integer, j::Integer) = setindex!(TV.data, x, j, i)
 
-# HIGHER ORDER DIFFERENTIATION
-# This follows Chapter 13 of Griewank & Walther - Evaluating derivatives
-
-
-struct DiffMap
-    D::Dict{Tuple{Any,Int},Any}
-end
-DiffMap() = DiffMap(Dict{Tuple{Any,Int},Any}())
+## taylor_op_* functions
 #
-Base.getindex(D::DiffMap, var, ∂i) = get(D.D, (var, ∂i), nothing)
-Base.setindex!(D::DiffMap, val, var, ∂i) = D.D[(var, ∂i)] = val
-Base.setindex!(D::DiffMap, ::Nothing, var, ∂i) = nothing
+# Each function computes the Taylor expansion of the corresponding scalar op_*.
+# Input/output: TruncatedTaylorSeries{N,T} with N coefficients (orders 0 to N-1).
+# Coefficient-wise ops operate independently per order.
+# Convolution-based ops (mul, div, inv, sqrt, pow_int) use recurrence relations.
 
-
-# Taylor
-function untuple(varname, dx)
-    :($(Expr(:tuple, (Symbol(varname, k) for k = 0:dx)...)) = $varname)
-end
-function taylor_tuple(ids)
-    tuple = Expr(:tuple, [isnothing(id) ? :(zero(x0)) : to_expr_arg(id) for id in ids]...)
-    :(TruncatedTaylorSeries($tuple))
-end
-
-function taylor_impl(f!, K::Int, dx::Int)
-    D = DiffMap()
-    list = IntermediateRepresentation()
-    for k = 0:dx
-        D[:x, k] = Symbol(:x, k)
-    end
-    ids = f!(list, D)
-    quote
-        Base.@_inline_meta
-        $(untuple(:x, dx))
-        $(to_julia_expr(list))
-        $(taylor_tuple(ids))
-    end
-end
-function taylor_impl(f!, K::Int, dx::Int, dy::Int)
-    D = DiffMap()
-    list = IntermediateRepresentation()
-    for k = 0:dx
-        D[:x, k] = Symbol(:x, k)
-    end
-    for k = 0:dy
-        D[:y, k] = Symbol(:y, k)
-    end
-    ids = f!(list, D)
-    quote
-        Base.@_inline_meta
-        $(untuple(:x, dx))
-        $(untuple(:y, dy))
-        $(to_julia_expr(list))
-        $(taylor_tuple(ids))
-    end
-end
-function taylor_impl(f!, K::Int, dx::Int, dy::Int, dz::Int)
-    D = DiffMap()
-    list = IntermediateRepresentation()
-    for k = 0:dx
-        D[:x, k] = Symbol(:x, k)
-    end
-    for k = 0:dy
-        D[:y, k] = Symbol(:y, k)
-    end
-    for k = 0:dz
-        D[:z, k] = Symbol(:z, k)
-    end
-
-    ids = f!(list, D)
-    quote
-        Base.@_inline_meta
-        $(untuple(:x, dx))
-        $(untuple(:y, dy))
-        $(untuple(:z, dz))
-        $(to_julia_expr(list))
-        $(taylor_tuple(ids))
-    end
-end
-function taylor_impl(f!, K::Int, dx::Int, dy::Int, dz::Int, dw::Int)
-    D = DiffMap()
-    list = IntermediateRepresentation()
-    for k = 0:dx
-        D[:x, k] = Symbol(:x, k)
-    end
-    for k = 0:dy
-        D[:y, k] = Symbol(:y, k)
-    end
-    for k = 0:dz
-        D[:z, k] = Symbol(:z, k)
-    end
-    for k = 0:dw
-        D[:w, k] = Symbol(:w, k)
-    end
-
-    ids = f!(list, D)
-    quote
-        Base.@_inline_meta
-        $(untuple(:x, dx))
-        $(untuple(:y, dy))
-        $(untuple(:z, dz))
-        $(untuple(:w, dw))
-        $(to_julia_expr(list))
-        $(taylor_tuple(ids))
-    end
-end
-
-
-taylor_op_call(op::OpType) = Symbol(:taylor_, op_call(op))
-
-# Generate fallbacks to convert every input to a tuple
-truncated_taylor_series(t::N) where {N<:Number} = TruncatedTaylorSeries((t,))
-truncated_taylor_series(t) = TruncatedTaylorSeries(t)
-truncated_taylor_series(t::T) where {T<:TruncatedTaylorSeries} = t
-for op in instances(OpType)
-    f = taylor_op_call(op)
-    if arity(op) === 1
-        @eval @inline $(f)(::Val{K}, x::X) where {K,X} =
-            $f(Val(K), truncated_taylor_series(x))
-    elseif arity(op) == 2
-        if op == OP_POW_INT
-            @eval $f(::Val{K}, x::X, r::Integer) where {K,X} =
-                $f(Val(K), truncated_taylor_series(x), r)
-        else
-            @eval $f(::Val{K}, x::X, y::Y) where {K,X,Y} =
-                $f(Val(K), truncated_taylor_series(x), truncated_taylor_series(y))
-        end
-    elseif arity(op) == 3
-        @eval @inline $f(::Val{K}, x::X, y::Y, z::Z) where {K,X,Y,Z} = $f(
-            Val(K),
-            truncated_taylor_series(x),
-            truncated_taylor_series(y),
-            truncated_taylor_series(z),
-        )
-    elseif arity(op) == 4
-        @eval @inline $f(::Val{K}, x::X, y::Y, z::Z, w::W) where {K,X,Y,Z,W} = $f(
-            Val(K),
-            truncated_taylor_series(x),
-            truncated_taylor_series(y),
-            truncated_taylor_series(z),
-            truncated_taylor_series(w),
-        )
-    end
-end
-
-
-
-# OP_STOP
-function taylor_op_stop(V::Val{K}) where {K}
-    nothing
-end
-
-#
-# OP_CB # a ^ 3 TODO
-function taylor_op_cb(V::Val{K}, x::TruncatedTaylorSeries{M}) where {K,M}
-    taylor_op_mul(V, taylor_op_sqr(V, x), x)
-end
-# OP_COS and OP_SIN
-function taylor_sin_helper!(list::IntermediateRepresentation, D, k)
-    k == 0 && return :s₀
-    s_k = nothing
-    for j = 1:k
-        s_k =
-            muladd!(list, mul!(list, j, D[:x, j]), taylor_cos_helper!(list, D, k - j), s_k)
-    end
-    div!(list, s_k, k)
-end
-function taylor_cos_helper!(list::IntermediateRepresentation, D, k)
-    k == 0 && return :c₀
-    c_k = nothing
-    for j = 1:k
-        c_k =
-            submul!(list, mul!(list, j, D[:x, j]), taylor_sin_helper!(list, D, k - j), c_k)
-    end
-    div!(list, c_k, k)
-end
-function taylor_sin_impl(K, M)
-    D = DiffMap()
-    list = IntermediateRepresentation()
-    for k = 0:M-1
-        D[:x, k] = Symbol(:x, k)
-    end
-
-    ids = Any[:s₀]
-    for k = 1:K
-        push!(ids, taylor_sin_helper!(list, D, k))
-    end
-
-    quote
-        Base.@_inline_meta
-        $(untuple(:x, M - 1))
-        $(K > 0 ? :((s₀, c₀) = sincos(x0)) : :(s₀ = sin(x0)))
-        $(to_julia_expr(list))
-        $(taylor_tuple(ids))
-    end
-end
-function taylor_cos_impl(K, M)
-    D = DiffMap()
-    list = IntermediateRepresentation()
-    for k = 0:M-1
-        D[:x, k] = Symbol(:x, k)
-    end
-
-    ids = Any[:c₀]
-    for k = 1:K
-        push!(ids, taylor_cos_helper!(list, D, k))
-    end
-
-    quote
-        Base.@_inline_meta
-        $(untuple(:x, M - 1))
-        $(K > 0 ? :((s₀, c₀) = sincos(x0)) : :(c₀ = cos(x0)))
-        $(to_julia_expr(list))
-        $(taylor_tuple(ids))
-    end
-end
-@generated function taylor_op_sin(::Val{K}, x::TruncatedTaylorSeries{M}) where {K,M}
-    taylor_sin_impl(K, M)
-end
-@generated function taylor_op_cos(::Val{K}, x::TruncatedTaylorSeries{M}) where {K,M}
-    taylor_cos_impl(K, M)
-end
-
-# OP_INV # 1 / a
-@generated function taylor_op_inv(V::Val{K}, x::TruncatedTaylorSeries{M}) where {K,M}
-    taylor_impl(K, M - 1) do list, D
-        ids = []
-        for k = 0:K
-            s = nothing
-            for j = 0:(k-1)
-                s = muladd!(list, ids[j+1], D[:x, k-j], s)
-            end
-            push!(ids, div!(list, sub!(list, k == 0 ? 1 : nothing, s), D[:x, 0]))
-        end
-        ids
-    end
-end
-# OP_INV_NOT_ZERO # a ≂̸ 0 ? 1 / a : a
-function taylor_op_inv_not_zero(V::Val{K}, x::TruncatedTaylorSeries{M}) where {K,M}
-    taylor_op_div(V, 1, x)
-end
-# OP_INVSQR # 1 / a^2
-function taylor_op_invsqr(V::Val{K}, x::TruncatedTaylorSeries{M}) where {K,M}
-    taylor_op_div(V, 1, taylor_op_sqr(V, x))
-end
-# OP_NEG # -a
-@generated function taylor_op_neg(::Val{K}, x::TruncatedTaylorSeries{M}) where {K,M}
-    taylor_impl(K, M - 1) do list, D
-        [neg!(list, D[:x, k]) for k = 0:K]
-    end
-end
-# OP_SQR # a ^ 2
-function taylor_op_sqr_impl(K, M)
-    taylor_impl(K, M - 1) do list, D
-        map(0:K) do k
-            # Compute ∑_{j=0}^k u_j U_{k - j} =
-            #         2(∑_{j=0}^div(k - 1,2) u_j U_{k - j}) +
-            #         iseven(k) * u_{k-1}^2
-            k == 0 && return sqr!(list, D[:x, 0])
-            w_k = nothing
-            for j = 0:div(k - 1, 2)
-                w_k = muladd!(list, D[:x, j], D[:x, k-j], w_k)
-            end
-            if iseven(k)
-                muladd!(list, 2, w_k, sqr!(list, D[:x, div(k, 2)]))
-            else
-                add!(list, w_k, w_k)
-            end
-        end
-    end
-end
-@generated function taylor_op_sqr(::Val{K}, x::TruncatedTaylorSeries{M}) where {K,M}
-    taylor_op_sqr_impl(K, M)
-end
-# OP_SQRT # √(a)
-# TODO VERIFY CORRECTNESS
-@generated function taylor_op_sqrt(::Val{K}, x::TruncatedTaylorSeries{M}) where {K,M}
-    taylor_impl(K, M - 1) do list, D
-        v₀ = add_op!(list, OP_SQRT, D[:x, 0])
-        d = mul!(list, 2, v₀)
-        ids = []
-        push!(ids, v₀)
-        if K >= 1
-            v₁ = div!(list, D[:x, 1], d)
-            push!(ids, v₁)
-        end
-        for k = 2:K
-            s = nothing
-            for j = 1:(k-1)
-                s = muladd!(list, ids[j+1], ids[k-j+1], s)
-            end
-            push!(ids, div!(list, sub!(list, D[:x, k], s), d))
-        end
-        ids
-    end
-end
 # OP_IDENTITY # a
-function taylor_op_identity(::Val{K}, x::TruncatedTaylorSeries{M,T}) where {K,M,T}
-    convert(TruncatedTaylorSeries{K + 1,T}, x)
+@inline function taylor_op_identity(a::TTS{N, T}) where {N, T}
+    return a
 end
-#
-# OP_ADD # a + b
-@generated function taylor_op_add(
-    ::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-) where {K,M,N}
-    taylor_impl(K, M - 1, N - 1) do list, D
-        [add!(list, D[:x, k], D[:y, k]) for k = 0:K]
-    end
-end
-# OP_DIV # a / b
-@generated function taylor_op_div(
-    ::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-) where {K,M,N}
-    taylor_impl(K, M - 1, N - 1) do list, D
-        ids = []
-        for k = 0:K
-            s = nothing
-            for j = 0:(k-1)
-                s = muladd!(list, ids[j+1], D[:y, k-j], s)
-            end
-            push!(ids, div!(list, sub!(list, D[:x, k], s), D[:y, 0]))
-        end
-        ids
-    end
-end
-# OP_MUL # a * b
-@generated function taylor_op_mul(
-    ::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-) where {K,M,N}
-    taylor_impl(K, M - 1, N - 1) do list, D
-        map(0:K) do k
-            c_k = nothing
-            for j = 0:k
-                c_k = muladd!(list, D[:x, j], D[:y, k-j], c_k)
-            end
-            c_k
-        end
-    end
-end
-# OP_SUB # a - b
-@generated function taylor_op_sub(
-    ::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-) where {K,M,N}
-    taylor_impl(K, M - 1, N - 1) do list, D
-        [sub!(list, D[:x, k], D[:y, k]) for k = 0:K]
-    end
-end
-#
-# OP_POW_INT # a ^ p where p isa Integer
 
-function taylor_op_pow_int_impl(K, dx)
-    D = DiffMap()
-    list = IntermediateRepresentation()
-    for k = 0:dx
-        D[:x, k] = Symbol(:x, k)
-    end
-    w = Any[:w₀]
-    for k = 1:K
-        s = nothing
-        for j = 1:k
-            ũ_j = mul!(list, j, D[:x, j])
-            w_kj = k == j ? :w₀ : w[k-j+1]
-            s = muladd!(list, w_kj, ũ_j, s)
-        end
-        s = mul!(list, :r, s)
-
-        t = nothing
-        for j = 1:k-1
-            u_kj = D[:x, k-j]
-            w̃_j = mul!(list, j, w[j+1])
-            t = muladd!(list, u_kj, w̃_j, t)
-        end
-        w̃_k = mul!(list, :u₀_inv, sub!(list, s, t))
-        w_k = div!(list, w̃_k, k)
-        push!(w, w_k)
-    end
-    quote
+# OP_NEG # -a
+@generated function taylor_op_neg(a::TTS{N, T}) where {N, T}
+    terms = Expr[:(-(a.val[$k])) for k in 1:N]
+    return quote
         Base.@_inline_meta
-        $(untuple(:x, dx))
-        iszero(x0) && return $(taylor_tuple([nothing for _ = 0:K]))
-        w₀ = op_pow_int(x0, r)
-        $((K > 0 ? (:(u₀_inv = op_inv(x0)),) : ())...)
-        $(to_julia_expr(list))
-        $(taylor_tuple(w))
+        TTS($(Expr(:tuple, terms...)))
     end
 end
-@generated function taylor_op_pow_int(
-    ::Val{K},
-    x::TruncatedTaylorSeries{M,T},
-    r::I,
-) where {K,M,T,I<:Integer}
-    taylor_op_pow_int_impl(K, M - 1)
-end
-# OP_POW # a ^ b  TODO
 
+# OP_ADD # a + b
+@generated function taylor_op_add(a::TTS{N, T}, b::TTS{N, T}) where {N, T}
+    terms = Expr[:(a.val[$k] + b.val[$k]) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        TTS($(Expr(:tuple, terms...)))
+    end
+end
 
-# OP_ADD3 # a + b + c
-function taylor_op_add3(
-    V::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-    z::TruncatedTaylorSeries{O},
-) where {K,M,N,O}
-    taylor_op_add(V, taylor_op_add(V, x, y), z)
+# OP_SUB # a - b
+@generated function taylor_op_sub(a::TTS{N, T}, b::TTS{N, T}) where {N, T}
+    terms = Expr[:(a.val[$k] - b.val[$k]) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        TTS($(Expr(:tuple, terms...)))
+    end
 end
-# OP_MUL3 # a * b * c
-function taylor_op_mul3(
-    V::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-    z::TruncatedTaylorSeries{O},
-) where {K,M,N,O}
-    taylor_op_mul(V, taylor_op_mul(V, x, y), z)
+
+# Helper: fold an Expr vector by addition (no closures)
+function _expr_sum(terms::Vector{Expr})::Expr
+    acc = terms[1]
+    for i in 2:length(terms)
+        acc = Expr(:call, :+, acc, terms[i])
+    end
+    return acc
 end
-# OP_MULADD # a * b + c
-@generated function taylor_op_muladd(
-    ::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-    z::TruncatedTaylorSeries{L},
-) where {K,M,N,L}
-    taylor_impl(K, M - 1, N - 1, L - 1) do list, D
-        map(0:K) do k
-            c_k = D[:z, k]
-            for j = 0:k
-                c_k = muladd!(list, D[:x, j], D[:y, k-j], c_k)
-            end
-            c_k
+
+# Helper: generate Cauchy product expressions for orders 1..N (1-indexed)
+# Returns Vector{Expr} where exprs[k] = Σ_{j=1}^{k} a.val[j] * b.val[k+1-j]
+function _cauchy_product_exprs(N::Int)::Vector{Expr}
+    exprs = Vector{Expr}(undef, N)
+    for k in 1:N
+        terms = Expr[:(a.val[$j] * b.val[$(k + 1 - j)]) for j in 1:k]
+        exprs[k] = _expr_sum(terms)
+    end
+    return exprs
+end
+
+# OP_MUL # a * b  (Cauchy product)
+# c[k] = Σ_{j=0}^{k} a[j] * b[k-j]  (0-indexed), i.e., val[k+1] = Σ_{j=1}^{k+1} a.val[j]*b.val[k+2-j]
+@generated function taylor_op_mul(a::TTS{N, T}, b::TTS{N, T}) where {N, T}
+    exprs = _cauchy_product_exprs(N)
+    return quote
+        Base.@_inline_meta
+        TTS($(Expr(:tuple, exprs...)))
+    end
+end
+
+# OP_DIV # a / b  (quotient rule recurrence)
+# c[0] = a[0] / b[0]
+# c[k] = (a[k] - Σ_{j=0}^{k-1} c[j] * b[k-j]) / b[0]
+@generated function taylor_op_div(a::TTS{N, T}, b::TTS{N, T}) where {N, T}
+    # Build sequential computation: c1, c2, ..., cN
+    stmts = Expr[]
+    push!(stmts, :(c1 = a.val[1] / b.val[1]))
+    for k in 2:N
+        # Σ_{j=1}^{k-1} c[j] * b[k+1-j]  (1-indexed: c[j] = c_{j-1} in 0-indexed)
+        sum_terms = Expr[]
+        for j in 1:(k - 1)
+            push!(sum_terms, :($(Symbol(:c, j)) * b.val[$(k + 1 - j)]))
         end
+        sum_expr = _expr_sum(sum_terms)
+        push!(stmts, :($(Symbol(:c, k)) = (a.val[$k] - $sum_expr) / b.val[1]))
+    end
+    cvars = Symbol[Symbol(:c, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, cvars...)))
     end
 end
-# OP_MULSUB # a * b - c
-@generated function taylor_op_mulsub(
-    ::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-    z::TruncatedTaylorSeries{L},
-) where {K,M,N,L}
-    taylor_impl(K, M - 1, N - 1, L - 1) do list, D
-        map(0:K) do k
-            c_k = D[:z, k]
-            neg = false
-            for j = 0:k
-                if neg
-                    c_k = muladd!(list, D[:x, j], D[:y, k-j], c_k)
-                else
-                    c_k = mulsub!(list, D[:x, j], D[:y, k-j], c_k)
-                    neg = true
+
+# OP_INV # 1 / a  (special case of div with numerator = 1)
+# c[0] = 1 / a[0]
+# c[k] = -(Σ_{j=0}^{k-1} c[j] * a[k-j]) / a[0]  for k >= 1
+@generated function taylor_op_inv(a::TTS{N, T}) where {N, T}
+    stmts = Expr[]
+    push!(stmts, :(c1 = inv(a.val[1])))
+    for k in 2:N
+        # Σ_{j=1}^{k-1} c[j] * a[k+1-j]
+        sum_terms = Expr[]
+        for j in 1:(k - 1)
+            push!(sum_terms, :($(Symbol(:c, j)) * a.val[$(k + 1 - j)]))
+        end
+        sum_expr = _expr_sum(sum_terms)
+        push!(stmts, :($(Symbol(:c, k)) = -($sum_expr * c1)))
+    end
+    cvars = Symbol[Symbol(:c, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, cvars...)))
+    end
+end
+
+# OP_SQR # a^2  (optimized Cauchy product exploiting symmetry)
+# c[k] = Σ_{j=0}^{k} a[j]*a[k-j]
+#       = 2 * Σ_{j=0}^{floor((k-1)/2)} a[j]*a[k-j]  + (iseven(k) ? a[k/2]^2 : 0)
+@generated function taylor_op_sqr(a::TTS{N, T}) where {N, T}
+    exprs = Vector{Expr}(undef, N)
+    for k in 1:N
+        # k is 1-indexed, so 0-indexed order is ord = k-1
+        ord = k - 1
+        if ord == 0
+            # c[0] = a[0]^2 = a.val[1]^2
+            exprs[k] = :(a.val[1] * a.val[1])
+        elseif isodd(ord)
+            half = div(ord, 2)
+            if half == 0
+                # ord == 1: c[1] = 2 * a[0]*a[1] = 2 * a.val[1] * a.val[2]
+                exprs[k] = :(2 * a.val[1] * a.val[2])
+            else
+                # c[ord] = 2 * Σ_{j=1}^{half+1} a.val[j] * a.val[ord+2-j]
+                # For odd orders, the symmetric pairs are (0, ord), (1, ord-1), ...
+                # so the 1-indexed loop must include half+1 terms.
+                terms = Expr[]
+                for j in 1:(half + 1)
+                    push!(terms, :(a.val[$j] * a.val[$(ord + 2 - j)]))
                 end
+                sum_expr = _expr_sum(terms)
+                exprs[k] = :(2 * ($sum_expr))
             end
-            neg ? c_k : neg!(list, c_k)
+        else
+            # ord is even, ord >= 2
+            half = div(ord, 2)
+            mid = half + 1  # 1-indexed index for a[half] (0-indexed)
+            terms = Expr[]
+            for j in 1:half
+                push!(terms, :(a.val[$j] * a.val[$(ord + 2 - j)]))
+            end
+            if isempty(terms)
+                exprs[k] = :(a.val[$mid] * a.val[$mid])
+            else
+                sum_expr = _expr_sum(terms)
+                exprs[k] = :(2 * ($sum_expr) + a.val[$mid] * a.val[$mid])
+            end
         end
     end
-end
-# OP_SUBMUL # c - a * b
-@generated function taylor_op_submul(
-    ::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-    z::TruncatedTaylorSeries{L},
-) where {K,M,N,L}
-    taylor_impl(K, M - 1, N - 1, L - 1) do list, D
-        map(0:K) do k
-            c_k = D[:z, k]
-            for j = 0:k
-                c_k = submul!(list, D[:x, j], D[:y, k-j], c_k)
-            end
-            c_k
-        end
+    return quote
+        Base.@_inline_meta
+        TTS($(Expr(:tuple, exprs...)))
     end
 end
-#
 
-# OP_ADD4 # a + b + c + d
-function taylor_op_add4(
-    V::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-    z::TruncatedTaylorSeries{O},
-    w::TruncatedTaylorSeries{P},
-) where {K,M,N,O,P}
-    taylor_op_add(V, taylor_op_add(V, x, y), taylor_op_add(V, z, w))
+# OP_CB # a^3 = sqr(a) * a
+@inline function taylor_op_cb(a::TTS{N, T}) where {N, T}
+    return taylor_op_mul(taylor_op_sqr(a), a)
 end
-# OP_MUL4 # a * b * c * d
-function taylor_op_mul4(
-    V::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-    z::TruncatedTaylorSeries{O},
-    w::TruncatedTaylorSeries{P},
-) where {K,M,N,O,P}
-    taylor_op_mul(V, taylor_op_mul(V, x, y), taylor_op_mul(V, z, w))
+
+# OP_INV_NOT_ZERO # a ≠ 0 ? 1/a : a
+@inline function taylor_op_inv_not_zero(a::TTS{N, T}) where {N, T}
+    iszero(a.val[1]) && return a
+    return taylor_op_inv(a)
 end
-# OP_MULMULADD # a * b + c * d
-function taylor_op_mulmuladd(
-    V::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-    z::TruncatedTaylorSeries{O},
-    w::TruncatedTaylorSeries{P},
-) where {K,M,N,O,P}
-    taylor_op_add(V, taylor_op_mul(V, x, y), taylor_op_mul(V, z, w))
+
+# OP_INVSQR # 1 / a^2
+@inline function taylor_op_invsqr(a::TTS{N, T}) where {N, T}
+    return taylor_op_inv(taylor_op_sqr(a))
 end
-# OP_MULMULSUB # a * b - c * d
-function taylor_op_mulmulsub(
-    V::Val{K},
-    x::TruncatedTaylorSeries{M},
-    y::TruncatedTaylorSeries{N},
-    z::TruncatedTaylorSeries{O},
-    w::TruncatedTaylorSeries{P},
-) where {K,M,N,O,P}
-    taylor_op_sub(V, taylor_op_mul(V, x, y), taylor_op_mul(V, z, w))
+
+# OP_SQRT # √(a)
+# c[0] = sqrt(a[0])
+# c[1] = a[1] / (2 * c[0])
+# c[k] = (a[k] - Σ_{j=1}^{k-1} c[j]*c[k-j]) / (2*c[0])  for k >= 2
+@generated function taylor_op_sqrt(a::TTS{N, T}) where {N, T}
+    stmts = Expr[]
+    push!(stmts, :(c1 = sqrt(a.val[1])))
+    push!(stmts, :(two_c1 = c1 + c1))
+    if N >= 2
+        push!(stmts, :(c2 = a.val[2] / two_c1))
+    end
+    for k in 3:N
+        # 0-indexed: c[k-1] = (a[k-1] - Σ_{j=1}^{k-2} c[j]*c[k-1-j]) / (2*c[0])
+        # 1-indexed (m = j+1): Σ_{m=2}^{k-1} c_m * c_{k+1-m}
+        sum_terms = Expr[]
+        for j in 2:(k - 1)
+            push!(sum_terms, :($(Symbol(:c, j)) * $(Symbol(:c, k + 1 - j))))
+        end
+        sum_expr = _expr_sum(sum_terms)
+        push!(stmts, :($(Symbol(:c, k)) = (a.val[$k] - $sum_expr) / two_c1))
+    end
+    cvars = Symbol[Symbol(:c, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, cvars...)))
+    end
 end
+
+# OP_POW_INT # a^r where r isa Integer
+#
+# The recurrence below divides by `a[0]`, so a series with a vanishing constant
+# term goes through division-free repeated squaring instead. Its coefficients are
+# finite (`a[0] = 0` and `r > 0` give `a^r = O(t^r)`), which the recurrence would
+# report as `Inf * 0 = NaN`. A negative `r` at `a[0] = 0` is a genuine pole and
+# keeps the non-finite result.
+@inline function taylor_op_pow_int(a::TTS{N, T}, r::I) where {N, T, I <: Integer}
+    if N > 1 && iszero(a.val[1]) && r > 0
+        return _taylor_pow_by_squaring(a, r)
+    end
+    return _taylor_op_pow_int_recurrence(a, r)
+end
+
+# `r ≥ 1`, so at most `2 log₂ r` truncated multiplications, each of which is a
+# short unrolled convolution.
+function _taylor_pow_by_squaring(a::TTS{N, T}, r::I) where {N, T, I <: Integer}
+    n = r
+    base = a
+    result = one(TTS{N, T})
+    while n > 0
+        if isodd(n)
+            result = taylor_op_mul(result, base)
+        end
+        n >>= 1
+        n > 0 && (base = taylor_op_sqr(base))
+    end
+    return result
+end
+
+# Logarithmic differentiation recurrence:
+# w[0] = a[0]^r
+# w[k] = (1/k) * (1/a[0]) * Σ_{j=1}^{k} (r*j - (k-j)) * a[j] * w[k-j]
+# This is the standard recurrence from Griewank & Walther (Chapter 13). It is
+# generic in `r`; only the order-0 term needs to know whether `r` is an integer.
+function _taylor_pow_recurrence_expr(N::Int, w0_call::Symbol)::Expr
+    stmts = Expr[]
+    push!(stmts, :(w1 = $w0_call(a.val[1], r)))
+    if N >= 2
+        push!(stmts, :(a0_inv = inv(a.val[1])))
+    end
+    for k in 2:N
+        # w[k-1] in 0-indexed = w_k in 1-indexed
+        # Σ_{j=1}^{k-1} ((r*j - (k-1-j)) * a.val[j+1] * w_{k-j})
+        sum_terms = Expr[]
+        for j in 1:(k - 1)
+            # coeff = j*r - (k-1-j): j is compile-time, r is runtime
+            push!(
+                sum_terms,
+                :(
+                    $j * r * a.val[$(j + 1)] * $(Symbol(:w, k - j)) -
+                        $(k - 1 - j) * a.val[$(j + 1)] * $(Symbol(:w, k - j))
+                ),
+            )
+        end
+        sum_expr = _expr_sum(sum_terms)
+        push!(stmts, :($(Symbol(:w, k)) = a0_inv * ($sum_expr) / $(k - 1)))
+    end
+    wvars = Symbol[Symbol(:w, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, wvars...)))
+    end
+end
+
+@generated function _taylor_op_pow_int_recurrence(
+        a::TTS{N, T}, r::I,
+    ) where {N, T, I <: Integer}
+    return _taylor_pow_recurrence_expr(N, :op_pow_int)
+end
+
+@generated function _taylor_op_pow_recurrence(
+        a::TTS{N, T}, r::R,
+    ) where {N, T, R <: Number}
+    return _taylor_pow_recurrence_expr(N, :op_pow)
+end
+
+# OP_POW # a^r where r is a non-integer number
+#
+# The exponent is a constant slot, so only its order-0 coefficient carries anything.
+# A vanishing `a[0]` is a branch point, and the recurrence reports it as non-finite.
+@inline taylor_op_pow(a::TTS{N, T}, r::TTS{N, S}) where {N, T, S} =
+    _taylor_op_pow_recurrence(a, r.val[1])
+
+# OP_SIN and OP_COS
+# Coupled recurrence (0-indexed):
+# s[0] = sin(a[0]),  c[0] = cos(a[0])
+# s[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * c[k-j]
+# c[k] = -(1/k) * Σ_{j=1}^{k} j * a[j] * s[k-j]
+@generated function taylor_op_sin(a::TTS{N, T}) where {N, T}
+    stmts = Expr[]
+    if N == 1
+        push!(stmts, :(s1 = sin(a.val[1])))
+    else
+        push!(stmts, :((s1, c1) = sincos(a.val[1])))
+        for k in 2:N
+            # s_k in 1-indexed naming = s[k-1] in 0-indexed
+            # s[k-1] = (1/(k-1)) * Σ_{j=1}^{k-1} j * a[j] * c[k-1-j]  (0-indexed)
+            # 1-indexed: Σ_{j=1}^{k-1} j * a.val[j+1] * c_{k-j}
+            sum_terms = Expr[]
+            for j in 1:(k - 1)
+                push!(sum_terms, :($j * a.val[$(j + 1)] * $(Symbol(:c, k - j))))
+            end
+            sum_expr = _expr_sum(sum_terms)
+            push!(stmts, :($(Symbol(:s, k)) = ($sum_expr) / $(k - 1)))
+            # c[k-1] in 0-indexed: c_k = -(1/(k-1)) * Σ_{j=1}^{k-1} j*a[j]*s[k-j]
+            csum_terms = Expr[]
+            for j in 1:(k - 1)
+                push!(csum_terms, :($j * a.val[$(j + 1)] * $(Symbol(:s, k - j))))
+            end
+            csum_expr = _expr_sum(csum_terms)
+            push!(stmts, :($(Symbol(:c, k)) = -($csum_expr) / $(k - 1)))
+        end
+    end
+    svars = Symbol[Symbol(:s, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, svars...)))
+    end
+end
+
+@generated function taylor_op_cos(a::TTS{N, T}) where {N, T}
+    stmts = Expr[]
+    if N == 1
+        push!(stmts, :(c1 = cos(a.val[1])))
+    else
+        push!(stmts, :((s1, c1) = sincos(a.val[1])))
+        for k in 2:N
+            sum_terms = Expr[]
+            for j in 1:(k - 1)
+                push!(sum_terms, :($j * a.val[$(j + 1)] * $(Symbol(:c, k - j))))
+            end
+            sum_expr = _expr_sum(sum_terms)
+            push!(stmts, :($(Symbol(:s, k)) = ($sum_expr) / $(k - 1)))
+            csum_terms = Expr[]
+            for j in 1:(k - 1)
+                push!(csum_terms, :($j * a.val[$(j + 1)] * $(Symbol(:s, k - j))))
+            end
+            csum_expr = _expr_sum(csum_terms)
+            push!(stmts, :($(Symbol(:c, k)) = -($csum_expr) / $(k - 1)))
+        end
+    end
+    cvars = Symbol[Symbol(:c, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, cvars...)))
+    end
+end
+
+# OP_EXP
+# e[0] = exp(a[0])
+# e[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * e[k-j]
+@generated function taylor_op_exp(a::TTS{N, T}) where {N, T}
+    stmts = Expr[:(e1 = exp(a.val[1]))]
+    for k in 2:N
+        terms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:e, k - j))) for j in 1:(k - 1)]
+        push!(stmts, :($(Symbol(:e, k)) = ($(_expr_sum(terms))) / $(k - 1)))
+    end
+    evars = Symbol[Symbol(:e, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, evars...)))
+    end
+end
+
+# OP_LOG
+# l[0] = log(a[0]) on the principal branch. For k ≥ 1, use
+# l′ = a′ / a with b = 1/a:
+# l[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * b[k-j].
+@generated function taylor_op_log(a::TTS{N, T}) where {N, T}
+    stmts = Expr[:(l1 = log(a.val[1]))]
+    if N >= 2
+        push!(stmts, :(b = taylor_op_inv(a)))
+        for k in 1:(N - 1)
+            terms = Expr[
+                :($j * a.val[$(j + 1)] * b.val[$(k - j + 1)]) for j in 1:k
+            ]
+            push!(stmts, :($(Symbol(:l, k + 1)) = ($(_expr_sum(terms))) / $k))
+        end
+    end
+    lvars = Symbol[Symbol(:l, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, lvars...)))
+    end
+end
+
+# OP_SINH and OP_COSH
+# Coupled recurrence, as for sin/cos but with no sign flip:
+# s[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * c[k-j]
+# c[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * s[k-j]
+function _taylor_hyperbolic_stmts(N::Int)::Vector{Expr}
+    stmts = Expr[:(s1 = sinh(a.val[1])), :(c1 = cosh(a.val[1]))]
+    for k in 2:N
+        sterms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:c, k - j))) for j in 1:(k - 1)]
+        push!(stmts, :($(Symbol(:s, k)) = ($(_expr_sum(sterms))) / $(k - 1)))
+        cterms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:s, k - j))) for j in 1:(k - 1)]
+        push!(stmts, :($(Symbol(:c, k)) = ($(_expr_sum(cterms))) / $(k - 1)))
+    end
+    return stmts
+end
+
+@generated function taylor_op_sinh(a::TTS{N, T}) where {N, T}
+    stmts = N == 1 ? Expr[:(s1 = sinh(a.val[1]))] : _taylor_hyperbolic_stmts(N)
+    svars = Symbol[Symbol(:s, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, svars...)))
+    end
+end
+
+@generated function taylor_op_cosh(a::TTS{N, T}) where {N, T}
+    stmts = N == 1 ? Expr[:(c1 = cosh(a.val[1]))] : _taylor_hyperbolic_stmts(N)
+    cvars = Symbol[Symbol(:c, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, cvars...)))
+    end
+end
+
+# OP_TAN and OP_TANH
+# `t' = u·a'` with `u = 1 + t²` for tan and `u = 1 - t²` for tanh, so
+# t[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * u[k-j],  u = ±(t ⋆ t) shifted by 1.
+function _taylor_tangent_stmts(N::Int, t0::Symbol, sign::Int)::Vector{Expr}
+    stmts = Expr[:(t1 = $t0(a.val[1]))]
+    for k in 1:(N - 1)
+        sq = _expr_sum(
+            Expr[:($(Symbol(:t, i)) * $(Symbol(:t, k + 1 - i))) for i in 1:k],
+        )
+        push!(
+            stmts,
+            k == 1 ? :($(Symbol(:u, 1)) = one(T) + $sign * $sq) :
+                :($(Symbol(:u, k)) = $sign * $sq),
+        )
+        terms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:u, k + 1 - j))) for j in 1:k]
+        push!(stmts, :($(Symbol(:t, k + 1)) = ($(_expr_sum(terms))) / $k))
+    end
+    return stmts
+end
+
+@generated function taylor_op_tan(a::TTS{N, T}) where {N, T}
+    stmts = _taylor_tangent_stmts(N, :tan, 1)
+    tvars = Symbol[Symbol(:t, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, tvars...)))
+    end
+end
+
+@generated function taylor_op_tanh(a::TTS{N, T}) where {N, T}
+    stmts = _taylor_tangent_stmts(N, :tanh, -1)
+    tvars = Symbol[Symbol(:t, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, tvars...)))
+    end
+end
+
+# OP_ASIN
+# `y' · g = a'` with `g = √(1 - a²)`, so
+# y[k] = (k*a[k] - Σ_{j=1}^{k-1} j*y[j]*g[k-j]) / (k*g[0]).
+@generated function _taylor_asin_from(a::TTS{N, T}, g::TTS{N, T}) where {N, T}
+    stmts = Expr[:(y1 = asin(a.val[1]))]
+    for k in 2:N
+        m = k - 1
+        expr = :($m * a.val[$k])
+        if m >= 2
+            sub = _expr_sum(
+                Expr[
+                    :($j * $(Symbol(:y, j + 1)) * g.val[$(m - j + 1)]) for j in 1:(m - 1)
+                ],
+            )
+            expr = :($expr - ($sub))
+        end
+        push!(stmts, :($(Symbol(:y, k)) = ($expr) / ($m * g.val[1])))
+    end
+    yvars = Symbol[Symbol(:y, k) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        $(stmts...)
+        TTS($(Expr(:tuple, yvars...)))
+    end
+end
+
+@inline function taylor_op_asin(a::TTS{N, T}) where {N, T}
+    N == 1 && return TTS((asin(a.val[1]),))
+    return _taylor_asin_from(a, taylor_op_sqrt(taylor_op_sub(one(TTS{N, T}), taylor_op_sqr(a))))
+end
+
+# OP_ACOS # acos = π/2 - asin, so every coefficient past the first is negated.
+@generated function taylor_op_acos(a::TTS{N, T}) where {N, T}
+    N == 1 && return :(TTS((acos(a.val[1]),)))
+    vars = Any[:(acos(a.val[1]))]
+    for k in 2:N
+        push!(vars, :(-y.val[$k]))
+    end
+    return quote
+        Base.@_inline_meta
+        y = taylor_op_asin(a)
+        TTS($(Expr(:tuple, vars...)))
+    end
+end
+
+# OP_MULADD # a * b + c
+@generated function taylor_op_muladd(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T}
+    cp = _cauchy_product_exprs(N)
+    exprs = Expr[:($(cp[k]) + c.val[$k]) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        TTS($(Expr(:tuple, exprs...)))
+    end
+end
+
+# OP_MULSUB # a * b - c
+@generated function taylor_op_mulsub(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T}
+    cp = _cauchy_product_exprs(N)
+    exprs = Expr[:($(cp[k]) - c.val[$k]) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        TTS($(Expr(:tuple, exprs...)))
+    end
+end
+
+# OP_SUBMUL # c - a * b
+@generated function taylor_op_submul(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T}
+    cp = _cauchy_product_exprs(N)
+    exprs = Expr[:(c.val[$k] - $(cp[k])) for k in 1:N]
+    return quote
+        Base.@_inline_meta
+        TTS($(Expr(:tuple, exprs...)))
+    end
+end
+
+# Composite ops — all delegate to the primitive taylor_op_add/sub/mul
+@inline taylor_op_add3(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T} =
+    taylor_op_add(taylor_op_add(a, b), c)
+@inline taylor_op_add4(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}, d::TTS{N, T}) where {N, T} =
+    taylor_op_add(taylor_op_add(a, b), taylor_op_add(c, d))
+@inline taylor_op_mul3(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T} =
+    taylor_op_mul(taylor_op_mul(a, b), c)
+@inline taylor_op_mul4(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}, d::TTS{N, T}) where {N, T} =
+    taylor_op_mul(taylor_op_mul(a, b), taylor_op_mul(c, d))
+@inline taylor_op_mulmuladd(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}, d::TTS{N, T}) where {N, T} =
+    taylor_op_add(taylor_op_mul(a, b), taylor_op_mul(c, d))
+@inline taylor_op_mulmulsub(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}, d::TTS{N, T}) where {N, T} =
+    taylor_op_sub(taylor_op_mul(a, b), taylor_op_mul(c, d))

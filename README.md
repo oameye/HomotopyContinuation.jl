@@ -1,54 +1,66 @@
-<img src="https://www.juliahomotopycontinuation.org/images/logo_transparent_bg.png" width="320px">
+# HomotopyContinuation.jl
 
-[![][docs-stable-img]][docs-stable-url] [![Run tests](https://github.com/JuliaHomotopyContinuation/HomotopyContinuation.jl/actions/workflows/run_tests.yml/badge.svg)](https://github.com/JuliaHomotopyContinuation/HomotopyContinuation.jl/actions/workflows/run_tests.yml)
+Numerical homotopy continuation for polynomial and analytic systems in Julia.
 
+HomotopyContinuation.jl provides path tracking, total-degree and polyhedral solvers, parameter continuation, subspace methods, monodromy, witness sets, regeneration, numerical irreducible decomposition, and serial/threaded/distributed execution behind one solver interface.
 
-**HomotopyContinuation.jl** is a Julia package for solving systems of polynomial equations by numerical homotopy continuation.
-
----
-
-### **See [juliahomotopycontinuation.org](https://www.juliahomotopycontinuation.org) for installation instructions, full content overview and detailed documentation.**
-
----
-
-## Basic usage
-
-HomotopyContinuation.jl aims at having easy-to-understand top-level commands. Here is a simple example:
+## Quick start
 
 ```julia
 using HomotopyContinuation
-@var x y; # declare the variables x and y
-F = System([x^2+2y, y^2-2])
+
+@polyvar x y
+F = System([x^2 + y - 1, x * y - 2])
 result = solve(F)
+
+solutions(result)
+real_solutions(result)
 ```
 
+Polynomial input uses the MultivariatePolynomials ecosystem through `@polyvar`. Analytic expressions that include division, non-integer powers, or supported transcendental functions can be built with `@var` and passed through the same `System` interface.
+
+## Solvers and continuation workflows
+
+The package includes:
+
+- total-degree and polyhedral start systems;
+- square, overdetermined, affine/projective, and multi-homogeneous workflows;
+- parameter and custom homotopies;
+- intrinsic and extrinsic subspace continuation and sweeps;
+- monodromy, completeness checks, witness sets, regeneration, and numerical irreducible decomposition;
+- `Serial()`, `Threaded()`, and `DistributedExecutor` execution;
+- interpreted and RuntimeGeneratedFunctions-backed evaluation modes through `CompileMode`.
+
+Mutable numerical state is owned by per-worker trackers/evaluators, so the same solver semantics are available across execution modes without sharing hot-path scratch storage.
+
+## Certification
+
+Rigorous certification is isolated in the companion package under `lib/HomotopyContinuationCertification`, keeping Arblib out of the core package:
+
+```julia
+using HomotopyContinuation
+using HomotopyContinuationCertification
+
+certify(F, solutions(result))
 ```
-Result with 4 solutions
-==================================
-• 4 non-singular solutions (2 real)
-• 0 singular solutions (0 real)
-• 4 paths tracked
-• random seed: 902575
+
+## Development
+
+The current architecture is documented in [`implementation_docs/00_architecture.md`](implementation_docs/00_architecture.md), with durable implementation constraints in [`implementation_docs/01_decisions.md`](implementation_docs/01_decisions.md). [`docs/src/dev.md`](docs/src/dev.md) is the short contributor guide.
+
+Historical migration/status/debt notes are intentionally not maintained as active documentation. Any still-actionable work from them must have an owning GitHub issue before the note is removed; Git history preserves the original analysis.
+
+Common commands:
+
+```sh
+make test           # core + certification suites
+make test-strict    # DispatchDoctor-instrumented suite
+make test-cert      # certification only
+make test-extensive # long reference solves
+make benchmark      # steady-state benchmarks
+make ttfx           # fresh-process first-use workloads
+make format         # Runic
+make deps           # instantiate development environments
 ```
 
-For more see [our user guides](https://www.juliahomotopycontinuation.org/guides/).
-
-## Citing HomotopyContinuation.jl
-
-If you find HomotopyContinuation.jl useful in your work, we kindly request that you cite the [following paper](https://link.springer.com/chapter/10.1007/978-3-319-96418-8_54):
-
-```latex
-@inproceedings{HomotopyContinuation.jl,
-  title={{H}omotopy{C}ontinuation.jl: {A} {P}ackage for {H}omotopy {C}ontinuation in {J}ulia},
-  author={Breiding, Paul and Timme, Sascha},
-  booktitle={International Congress on Mathematical Software},
-  pages={458--465},
-  year={2018},
-  organization={Springer}
-}
-```
-
-A preprint of this paper is [freely available](https://arxiv.org/abs/1711.10911).
-
-[docs-stable-img]: https://img.shields.io/badge/docs-online-blue.svg
-[docs-stable-url]: https://www.juliahomotopycontinuation.org/HomotopyContinuation.jl/stable
+Run `make help` for the complete maintained command surface.

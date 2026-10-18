@@ -1,579 +1,518 @@
-@testset "solve" begin
+using Test
+using HomotopyContinuation
+using DynamicPolynomials: @polyvar
+using CommonSolve: CommonSolve
 
-    @testset "total degree (simple)" begin
-        @var x y
-        affine_sqr = System([
-            2.3 * x^2 + 1.2 * y^2 + 3x - 2y + 3,
-            2.3 * x^2 + 1.2 * y^2 + 5x + 2y - 5,
-        ])
-        @test count(is_success, track.(total_degree(affine_sqr; compile = false)...)) == 2
+include("solution_sets.jl")
 
-        @var x y z
-        proj_square = System([
-            2.3 * x^2 + 1.2 * y^2 + 3x * z - 2y * z + 3 * z^2,
-            2.3 * x^2 + 1.2 * y^2 + 5x * z + 2y * z - 5 * z^2,
-        ])
-        @test count(is_success, track.(total_degree(proj_square; compile = false)...)) == 4
-
-        @var x y
-        affine_ov = System([
-            (x^2 + y^2 + x * y - 3) * (x + 3),
-            (x^2 + y^2 + x * y - 3) * (y - x + 2),
-            2x + 5y - 3,
-        ])
-        @test count(is_success, track.(total_degree(affine_ov; compile = false)...)) == 2
-
-        @var x y
-        affine_ov_reordering = System([
-            (x^2 + y^2 + x * y - 3) * (x + 3),
-            2x + 5y - 3,
-            (x^2 + y^2 + x * y - 3) * (y^2 - x + 2),
-        ])
-        tracker, starts = total_degree(affine_ov_reordering; compile = false)
-        @test length(starts) == 4 * 3
-        @test count(is_success, track.(tracker, starts)) == 2
-
-        @var x y z
-        proj_ov = System([
-            (x^2 + y^2 + x * y - 3 * z^2) * (x + 3z),
-            (x^2 + y^2 + x * y - 3 * z^2) * (y - x + 2z),
-            2x + 5y - 3z,
-        ])
-        @test count(is_success, track.(total_degree(proj_ov; compile = false)...)) == 2
-
-        @var x y
-        proj_ov_reordering = System([
-            (x^2 + y^2 + x * y - 3 * z^2) * (x + 3z),
-            2x + 5y - 3z,
-            (x^2 + y^2 + x * y - 3 * z^2) * (y^2 - x * z + 2 * z^2),
-        ])
-        tracker, starts = total_degree(proj_ov_reordering; compile = false)
-        @test length(starts) == 4 * 3
-        @test count(is_success, track.(tracker, starts)) == 2
-
-        @var x y
-        affine_underdetermined = System([2.3 * x^2 + 1.2 * y^2 + 3x - 2y + 3])
-        @test_throws HC.FiniteException total_degree(affine_underdetermined)
-
-        @var x y z
-        proj_underdetermined = System([2.3 * x^2 + 1.2 * y^2 + 3x * z])
-        @test_throws HC.FiniteException total_degree(proj_underdetermined)
-    end
-
-    @testset "total degree (variable groups)" begin
-        @var x y v w
-        affine_sqr = System([x * y - 2, x^2 - 4], variable_groups = [[x], [y]])
-        tracker, starts = total_degree(affine_sqr; compile = false)
-        @test length(collect(starts)) == 2
-        @test count(is_success, track.(tracker, starts)) == 2
-        @test nsolutions(solve(affine_sqr, start_system = :total_degree)) == 2
-
-        @var x y v w
-        proj_sqr =
-            System([x * y - 2v * w, x^2 - 4 * v^2], variable_groups = [[x, v], [y, w]])
-        tracker, starts = total_degree(proj_sqr)
-        @test length(collect(starts)) == 2
-        @test count(is_success, track.(tracker, starts)) == 2
-
-        @var x y v w
-        affine_ov = System(
-            [(x^2 - 4) * (x * y - 2), x * y - 2, x^2 - 4],
-            variable_groups = [[x], [y]],
-        )
-        tracker, starts = total_degree(affine_ov; compile = false)
-        @test count(is_success, track.(tracker, starts)) == 2
-        @var x y v w
-        proj_ov = System(
-            [(x^2 - 4 * v^2) * (x * y - v * w), x * y - v * w, x^2 - v^2],
-            variable_groups = [[x, v], [y, w]],
-        )
-        tracker, starts = total_degree(proj_ov; compile = false)
-        @test count(is_success, track.(tracker, starts)) == 2
-    end
-
-    @testset "polyhedral" begin
-        @var x y
-        affine_sqr = System([
-            2.3 * x^2 + 1.2 * y^2 + 3x - 2y + 3,
-            2.3 * x^2 + 1.2 * y^2 + 5x + 2y - 5,
-        ])
-        @test count(is_success, track.(polyhedral(affine_sqr; compile = false)...)) == 2
-
-        @var x y z
-        proj_square = System([
-            2.3 * x^2 + 1.2 * y^2 + 3x * z - 2y * z + 3 * z^2,
-            2.3 * x^2 + 1.2 * y^2 + 5x * z + 2y * z - 5 * z^2,
-        ])
-        @test count(is_success, track.(polyhedral(proj_square; compile = false)...)) == 4
-
-        @var x y
-        affine_ov = System([
-            (x^2 + y^2 + x * y - 3) * (x + 3),
-            (x^2 + y^2 + x * y - 3) * (y - x + 2),
-            2x + 5y - 3,
-        ])
-        @test count(is_success, track.(polyhedral(affine_ov; compile = false)...)) == 2
-
-        @var x y z
-        proj_ov = System([
-            (x^2 + y^2 + x * y - 3 * z^2) * (x + 3z),
-            (x^2 + y^2 + x * y - 3 * z^2) * (y - x + 2z),
-            2x + 5y - 3z,
-        ])
-        @test count(is_success, track.(polyhedral(proj_ov; compile = false)...)) == 2
-
-        @var x y
-        affine_underdetermined = System([2.3 * x^2 + 1.2 * y^2 + 3x - 2y + 3])
-        @test_throws HC.FiniteException polyhedral(affine_underdetermined)
-
-        @var x y z
-        proj_underdetermined = System([2.3 * x^2 + 1.2 * y^2 + 3x * z])
-        @test_throws HC.FiniteException polyhedral(proj_underdetermined)
-    end
-
-    @testset "overdetermined" begin
-        @testset "3 by 5 minors" begin
-            res = solve(
-                minors();
-                start_system = :total_degree,
-                compile = false,
-                show_progress = false,
-            )
-            @test count(is_success, res) == 80
-            @test count(is_excess_solution, res) == 136
-        end
-    end
-
-    @testset "composition" begin
-        @var a b c x y z u v
-        e = System([u + 1, v - 2])
-        f = System([a * b - 2, a * c - 1])
-        g = System([x + y, y + 3, x + 2])
-
-        res = solve(e ∘ f ∘ g; start_system = :total_degree, compile = false)
-        @test nsolutions(res) == 2
-
-        res = solve(e ∘ f ∘ g; start_system = :polyhedral)
-        @test nsolutions(res) == 2
-    end
-
-    @testset "paths to track" begin
-        @var x y
-        f = System([2y + 3 * y^2 - x * y^3, x + 4 * x^2 - 2 * x^3 * y])
-
-        @test paths_to_track(f; start_system = :total_degree) == 16
-        @test paths_to_track(f; start_system = :total_degree) == 16
-        @test paths_to_track(f; start_system = :polyhedral) == 8
-        @test paths_to_track(f; start_system = :polyhedral, only_non_zero = true) == 3
-        @test paths_to_track(f) == 8
-        @test_deprecated bezout_number(f) == 16
-        @test mixed_volume(f) == 3
-
-        @var x y a
-        g = System([2y + a * y^2 - x * y^3, x + 4 * x^2 - 2 * x^3 * y], parameters = [a])
-        @test paths_to_track(g; start_system = :total_degree) == 16
-        @test paths_to_track(g; start_system = :polyhedral) == 8
-    end
-
-    @testset "solve (parameter homotopy)" begin
-        # affine
-        @var x a y b
-        F = System([x^2 - a, x * y - a + b], [x, y], [a, b])
-        s = [1, 1]
-        res = solve(F, [s]; start_parameters = [1, 0], target_parameters = [2, 4])
-        @test nsolutions(res) == 1
-        res = solve(
-            InterpretedSystem(F),
-            [s];
-            start_parameters = [1, 0],
-            target_parameters = [2, 4],
-            threading = false,
-        )
-        @test nsolutions(res) == 1
-        res = solve(
-            F,
-            s;
-            start_parameters = [1, 0],
-            target_parameters = [2, 4],
-            threading = false,
-            compile = false,
-        )
-        @test nsolutions(res) == 1
-
-        @var x a y b
-        F = System([x^2 - a], [x, y], [a, b])
-        s = [1, 1]
-        @test_throws FiniteException(1) solve(
-            F,
-            [s];
-            start_parameters = [1, 0],
-            target_parameters = [2, 4],
-        )
-
-        # proj
-        @var x a y b z
-        F_proj = System([x^2 - a * z^2, x * y + (b - a) * z^2], [x, y, z], [a, b])
-        s = [1, 1, 1]
-        res = solve(F_proj, [s]; start_parameters = [1, 0], target_parameters = [2, 4])
-        @test nsolutions(res) == 1
-        res = solve(InterpretedSystem(F_proj), [s]; p₁ = [1, 0], p₀ = [2, 4])
-        @test nsolutions(res) == 1
-
-        F_proj_err = System([x * y + (b - a) * z^2], [x, y, z], [a, b])
-        @test_throws FiniteException solve(F_proj_err, [s]; p₁ = [1, 0], p₀ = [2, 4])
-
-        # multi-proj
-        @var x y v w a b
-        F_multi_proj = System(
-            [x * y - a * v * w, x^2 - b * v^2],
-            parameters = [a, b],
-            variable_groups = [[x, v], [y, w]],
-        )
-        S = [
-            [
-                -1.808683149843597 + 0.2761582523875564im,
-                -0.9043415749217985 + 0.1380791261937782im,
-                -0.0422893850686111 - 0.7152002569359284im,
-                -0.0422893850686111 - 0.7152002569359283im,
-            ],
-            [
-                -0.36370464807054353 + 0.6777414371333245im,
-                0.18185232403527177 - 0.33887071856666223im,
-                -0.3348980281838583 - 0.7759382220656511im,
-                0.3348980281838583 + 0.7759382220656511im,
-            ],
-        ]
-        res = solve(F_multi_proj, S; start_parameters = [2, 4], target_parameters = [3, 5])
-        @test nsolutions(res) == 2
-        res = solve(InterpretedSystem(F_multi_proj), S; p₁ = [2, 4], p₀ = [3, 5])
-        @test nsolutions(res) == 2
-
-        F_multi_proj_err = System(
-            [x * y - a * v * w],
-            parameters = [a, b],
-            variable_groups = [[x, v], [y, w]],
-        )
-        @test_throws FiniteException(1) solve(F_multi_proj_err, S; p₁ = [2, 4], p₀ = [3, 5])
-    end
-
-    @testset "solve (Homotopy)" begin
-        @var x a y b
-        F = System([x^2 - a, x * y - a + b], [x, y], [a, b])
-        s = [1, 1]
-        H = ParameterHomotopy(F, [1, 0], [2, 4])
-        res = solve(H, [s])
-        @test nsolutions(res) == 1
-    end
-
-    @testset "solve (start target)" begin
-        @var x a y b
-        f = System([x^2 - a, x * y - a + b], parameters = [a, b])
-        s = [1, 1]
-        res = solve(f, f, [s]; start_parameters = [1, 0], target_parameters = [2, 4])
-        @test nsolutions(res) == 1
-
-        G = FixedParameterSystem(f, [1, 0])
-        F = FixedParameterSystem(f, [2, 4])
-        res = solve(G, F, [s];)
-        @test nsolutions(res) == 1
-    end
-
-    @testset "solve (affine sliced)" begin
-        @var x y
-        F = System([x^2 + y^2 - 5], [x, y])
-        l1 = rand_subspace(2; codim = 1)
-        l2 = rand_subspace(2; codim = 1)
-
-        _solver, starts = solver_startsolutions(slice(F, l1), slice(F, l2))
-        @test _solver.trackers[1].tracker.homotopy isa IntrinsicSubspaceHomotopy
-
-        @var x y
-        r1 = solve(F; target_subspace = l1, compile = false)
-        @test nsolutions(r1) == 2
-        r2 = solve(
-            F,
-            solutions(r1);
-            start_subspace = l1,
-            target_subspace = l2,
-            compile = false,
-            threading = false,
-            intrinsic = true,
-        )
-        @test nsolutions(r2) == 2
-        r3 = solve(
-            F,
-            solutions(r1);
-            start_subspace = l1,
-            target_subspace = l2,
-            compile = false,
-            intrinsic = false,
-        )
-        @test nsolutions(r3) == 2
-
-        @var x y z
-        F = System([x^2 + y^2 - 5; x * y + 1], [x, y, z])
-        l1 = rand_subspace(3; dim = 2)
-        l2 = rand_subspace(3; dim = 2)
-
-        _solver, starts = solver_startsolutions(slice(F, l1), slice(F, l2))
-        @test _solver.trackers[1].tracker.homotopy isa ExtrinsicSubspaceHomotopy
-    end
-
-    @testset "solve (Vector{Expression})" begin
-        @var x a y b
-        F = [x^2 - a, x * y - a + b]
-        s = [1, 1]
-        res = solve(
-            F,
-            [s];
-            parameters = [a, b],
-            start_parameters = [1, 0],
-            target_parameters = [2, 4],
-        )
-        @test nsolutions(res) == 1
-    end
-
-    @testset "solve (DynamicPolynomials)" begin
+@testset "Solve" begin
+    @testset "TotalDegree: basic solver semantics" begin
         @polyvar x y
-        # define the polynomials
-        f₁ = (x^4 + y^4 - 1) * (x^2 + y^2 - 2) + x^5 * y
-        f₂ = x^2 + 2x * y^2 - 2 * y^2 - 1 / 2
-        result = solve([f₁, f₂])
-        @test nsolutions(result) == 18
 
-        @polyvar x a y b
-        F = [x^2 - a, x * y - a + b]
-        s = [1, 1]
-        res = solve(
-            F,
-            [s];
-            variables = [x, y],
-            parameters = [a, b],
-            start_parameters = [1, 0],
-            target_parameters = [2, 4],
-            compile = false,
-        )
-        @test nsolutions(res) == 1
-        res2 = solve(
-            F,
-            [s];
-            variable_ordering = [y, x],
-            parameters = [a, b],
-            start_parameters = [1, 0],
-            target_parameters = [2, 4],
-            compile = false,
-        )
-        s = solutions(res)[1]
-        s2 = solutions(res2)[1]
-        @test s ≈ [s2[2], s2[1]]
-    end
+        linear = solve(System([x - 2, y - 3]), TotalDegree(; show_progress = false))
+        @test nsolutions(linear) == 1
+        @test solutions(linear)[1] ≈ [2.0, 3.0] atol = 1.0e-8
 
-    @testset "change parameters" begin
-        @var x a y b
-        F = System([x^2 - a, x * y - a + b]; parameters = [a, b])
-        s = [1.0, 1.0 + 0im]
-        S, _ = solver_startsolutions(F, generic_parameters = [2.2, 3.2])
-        start_parameters!(S, [1, 0])
-        target_parameters!(S, [2, 4])
-        @test is_success(track(S, s))
-    end
-
-    @testset "solve (threading)" begin
-        res = solve(cyclic(7), threading = true, show_progress = false)
-        @test nsolutions(res) == 924
-    end
-
-    @testset "stop early callback" begin
-        @var x
-        first_result = nothing
-        results = solve(
-            [(x - 3) * (x + 6) * (x + 2)];
-            stop_early_cb = r -> begin
-                first_result = r
-                true
-            end,
-            threading = false,
-            show_progress = false,
-            start_system = :total_degree,
-        )
-        @test length(results) == 1
-        @test first(results) === first_result
-
-        result = let k = 0
-            solve(
-                [(x - 3) * (x + 6) * (x + 2)],
-                stop_early_cb = r -> (k += 1) == 2,
-                start_system = :total_degree,
-                show_progress = false,
-                threading = false,
-            )
+        complete = solve(System([x^2 - 1, y^2 - 4]), TotalDegree(; show_progress = false))
+        @test nsolutions(complete) == 4
+        @test length(real_solutions(complete)) == 4
+        for sol in real_solutions(complete)
+            @test abs(sol[1]^2 - 1) < 1.0e-6
+            @test abs(sol[2]^2 - 4) < 1.0e-6
         end
-        @test length(result) == 2
 
-        # threading
-        @var x y z
-        first_result = nothing
-        # this has 5^3 = 125 solutions, so we should definitely stop early if we
-        # have less than 64 threads
-        results = solve(
+        complex_only =
+            solve(System([x^2 + 1, y - 1]), TotalDegree(; show_progress = false))
+        @test nreal(complex_only) == 0
+        @test nsolutions(complex_only) == 2
+    end
+
+    @testset "TotalDegree: nonlinear residuals and reproducibility" begin
+        @polyvar x y
+        F = System([x^2 + y - 1, x * y - 0.5])
+
+        result = solve(F, TotalDegree(; seed = UInt32(42), show_progress = false))
+        # y = 1 - x² reduces the system to x³ - x + 1/2 = 0: three finite
+        # roots, and the fourth total-degree path diverges.
+        @test nsolutions(result) == 3
+        @test nat_infinity(result) == 1
+        @test count(r -> return_code(r) == PathResultCode.PATH_SUCCESS, path_results(result)) == 3
+        @test count(r -> return_code(r) == PathResultCode.PATH_AT_INFINITY, path_results(result)) == 1
+        for sol in solutions(result)
+            @test abs(sol[1]^2 + sol[2] - 1) < 1.0e-6
+            @test abs(sol[1] * sol[2] - 0.5) < 1.0e-6
+        end
+
+        repeated = solve(F, TotalDegree(; seed = UInt32(42), show_progress = false))
+        @test nsolutions(repeated) == 3
+        @test same_solution_set(solutions(result), solutions(repeated); atol = 1.0e-10)
+    end
+
+    @testset "TotalDegree: Katsura-3" begin
+        @polyvar x0 x1 x2 x3
+        F = System(
             [
-                (x - 3) * (x + 6) * (x + 2) * (x - 2) * (x + 2.5),
-                (y + 2) * (y - 2) * (y + 3) * (y + 5) * (y - 1),
-                (z + 2) * (z - 2) * (z + 3) * (z + 5) * (z - 2.1),
-            ];
-            stop_early_cb = r -> begin
-                first_result = r
-                true
-            end,
-            threading = true,
-            show_progress = false,
-            start_system = :total_degree,
+                x0 + 2x1 + 2x2 + 2x3 - 1,
+                x0^2 + 2x1^2 + 2x2^2 + 2x3^2 - x0,
+                2x0 * x1 + 2x1 * x2 + 2x2 * x3 - x1,
+                x1^2 + 2x0 * x2 + 2x1 * x3 - x2,
+            ],
         )
-        @test length(results) < 125
+        result = solve(F, TotalDegree(; show_progress = false))
+        # Katsura-3 has 2³ = 8 isolated nonsingular roots, the Bezout number.
+        @test nsolutions(result) == 8
+        @test nnonsingular(result) == 8
+        for sol in solutions(result)
+            residual = maximum(
+                abs.(
+                    [
+                        sol[1] + 2sol[2] + 2sol[3] + 2sol[4] - 1,
+                        sol[1]^2 + 2sol[2]^2 + 2sol[3]^2 + 2sol[4]^2 - sol[1],
+                        2sol[1] * sol[2] + 2sol[2] * sol[3] + 2sol[3] * sol[4] - sol[2],
+                        sol[2]^2 + 2sol[1] * sol[3] + 2sol[2] * sol[4] - sol[3],
+                    ],
+                ),
+            )
+            @test residual < 1.0e-6
+        end
     end
 
-    @testset "Many parameters solver" begin
-        # Setup
-        @var x y
-        f = x^2 + y^2 - 1
+    @testset "CommonSolve interface" begin
+        @polyvar x y a
 
-        @var a b c
-        l = a * x + b * y + c
-        F = [f, l]
+        td_cache = CommonSolve.init(System([x^2 - 1, y - 2]), TotalDegree())
+        @test nsolutions(CommonSolve.solve!(td_cache)) == 2
 
-        # Compute start solutions S₀ for given start parameters p₀
-        p₀ = randn(ComplexF64, 3)
-        S₀ = solutions(solve(subs(F, [a, b, c] => p₀)))
-        # The parameters we are intersted in
-        params = [rand(3) for i = 1:100]
+        poly_cache = CommonSolve.init(System([x^2 - 1, y^2 - 4]), Polyhedral())
+        @test nsolutions(CommonSolve.solve!(poly_cache)) == 4
 
-        result1 = solve(
-            F,
-            S₀,
-            ;
-            start_parameters = p₀,
-            target_parameters = params,
-            parameters = [a, b, c],
-            threading = true,
+        F = System([x^2 - a, y - 1]; parameters = [a])
+        starts = solutions(solve(System([x^2 - 1, y - 1]), TotalDegree(; show_progress = false)))
+        parameter_cache = CommonSolve.init(F, starts, [1.0], [4.0])
+        @test nsolutions(CommonSolve.solve!(parameter_cache)) == 2
+    end
+
+    @testset "Result display" begin
+        @polyvar x y
+        result = solve(System([x - 1, y - 2]), TotalDegree(; show_progress = false))
+        buf = IOBuffer()
+        show(buf, result)
+        text = String(take!(buf))
+        @test contains(text, "tracked paths")
+        @test contains(text, "solutions")
+    end
+
+    @testset "Tracker options are honored through the public solver" begin
+        @polyvar x y
+        result = solve(
+            System([x^2 - 1, y^2 - 1]),
+            TotalDegree(;
+                tracker_options = TrackerOptions(; max_steps = 100),
+                show_progress = false,
+            ),
         )
-        @test typeof(result1) == Vector{Tuple{Result,Vector{Float64}}}
-        result1 = solve(
-            F,
-            S₀,
-            ;
-            start_parameters = p₀,
-            target_parameters = params,
-            parameters = [a, b, c],
-            show_progress = false,
-            threading = false,
-        )
-        @test typeof(result1) == Vector{Tuple{Result,Vector{Float64}}}
+        @test nsolutions(result) == 4
+    end
 
-        # Only keep real solutions
-        result2 = solve(
-            F,
-            S₀,
-            ;
-            start_parameters = p₀,
-            target_parameters = params,
-            parameters = [a, b, c],
-            transform_result = (r, p) -> real_solutions(r),
-            threading = true,
-        )
-        @test typeof(result2) == Vector{Vector{Vector{Float64}}}
-        @test !isempty(result2)
-
-        # Now instead of an Array{Array{Array{Float64,1},1},1} we want to have an
-        # Array{Array{Float64,1},1}
-        result3 = solve(
-            F,
-            S₀,
-            ;
-            start_parameters = p₀,
-            target_parameters = params,
-            parameters = [a, b, c],
-            transform_result = (r, p) -> real_solutions(r),
-            flatten = true,
-            threading = false,
-        )
-        @test typeof(result3) == Vector{Vector{Float64}}
-        @test !isempty(result3)
-
-        # The passed `params` do not directly need to be the target parameters.
-        # Instead they can be some more concrete informations (e.g. an index)
-        # and we can them by using the `transform_parameters` method
-        result4 = solve(
-            F,
-            S₀,
-            ;
-            start_parameters = p₀,
-            target_parameters = 1:100,
-            parameters = [a, b, c],
-            transform_result = (r, p) -> (real_solutions(r), p),
-            transform_parameters = _ -> rand(3),
-        )
-        @test typeof(result4) == Vector{Tuple{Vector{Vector{Float64}},Int64}}
-
-
-        @var x y
-        f = System([x^2 + y^2 - 1])
-
-
-        # Compute start solutions S₀ for given start parameters p₀
-        l₀ = rand_subspace(2; dim = 1)
-        S₀ = solutions(solve(f, target_subspace = l₀))
-        # The parameters we are intersted in
-        subspaces = [rand_subspace(2; dim = 1) for i = 1:100]
-        result1 = solve(
-            f,
-            S₀;
-            start_subspace = l₀,
-            target_subspaces = subspaces,
-            threading = false,
-            intrinsic = false,
-        )
-        @test all(r -> nsolutions(first(r)) == 2, result1)
-
-        @testset "Many parameters threaded" begin
-            @var u1, v1, ω, α, γ, λ, ω0
-
-            eqs = [
-                -u1 * ω^2 +
-                u1 * ω0^2 +
-                (3 / 4) * u1^3 * α +
-                (3 / 4) * u1 * v1^2 * α +
-                (-1 / 2) * u1 * λ * ω0^2 +
-                v1 * γ * ω,
-                -v1 * ω^2 + v1 * ω0^2 + (3 / 4) * v1^3 * α - u1 * γ * ω +
-                (3 / 4) * u1^2 * v1 * α +
-                (1 / 2) * v1 * λ * ω0^2,
-            ]
-
-            F = System(eqs, parameters = [ω, α, γ, λ, ω0], variables = [u1, v1])
-
-            input_array = [
-                [0.9, 1.0, 0.01, 0.01, 1.1],
-                [0.9105263157894737, 1.0, 0.01, 0.01, 1.1],
-                [0.9210526315789473, 1.0, 0.01, 0.01, 1.1],
-                [0.9315789473684211, 1.0, 0.01, 0.01, 1.1],
-                [0.9421052631578948, 1.0, 0.01, 0.01, 1.1],
-                [0.9526315789473684, 1.0, 0.01, 0.01, 1.1],
-            ]
-
-            generic_parameters = randn(ComplexF64, 5)
-
-            R0 = solve(F; target_parameters = generic_parameters, threading = true)
-            R1 = solve(
-                F,
-                solutions(R0);
-                start_parameters = generic_parameters,
-                target_parameters = input_array,
-                threading = true,
-            )
-
-            @test length(R1) == 6
+    @testset "Polyhedral: sparse and dense path geometry" begin
+        @polyvar x y
+        sparse = System([x^2 + y - 1, x * y - 2])
+        result = solve(sparse, Polyhedral(; show_progress = false))
+        # y = 1 - x² reduces the system to x³ - x + 2 = 0.
+        @test mixed_volume(sparse) == 3
+        @test nsolutions(result) == 3
+        for sol in solutions(result)
+            @test abs(sol[1]^2 + sol[2] - 1) < 1.0e-6
+            @test abs(sol[1] * sol[2] - 2) < 1.0e-6
         end
 
+        td = solve(sparse, TotalDegree(; show_progress = false))
+        @test nsolutions(td) == 3
+        @test same_solution_set(solutions(td), solutions(result))
 
+        dense = System(
+            [
+                x^2 + x * y + y^2 + x + y + 1,
+                x^2 + 2 * x * y - y^2 + x - y + 2,
+            ],
+        )
+        @test mixed_volume(dense) == 4
+        @test paths_to_track(dense, TotalDegree()) == 4
+    end
+
+    @testset "Polyhedral: torus support" begin
+        @polyvar x₁ x₂ s
+        F = System(
+            [
+                x₁^3 * s^15 + x₁ * x₂ * s + x₂^3 + s^12,
+                x₁^2 * s^9 + x₁ * x₂^2 + x₂ * s^3,
+                x₁^2 * x₂ * s^5 + x₁ * s^8 + x₂^2,
+            ],
+        )
+        all_alg = Polyhedral(; seed = UInt32(1), show_progress = false)
+        torus_alg =
+            Polyhedral(; only_torus = true, seed = UInt32(1), show_progress = false)
+
+        @test paths_to_track(F, all_alg) == 92
+        @test paths_to_track(F, torus_alg) == 54
+        @test mixed_volume(F) == 54
+
+        all_result = solve(F, all_alg, Serial())
+        torus_result = solve(F, torus_alg, Serial())
+        @test nsolutions(torus_result) <= nsolutions(all_result)
+        @test all(sol -> all(!iszero, sol), solutions(torus_result))
+        for sol in solutions(torus_result)
+            @test any(
+                candidate -> maximum(abs.(sol .- candidate)) < 1.0e-8,
+                solutions(all_result),
+            )
+        end
+    end
+
+    @testset "Polyhedral and TotalDegree agree on complete root sets" begin
+        @polyvar x y
+        for F in (
+                System([x^2 - 1, y^2 - 4]),
+                System([x^2 + y^2 - 1, x * y - 0.25]),
+            )
+            td = solve(F, TotalDegree(; seed = UInt32(1), show_progress = false))
+            ph = solve(F, Polyhedral(; seed = UInt32(1), show_progress = false))
+            @test nsolutions(td) == nsolutions(ph) == 4
+            @test same_solution_set(solutions(td), solutions(ph))
+        end
+    end
+
+    projective_normalize(sols) = [s ./ s[argmax(abs.(s))] for s in sols]
+    same_point_set(a, b) =
+        same_solution_set(projective_normalize(a), projective_normalize(b); atol = 1.0e-7)
+
+    @testset "projective solve: chart-independent roots" begin
+        @polyvar x y z
+        F = System(
+            [
+                2.3 * x^2 + 1.2 * y^2 + 3x * z - 2y * z + 3 * z^2,
+                2.3 * x^2 + 1.2 * y^2 + 5x * z + 2y * z - 5 * z^2,
+            ],
+        )
+        run(alg, exec = Serial()) = solve(F, alg, exec)
+
+        reference = run(TotalDegree(; seed = UInt32(0x1234)))
+        for result in (reference, run(Polyhedral(; seed = UInt32(0x1234))))
+            @test ntracked(result) == 4
+            @test count(is_success, path_results(result)) == 4
+            @test nsolutions(result) == 4
+            for v in projective_normalize(solutions(result))
+                @test abs(
+                    2.3v[1]^2 + 1.2v[2]^2 + 3v[1] * v[3] - 2v[2] * v[3] +
+                        3v[3]^2,
+                ) < 1.0e-8
+                @test abs(
+                    2.3v[1]^2 + 1.2v[2]^2 + 5v[1] * v[3] + 2v[2] * v[3] -
+                        5v[3]^2,
+                ) < 1.0e-8
+            end
+        end
+
+        @test count(
+            s -> abs(s[3]) < 1.0e-8 * maximum(abs.(s)),
+            solutions(reference),
+        ) == 2
+
+        for (alg, exec) in (
+                (TotalDegree(; seed = UInt32(99)), Serial()),
+                (Polyhedral(; seed = UInt32(99)), Serial()),
+                (TotalDegree(; seed = UInt32(0x1234)), Threaded()),
+            )
+            @test same_point_set(solutions(run(alg, exec)), solutions(reference))
+        end
+    end
+
+    @testset "projective solve: overdetermined after charting" begin
+        @polyvar x y z
+        F = System(
+            [
+                (x^2 + y^2 + x * y - 3 * z^2) * (x + 3z),
+                (x^2 + y^2 + x * y - 3 * z^2) * (y - x + 2z),
+                2x + 5y - 3z,
+            ],
+        )
+        for alg in (
+                TotalDegree(; seed = UInt32(0x1234), show_progress = false),
+                Polyhedral(; seed = UInt32(0x1234), show_progress = false),
+            )
+            result = solve(F, alg, Serial())
+            @test ntracked(result) == 9
+            @test count(is_success, path_results(result)) == 2
+            @test nsolutions(result) == 2
+            @test nexcess_solutions(result) == 3
+        end
+
+        G = System(
+            [
+                (x^2 + y^2 + x * y - 3 * z^2) * (x + 3z),
+                2x + 5y - 3z,
+                (x^2 + y^2 + x * y - 3 * z^2) * (y^2 - x * z + 2 * z^2),
+            ],
+        )
+        result = solve(
+            G,
+            TotalDegree(; seed = UInt32(0x1234), show_progress = false),
+            Serial(),
+        )
+        @test ntracked(result) == 12
+        @test count(is_success, path_results(result)) == 2
+    end
+
+    @testset "projective solve: composition and fixed parameters" begin
+        @polyvar u v w a
+        run(F) = solve(F, TotalDegree(; seed = UInt32(5), show_progress = false), Serial())
+        L = System([2u - v + w, u + 3w, v - w]; variables = [u, v, w])
+
+        composition =
+            System([u * v - w^2, u^2 + v * w]; variables = [u, v, w]) ∘ L
+        composition_result = run(composition)
+        @test ntracked(composition_result) == 4
+        @test nsolutions(composition_result) == 4
+        @test same_point_set(
+            solutions(composition_result),
+            solutions(run(System(composition))),
+        )
+
+        parametric = System(
+            [u * v - a * w^2, u^2 + v * w];
+            variables = [u, v, w],
+            parameters = [a],
+        ) ∘ L
+        fixed = fix_parameters(parametric, [2.0])
+        @test fixed isa FixedParameterSystem
+        fixed_result = run(fixed)
+        @test nsolutions(fixed_result) == 4
+        @test same_point_set(
+            solutions(fixed_result),
+            solutions(run(fix_parameters(System(parametric), [2.0]))),
+        )
+    end
+
+    @testset "parameter continuation" begin
+        @polyvar x y a b
+        F = System([x^2 + a * y - 1, x * y - b]; parameters = [a, b])
+        starts = solutions(
+            solve(
+                System([x^2 + y - 1, x * y - 0.5]),
+                TotalDegree(; show_progress = false),
+            ),
+        )
+        result = solve(
+            F,
+            starts,
+            [1.0, 0.5],
+            [2.0, 1.0],
+            Continuation(; show_progress = false),
+        )
+        # Both fibers reduce to a cubic in x: x³ - x + 1/2 and x³ - x + 2.
+        @test length(starts) == 3
+        @test nsolutions(result) == 3
+        for sol in solutions(result)
+            @test abs(sol[1]^2 + 2.0 * sol[2] - 1) < 1.0e-6
+            @test abs(sol[1] * sol[2] - 1.0) < 1.0e-6
+        end
+    end
+
+    @testset "parameter continuation preserves all four real branches" begin
+        @polyvar x y a
+        F = System([x^2 - a, y^2 - a]; parameters = [a])
+        starts = solutions(
+            solve(System([x^2 - 1, y^2 - 1]), TotalDegree(; show_progress = false)),
+        )
+        result = solve(
+            F,
+            starts,
+            [1.0],
+            [4.0],
+            Continuation(; show_progress = false),
+        )
+        @test nsolutions(result) == 4
+        @test length(real_solutions(result)) == 4
+        for sol in real_solutions(result)
+            @test abs(sol[1]^2 - 4) < 1.0e-6
+            @test abs(sol[2]^2 - 4) < 1.0e-6
+        end
+    end
+
+    @testset "start-system routes reject parametric systems without values" begin
+        @polyvar x y a
+        F = System([x^2 + y^2 - a, x * y - 1]; variables = [x, y], parameters = [a])
+        for alg in (
+                TotalDegree(; show_progress = false),
+                Polyhedral(; show_progress = false),
+            )
+            @test_throws ArgumentError solve(F, alg, Serial())
+            @test_throws ArgumentError CommonSolve.init(F, alg, Serial())
+        end
+        @test_throws ArgumentError solve(
+            F,
+            rand_subspace(2; codim = 1),
+            TotalDegree(; show_progress = false),
+            Serial(),
+        )
+
+        nonparametric = System([x^2 + y^2 - 5, x * y - 1]; variables = [x, y])
+        @test nsolutions(
+            solve(nonparametric, TotalDegree(; show_progress = false), Serial()),
+        ) == 4
+    end
+
+    @testset "executor validation and parity" begin
+        @test_throws ArgumentError Threaded(Threads.nthreads() + 1)
+        @test_throws ArgumentError Threaded(0)
+        @test_throws ArgumentError Threaded(-1)
+
+        @polyvar x y
+        F = System([x^2 + y - 1, x * y - 0.5])
+        for alg in (
+                TotalDegree(; seed = UInt32(99), show_progress = false),
+                Polyhedral(; seed = UInt32(99), show_progress = false),
+            )
+            serial = solve(F, alg, Serial())
+            threaded = solve(F, alg, Threaded())
+
+            @test nsolutions(serial) == nsolutions(threaded) == 3
+            @test nreal(serial) == nreal(threaded)
+            @test ntracked(serial) == ntracked(threaded)
+            @test nsingular(serial) == nsingular(threaded)
+            @test nnonsingular(serial) == nnonsingular(threaded) == 3
+            # Three finite roots; every further path (one for TotalDegree,
+            # none for Polyhedral) diverges.
+            @test nat_infinity(serial) == nat_infinity(threaded) == ntracked(serial) - 3
+            @test count(is_success, path_results(serial)) ==
+                count(is_success, path_results(threaded))
+            @test same_solution_set(solutions(serial), solutions(threaded); atol = 1.0e-6)
+        end
+    end
+
+    @testset "parameter continuation: Serial and Threaded parity" begin
+        @polyvar x y a
+        F = System([x^2 - a, y^2 - a]; parameters = [a])
+        starts = solutions(
+            solve(System([x^2 - 1, y^2 - 1]), TotalDegree(; show_progress = false)),
+        )
+
+        serial = solve(
+            F,
+            starts,
+            [1.0],
+            [4.0],
+            Continuation(; show_progress = false),
+            Serial(),
+        )
+        threaded = solve(
+            F,
+            starts,
+            [1.0],
+            [4.0],
+            Continuation(; show_progress = false),
+            Threaded(),
+        )
+        @test nsolutions(serial) == nsolutions(threaded) == 4
+        @test same_solution_set(solutions(serial), solutions(threaded))
+    end
+
+    @testset "Serial and Threaded preserve cluster structure" begin
+        @polyvar x0 x1 x2 x3
+        F = System(
+            [
+                x0 + 2x1 + 2x2 + 2x3 - 1,
+                x0^2 + 2x1^2 + 2x2^2 + 2x3^2 - x0,
+                2x0 * x1 + 2x1 * x2 + 2x2 * x3 - x1,
+                x1^2 + 2x0 * x2 + 2x1 * x3 - x2,
+            ],
+        )
+        serial = solve(F, TotalDegree(; seed = UInt32(7), show_progress = false), Serial())
+        threaded =
+            solve(F, TotalDegree(; seed = UInt32(7), show_progress = false), Threaded())
+
+        @test nsolutions(serial) == nsolutions(threaded)
+        @test ntracked(serial) == ntracked(threaded)
+        @test sort(length.(clusters(serial))) == sort(length.(clusters(threaded)))
+    end
+
+    @testset "paths_to_track agrees with executed path count" begin
+        @polyvar x y z
+        @test paths_to_track(System([x^2 + y^2 - 4, x * y - 1])) == 4
+        @test paths_to_track(
+            System([2y + 3 * y^2 - x * y^3, x + 4 * x^2 - 2 * x^3 * y]),
+        ) == 16
+
+        for F in (
+                System([x^2 + y^2 - 4, x * y - 1]),
+                System([x^2 + y^2 - z^2, x * y - z^2]),
+                System([(x^2 - 4) * (x * y - 2), x * y - 2, x^2 - 4]),
+                System([x^2 - y, x + y - 1]) ∘ System([x + y, x - y]),
+            )
+            alg = TotalDegree(; seed = UInt32(11), show_progress = false)
+            @test paths_to_track(F, alg) == ntracked(solve(F, alg, Serial()))
+        end
+    end
+
+    @testset "early_stop_callback preserves executed-path accounting" begin
+        @polyvar x y
+        F = System([x^3 + y^2 - 3, x * y^2 - 2])
+
+        for exec in (Serial(), Threaded(1))
+            full = solve(F, TotalDegree(; seed = UInt32(5), show_progress = false), exec)
+            @test ntracked(full) == 9
+
+            hits = Threads.Atomic{Int}(0)
+            stopped = solve(
+                F,
+                TotalDegree(;
+                    seed = UInt32(5),
+                    show_progress = false,
+                    early_stop_callback = function (pr)
+                        Threads.atomic_add!(hits, 1)
+                        return true
+                    end,
+                ),
+                exec,
+            )
+            @test hits[] >= 1
+            @test 0 < ntracked(stopped) < 9
+            @test nfailed(stopped) == 0
+            @test length(path_results(stopped)) == ntracked(stopped)
+
+            never = solve(
+                F,
+                TotalDegree(;
+                    seed = UInt32(5),
+                    show_progress = false,
+                    early_stop_callback = _ -> false,
+                ),
+                exec,
+            )
+            @test ntracked(never) == 9
+            @test nsolutions(never) == nsolutions(full)
+        end
+
+        if Threads.nthreads() > 1
+            stopped = solve(
+                F,
+                TotalDegree(;
+                    seed = UInt32(5),
+                    show_progress = false,
+                    early_stop_callback = _ -> true,
+                ),
+                Threaded(min(4, Threads.nthreads())),
+            )
+            prs = path_results(stopped)
+            @test issorted(path_number.(prs))
+            @test allunique(path_number.(prs))
+            for pr in prs
+                is_success(pr) || continue
+                i = path_number(pr)
+                @test multiplicity(stopped, i) == multiplicity(pr)
+                @test any(c -> solution(c) == solution(pr), cluster_of(stopped, i))
+            end
+            @test_throws BoundsError cluster_of(stopped, 10)
+        end
     end
 end

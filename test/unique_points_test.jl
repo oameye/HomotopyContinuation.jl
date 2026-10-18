@@ -1,50 +1,90 @@
+using Test, Random
+using LinearAlgebra
+using HomotopyContinuation
+using HomotopyContinuation: UniquePoints, GroupActions, add!, multiplicities,
+    unique_points, InfNorm, EuclideanNorm, satisfies_triangle_inequality
+
 @testset "UniquePoints" begin
-    data = [randn(ComplexF64, 12) for i = 1:10_000]
-    up = HC.UniquePoints(first(data), 1)
-    HC.add!.(up, data, 1:length(data), 1e-8)
+    Random.seed!(0x75b1)
+    data = [randn(ComplexF64, 12) for i in 1:10_000]
+    up = UniquePoints(12)
+    add!.(up, data, 1:length(data), 1.0e-8)
     @test length(up) == 10_000
-    HC.add!.(up, data, 1:length(data), 1e-8)
+    # re-adding the same points does not grow the structure
+    add!.(up, data, 1:length(data), 1.0e-8)
+    @test length(up) == 10_000
 
-
-    # Test with group action
+    # Group actions
     x = randn(ComplexF64, 4)
     permutation1(x) = ([x[2]; x[1]; x[3]; x[4]],)
     permutation2(x) = ([x[1]; x[2]; x[4]; x[3]],)
-    group_actions = GroupActions(permutation1, permutation1)
-    X = [[x]; group_actions(x)]
-
     X = [v for v in GroupActions(permutation1, permutation2)(x)]
+    @test length(X) == 4
 
-    # One group action
-    data = HC.UniquePoints(first(X), 1, group_action = permutation1)
-    HC.add!.(data, X, 1:length(X), 1e-5)
-    @test length(data) == 2
+    # one group action: the orbit splits into 2 classes
+    up1 = UniquePoints(4; group_action = permutation1)
+    add!.(up1, X, 1:length(X), 1.0e-5)
+    @test length(up1) == 2
 
-    data =
-        HC.UniquePoints(X[1], 1, group_actions = GroupActions(permutation1, permutation2))
-    HC.add!.(data, X, 1:4, 1e-5)
-    @test length(data) == 1
+    # both group actions: everything is one class
+    up2 = UniquePoints(4; group_actions = GroupActions(permutation1, permutation2))
+    add!.(up2, X, 1:4, 1.0e-5)
+    @test length(up2) == 1
 
-    # Group action and reality check
-    x = randn(4)
-    X = [im .* x, x, randn(ComplexF64, 4)]
-    data = HC.UniquePoints(X[1], 1, group_action = x -> (im .* x, (-1) .* x, (-im) .* x))
-    HC.add!.(data, X, 1:length(X), 1e-5)
-    @test length(data) == 2
+    # group action identifying scalar multiples by roots of unity
+    xr = randn(4)
+    Y = [im .* xr, xr, randn(ComplexF64, 4)]
+    up3 = UniquePoints(4; group_action = x -> (im .* x, (-1) .* x, (-im) .* x))
+    add!.(up3, Y, 1:length(Y), 1.0e-5)
+    @test length(up3) == 2
 end
 
 @testset "Multiplicities" begin
-    # test empty input
+    Random.seed!(0x75b2)
+    # empty input
     @test isempty(multiplicities(Vector{Vector{ComplexF64}}()))
 
-    V = [randn(3) + im .* randn(3) for i = 1:10]
+    V = [randn(3) + im .* randn(3) for i in 1:10]
     W = [
-        map(v -> v + [1e-7 * v[1]; 1.0; 1.0], V)
+        map(v -> v + [1.0e-7 * v[1]; 1.0; 1.0], V)
         V
-        map(v -> v + [1e-6 * v[1]; 0; 0], V)
+        map(v -> v + [1.0e-6 * v[1]; 0; 0], V)
     ]
-    U = [[cis(rand()) for _ = 1:3] for _ = 1:20]
-    X = [
+    U = [[cis(rand()) for _ in 1:3] for _ in 1:20]
+
+    M = multiplicities(V)
+    @test length(M) == 0
+
+    N = multiplicities(W; distance = InfNorm(), atol = 1.0e-5)
+    sort!(N; by = first)
+    @test length(N) == 10
+    @test unique([length(m) for m in N]) == [2]
+    @test N == [[i, i + 10] for i in 11:20]
+
+    O = multiplicities([U; U])
+    @test length(O) == 20
+
+    # group actions
+    x = randn(ComplexF64, 4)
+    permutation1(x) = ([x[2]; x[1]; x[3]; x[4]],)
+    permutation2(x) = ([x[1]; x[2]; x[4]; x[3]],)
+    X = collect(GroupActions(permutation1, permutation2)(x))
+
+    m1 = sort(multiplicities(X; group_action = permutation1))
+    @test m1 == [[1, 2], [3, 4]]
+
+    m2 = multiplicities(X; group_actions = GroupActions(permutation1, permutation2))
+    @test m2 == [[1, 2, 3, 4]]
+
+    # docstring example
+    Xd = [[1, 2, 3, 4], [2, 1, 3, 4], [1, 2, 4, 3], [2, 1, 4, 3]]
+    permutation(x) = [x[2], x[1], x[3], x[4]]
+    md = sort(multiplicities(Xd; group_action = permutation))
+    @test md == [[1, 2], [3, 4]]
+end
+
+function _unique_points_X_data()
+    return [
         [
             0.499064 - 0.707804im,
             -0.164223 + 0.0933025im,
@@ -334,43 +374,142 @@ end
             -0.018186 - 0.240642im,
         ],
     ]
+end
 
-    M = multiplicities(V)
-    @test length(M) == 0
-
-    N = multiplicities(W, distance = InfNorm(), atol = 1e-5)
-    sort!(N, by = first)
-    @test length(N) == 10
-    @test unique([length(m) for m in N]) == [2]
-    @test N == [[i, i + 10] for i = 11:20]
-
-    O = multiplicities([U; U])
-    @test length(O) == 20
-
+@testset "Multiplicities: non-metric distance" begin
+    # 1 - |<x, y>| on (near-)unit vectors is not a metric; the probabilistic
+    # triangle-inequality autodetection must disable pruning so classes are
+    # still found. The 30 fixed points fall into 3 classes under this distance.
     P = multiplicities(
-        X,
+        _unique_points_X_data();
         distance = (x, y) -> 1 - abs(LinearAlgebra.dot(x, y)),
-        atol = 1e-5,
+        atol = 1.0e-5,
     )
     @test length(P) == 3
+end
 
-    # Test with group action
-    x = randn(ComplexF64, 4)
-    permutation1(x) = ([x[2]; x[1]; x[3]; x[4]],)
-    permutation2(x) = ([x[1]; x[2]; x[4]; x[3]],)
-    X = GroupActions(permutation1, permutation2)(x)
+@testset "unique_points" begin
+    Random.seed!(0x75b3)
+    V = [randn(ComplexF64, 3) for _ in 1:8]
+    W = [V; map(v -> v .+ 1.0e-12, V)]
+    UP = unique_points(W)
+    @test length(UP) == 8
+    @test unique_points(W; atol = 0.0, rtol = 0.0) == W
+end
 
-    # One group action
-    m = sort(multiplicities(X, group_action = permutation1))
-    @test m == [[1, 2], [3, 4]]
+@testset "EuclideanNorm as the distance" begin
+    Random.seed!(0x75b4)
+    V = [randn(ComplexF64, 3) for _ in 1:8]
+    W = [V; map(v -> v .+ 1.0e-12, V)]
+    @test length(unique_points(W; distance = EuclideanNorm())) == 8
+    @test sort(multiplicities(W; distance = EuclideanNorm())) ==
+        sort(multiplicities(W; distance = InfNorm()))
 
-    # Two group actions
-    m = multiplicities(X, group_actions = GroupActions(permutation1, permutation2))
-    @test m == [[1, 2, 3, 4]]
+    # ‖·‖₂ ≤ √d‖·‖∞, so a point at inf-distance just inside the tolerance can sit
+    # outside it in the Euclidean one.
+    tol = 1.0e-6
+    a = zeros(ComplexF64, 3)
+    b = fill(complex(0.9 * tol), 3)
+    inf_up = UniquePoints(3; distance = InfNorm())
+    euc_up = UniquePoints(3; distance = EuclideanNorm())
+    add!(inf_up, a, 1, tol)
+    add!(euc_up, a, 1, tol)
+    @test add!(inf_up, b, 2, tol) == (1, false)
+    @test add!(euc_up, b, 2, tol) == (2, true)
+end
 
-    # docs
-    X = [[1, 2, 3, 4], [2, 1, 3, 4], [1, 2, 4, 3], [2, 1, 4, 3]]
-    permutation(x) = [x[2], x[1], x[3], x[4]]
-    m = sort(multiplicities(X, group_action = permutation))
-    @test m == [[1, 2], [3, 4]]
+# Pruning is only sound for a metric, and probing random triples to decide that
+# would make deduplication depend on the ambient RNG.
+@testset "triangle inequality is a trait, not a probe" begin
+    non_metric = (x, y) -> 1 - abs(LinearAlgebra.dot(x, y))
+
+    @test satisfies_triangle_inequality(InfNorm())
+    @test !satisfies_triangle_inequality(non_metric)
+
+    # Squared distance violates the triangle inequality. With eight root entries
+    # at 0, 10, ..., 70, the point 4.9 lands below the entry at 0, while the
+    # query 5.05 is nearest to the entry at 10, so pruning skips 4.9's subtree.
+    squared = (x, y) -> sum(abs2, x .- y)
+    function misses_near_duplicate(up)
+        for (i, r) in enumerate(0.0:10.0:70.0)
+            add!(up, ComplexF64[r], i, 0.03)
+        end
+        add!(up, ComplexF64[4.9], 9, 0.03)
+        return iszero(search_in_radius(up, ComplexF64[5.05], 0.03))
+    end
+    Random.seed!(11)
+    a = UniquePoints(1; distance = squared)
+    Random.seed!(999)
+    b = UniquePoints(1; distance = squared)
+    @test !misses_near_duplicate(a)
+    @test !misses_near_duplicate(b)
+    @test search_in_radius(a, ComplexF64[5.05], 0.03) == 9
+    opted_in = UniquePoints(1; distance = squared, triangle_inequality = true)
+    @test misses_near_duplicate(opted_in)
+
+    # Constructing one must not advance the ambient stream.
+    Random.seed!(7)
+    x = rand()
+    Random.seed!(7)
+    UniquePoints(3; distance = non_metric)
+    @test x == rand()
+end
+
+@testset "InfNorm and EuclideanNorm distances" begin
+    Random.seed!(0x75b5)
+    @test satisfies_triangle_inequality(InfNorm())
+    @test satisfies_triangle_inequality(EuclideanNorm())
+
+    # Radius search against brute-force max-modulus and Euclidean distances.
+    for (distance, oracle) in (
+            (InfNorm(), (u, v) -> maximum(abs.(u .- v))),
+            (EuclideanNorm(), (u, v) -> sqrt(sum(abs2, u .- v))),
+        )
+        points = [randn(ComplexF64, 3) for _ in 1:200]
+        up = UniquePoints(3; distance = distance)
+        for (i, p) in enumerate(points)
+            add!(up, p, i, 0.0)
+        end
+        @test length(up) == 200
+        for _ in 1:200
+            q = randn(ComplexF64, 3)
+            r = 0.5 * rand()
+            id = search_in_radius(up, q, r)
+            inside = findall(p -> oracle(p, q) <= r, points)
+            if isempty(inside)
+                @test id == 0
+            else
+                @test id in inside
+            end
+        end
+    end
+
+    # |(3, 4) - 0| is 4 in the max-modulus norm and 5 in the Euclidean one.
+    inf_up = UniquePoints(2; distance = InfNorm())
+    euc_up = UniquePoints(2; distance = EuclideanNorm())
+    add!(inf_up, ComplexF64[0, 0], 1, 0.0)
+    add!(euc_up, ComplexF64[0, 0], 1, 0.0)
+    @test search_in_radius(inf_up, ComplexF64[3, 4], 4.001) == 1
+    @test search_in_radius(inf_up, ComplexF64[3, 4], 3.999) == 0
+    @test search_in_radius(euc_up, ComplexF64[3, 4], 5.001) == 1
+    @test search_in_radius(euc_up, ComplexF64[3, 4], 4.999) == 0
+end
+
+@testset "InfNorm stays finite at extreme scale" begin
+    # Squared moduli of these entries overflow Float64; the distance must not.
+    s = exp2(700)
+    x = s .* ComplexF64[2im, 3 - 1im, 5 + 2im]
+    y = s .* ComplexF64[-2im, 3 - 1im, 5 + 2im]
+    up = UniquePoints(3; distance = InfNorm())
+    @test add!(up, x, 1, 0.0) == (1, true)
+    @test search_in_radius(up, x, 1.0) == 1
+    @test search_in_radius(up, y, 4.001 * s) == 1
+    @test search_in_radius(up, y, 3.999 * s) == 0
+    # The relative tolerance is measured against ‖y‖∞ = |5 + 2i|·2⁷⁰⁰.
+    @test add!(up, y, 2; atol = 0.0, rtol = 0.75) == (1, false)
+    @test add!(up, y, 2; atol = 0.0, rtol = 0.7) == (2, true)
+
+    euc_up = UniquePoints(3; distance = EuclideanNorm())
+    add!(euc_up, x, 1, 0.0)
+    @test_broken search_in_radius(euc_up, y, 4.001 * s) == 1
 end

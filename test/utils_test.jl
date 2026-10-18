@@ -1,91 +1,55 @@
-@testset "utils.jl" begin
-    @testset "writing and reading" begin
-        S = [rand(ComplexF64, 3) for i = 1:2]
-        write_solutions("tmp_sols.txt", S)
-        @test read_solutions("tmp_sols.txt") == S
+using Test
+using HomotopyContinuation
+using Random: MersenneTwister
 
-        p = rand(ComplexF64, 14)
-        write_parameters("tmp_params.txt", p)
-        @test read_parameters("tmp_params.txt") == p
+@testset "public solution and parameter I/O" begin
+    dir = mktempdir()
+    rng = MersenneTwister(1234)
+
+    @testset "round trip is exact" begin
+        S = [rand(rng, ComplexF64, 3) for _ in 1:2]
+        path = joinpath(dir, "sols.txt")
+        write_solutions(path, S)
+        @test read_solutions(path) == S
+
+        p = rand(rng, ComplexF64, 14)
+        ppath = joinpath(dir, "params.txt")
+        write_parameters(ppath, p)
+        @test read_parameters(ppath) == p
     end
 
-    Q = HC.rand_unitary_matrix(8, ComplexF64)
-    @test norm(LinearAlgebra.I - Q' * Q, Inf) < 1e-14
-
-    @test HC.fast_abs(-2.0) ≈ abs(-2.0)
-    @test HC.fast_abs(2.0 + 3im) ≈ abs(2.0 + 3im)
-
-    @test HC.nthroot(42.2, 0) == 1.0
-    @test HC.nthroot(42.2, 1) == 42.2
-    @test HC.nthroot(42.1, 2) == sqrt(42.1)
-    @test HC.nthroot(42.1, 3) == cbrt(42.1)
-    @test HC.nthroot(42.1, 4) == sqrt(sqrt(42.1))
-    @test HC.nthroot(42.1, 5) == 42.1^(1 / 5)
-
-    @testset "SegmentStepper" begin
-        seg = HC.SegmentStepper(0, 1)
-        @test seg.start == 0
-        @test seg.target == 1
-        @test seg.abs_Δ == 1.0
-        @test seg.forward
-        @test !isempty(sprint(show, seg))
-
-        HC.propose_step!(seg, exp2(-60))
-        @test seg.Δs == exp2(-60)
-        @test seg.s′ == exp2(-60)
-        @test seg.t′ == exp2(-60)
-        @test seg.t == 0
-        @test seg.Δt == exp2(-60)
-        HC.step_success!(seg)
-        @test seg.s == exp2(-60)
-        @test seg.t == exp2(-60)
-        @test seg.t′ == exp2(-60)
-        HC.propose_step!(seg, exp2(-50))
-        @test seg.t == exp2(-60)
-        @test seg.s′ == exp2(-60) + exp2(-50)
-        @test seg.t′ == exp2(-60) + exp2(-50)
-
-        HC.propose_step!(seg, 4)
-        @test seg.s′ == 1.0
-        @test seg.t′ == 1.0
-        @test !HC.is_done(seg)
-        HC.step_success!(seg)
-        @test HC.is_done(seg)
-
-        seg = HC.SegmentStepper(im, 0)
-        @test seg.start == im
-        @test seg.target == 0
-        @test seg.abs_Δ == 1.0
-        @test !seg.forward
-
-        HC.propose_step!(seg, exp2(-20))
-        @test seg.Δs == exp2(-20)
-        @test seg.s′ == 1 - exp2(-20)
-        @test seg.t′ == im * (1 - exp2(-20))
-        @test seg.t == im
-        @test seg.Δt == -im * exp2(-20)
-        HC.step_success!(seg)
-        @test seg.s == 1 - exp2(-20)
-        @test seg.t == im * (1 - exp2(-20))
-        @test seg.t′ == im * (1 - exp2(-20))
-        HC.propose_step!(seg, exp2(-10))
-        @test seg.t == im * (1 - exp2(-20))
-        @test seg.s′ == 1 - (exp2(-20) + exp2(-10))
-        @test seg.t′ == im * (1 - (exp2(-20) + exp2(-10)))
-
-        HC.propose_step!(seg, 2)
-        @test seg.s′ == 0.0
-        @test seg.t′ == 0.0
-        @test !HC.is_done(seg)
-        HC.step_success!(seg)
-        @test HC.is_done(seg)
+    @testset "integer input reads back as complex" begin
+        path = joinpath(dir, "ints.txt")
+        write_solutions(path, [[1, 1], [-1, 2]])
+        @test read_solutions(path) == [[1.0 + 0im, 1.0 + 0im], [-1.0 + 0im, 2.0 + 0im]]
+        @test read(path, String) == "2\n\n1 0\n1 0\n\n-1 0\n2 0\n"
     end
 
-    struct Foo_print_fieldnames
-        a::Int
-        b::Float64
+    @testset "empty and single" begin
+        path = joinpath(dir, "empty.txt")
+        write_solutions(path, Vector{ComplexF64}[])
+        @test isempty(read_solutions(path))
+
+        ppath = joinpath(dir, "one.txt")
+        write_parameters(ppath, [2.0 - 3.0im])
+        @test read_parameters(ppath) == [2.0 - 3.0im]
     end
 
-    @test sprint(HC.print_fieldnames, Foo_print_fieldnames(2, 2.2)) ==
-          "Foo_print_fieldnames:\n • a → 2\n • b → 2.2\n"
+    @testset "a missing imaginary part is zero" begin
+        path = joinpath(dir, "real_only.txt")
+        write(path, "2\n\n1.5\n-2.5\n")
+        @test read_parameters(path) == [1.5 + 0im, -2.5 + 0im]
+    end
+
+    @testset "declared count is checked" begin
+        path = joinpath(dir, "bad_count.txt")
+        write(path, "3\n\n1.0 0.0\n2.0 0.0\n")
+        @test_throws ArgumentError read_parameters(path)
+
+        write(path, "")
+        @test_throws ArgumentError read_solutions(path)
+
+        write(path, "1\n\n1.0 0.0 2.0\n")
+        @test_throws ArgumentError read_parameters(path)
+    end
 end
