@@ -464,7 +464,7 @@ function normalize_polys(
     scales = Vector{Float64}(undef, length(polys))
     normalized = map(enumerate(polys)) do (i, p)
         coeffs = MP.coefficients(p)
-        nrm = maximum(c -> Float64(abs(c)), coeffs)
+        nrm = maximum(c -> Float64(abs(c)), coeffs; init = 0.0)
         scale = normalization_scale(nrm)
         scales[i] = scale
         return p / scale

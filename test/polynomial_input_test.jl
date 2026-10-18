@@ -84,9 +84,13 @@ end
         test_eval_and_jac([x^5 - y^7 + 3x^4 * y^4], [x, y])
         test_eval_and_jac([-x + y, x - y], [x, y])
         test_eval_and_jac([x^2 - 1, 0 * x + 2], [x, y])
-        # The zero equation has no coefficients, and normalization reduces over them.
-        @test_broken evaluate(System([x^2 - 1, 0 * x]; variables = [x, y]), [1, 2]) ==
+        # The zero polynomial has no terms.
+        @test evaluate(System([x^2 - 1, 0 * x]; variables = [x, y]), [1, 2]) ==
             ComplexF64[0, 0]
+        test_eval_and_jac([x^2 - 1, 0 * x], [x, y])
+        test_eval_and_jac([0 * x, 0 * y], [x, y])
+        test_eval_and_jac([x^2 - 1, 0 * x], [x, y]; params = [z])
+        @test is_real(System([x^2 - 1, 0 * x]; variables = [x, y]))
         test_eval_and_jac([x * y, x * y, x^2], [x, y])
         test_eval_and_jac([x + 0 * y, y + 0 * x], [x, y])
         test_eval_and_jac([(2.0 + 3.0im) * x^2 * y - (0.5 - 0.25im), x - y], [x, y])
