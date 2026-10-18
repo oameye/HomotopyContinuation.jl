@@ -629,7 +629,10 @@ as `sqrt(d^2 + ||a-b||^2)`, where `d` is the distance from the column span of
 geodesic_distance(A::LinearSubspace, B::LinearSubspace) =
     geodesic_distance(A.intrinsic, B.intrinsic)
 function geodesic_distance(A::IntrinsicDescription, B::IntrinsicDescription)
-    return sqrt(sum(σᵢ -> acos(min(σᵢ, 1.0))^2, LA.svdvals(A.Y' * B.Y)))
+    # The principal angles of `grassmannian_svd` keep small angles accurate,
+    # so equal or nearly equal subspaces have a distance near eps, not sqrt(eps).
+    _, Θ, _ = grassmannian_svd(A, B; embedded_projective = true)
+    return LA.norm(Θ)
 end
 
 # geodesic
@@ -661,30 +664,31 @@ end
 function grassmannian_svd(A::AbstractMatrix, B::AbstractMatrix)
     # Here A and B are assumed to be Stiefel matrices representing linear spaces.
     n, k = size(A)
+    # A' B = U cos(Θ) V' and (I - A A') B V = Q sin(Θ): the columns of
+    # M V = (I - A A') B V are mutually orthogonal with norms sin(θⱼ), so a
+    # column-pivoted QR M V[:, p] = Q R has an (up to rounding) diagonal R with
+    # |R[i, i]| = sin(θ_{p[i]}). The pivot `p` maps each column back to the SVD
+    # order, which stays correct when angles are equal or reorder under
+    # rounding.
     U, Σ, V = LA.svd!(A' * B)
-    # M = (LA.I - A * A') * B
-    # Have to compute an SVD of M s.t. M = Q sinΘ V'
-    # Equivalently M * V = Q sin(Θ)
-    # We can achieve this by using a *pivoted* QR
-    # since then R will be a diagonal matrix s.t. the absolute value of R_ii is θ_{k-i}
     MV = (LA.I - A * A') * B * V
-
-    # Θ = acos.(min.(Σ, 1.0))
-    # We have acos(1-eps()) = 2.1073424255447017e-8
-    # So this is numerically super unstable if the singular value is off by only eps()
-    # We try to correct this fact by treating σ >= 1 - 2eps() as 1.0
-    Θ = map(σ -> σ + 2 * eps() > 1.0 ? 0.0 : acos(σ), Σ)
-
     F = LA.qr!(MV, LA.ColumnNorm())
-    Q, R = F.Q, F.R
-    # correct signs and ordering of Q
-    Q′ = Q[:, k:-1:1]
-    for j in 1:k
-        # Look if we need to flip signs
-        real(R[k - j + 1, k - j + 1]) < 0 || continue
-        for i in 1:n
-            Q′[i, j] = -Q′[i, j]
+    Q = Matrix(F.Q)
+    R = F.R
+    Q′ = similar(Q)
+    Θ = Vector{Float64}(undef, k)
+    for (i, j) in enumerate(F.p)
+        r = R[i, i]
+        sinθ = abs(r)
+        phase = iszero(sinθ) ? one(r) : r / sinθ
+        for l in 1:n
+            Q′[l, j] = Q[l, i] * phase
         end
+        # Two subspaces sharing a direction have σⱼ = 1 up to rounding, where
+        # acos(σⱼ) has an O(sqrt(eps)) error (acos(1 - eps()) ≈ 2.1e-8). The
+        # absolute error of sin(θⱼ) is O(eps), so atan(sin, cos) resolves small
+        # angles to working precision and large ones through the cosine.
+        Θ[j] = atan(sinθ, Σ[j])
     end
 
     return Q′, Θ, U

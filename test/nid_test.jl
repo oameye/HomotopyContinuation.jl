@@ -251,17 +251,28 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
         # in P³. Homogeneous input is regenerated projectively, so the witness
         # sets are cut by linear (not affine) subspaces.
         G = System([a * c, b * c]; variables = x)
-        N = solve(G, Decomposition(; show_progress = false))
+        N = solve(G, Decomposition(; seed = 0x00000078, show_progress = false))
         @test degrees(N) == Dict(2 => [4], 1 => [6])
         @test ncomponents(N) == 2
 
         Ws = witness_sets(N)
         W1, W2 = first(Ws[2]), first(Ws[1])
         @test all(W -> is_linear(linear_subspace(W)), [W1, W2])
-        for W in (W1, W2)
-            q = first(solutions(W))
-            @test membership((2.0 + 1.0im) .* q, W, Membership(; show_progress = false))
+        # Every rescaling of a point of a projective component is a member. The
+        # slice through a rescaled witness point of the curve shares a plane
+        # with the witness slice, so the membership homotopy follows a geodesic
+        # with vanishing principal angles.
+        scales = (2.0 + 1.0im, 1.0, 1.0e-8, 1.0e8, 1.0e-8im, -3.7e5 + 2.0e5im)
+        for seed in (0x00000002, 0x00000005), W in (W1, W2), q in solutions(W)
+            alg = Membership(; seed, show_progress = false)
+            @test all(membership([s .* q for s in scales], W, alg))
+            @test all(s -> membership(s .* q, W, alg), scales)
         end
+        # A generic point of the quartic surface is not on the sextic curve,
+        # at any scale.
+        p = first(solutions(W1))
+        alg = Membership(; seed = 0x00000002, show_progress = false)
+        @test !any(membership([s .* p for s in scales], W2, alg))
 
         # `EquationSorting.RANDOMIZED` combines equations of different degrees,
         # which does not stay homogeneous.
