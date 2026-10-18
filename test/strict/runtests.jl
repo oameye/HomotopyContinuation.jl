@@ -15,7 +15,7 @@ DispatchDoctor.JULIA_OK ||
 # type stability. They must inspect production package code rather than
 # DispatchDoctor wrappers, so the instrumented lane excludes them. The production
 # lane and dedicated analysis workflows retain those contracts.
-const INSTRUMENTED_CONTRACTS = ["quality/dispatch_doctor_test", "quality/instruction_count_test"]
+const INSTRUMENTED_CONTRACTS = ["quality/instruction_count_test"]
 
 testsuite = find_tests(dirname(@__DIR__))
 filter!(testsuite) do entry
