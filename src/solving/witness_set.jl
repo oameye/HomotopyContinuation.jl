@@ -494,8 +494,10 @@ For a projective witness set the query points are projective representatives
 (any scaling).
 
 `atol = 1e-14` and `rtol = sqrt(eps())` set the tolerance: a point `y` equals `x`
-when their distance is below `max(atol, norm(x, Inf) * rtol)`. See
-[`Membership`](@ref) for the rest.
+when their distance is below `max(atol, norm(x, Inf) * rtol)`. For a projective
+witness set `x` and `y` are representatives on one fixed affine chart, so the
+test does not depend on the scaling of `p`. See [`Membership`](@ref) for the
+rest.
 """
 function membership(
         p::AbstractVector{<:Number}, W::WitnessSet,
@@ -580,6 +582,9 @@ function _membership_query(
         DimensionMismatch("query point has length $(length(x)), expected $n"),
     )
     copyto!(st.xc, x)
+    # A projective query is replaced by its chart representative up front, so
+    # every rescaling of x runs the same query below up to rounding.
+    W.projective && on_chart!(st.xc, chart)
     k = codim(W.L)
 
     # First check: is x approximately on V(F)? (`x0` gauges the scale of F.)
@@ -591,7 +596,6 @@ function _membership_query(
     LA.norm(st.y, Inf) > 1.0e-2 * LA.norm(st.y0, Inf) && return false
 
     if W.projective
-        on_chart!(st.xc, chart)   # compare chart representatives
         A = _orthonormal_rows_through!(R, st.xc)
         b = zeros(ComplexF64, k)
     else

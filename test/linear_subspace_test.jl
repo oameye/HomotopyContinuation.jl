@@ -147,6 +147,28 @@ end
     @test geodesic_distance(A, B) ≈ geodesic_distance(B, A) atol = 1.0e-12
 end
 
+@testset "geodesic: subspaces sharing directions" begin
+    # Two linear hyperplanes of C⁴ meet in a plane, so two principal angles
+    # vanish. The geodesic keeps that plane fixed and reaches both endpoints to
+    # working precision, which the membership test relies on.
+    Random.seed!(0x0120)
+    for _ in 1:50
+        A = rand_subspace(4; codim = 1, affine = false)
+        B = rand_subspace(4; codim = 1, affine = false)
+        common = nullspace([extrinsic(A).A; extrinsic(B).A])
+        @test geodesic_distance(A, A) < 1.0e-13
+        γ = geodesic(A, B)
+        for (t, L) in ((1.0, A), (0.0, B))
+            x = L(randn(ComplexF64, dim(L)), Intrinsic)
+            @test norm(extrinsic(γ(t)).A * x) < 1.0e-13
+        end
+        for t in (0.25, 0.5, 0.75)
+            x = common * randn(ComplexF64, 2)
+            @test norm(extrinsic(γ(t)).A * x) < 1.0e-13 * norm(x)
+        end
+    end
+end
+
 @testset "LinearSubspace endpoint dimensions" begin
     for L in (
             rand_subspace(3; dim = 0),
