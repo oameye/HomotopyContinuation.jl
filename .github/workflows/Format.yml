@@ -2,15 +2,22 @@ name: Format Check
 
 on:
   push:
-    branches: [main]
+    branches:
+      - 'main'
     paths:
       - '.github/workflows/Format.yml'
       - '**.jl'
   pull_request:
+    branches:
+      - 'main'
     paths:
       - '.github/workflows/Format.yml'
       - '**.jl'
-    types: [opened, reopened, synchronize, ready_for_review]
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

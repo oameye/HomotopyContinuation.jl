@@ -11,7 +11,7 @@ CERT_LOG ?= test-cert.log
 EXTENSIVE_LOG ?= test-extensive.log
 STRICT_LOG ?= test-strict.log
 
-.PHONY: test test-serial test-cert test-extensive test-strict benchmark ttfx format deps update help
+.PHONY: test test-serial test-cert test-extensive test-strict jet benchmark ttfx format deps update help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}'
@@ -34,6 +34,10 @@ test-strict: ## Run the suite with DispatchDoctor in error mode (log: test-stric
 test-serial: ## Run core + certification suites serially for debugging
 	set -o pipefail; $(JULIA) --project=test test/runtests.jl --jobs=1 2>&1 | tee $(TEST_LOG)
 	set -o pipefail; $(JULIA) --project=$(CERT)/test $(CERT)/test/runtests.jl 2>&1 | tee $(CERT_LOG)
+
+jet: ## Run JET package analysis in the test environment
+	$(JULIA) --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+	$(JULIA) --project=test test/quality/jet_test.jl
 
 benchmark: ## Run steady-state benchmarks
 	$(JULIA) --project=benchmark benchmark/runbenchmarks.jl

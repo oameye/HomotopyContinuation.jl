@@ -1,25 +1,13 @@
 using HomotopyContinuation
 using ParallelTestRunner: ParallelTestRunner, find_tests
 
-# Coverage must exercise exactly the ordinary suite, not the static contracts.
-const QUALITY_CONTRACTS = Set(
-    [
-        "alloc_check_test",
-        "aqua_test",
-        "concrete_structs_test",
-        "dispatch_doctor_test",
-        "explicit_imports_test",
-        "instruction_count_test",
-        "jet_test",
-    ],
-)
-
 repo_root = realpath(joinpath(@__DIR__, ".."))
 test_root = joinpath(repo_root, "test")
 testsuite = find_tests(test_root)
 filter!(entry -> !startswith(first(entry), "extensive/"), testsuite)
 filter!(entry -> !startswith(first(entry), "strict/"), testsuite)
-filter!(entry -> !(first(entry) in QUALITY_CONTRACTS), testsuite)
+# Coverage must exercise exactly the ordinary suite, not the static contracts.
+filter!(entry -> !startswith(first(entry), "quality/"), testsuite)
 
 coverage_dir = abspath(get(ENV, "HC_COVERAGE_DIR", joinpath(repo_root, "coverage")))
 mkpath(coverage_dir)
