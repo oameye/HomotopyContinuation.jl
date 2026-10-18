@@ -153,9 +153,11 @@ end
     return nothing
 end
 
-@inline function _start_pair_taylor!(
+# The joint system has no parameters of its own, so a parameter series is empty.
+function taylor!(
         u::FSVec{ComplexF64}, v::Val{K}, S::_StartPairSystem,
         txp::TaylorVector{N, ComplexF64},
+        ::Union{FSVec{ComplexF64}, TaylorVector{<:Any, ComplexF64}},
     )::Nothing where {K, N}
     _split_start_pair_series!(S, v, txp)
     taylor!(
@@ -165,30 +167,3 @@ end
     )
     return nothing
 end
-
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{1}, S::_StartPairSystem,
-    txp::TaylorVector{2, ComplexF64}, ::FSVec{ComplexF64},
-)::Nothing = _start_pair_taylor!(u, v, S, txp)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{2}, S::_StartPairSystem,
-    txp::TaylorVector{3, ComplexF64}, ::FSVec{ComplexF64},
-)::Nothing = _start_pair_taylor!(u, v, S, txp)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{3}, S::_StartPairSystem,
-    txp::TaylorVector{4, ComplexF64}, ::FSVec{ComplexF64},
-)::Nothing = _start_pair_taylor!(u, v, S, txp)
-
-# The joint system has no parameters of its own, so a parameter series is empty.
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{1}, S::_StartPairSystem,
-    txp::TaylorVector{2, ComplexF64}, ::TaylorVector{2, ComplexF64},
-)::Nothing = _start_pair_taylor!(u, v, S, txp)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{2}, S::_StartPairSystem,
-    txp::TaylorVector{3, ComplexF64}, ::TaylorVector{3, ComplexF64},
-)::Nothing = _start_pair_taylor!(u, v, S, txp)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{3}, S::_StartPairSystem,
-    txp::TaylorVector{4, ComplexF64}, ::TaylorVector{4, ComplexF64},
-)::Nothing = _start_pair_taylor!(u, v, S, txp)

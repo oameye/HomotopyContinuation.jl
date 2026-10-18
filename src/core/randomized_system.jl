@@ -163,42 +163,12 @@ function evaluate_and_jacobian!(
     return nothing
 end
 
-# Taylor: order-K coefficient of A·F is A·(order-K coefficient of F). Shared
-# implementation for all taylor! dispatch variants.
-@inline function _randomized_taylor!(
+function taylor!(
         u::FSVec{ComplexF64}, v::Val{K}, R::RandomizedSystem,
-        tx::TaylorVector{M, ComplexF64},
-        p::Union{FSVec{ComplexF64}, TaylorVector{M, ComplexF64}},
-    )::Nothing where {K, M}
+        tx::TaylorVector{N, ComplexF64},
+        p::Union{FSVec{ComplexF64}, TaylorVector{<:Any, ComplexF64}},
+    )::Nothing where {K, N}
     taylor!(R.u_full, v, R.system, tx, p)
     _randomize!(u, R.A, R.perm, R.u_full)
     return nothing
 end
-
-# FSVec parameter variants (used by StraightLineHomotopy, etc.)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{1}, R::RandomizedSystem,
-    tx::TaylorVector{2, ComplexF64}, p::FSVec{ComplexF64},
-)::Nothing = _randomized_taylor!(u, v, R, tx, p)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{2}, R::RandomizedSystem,
-    tx::TaylorVector{3, ComplexF64}, p::FSVec{ComplexF64},
-)::Nothing = _randomized_taylor!(u, v, R, tx, p)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{3}, R::RandomizedSystem,
-    tx::TaylorVector{4, ComplexF64}, p::FSVec{ComplexF64},
-)::Nothing = _randomized_taylor!(u, v, R, tx, p)
-
-# TaylorVector parameter variants (used by CoefficientHomotopy/ToricHomotopy Cauchy product path)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{1}, R::RandomizedSystem,
-    tx::TaylorVector{2, ComplexF64}, tp::TaylorVector{2, ComplexF64},
-)::Nothing = _randomized_taylor!(u, v, R, tx, tp)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{2}, R::RandomizedSystem,
-    tx::TaylorVector{3, ComplexF64}, tp::TaylorVector{3, ComplexF64},
-)::Nothing = _randomized_taylor!(u, v, R, tx, tp)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{3}, R::RandomizedSystem,
-    tx::TaylorVector{4, ComplexF64}, tp::TaylorVector{4, ComplexF64},
-)::Nothing = _randomized_taylor!(u, v, R, tx, tp)
