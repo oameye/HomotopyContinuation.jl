@@ -120,25 +120,9 @@ nparameters(::_BoundParameterSystem)::Int = 0
 
 # The ignored argument below is the wrapper's own (empty) parameter vector.
 function evaluate!(
-        u::FSVec{ComplexF64}, F::_BoundParameterSystem,
-        x::FSVec{ComplexF64}, ::FSVec{ComplexF64},
-    )::Nothing
-    evaluate!(u, F.system, x, F.p)
-    return nothing
-end
-
-function evaluate!(
-        u::FSVec{ComplexF64}, F::_BoundParameterSystem,
-        x::FSVec{ComplexDF64}, ::FSVec{ComplexF64},
-    )::Nothing
-    evaluate!(u, F.system, x, F.p)
-    return nothing
-end
-
-function evaluate!(
-        u::FSVec{ComplexDF64}, F::_BoundParameterSystem,
-        x::FSVec{ComplexDF64}, ::FSVec{ComplexF64},
-    )::Nothing
+        u::FSVec{T}, F::_BoundParameterSystem,
+        x::FSVec{S}, ::FSVec{ComplexF64},
+    )::Nothing where {T <: Union{ComplexF64, ComplexDF64}, S <: Union{T, ComplexDF64}}
     evaluate!(u, F.system, x, F.p)
     return nothing
 end

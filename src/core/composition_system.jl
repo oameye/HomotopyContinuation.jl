@@ -80,17 +80,7 @@ end
 # The inner value is `G`'s argument, so an extended-precision residual needs it
 # unrounded.
 function evaluate!(
-        u::FSVec{ComplexF64}, C::_ComposedSystem,
-        x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
-    )::Nothing
-    evaluate!(C.f_ū, C.f, x, p)
-    _unscale!(C.f_ū, C.f_scale)
-    evaluate!(u, C.g, C.f_ū, p)
-    return nothing
-end
-
-function evaluate!(
-        u::FSVec{ComplexDF64}, C::_ComposedSystem,
+        u::Union{FSVec{ComplexF64}, FSVec{ComplexDF64}}, C::_ComposedSystem,
         x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
     )::Nothing
     evaluate!(C.f_ū, C.f, x, p)

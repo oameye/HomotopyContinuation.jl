@@ -136,16 +136,7 @@ function evaluate!(
 end
 
 function evaluate!(
-        u::FSVec{ComplexF64}, R::RandomizedSystem,
-        x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
-    )::Nothing
-    evaluate!(R.ū_full, R.system, x, p)
-    _randomize!(u, R.A, R.perm, R.ū_full)
-    return nothing
-end
-
-function evaluate!(
-        u::FSVec{ComplexDF64}, R::RandomizedSystem,
+        u::Union{FSVec{ComplexF64}, FSVec{ComplexDF64}}, R::RandomizedSystem,
         x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
     )::Nothing
     evaluate!(R.ū_full, R.system, x, p)

@@ -181,16 +181,7 @@ end
 
 function evaluate!(
         u::FSVec{ComplexF64}, H::LinearParameterHomotopy,
-        x::FSVec{ComplexF64}, t::ComplexF64,
-    )::Nothing
-    _update_p!(H, t)
-    evaluate!(u, H.system, x, H.p_t)
-    return nothing
-end
-
-function evaluate!(
-        u::FSVec{ComplexF64}, H::LinearParameterHomotopy,
-        x::FSVec{ComplexDF64}, t::ComplexF64,
+        x::Union{FSVec{ComplexF64}, FSVec{ComplexDF64}}, t::ComplexF64,
     )::Nothing
     _update_p!(H, t)
     evaluate!(u, H.system, x, H.p_t)

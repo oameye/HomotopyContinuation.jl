@@ -76,27 +76,9 @@ nparameters(S::SlicedSystem)::Int = nparameters(S.system)
 end
 
 function evaluate!(
-        u::FSVec{ComplexF64}, S::SlicedSystem,
-        x::FSVec{ComplexF64}, p::FSVec{ComplexF64},
-    )::Nothing
-    evaluate!(u, S.system, x, p)
-    _sliced_rows!(u, S, x, size(S.system)[1])
-    return nothing
-end
-
-function evaluate!(
-        u::FSVec{ComplexF64}, S::SlicedSystem,
-        x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
-    )::Nothing
-    evaluate!(u, S.system, x, p)
-    _sliced_rows!(u, S, x, size(S.system)[1])
-    return nothing
-end
-
-function evaluate!(
-        u::FSVec{ComplexDF64}, S::SlicedSystem,
-        x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
-    )::Nothing
+        u::FSVec{T}, S::SlicedSystem,
+        x::FSVec{X}, p::FSVec{ComplexF64},
+    )::Nothing where {T <: Union{ComplexF64, ComplexDF64}, X <: Union{T, ComplexDF64}}
     evaluate!(u, S.system, x, p)
     _sliced_rows!(u, S, x, size(S.system)[1])
     return nothing
