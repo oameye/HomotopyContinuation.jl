@@ -183,40 +183,15 @@ end
     return nothing
 end
 
-@inline function _composition_taylor!(
+function taylor!(
         u::FSVec{ComplexF64}, v::Val{K}, C::_ComposedSystem,
-        tx::TaylorVector{N, ComplexF64}, p,
+        tx::TaylorVector{N, ComplexF64},
+        p::Union{FSVec{ComplexF64}, TaylorVector{<:Any, ComplexF64}},
     )::Nothing where {K, N}
     _inner_series!(C, v, tx, p)
     taylor!(u, v, C.g, _truncate_series(C.tu, Val(K + 1)), p)
     return nothing
 end
-
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{1}, C::_ComposedSystem,
-    tx::TaylorVector{2, ComplexF64}, p::FSVec{ComplexF64},
-)::Nothing = _composition_taylor!(u, v, C, tx, p)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{2}, C::_ComposedSystem,
-    tx::TaylorVector{3, ComplexF64}, p::FSVec{ComplexF64},
-)::Nothing = _composition_taylor!(u, v, C, tx, p)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{3}, C::_ComposedSystem,
-    tx::TaylorVector{4, ComplexF64}, p::FSVec{ComplexF64},
-)::Nothing = _composition_taylor!(u, v, C, tx, p)
-
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{1}, C::_ComposedSystem,
-    tx::TaylorVector{2, ComplexF64}, tp::TaylorVector{2, ComplexF64},
-)::Nothing = _composition_taylor!(u, v, C, tx, tp)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{2}, C::_ComposedSystem,
-    tx::TaylorVector{3, ComplexF64}, tp::TaylorVector{3, ComplexF64},
-)::Nothing = _composition_taylor!(u, v, C, tx, tp)
-taylor!(
-    u::FSVec{ComplexF64}, v::Val{3}, C::_ComposedSystem,
-    tx::TaylorVector{4, ComplexF64}, tp::TaylorVector{4, ComplexF64},
-)::Nothing = _composition_taylor!(u, v, C, tx, tp)
 
 ## ── User-facing composition ─────────────────────────────────────────────────
 
