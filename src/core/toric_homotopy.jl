@@ -286,18 +286,7 @@ end
 
 function evaluate!(
         u::FSVec{ComplexF64}, H::ToricHomotopy,
-        x::FSVec{ComplexF64}, t::ComplexF64,
-    )::Nothing
-    _update_toric_coeffs!(H, t)
-    evaluate!(u, H.system, x, H.coeffs)
-    return nothing
-end
-
-## evaluate! DF64 variant
-
-function evaluate!(
-        u::FSVec{ComplexF64}, H::ToricHomotopy,
-        x::FSVec{ComplexDF64}, t::ComplexF64,
+        x::Union{FSVec{ComplexF64}, FSVec{ComplexDF64}}, t::ComplexF64,
     )::Nothing
     _update_toric_coeffs!(H, t)
     evaluate!(u, H.system, x, H.coeffs)
