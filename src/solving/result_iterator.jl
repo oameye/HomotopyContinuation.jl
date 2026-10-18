@@ -10,24 +10,8 @@
 
 # ── One path per cache kind ────────────────────────────────────────────────
 
-function _path_result(cache::SolveCache, i::Int)::PathResult
-    x₀ = cache.start_solutions[i]
-    track!(cache.tracker, x₀)
-    return PathResult(
-        cache.tracker; path_number = i, start_solution = Vector{ComplexF64}(x₀),
-    )
-end
-
-_path_result(cache::WorkerSolveCache, i::Int)::PathResult =
-    _track_path!(cache.worker, cache.start_solutions[i], i)
-
-function _path_result(cache::PolyhedralSolveCache, i::Int)::PathResult
-    cell, x₀ = cache.start_solutions[i]
-    return _track_polyhedral_path!(
-        cache.toric_tracker, cache.coeff_tracker, cache.toric_homotopy,
-        cache.support, cache.lifting, cache.x_buffer, cell, x₀, i,
-    )
-end
+_path_result(cache::PathSolveCache, i::Int)::PathResult =
+    path_work(cache)(cache.worker, i)
 
 # ── Iteration ──────────────────────────────────────────────────────────────
 
@@ -65,19 +49,9 @@ end
 # tracker. Tracking the same paths concurrently needs one worker state per task,
 # which is what the cache's builder makes.
 
-_path_result(cache::SolveCache, ws::TrackingWorkerState, i::Int)::PathResult =
-    _track_path!(ws, cache.start_solutions[i], i)
-
-_path_result(cache::WorkerSolveCache, ws::PathWorker, i::Int)::PathResult =
-    _track_path!(ws, cache.start_solutions[i], i)
-
-function _path_result(
-        cache::PolyhedralSolveCache, ws::PolyhedralWorkerState, i::Int,
-    )::PathResult
-    cell, x₀ = cache.start_solutions[i]
-    return _track_polyhedral_path!(ws, cache.support, cache.lifting, cell, x₀, i)
-end
-
+# `worker` comes from `_path_worker` over the same cache.
+_path_result(cache::PathSolveCache, worker, i::Int)::PathResult =
+    path_work(cache)(worker, i)
 """
     _replay_ntasks(ri::ResultIterator, exec::AbstractExecutor)
 
@@ -156,9 +130,7 @@ function _foreach_path(
     return nothing
 end
 
-_path_worker(cache::SolveCache)::TrackingWorkerState = cache.builder()
-_path_worker(cache::WorkerSolveCache)::PathWorker = cache.builder()
-_path_worker(cache::PolyhedralSolveCache)::PolyhedralWorkerState = cache.builder()
+_path_worker(cache::PathSolveCache) = cache.builder()
 
 function Base.show(io::IO, ri::ResultIterator)
     print(
@@ -290,10 +262,6 @@ function Result(ri::ResultIterator)::Result
     return _finalize_result(prs, length(prs), seed(ri), _excess_checkers(ri.cache))
 end
 
-_excess_checkers(cache::SolveCache)::ExcessCheckers = cache.excess_checkers
-_excess_checkers(cache::PolyhedralSolveCache)::ExcessCheckers = cache.excess_checkers
-# The subspace routes never square up, so they carry nothing to re-check.
-_excess_checkers(::WorkerSolveCache)::ExcessCheckers = ExcessCheckers()
 
 # ── Entry points ───────────────────────────────────────────────────────────
 

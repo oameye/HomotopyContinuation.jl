@@ -130,11 +130,6 @@ DistributedExecutor(;
     )
 end
 
-function _distributed_solve!(cache)
-    Base.@nospecialize cache
-    return _distributed_ext_missing()
-end
-
 function _distributed_monodromy_solve!(executor, MS, results, seed, progress)
     Base.@nospecialize executor MS results seed progress
     return _distributed_ext_missing()

@@ -1,30 +1,9 @@
-## Per-route work units, progress reporters, and the `solve!` dispatch.
+## The sweep work unit, progress reporters, and distributed path tracking.
 
-# ── Work units ──────────────────────────────────────────────────────────────
+# ── Sweep work unit ─────────────────────────────────────────────────────────
 #
-# A work unit is the whole problem as plain data: a builder that produces one
-# per-task state, plus whatever the per-path body reads. It ships once per
-# process and is called as `work(state, i)` for the global path index `i`.
-
-struct TrackWork{B}
-    builder::B
-    starts::Vector{Vector{ComplexF64}}
-end
-
-(w::TrackWork)(state, i::Int)::HCN.PathResult =
-    HCN._track_path!(state, w.starts[i], i)
-
-struct PolyhedralWork{B}
-    builder::B
-    starts::Vector{Tuple{MixedSubdivisions.MixedCell, Vector{ComplexF64}}}
-    support::Vector{Matrix{Int32}}
-    lifting::Vector{Vector{Int32}}
-end
-
-function (w::PolyhedralWork)(state, i::Int)::HCN.PathResult
-    cell, x₀ = w.starts[i]
-    return HCN._track_polyhedral_path!(state, w.support, w.lifting, cell, x₀, i)
-end
+# The solve routes use the work units in `track_paths.jl`; a sweep adds the
+# target to the path index.
 
 # A sweep walks the (target, path) product in target-major order, so a task
 # retargets only when it crosses a target boundary. The state has to remember
@@ -106,110 +85,14 @@ function (r::SweepReport)(batch::UnitRange{Int}, ::Vector{HCN.PathResult})::Noth
     return nothing
 end
 
-# ── Total degree and parameter homotopy ─────────────────────────────────────
+# ── Every path of a solve cache ─────────────────────────────────────────────
 
-function HCN._distributed_solve!(
-        cache::HCN.SolveCache{HCN.DistributedExecutor},
-    )::HCN.Result
-    solver = cache.show_progress ?
-        _solve_total_degree_distributed_with_progress :
-        _solve_total_degree_distributed_without_progress
-    solver = Base.inferencebarrier(solver)
-    return HCN._dispatch_solve_policy(solver, cache)
-end
-
-@noinline _solve_total_degree_distributed_without_progress(
-    cache::HCN.SolveCache{HCN.DistributedExecutor},
-) = _solve_total_degree_distributed(cache, NoReport())
-@noinline _solve_total_degree_distributed_with_progress(
-    cache::HCN.SolveCache{HCN.DistributedExecutor},
-) = _solve_total_degree_distributed(
-    cache, PathReport(HCN.make_progress(length(cache.start_solutions))),
-)
-
-function _solve_total_degree_distributed(
-        cache::HCN.SolveCache{HCN.DistributedExecutor}, report::R,
-    )::HCN.Result where {R}
-    starts = cache.start_solutions
-    n_paths = length(starts)
-    results = _distributed_map(
-        cache.executor, TrackWork(cache.builder, starts), n_paths, report,
-        cache.early_stop,
-    )
-    tracked = HCN._assigned_results(results)
-    return HCN._finalize_result(
-        tracked, length(tracked), cache.seed, cache.excess_checkers,
-    )
-end
-
-# ── Two-phase polyhedral ────────────────────────────────────────────────────
-
-function HCN._distributed_solve!(
-        cache::HCN.PolyhedralSolveCache{HCN.DistributedExecutor},
-    )::HCN.Result
-    solver = cache.show_progress ?
-        _solve_polyhedral_distributed_with_progress :
-        _solve_polyhedral_distributed_without_progress
-    solver = Base.inferencebarrier(solver)
-    return HCN._dispatch_solve_policy(solver, cache)
-end
-
-@noinline _solve_polyhedral_distributed_without_progress(
-    cache::HCN.PolyhedralSolveCache{HCN.DistributedExecutor},
-) = _solve_polyhedral_distributed(cache, NoReport())
-@noinline _solve_polyhedral_distributed_with_progress(
-    cache::HCN.PolyhedralSolveCache{HCN.DistributedExecutor},
-) = _solve_polyhedral_distributed(
-    cache, PathReport(HCN.make_progress(length(cache.start_solutions))),
-)
-
-function _solve_polyhedral_distributed(
-        cache::HCN.PolyhedralSolveCache{HCN.DistributedExecutor}, report::R,
-    )::HCN.Result where {R}
-    starts = cache.start_solutions
-    n_paths = length(starts)
-    work = PolyhedralWork(cache.builder, starts, cache.support, cache.lifting)
-    results = _distributed_map(
-        cache.executor, work, n_paths, report, cache.early_stop,
-    )
-    tracked = HCN._assigned_results(results)
-    return HCN._finalize_result(
-        tracked, length(tracked), cache.seed, cache.excess_checkers,
-    )
-end
-
-# ── Subspace to subspace, and retargeted parameter homotopies ───────────────
-
-function HCN._distributed_solve!(
-        cache::HCN.WorkerSolveCache{HCN.DistributedExecutor},
-    )::HCN.Result
-    solver = cache.show_progress ?
-        _solve_worker_distributed_with_progress :
-        _solve_worker_distributed_without_progress
-    solver = Base.inferencebarrier(solver)
-    return HCN._dispatch_solve_policy(solver, cache)
-end
-
-@noinline _solve_worker_distributed_without_progress(
-    cache::HCN.WorkerSolveCache{HCN.DistributedExecutor},
-) = _solve_worker_distributed(cache, NoReport())
-@noinline _solve_worker_distributed_with_progress(
-    cache::HCN.WorkerSolveCache{HCN.DistributedExecutor},
-) = _solve_worker_distributed(
-    cache, PathReport(HCN.make_progress(length(cache.start_solutions))),
-)
-
-function _solve_worker_distributed(
-        cache::HCN.WorkerSolveCache{HCN.DistributedExecutor}, report::R,
-    )::HCN.Result where {R}
-    starts = cache.start_solutions
-    n_paths = length(starts)
-    results = _distributed_map(
-        cache.executor, TrackWork(cache.builder, starts), n_paths, report,
-        cache.early_stop,
-    )
-    tracked = HCN._assigned_results(results)
-    return HCN._finalize_result(tracked, length(tracked), cache.seed, HCN.ExcessCheckers())
+function HCN.track_paths(
+        exec::HCN.DistributedExecutor, _, work::Union{HCN.TrackWork, HCN.PolyhedralWork},
+        n::Int, progress::P, stop::HCN.EarlyStop,
+    )::Vector{HCN.PathResult} where {P}
+    report = progress === nothing ? NoReport() : PathReport(progress)
+    return HCN._assigned_results(_distributed_map(exec, work, n, report, stop))
 end
 
 # ── Many-target sweeps ──────────────────────────────────────────────────────

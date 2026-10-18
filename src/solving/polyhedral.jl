@@ -102,15 +102,11 @@ Created by `CommonSolve.init`.
 struct PolyhedralSolveCache{E <: AbstractExecutor}
     executor::E
     builder::PolyhedralPathBuilder
-    toric_tracker::Tracker
-    coeff_tracker::EndgameTracker
-    toric_homotopy::ToricHomotopy
+    worker::PolyhedralWorkerState
     support::Vector{Matrix{Int32}}
     lifting::Vector{Vector{Int32}}
     start_solutions::Vector{Tuple{MixedSubdivisions.MixedCell, Vector{ComplexF64}}}
     seed::UInt32
-    # carries a point from the toric phase to the coefficient phase
-    x_buffer::Vector{ComplexF64}
     # GC roots for interpreters — must be kept alive for FunctionWrapper closures
     _support_system::_SupportSystem
     # One checker when the system was squared up, none when it was already square.
@@ -689,11 +685,9 @@ function _init_polyhedral(
     worker = builder()
 
     return PolyhedralSolveCache(
-        exec, PolyhedralPathBuilder(builder),
-        worker.toric_tracker, worker.coeff_tracker, worker.toric_homotopy,
+        exec, PolyhedralPathBuilder(builder), worker,
         support, lifting,
         all_starts, seed,
-        worker.x_buffer,
         support_system,
         excess_checkers,
         show_progress,
@@ -791,22 +785,6 @@ function _track_toric_phase!(
     return tracker.state.code
 end
 
-# ── CommonSolve.solve!: serial two-phase path tracking ───────────────────
-
-function CommonSolve.solve!(cache::PolyhedralSolveCache{Serial})::Result
-    solver = cache.show_progress ?
-        _solve_polyhedral_serial_with_progress :
-        _solve_polyhedral_serial_without_progress
-    solver = Base.inferencebarrier(solver)
-    return _dispatch_solve_policy(solver, cache)
-end
-
-
-@noinline _solve_polyhedral_serial_without_progress(cache::PolyhedralSolveCache{Serial}) =
-    _solve_polyhedral_serial(cache, nothing)
-@noinline _solve_polyhedral_serial_with_progress(cache::PolyhedralSolveCache{Serial}) =
-    _solve_polyhedral_serial(cache, make_progress(length(cache.start_solutions)))
-
 # One two-phase path: toric phase from the mixed cell, then the coefficient homotopy.
 function _track_polyhedral_path!(
         toric_tracker::Tracker, coeff_tracker::EndgameTracker,
@@ -852,83 +830,3 @@ _track_polyhedral_path!(
     ws.toric_tracker, ws.coeff_tracker, ws.toric_homotopy, support, lifting,
     ws.x_buffer, cell, x₀, k,
 )
-
-function _solve_polyhedral_serial(cache::PolyhedralSolveCache{Serial}, progress)::Result
-    support = cache.support
-    n_paths = length(cache.start_solutions)
-    path_results = PathResult[]
-    sizehint!(path_results, n_paths)
-
-    stats = ProgressStats()
-
-    stop = cache.early_stop
-    for (k, (cell, x₀)) in enumerate(cache.start_solutions)
-        pr = _track_polyhedral_path!(
-            cache.toric_tracker, cache.coeff_tracker, cache.toric_homotopy,
-            support, cache.lifting, cache.x_buffer, cell, x₀, k,
-        )
-        push!(path_results, pr)
-        update_progress!(progress, k, stats, pr)
-        is_success(pr) && stop(pr) && break
-    end
-
-    return _finalize_result(
-        path_results, length(path_results), cache.seed, cache.excess_checkers,
-    )
-end
-
-# ── CommonSolve.solve!: threaded two-phase path tracking ─────────────────
-
-function CommonSolve.solve!(cache::PolyhedralSolveCache{Threaded})::Result
-    solver = cache.show_progress ?
-        _solve_polyhedral_threaded_with_progress :
-        _solve_polyhedral_threaded_without_progress
-    solver = Base.inferencebarrier(solver)
-    return _dispatch_solve_policy(solver, cache)
-end
-
-@noinline _solve_polyhedral_threaded_without_progress(cache::PolyhedralSolveCache{Threaded}) =
-    _solve_polyhedral_threaded(cache, nothing)
-@noinline _solve_polyhedral_threaded_with_progress(cache::PolyhedralSolveCache{Threaded}) =
-    _solve_polyhedral_threaded(cache, make_progress(length(cache.start_solutions)))
-
-function _solve_polyhedral_threaded(cache::PolyhedralSolveCache{Threaded}, progress)::Result
-    nt = cache.executor.ntasks
-    starts = cache.start_solutions
-    n_paths = length(starts)
-    results = Vector{PathResult}(undef, n_paths)
-    support = cache.support
-    lifting = cache.lifting
-
-    stats = ProgressStats()
-    counter = Threads.Atomic{Int}(0)
-    plock = ReentrantLock()
-
-    stop = cache.early_stop
-    stopped = Threads.Atomic{Bool}(false)
-
-    @tasks for i in eachindex(starts)
-        @set ntasks = nt
-        @local ws = cache.builder()
-
-        if !stopped[]
-            cell, x₀ = starts[i]
-            pr = _track_polyhedral_path!(ws, support, lifting, cell, x₀, i)
-            results[i] = pr
-
-            if progress !== nothing
-                k = Threads.atomic_add!(counter, 1) + 1
-                @lock plock update_progress!(progress, k, stats, pr)
-            end
-            is_success(pr) && stop(pr) && (stopped[] = true)
-        end
-    end
-
-    tracked = _assigned_results(results)
-    return _finalize_result(tracked, length(tracked), cache.seed, cache.excess_checkers)
-end
-
-# ── CommonSolve.solve!: distributed (extension) ──────────────────────────
-
-CommonSolve.solve!(cache::PolyhedralSolveCache{DistributedExecutor})::Result =
-    _distributed_solve!(cache)

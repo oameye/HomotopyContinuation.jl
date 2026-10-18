@@ -177,14 +177,16 @@ function solve(
         F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree(),
         exec::E = Threaded(),
     )::Result where {E <: AbstractExecutor}
-    return CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
+    cache::PathSolveCache = CommonSolve.init(F, L, alg, exec)
+    return CommonSolve.solve!(cache)
 end
 
 function solve(
         F::System, L::LinearSubspace, alg::Polyhedral,
         exec::E = Threaded(),
     )::Result where {E <: AbstractExecutor}
-    return CommonSolve.solve!(CommonSolve.init(F, L, alg, exec))
+    cache::PathSolveCache = CommonSolve.init(F, L, alg, exec)
+    return CommonSolve.solve!(cache)
 end
 
 function solve(F::System, L::LinearSubspace, exec::E)::Result where {E <: AbstractExecutor}
