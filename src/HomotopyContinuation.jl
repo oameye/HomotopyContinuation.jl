@@ -174,6 +174,7 @@ end
     include("solving/slice.jl")
     include("solving/multi_homogeneous.jl")
     include("solving/subspace_solve.jl")
+    include("solving/track_paths.jl")
     include("solving/sweep.jl")
     include("solving/result_iterator.jl")
     include("solving/monodromy.jl")

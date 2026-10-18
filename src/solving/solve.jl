@@ -5,7 +5,7 @@
 struct SolveCache{E <: AbstractExecutor}
     executor::E
     builder::TrackingBuilder
-    tracker::EndgameTracker
+    worker::TrackingWorkerState
     start_solutions::Vector{Vector{ComplexF64}}
     seed::UInt32
     # One checker when the system was squared up, none when it was already square.
@@ -180,7 +180,7 @@ function _solve_cache(
     )::SolveCache{E} where {E <: AbstractExecutor}
     erased = TrackingBuilder(builder)
     return SolveCache(
-        exec, erased, erased().tracker, starts, seed, excess_checkers, show_progress,
+        exec, erased, erased(), starts, seed, excess_checkers, show_progress,
         early_stop,
     )
 end
@@ -252,26 +252,6 @@ function _init_total_degree(
     )
 end
 
-# ── CommonSolve.solve!: serial ─────────────────────────────────────────────
-
-function CommonSolve.solve!(cache::SolveCache{Serial})::Result
-    solver = cache.show_progress ?
-        _solve_total_degree_serial_with_progress :
-        _solve_total_degree_serial_without_progress
-    solver = Base.inferencebarrier(solver)
-    return _dispatch_solve_policy(solver, cache)
-end
-
-@noinline function _dispatch_solve_policy(solver::Function, cache)::Result
-    Base.@nospecialize solver cache
-    return solver(cache)
-end
-
-@noinline _solve_total_degree_serial_without_progress(cache::SolveCache{Serial}) =
-    _solve_total_degree_serial(cache, nothing)
-@noinline _solve_total_degree_serial_with_progress(cache::SolveCache{Serial}) =
-    _solve_total_degree_serial(cache, make_progress(length(cache.start_solutions)))
-
 # `start_solution` is copied: the caller's `starts` vector outlives the result.
 function _track_path!(
         eg::EndgameTracker, x₀::Vector{ComplexF64}, k::Int,
@@ -282,76 +262,6 @@ end
 
 _track_path!(ws::TrackingWorkerState, x₀::Vector{ComplexF64}, k::Int)::PathResult =
     _track_path!(ws.tracker, x₀, k)
-
-function _solve_total_degree_serial(cache::SolveCache{Serial}, progress)::Result
-    eg = cache.tracker
-    n_paths = length(cache.start_solutions)
-    path_results = PathResult[]
-    sizehint!(path_results, n_paths)
-
-    stats = ProgressStats()
-    stop = cache.early_stop
-    for (k, x₀) in enumerate(cache.start_solutions)
-        pr = _track_path!(eg, x₀, k)
-        push!(path_results, pr)
-        update_progress!(progress, k, stats, pr)
-        is_success(pr) && stop(pr) && break
-    end
-
-    return _finalize_result(
-        path_results, length(path_results), cache.seed, cache.excess_checkers,
-    )
-end
-
-# ── CommonSolve.solve!: threaded ───────────────────────────────────────────
-
-function CommonSolve.solve!(cache::SolveCache{Threaded})::Result
-    solver = cache.show_progress ?
-        _solve_total_degree_threaded_with_progress :
-        _solve_total_degree_threaded_without_progress
-    solver = Base.inferencebarrier(solver)
-    return _dispatch_solve_policy(solver, cache)
-end
-
-@noinline _solve_total_degree_threaded_without_progress(cache::SolveCache{Threaded}) =
-    _solve_total_degree_threaded(cache, nothing)
-@noinline _solve_total_degree_threaded_with_progress(cache::SolveCache{Threaded}) =
-    _solve_total_degree_threaded(cache, make_progress(length(cache.start_solutions)))
-
-function _solve_total_degree_threaded(cache::SolveCache{Threaded}, progress)::Result
-    nt = cache.executor.ntasks
-    starts = cache.start_solutions
-    n_paths = length(starts)
-    results = Vector{PathResult}(undef, n_paths)
-
-    stats = ProgressStats()
-    counter = Threads.Atomic{Int}(0)
-    plock = ReentrantLock()
-    stop = cache.early_stop
-    stopped = Threads.Atomic{Bool}(false)
-
-    @tasks for i in eachindex(starts)
-        @set ntasks = nt
-        @local ws = cache.builder()
-        if !stopped[]
-            pr = _track_path!(ws, starts[i], i)
-            results[i] = pr
-            if progress !== nothing
-                k = Threads.atomic_add!(counter, 1) + 1
-                @lock plock update_progress!(progress, k, stats, pr)
-            end
-            is_success(pr) && stop(pr) && (stopped[] = true)
-        end
-    end
-
-    tracked = _assigned_results(results)
-    return _finalize_result(tracked, length(tracked), cache.seed, cache.excess_checkers)
-end
-
-# ── CommonSolve.solve!: distributed (extension) ────────────────────────────
-
-CommonSolve.solve!(cache::SolveCache{DistributedExecutor})::Result =
-    _distributed_solve!(cache)
 
 # ── Convenience: solve(F, alg, exec) ─────────────────────────────────────
 
@@ -377,7 +287,8 @@ function solve(
         alg::TotalDegree = TotalDegree(),
         exec::E = Threaded(),
     )::Result where {E <: AbstractExecutor}
-    return CommonSolve.solve!(CommonSolve.init(F, alg, exec))
+    cache::PathSolveCache = CommonSolve.init(F, alg, exec)
+    return CommonSolve.solve!(cache)
 end
 
 function solve(F::CloneableSystem, exec::E)::Result where {E <: AbstractExecutor}
@@ -459,7 +370,8 @@ end
 function solve(
         F::Union{System, CompositionSystem}, alg::Polyhedral, exec::E = Threaded(),
     )::Result where {E <: AbstractExecutor}
-    return CommonSolve.solve!(CommonSolve.init(F, alg, exec))
+    cache::PathSolveCache = CommonSolve.init(F, alg, exec)
+    return CommonSolve.solve!(cache)
 end
 
 # The polyhedral start system is built from the composed monomials, which only

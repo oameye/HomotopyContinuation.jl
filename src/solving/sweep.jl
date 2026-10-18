@@ -53,12 +53,13 @@ _retarget!(ws::Union{AmbientWorkerState, IntrinsicWorkerState}, q::LinearSubspac
 _retarget!(ws::PathWorker, q)::Nothing = _retarget!(ws._inner[], q)::Nothing
 
 # Retarget and track every start solution once.
-function _sweep_one!(
-        ws::PathWorker, starts::Vector{Vector{ComplexF64}},
-        seed::UInt32, q,
-    )::Result
-    _retarget!(ws, q)
-    return _track_all_serial(ws, starts, seed, nothing)
+function _sweep_one!(cache::WorkerSolveCache{Serial}, q)::Result
+    _retarget!(cache.worker, q)
+    prs = track_paths(
+        cache.executor, cache.worker, path_work(cache),
+        length(cache.start_solutions), nothing, NEVER_STOP,
+    )
+    return _finalize_result(prs, length(prs), cache.seed, ExcessCheckers())
 end
 
 # ── Per-target Results ─────────────────────────────────────────────────────
@@ -132,21 +133,14 @@ function _sweep_entries(
         cache::WorkerSolveCache{Serial}, targets::AbstractVector, idxs::Vector,
         first_q, transform_result::TR, transform_parameters::TP, progress,
     ) where {TR, TP}
-    ws = cache.worker
-    starts = cache.start_solutions
-    np = length(starts)
+    np = length(cache.start_solutions)
     out = _entry_vector(
-        transform_result(
-            _sweep_one!(ws, starts, cache.seed, first_q), targets[idxs[1]],
-        ),
-        length(idxs),
+        transform_result(_sweep_one!(cache, first_q), targets[idxs[1]]), length(idxs),
     )
     update_many_progress!(progress, 1, np)
     for k in 2:length(idxs)
         q = targets[idxs[k]]
-        out[k] = transform_result(
-            _sweep_one!(ws, starts, cache.seed, transform_parameters(q)), q,
-        )
+        out[k] = transform_result(_sweep_one!(cache, transform_parameters(q)), q)
         update_many_progress!(progress, k, k * np)
     end
     return out

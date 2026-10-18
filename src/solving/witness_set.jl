@@ -223,7 +223,7 @@ Membership(;
 
 # ── Internal primitives ──────────────────────────────────────────────────────
 
-@noinline _solve_witness_cache(cache)::Result = CommonSolve.solve!(cache)
+@noinline _solve_witness_cache(cache::PathSolveCache)::Result = CommonSolve.solve!(cache)
 
 # Initialize witness points: solve `V(F) ∩ L` by appending the linear equations
 # of `L` to `F` and running the ordinary total-degree solve. Returns the
