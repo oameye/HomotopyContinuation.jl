@@ -2,7 +2,7 @@ name: Quality
 
 on:
   push:
-    branches: [v3]
+    branches: [main]
     paths:
       - '.github/workflows/Quality.yml'
       - 'Project.toml'
