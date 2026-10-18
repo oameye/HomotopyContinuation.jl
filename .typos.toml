@@ -1,0 +1,15 @@
+[default.extend-identifiers]
+shwo_progress = "shwo_progress"
+
+[default.extend-words]
+hom = "hom"
+Hom = "Hom"
+Ser = "Ser"
+CNA = "CNA"
+bre = "bre"
+iy = "iy"
+iz = "iz"
+colinear = "colinear"
+nd = "nd"
+Fo = "Fo"
+mis = "mis"

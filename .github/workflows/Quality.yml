@@ -2,7 +2,8 @@ name: Quality
 
 on:
   push:
-    branches: [main]
+    branches:
+      - 'main'
     paths:
       - '.github/workflows/Quality.yml'
       - 'Project.toml'
@@ -13,6 +14,8 @@ on:
       - 'benchmark/**'
       - 'quality/**'
   pull_request:
+    branches:
+      - 'main'
     paths:
       - '.github/workflows/Quality.yml'
       - 'Project.toml'
@@ -22,7 +25,11 @@ on:
       - 'lib/**'
       - 'benchmark/**'
       - 'quality/**'
-    types: [opened, reopened, synchronize, ready_for_review]
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -30,7 +37,7 @@ concurrency:
 
 jobs:
   static-contracts:
-    name: Static contracts / Julia ${{ matrix.version }}
+    name: Static contracts - Julia ${{ matrix.version }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     if: ${{ !github.event.pull_request.draft }}
@@ -40,7 +47,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ['1.10', '1']
+        version:
+          - 'min'
+          - '1'
     env:
       JULIA_NUM_THREADS: '1'
       OPENBLAS_NUM_THREADS: '1'
@@ -54,22 +63,22 @@ jobs:
           show-versioninfo: true
           version: ${{ matrix.version }}
       - uses: julia-actions/cache@v3
-      - name: Instantiate test environment
-        run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Set up test environment
+        run: julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
       - name: Run package and compiler contracts
         run: |
-          julia --project=test test/aqua_test.jl
-          julia --project=test test/alloc_check_test.jl
-          julia --project=test test/concrete_structs_test.jl
-          julia --project=test test/explicit_imports_test.jl
-          julia --project=test test/dispatch_doctor_test.jl
-          julia --project=test test/instruction_count_test.jl
-          julia --project=test quality/linear_subspace_compiler.jl
-          julia --project=test quality/monodromy_compiler.jl
-          julia --project=test quality/nid_compiler.jl
+          julia --project=test test/quality/aqua_test.jl
+          julia --project=test test/quality/alloc_check_test.jl
+          julia --project=test test/quality/concrete_structs_test.jl
+          julia --project=test test/quality/explicit_imports_test.jl
+          julia --project=test test/quality/dispatch_doctor_test.jl
+          julia --project=test test/quality/instruction_count_test.jl
+          julia --project=test test/quality/linear_subspace_compiler.jl
+          julia --project=test test/quality/monodromy_compiler.jl
+          julia --project=test test/quality/nid_compiler.jl
 
   strict-mode:
-    name: StrictMode / Julia 1.13
+    name: StrictMode - Julia 1.13
     runs-on: ubuntu-latest
     timeout-minutes: 180
     if: ${{ !github.event.pull_request.draft }}
