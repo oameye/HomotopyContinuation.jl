@@ -7,14 +7,16 @@ on:
       - '.github/workflows/JET.yml'
       - 'src/**'
       - 'ext/**'
-      - 'test/**'
+      - 'quality/jet.jl'
+      - 'quality/Project.toml'
       - 'Project.toml'
   pull_request:
     paths:
       - '.github/workflows/JET.yml'
       - 'src/**'
       - 'ext/**'
-      - 'test/**'
+      - 'quality/jet.jl'
+      - 'quality/Project.toml'
       - 'Project.toml'
     types: [opened, reopened, synchronize, ready_for_review]
 
@@ -39,7 +41,7 @@ jobs:
           show-versioninfo: true
           version: '1'
       - uses: julia-actions/cache@v3
-      - name: Instantiate test environment
-        run: julia --project=test -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+      - name: Instantiate quality environment
+        run: julia --project=quality -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
       - name: Run JET analysis
-        run: julia --project=test test/jet_test.jl
+        run: julia --project=quality quality/jet.jl

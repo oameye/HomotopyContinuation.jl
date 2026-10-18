@@ -10,7 +10,6 @@ const QUALITY_CONTRACTS = Set(
         "dispatch_doctor_test",
         "explicit_imports_test",
         "instruction_count_test",
-        "jet_test",
     ],
 )
 

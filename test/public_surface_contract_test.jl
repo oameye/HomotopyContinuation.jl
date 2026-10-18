@@ -19,7 +19,6 @@ const QUALITY_CONTRACTS = Set(
         "dispatch_doctor_test.jl",
         "explicit_imports_test.jl",
         "instruction_count_test.jl",
-        "jet_test.jl",
     ],
 )
 

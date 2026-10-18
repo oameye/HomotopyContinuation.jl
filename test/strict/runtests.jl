@@ -20,7 +20,6 @@ const OTHER_CONTRACTS = [
     "aqua_test",
     "concrete_structs_test",
     "explicit_imports_test",
-    "jet_test",
 ]
 
 testsuite = find_tests(dirname(@__DIR__))
