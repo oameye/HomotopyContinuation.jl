@@ -186,10 +186,9 @@ function _init_intrinsic_subspace(
         G::System, starts::Vector{Vector{ComplexF64}},
         L_start::LinearSubspace, L_target::LinearSubspace,
         chart::Vector{ComplexF64}, gamma::ComplexF64,
-        exec::E, seed::UInt32, tracker_options::TrackerOptions,
-        endgame_options::EndgameOptions, show_progress::Bool,
-        early_stop::EarlyStop = NEVER_STOP,
+        exec::E, alg::AbstractAlgorithm,
     )::WorkerSolveCache{E} where {E <: AbstractExecutor}
+    tracker_options, endgame_options = _tracker_options(alg), _endgame_options(alg)
     builder = IntrinsicSubspaceBuilder(
         G, convert(LinearSubspace{ComplexF64}, L_start),
         convert(LinearSubspace{ComplexF64}, L_target),
@@ -198,7 +197,8 @@ function _init_intrinsic_subspace(
     worker = builder()
     _check_subspace_square(worker.homotopy, "intrinsic")
     return WorkerSolveCache(
-        exec, builder, worker, starts, seed, show_progress, early_stop,
+        exec, builder, worker, starts, _seed(alg), _show_progress(alg),
+        early_stop_callback(alg),
     )
 end
 
@@ -208,10 +208,9 @@ function _init_extrinsic_subspace(
         G::System, starts::Vector{Vector{ComplexF64}},
         L_start::LinearSubspace, L_target::LinearSubspace,
         chart::Vector{ComplexF64}, gamma::ComplexF64,
-        exec::E, seed::UInt32, tracker_options::TrackerOptions,
-        endgame_options::EndgameOptions, show_progress::Bool,
-        early_stop::EarlyStop = NEVER_STOP,
+        exec::E, alg::AbstractAlgorithm,
     )::WorkerSolveCache{E} where {E <: AbstractExecutor}
+    tracker_options, endgame_options = _tracker_options(alg), _endgame_options(alg)
     V = convert(LinearSubspace{ComplexF64}, L_start)
     W = convert(LinearSubspace{ComplexF64}, L_target)
     if isempty(chart)
@@ -221,7 +220,8 @@ function _init_extrinsic_subspace(
         worker = builder()
         _check_subspace_square(worker.homotopy, "extrinsic")
         return WorkerSolveCache(
-            exec, builder, worker, starts, seed, show_progress, early_stop,
+            exec, builder, worker, starts, _seed(alg), _show_progress(alg),
+            early_stop_callback(alg),
         )
     end
     chart_builder = ChartExtrinsicSubspaceBuilder(
@@ -230,7 +230,8 @@ function _init_extrinsic_subspace(
     chart_worker = chart_builder()
     _check_subspace_square(chart_worker.homotopy, "extrinsic")
     return WorkerSolveCache(
-        exec, chart_builder, chart_worker, starts, seed, show_progress, early_stop,
+        exec, chart_builder, chart_worker, starts, _seed(alg), _show_progress(alg),
+        early_stop_callback(alg),
     )
 end
 
@@ -270,17 +271,9 @@ function CommonSolve.init(
         F, starts, L_start, L_target, seed,
     )
     return if intrinsic
-        _init_intrinsic_subspace(
-            G, points, L_start, L_target, chart, gamma, exec, seed,
-            _tracker_options(alg), _endgame_options(alg), _show_progress(alg),
-            early_stop_callback(alg),
-        )
+        _init_intrinsic_subspace(G, points, L_start, L_target, chart, gamma, exec, alg)
     else
-        _init_extrinsic_subspace(
-            G, points, L_start, L_target, chart, gamma, exec, seed,
-            _tracker_options(alg), _endgame_options(alg), _show_progress(alg),
-            early_stop_callback(alg),
-        )
+        _init_extrinsic_subspace(G, points, L_start, L_target, chart, gamma, exec, alg)
     end
 end
 
