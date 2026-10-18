@@ -80,14 +80,15 @@ mutable struct EndgameState
     best_singular_winding::Int
     # Scaling for condition number. Every endgame decision reads the condition
     # number of the column-scaled Jacobian; `unit_scaling` is the all-ones row
-    # scaling that says so. Skeel row scaling normalizes away the spread between
+    # scaling that says so, one entry per Jacobian row. Skeel row scaling normalizes away the spread between
     # the row norms, which is the divergence signal a path running to infinity
     # leaves behind.
     const col_scaling::FSVec{Float64}
     const unit_scaling::FSVec{Float64}
 end
 
-function EndgameState(n::Int)
+# `m` Jacobian rows, `n` unknowns; an overdetermined homotopy has `m > n`.
+function EndgameState(m::Int, n::Int)
     return EndgameState(
         EndgameCode.TRACKING,
         false, false, 0,                                # code, in_endgame, in_singular, winding
@@ -109,7 +110,7 @@ function EndgameState(n::Int)
         FSVec{ComplexF64}(zeros(ComplexF64, n)),          # best_singular
         Inf, 0,                                           # best_singular_accuracy, _winding
         FSVec{Float64}(zeros(n)),                         # col_scaling
-        FSVec{Float64}(ones(n)),                          # unit_scaling
+        FSVec{Float64}(ones(m)),                          # unit_scaling
     )
 end
 
@@ -124,8 +125,8 @@ function EndgameTracker(
         tracker::Tracker,
         options::EndgameOptions = EndgameOptions(),
     )
-    n = length(tracker.state.x)
-    return EndgameTracker(tracker, EndgameState(n), Valuation(n), options)
+    m, n = size(tracker.state.jacobian.workspace)
+    return EndgameTracker(tracker, EndgameState(m, n), Valuation(n), options)
 end
 
 function endgame_tracker(
