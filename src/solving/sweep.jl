@@ -239,9 +239,7 @@ end
 
 function _init_parameter_sweep(
         F::System, starts, first_target::AbstractVector{<:Number}, exec::E,
-        p_start::AbstractVector{<:Number}, seed::UInt32,
-        tracker_options::TrackerOptions, endgame_options::EndgameOptions,
-        show_progress::Bool,
+        p_start::AbstractVector{<:Number}, alg::Sweep,
     )::WorkerSolveCache{E} where {E <: AbstractExecutor}
     _check_square_or_overdetermined(F)
     np = nparameters(F)
@@ -261,10 +259,10 @@ function _init_parameter_sweep(
     )
     builder = ParameterRetargetBuilder(
         F, Vector{ComplexF64}(p_start), Vector{ComplexF64}(first_target),
-        tracker_options, endgame_options,
+        _tracker_options(alg), _endgame_options(alg),
     )
     return WorkerSolveCache(
-        exec, builder, builder(), _start_points(starts), seed, show_progress,
+        exec, builder, builder(), _start_points(starts), _seed(alg), _show_progress(alg),
     )
 end
 
@@ -297,16 +295,10 @@ function solve(
     )
     transform_result = alg.transform_result
     transform_parameters = alg.transform_parameters
-    seed = _seed(alg)
-    tracker_options = _tracker_options(alg)
-    endgame_options = _endgame_options(alg)
     show_progress = _show_progress(alg)
     isempty(targets) && throw(ArgumentError("No targets given."))
     q_first = transform_parameters(first(targets))
-    cache = _init_parameter_sweep(
-        F, starts, q_first, exec, p_start,
-        seed, tracker_options, endgame_options, show_progress,
-    )
+    cache = _init_parameter_sweep(F, starts, q_first, exec, p_start, alg)
     return _run_sweep(
         cache, targets, q_first, transform_result, transform_parameters,
         show_progress,
@@ -324,25 +316,16 @@ function solve(
     intrinsic = _use_intrinsic(alg.coords, L_start)
     transform_result = alg.transform_result
     transform_parameters = alg.transform_parameters
-    seed = _seed(alg)
-    tracker_options = _tracker_options(alg)
-    endgame_options = _endgame_options(alg)
     show_progress = _show_progress(alg)
     isempty(targets) && throw(ArgumentError("No targets given."))
     L_first = transform_parameters(first(targets))
     G, points, chart, gamma = _subspace_solve_setup(
-        F, starts, L_start, L_first, seed,
+        F, starts, L_start, L_first, _seed(alg),
     )
     cache = if intrinsic
-        _init_intrinsic_subspace(
-            G, points, L_start, L_first, chart, gamma, exec, seed,
-            tracker_options, endgame_options, show_progress,
-        )
+        _init_intrinsic_subspace(G, points, L_start, L_first, chart, gamma, exec, alg)
     else
-        _init_extrinsic_subspace(
-            G, points, L_start, L_first, chart, gamma, exec, seed,
-            tracker_options, endgame_options, show_progress,
-        )
+        _init_extrinsic_subspace(G, points, L_start, L_first, chart, gamma, exec, alg)
     end
     return _run_sweep(
         cache, targets, L_first, transform_result, transform_parameters,
