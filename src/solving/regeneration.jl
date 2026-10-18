@@ -640,11 +640,7 @@ function _drop_poles(
         evaluate_and_jacobian!(y, J, Q.evaluator, x, p_empty)
         v = LA.norm(y, Inf)
         isfinite(v) || continue
-        grad = 0.0
-        for j in 1:n
-            grad += abs2(J[1, j])
-        end
-        grad = sqrt(grad)
+        grad = euclidean_norm(view(J, 1, :))
         # Without a gradient there is no distance estimate, so only an exactly
         # vanishing denominator counts.
         d = grad > 0.0 ? v / grad : (iszero(v) ? 0.0 : Inf)

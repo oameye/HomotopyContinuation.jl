@@ -20,24 +20,66 @@ wherever a `distance` is taken (`UniquePoints`, `multiplicities`,
 """
 struct EuclideanNorm end
 
+# Squared moduli overflow above about 1.3e154 and lose precision below about
+# 1.5e-154. A sum of squares outside [floatmin, Inf) therefore triggers a second
+# pass that divides by the largest modulus first, as `LinearAlgebra.norm` does.
+# NaN fails both comparisons and propagates from the first pass.
+@inline sumsq_out_of_range(s::Real) = s < floatmin(s) || isinf(s)
+
 """
     euclidean_norm(x::AbstractVector)
 
-Compute the Euclidean norm ``\\sqrt{\\sum_i |x_i|^2}``.
+Compute the Euclidean norm ``\\sqrt{\\sum_i |x_i|^2}`` without overflow or
+underflow in the squared moduli.
 """
-@inline euclidean_norm(x::AbstractVector) = sqrt(sum(abs2, x))
+@inline function euclidean_norm(x::AbstractVector)
+    s = zero(float(real(eltype(x))))
+    @inbounds @simd for i in eachindex(x)
+        s += abs2(x[i])
+    end
+    sumsq_out_of_range(s) && return scaled_euclidean_norm(x)
+    return sqrt(s)
+end
+
+@noinline function scaled_euclidean_norm(x::AbstractVector)
+    m = zero(float(real(eltype(x))))
+    @inbounds for i in eachindex(x)
+        m = max(m, abs(x[i]))
+    end
+    (iszero(m) || !isfinite(m)) && return m
+    s = zero(m)
+    @inbounds for i in eachindex(x)
+        s += abs2(x[i] / m)
+    end
+    return m * sqrt(s)
+end
 
 """
     euclidean_distance(x::AbstractVector, y::AbstractVector)
 
-Compute the Euclidean distance ``\\sqrt{\\sum_i |x_i - y_i|^2}``.
+Compute the Euclidean distance ``\\sqrt{\\sum_i |x_i - y_i|^2}`` without
+overflow or underflow in the squared moduli.
 """
 @inline function euclidean_distance(x::AbstractVector, y::AbstractVector)
-    d = zero(real(eltype(x)))
-    @inbounds for i in eachindex(x, y)
-        d += abs2(x[i] - y[i])
+    s = zero(float(real(promote_type(eltype(x), eltype(y)))))
+    @inbounds @simd for i in eachindex(x, y)
+        s += abs2(x[i] - y[i])
     end
-    return sqrt(d)
+    sumsq_out_of_range(s) && return scaled_euclidean_distance(x, y)
+    return sqrt(s)
+end
+
+@noinline function scaled_euclidean_distance(x::AbstractVector, y::AbstractVector)
+    m = zero(float(real(promote_type(eltype(x), eltype(y)))))
+    @inbounds for i in eachindex(x, y)
+        m = max(m, abs(x[i] - y[i]))
+    end
+    (iszero(m) || !isfinite(m)) && return m
+    s = zero(m)
+    @inbounds for i in eachindex(x, y)
+        s += abs2((x[i] - y[i]) / m)
+    end
+    return m * sqrt(s)
 end
 
 Base.@kwdef struct WeightedNormOptions
@@ -64,7 +106,8 @@ WeightedNorm(n::Integer) = WeightedNorm(FSVec{Float64}(ones(n)), WeightedNormOpt
 Base.length(w::WeightedNorm) = length(w.weights)
 
 # ---------------------------------------------------------------------------
-# inf_norm: max_i |x_i|, using abs2 for speed with isinf fallback for overflow.
+# inf_norm: max_i |x_i|, using abs2 for speed with an `abs` fallback when the
+# largest squared modulus overflows or underflows.
 # FSVec is always 1-based, so we initialize with x[1] and loop from 2.
 # ---------------------------------------------------------------------------
 
@@ -72,7 +115,8 @@ Base.length(w::WeightedNorm) = length(w.weights)
     inf_norm(x::AbstractVector)
 
 Compute the infinity norm ``\\max_i |x_i|``.
-Uses `abs2` for speed; falls back to `abs` if overflow is detected.
+Uses `abs2` for speed; falls back to `abs` when the largest squared modulus
+overflows or underflows.
 """
 @inline function inf_norm(x::AbstractVector)
     n = length(x)
@@ -81,8 +125,7 @@ Uses `abs2` for speed; falls back to `abs` if overflow is detected.
         @inbounds dᵢ = abs2(x[i])
         dmax = @fastmath max(dmax, dᵢ)
     end
-    d = sqrt(dmax)
-    if isinf(d)
+    if sumsq_out_of_range(dmax)
         @inbounds dmax = abs(x[1])
         for i in 2:n
             @inbounds dᵢ = abs(x[i])
@@ -90,7 +133,7 @@ Uses `abs2` for speed; falls back to `abs` if overflow is detected.
         end
         return dmax
     end
-    return d
+    return sqrt(dmax)
 end
 
 # ---------------------------------------------------------------------------
@@ -109,8 +152,7 @@ Compute the infinity-norm distance ``\\max_i |x_i - y_i|``.
         @inbounds dᵢ = abs2(x[i] - y[i])
         dmax = @fastmath max(dmax, dᵢ)
     end
-    d = sqrt(dmax)
-    if isinf(d)
+    if sumsq_out_of_range(dmax)
         @inbounds dmax = abs(x[1] - y[1])
         for i in 2:n
             @inbounds dᵢ = abs(x[i] - y[i])
@@ -118,7 +160,7 @@ Compute the infinity-norm distance ``\\max_i |x_i - y_i|``.
         end
         return dmax
     end
-    return d
+    return sqrt(dmax)
 end
 
 # ---------------------------------------------------------------------------
@@ -138,8 +180,7 @@ Compute ``||D^{-1}x||_\\infty = \\max_i |x_i / w_i|``.
         @inbounds dᵢ = abs2(x[i] / weights[i])
         dmax = @fastmath max(dmax, dᵢ)
     end
-    d = sqrt(dmax)
-    if isinf(d)
+    if sumsq_out_of_range(dmax)
         @inbounds dmax = abs(x[1] / weights[1])
         for i in 2:n
             @inbounds dᵢ = abs(x[i] / weights[i])
@@ -147,7 +188,7 @@ Compute ``||D^{-1}x||_\\infty = \\max_i |x_i / w_i|``.
         end
         return dmax
     end
-    return d
+    return sqrt(dmax)
 end
 
 # ---------------------------------------------------------------------------
@@ -171,8 +212,7 @@ Compute ``||D^{-1}(x-y)||_\\infty = \\max_i |(x_i - y_i) / w_i|``.
         @inbounds dᵢ = abs2((x[i] - y[i]) / weights[i])
         dmax = @fastmath max(dmax, dᵢ)
     end
-    d = sqrt(dmax)
-    if isinf(d)
+    if sumsq_out_of_range(dmax)
         @inbounds dmax = abs((x[1] - y[1]) / weights[1])
         for i in 2:n
             @inbounds dᵢ = abs((x[i] - y[i]) / weights[i])
@@ -180,7 +220,7 @@ Compute ``||D^{-1}(x-y)||_\\infty = \\max_i |(x_i - y_i) / w_i|``.
         end
         return dmax
     end
-    return d
+    return sqrt(dmax)
 end
 
 # ---------------------------------------------------------------------------

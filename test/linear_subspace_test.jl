@@ -216,6 +216,20 @@ end
     @test norm(extrinsic(L).A * x) == 0
 end
 
+@testset "rand_subspace! through a point at extreme scale" begin
+    # |x|² overflows or underflows for these points; the subspace must still
+    # contain the ray through x.
+    Random.seed!(7)
+    A = zeros(ComplexF64, 2, 3)
+    b = zeros(ComplexF64, 2)
+    for s in (exp2(700), exp2(-700))
+        x = s .* randn(ComplexF64, 3)
+        L = rand_subspace!(A, b, x; affine = false)
+        @test all(isfinite, extrinsic(L).A)
+        @test norm(extrinsic(L).A * (x ./ norm(x))) < 1.0e-12
+    end
+end
+
 @testset "translate promotes coefficient type" begin
     L = rand_subspace(Float64, 4; dim = 1)
     δb = ComplexF64[0.2 + 0.3im, -0.7im, 1.1 - 0.4im]

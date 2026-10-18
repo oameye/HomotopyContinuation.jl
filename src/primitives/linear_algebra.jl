@@ -196,25 +196,34 @@ end
 # ---------------------------------------------------------------------------
 # Custom QR factorization
 # ---------------------------------------------------------------------------
-# Adapted from base implementation with @fastmath for division (~50% speedup)
+# Adapted from the LinearAlgebra implementation. The reflector divides by ξ1
+# with `@fastmath` (~50% speedup), which forms |ξ1|² and is therefore only
+# valid while that square is a normal float. After the update
+# |ξ1| ∈ [‖x‖, 2‖x‖], so this holds for 1e-150 < ‖x‖ < 1e150. Other columns
+# multiply by a reciprocal of ξ1 built from ξ1 / ‖x‖, whose modulus lies in
+# [1, 2], as LAPACK's zlarfg scales by one reciprocal.
 
 @inline function reflector!(x::AbstractVector{ComplexF64})
     n = length(x)
     @inbounds begin
         ξ1 = x[1]
-        normu = abs2(ξ1)
-        for i in 2:n
-            normu += abs2(x[i])
-        end
+        normu = euclidean_norm(x)
         if iszero(normu)
             return zero(ComplexF64)
         end
-        normu = sqrt(normu)
         ν = copysign(normu, real(ξ1))
         ξ1 += ν
         x[1] = -ν
-        for i in 2:n
-            @fastmath x[i] = x[i] / ξ1
+        if 1.0e-150 < normu < 1.0e150
+            for i in 2:n
+                @fastmath x[i] = x[i] / ξ1
+            end
+        else
+            w = ξ1 / normu
+            ξ1⁻¹ = conj(w) / (abs2(w) * normu)
+            for i in 2:n
+                x[i] *= ξ1⁻¹
+            end
         end
     end
     return ξ1 / ν
