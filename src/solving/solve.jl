@@ -457,19 +457,13 @@ function SemialgebraicSetsHCSolver(args...; kwargs...)
 end
 
 function solve(
-        F::System, alg::Polyhedral, exec::E = Threaded(),
+        F::Union{System, CompositionSystem}, alg::Polyhedral, exec::E = Threaded(),
     )::Result where {E <: AbstractExecutor}
     return CommonSolve.solve!(CommonSolve.init(F, alg, exec))
 end
 
 # The polyhedral start system is built from the composed monomials, which only
 # the substituted equations carry.
-function solve(
-        C::CompositionSystem, alg::Polyhedral, exec::E = Threaded(),
-    )::Result where {E <: AbstractExecutor}
-    return solve(System(C), alg, exec)
-end
-
 function CommonSolve.init(
         C::CompositionSystem, alg::Polyhedral, exec::E = Threaded(),
     )::PolyhedralSolveCache{E} where {E <: AbstractExecutor}

@@ -47,9 +47,7 @@ function _retarget_subspace!(H::AbstractHomotopy, q::LinearSubspace)::Nothing
     return nothing
 end
 
-_retarget!(ws::AmbientWorkerState, q::LinearSubspace)::Nothing =
-    _retarget_subspace!(ws.homotopy, q)
-_retarget!(ws::IntrinsicWorkerState, q::LinearSubspace)::Nothing =
+_retarget!(ws::Union{AmbientWorkerState, IntrinsicWorkerState}, q::LinearSubspace)::Nothing =
     _retarget_subspace!(ws.homotopy, q)
 
 _retarget!(ws::PathWorker, q)::Nothing = _retarget!(ws._inner[], q)::Nothing
