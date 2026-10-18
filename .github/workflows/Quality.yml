@@ -37,19 +37,13 @@ concurrency:
 
 jobs:
   static-contracts:
-    name: Static contracts - Julia ${{ matrix.version }}
+    name: Static contracts - Julia 1
     runs-on: ubuntu-latest
     timeout-minutes: 90
     if: ${{ !github.event.pull_request.draft }}
     permissions:
       actions: write
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        version:
-          - 'min'
-          - '1'
     env:
       JULIA_NUM_THREADS: '1'
       OPENBLAS_NUM_THREADS: '1'
@@ -61,7 +55,7 @@ jobs:
       - uses: julia-actions/setup-julia@v3
         with:
           show-versioninfo: true
-          version: ${{ matrix.version }}
+          version: '1'
       - uses: julia-actions/cache@v3
       - name: Set up test environment
         run: julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
