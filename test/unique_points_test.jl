@@ -495,7 +495,7 @@ end
     @test search_in_radius(euc_up, ComplexF64[3, 4], 4.999) == 0
 end
 
-@testset "InfNorm stays finite at extreme scale" begin
+@testset "Distances stay finite at extreme scale" begin
     # Squared moduli of these entries overflow Float64; the distance must not.
     s = exp2(700)
     x = s .* ComplexF64[2im, 3 - 1im, 5 + 2im]
@@ -510,6 +510,28 @@ end
     @test add!(up, y, 2; atol = 0.0, rtol = 0.7) == (2, true)
 
     euc_up = UniquePoints(3; distance = EuclideanNorm())
-    add!(euc_up, x, 1, 0.0)
-    @test_broken search_in_radius(euc_up, y, 4.001 * s) == 1
+    @test add!(euc_up, x, 1, 0.0) == (1, true)
+    @test search_in_radius(euc_up, x, 1.0) == 1
+    @test search_in_radius(euc_up, y, 4.001 * s) == 1
+    @test search_in_radius(euc_up, y, 3.999 * s) == 0
+    # The relative tolerance is measured against ‖y‖₂ = √43·2⁷⁰⁰.
+    @test add!(euc_up, y, 2; atol = 0.0, rtol = 0.62) == (1, false)
+    @test add!(euc_up, y, 2; atol = 0.0, rtol = 0.6) == (2, true)
+end
+
+@testset "Distances stay accurate at tiny scale" begin
+    # Squared moduli of these entries underflow to zero; the distances must not.
+    s = exp2(-600)
+    x = s .* ComplexF64[2im, 3 - 1im, 5 + 2im]
+    y = s .* ComplexF64[-2im, 3 - 1im, 5 + 2im]
+    for (distance, d, ny) in ((InfNorm(), 4.0, abs(5 + 2im)), (EuclideanNorm(), 4.0, sqrt(43.0)))
+        up = UniquePoints(3; distance)
+        @test add!(up, x, 1; atol = 0.0, rtol = 1.0e-8) == (1, true)
+        @test search_in_radius(up, x, 1.0e-300) == 1
+        @test search_in_radius(up, y, 1.001 * d * s) == 1
+        @test search_in_radius(up, y, 0.999 * d * s) == 0
+        # The relative tolerance scales with ‖y‖, which must not vanish.
+        @test add!(up, y, 2; atol = 0.0, rtol = 1.001 * d / ny) == (1, false)
+        @test add!(up, y, 2; atol = 0.0, rtol = 0.999 * d / ny) == (2, true)
+    end
 end

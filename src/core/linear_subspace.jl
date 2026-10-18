@@ -175,7 +175,7 @@ function stiefel_coordinates_intrinsic(A::Matrix{T}, b::Vector{T})::Matrix{T} wh
     return Y
 end
 function stiefel_coordinates_intrinsic!(Y::Matrix{T}, A::Matrix{T}, b::Vector{T})::Matrix{T} where {T}
-    γ = sqrt(1 + sum(abs2, b))
+    γ = hypot(1, LA.norm(b))
     n, k = size(A)
     Y[1:n, 1:k] .= A
     Y[1:n, k + 1] .= b ./ γ
@@ -581,16 +581,17 @@ function rand_subspace!(
         LA.mul!(b, A, x)
     else
         fill!(b, zero(eltype(b)))
-        nrmsq = sum(abs2, x)
-        if !iszero(nrmsq)
+        # Project the rows onto the complement of x̂ = x / ‖x‖; normalizing
+        # first keeps the projection finite for any representable `x`.
+        ν = LA.norm(x)
+        if !iszero(ν)
             for i in axes(A, 1)
                 α = zero(eltype(A))
                 for j in axes(A, 2)
-                    α += A[i, j] * x[j]
+                    α += A[i, j] * (x[j] / ν)
                 end
-                α /= nrmsq
                 for j in axes(A, 2)
-                    A[i, j] -= α * conj(x[j])
+                    A[i, j] -= α * conj(x[j] / ν)
                 end
             end
         end
