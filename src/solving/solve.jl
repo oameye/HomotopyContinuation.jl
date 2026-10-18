@@ -503,20 +503,6 @@ function solve(
     )
 end
 
-function solve(
-        F::SystemLike, starts::StartsLike, p_start::AbstractVector{<:Number},
-        p_target::AbstractVector{<:Number}, exec::E,
-    )::Result where {E <: AbstractExecutor}
-    return solve(F, starts, p_start, p_target, Continuation(), exec)
-end
-
-function CommonSolve.init(
-        F::SystemLike, starts::StartsLike, p_start::AbstractVector{<:Number},
-        p_target::AbstractVector{<:Number}, exec::E,
-    )::SolveCache{E} where {E <: AbstractExecutor}
-    return CommonSolve.init(F, starts, p_start, p_target, Continuation(), exec)
-end
-
 function CommonSolve.init(
         F::SystemLike,
         starts::StartsLike,
@@ -558,6 +544,12 @@ end
 
 for f in (:(solve), :(CommonSolve.init))
     @eval begin
+        $f(
+            F::SystemLike, starts::StartsLike, p_start::AbstractVector{<:Number},
+            p_target::AbstractVector{<:Number}, exec::E,
+        ) where {E <: AbstractExecutor} =
+            $f(F, starts, p_start, p_target, Continuation(), exec)
+
         $f(
             ::SystemLike, starts, ::AbstractVector{<:Number},
             ::AbstractVector{<:Number}, ::Continuation = Continuation(),

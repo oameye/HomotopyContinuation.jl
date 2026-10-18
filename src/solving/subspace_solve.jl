@@ -284,13 +284,6 @@ function CommonSolve.init(
     end
 end
 
-function CommonSolve.init(
-        F::System, starts::StartsLike, L_start::LinearSubspace,
-        L_target::LinearSubspace, exec::E,
-    )::WorkerSolveCache{E} where {E <: AbstractExecutor}
-    return CommonSolve.init(F, starts, L_start, L_target, Continuation(), exec)
-end
-
 """
     solve(F::System, starts, L_start::LinearSubspace, L_target::LinearSubspace,
           alg = Continuation(), exec = Threaded())
@@ -324,15 +317,14 @@ function solve(
     )
 end
 
-function solve(
-        F::System, starts::StartsLike, L_start::LinearSubspace,
-        L_target::LinearSubspace, exec::E,
-    )::Result where {E <: AbstractExecutor}
-    return solve(F, starts, L_start, L_target, Continuation(), exec)
-end
-
 for f in (:(solve), :(CommonSolve.init))
     @eval begin
+        $f(
+            F::System, starts::StartsLike, L_start::LinearSubspace,
+            L_target::LinearSubspace, exec::E,
+        ) where {E <: AbstractExecutor} =
+            $f(F, starts, L_start, L_target, Continuation(), exec)
+
         $f(
             ::System, starts, ::LinearSubspace, ::LinearSubspace,
             ::Continuation = Continuation(), ::AbstractExecutor = Threaded(),
