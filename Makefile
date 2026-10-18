@@ -36,7 +36,7 @@ test-serial: ## Run core + certification suites serially for debugging
 	set -o pipefail; $(JULIA) --project=$(CERT)/test $(CERT)/test/runtests.jl 2>&1 | tee $(CERT_LOG)
 
 jet: ## Run JET package analysis in the test environment
-	$(JULIA) --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+	$(JULIA) --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=".")); Pkg.instantiate()'
 	$(JULIA) --project=test test/quality/jet_test.jl
 
 benchmark: ## Run steady-state benchmarks
