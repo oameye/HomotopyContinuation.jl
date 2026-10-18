@@ -67,19 +67,6 @@ function solve(
     return CommonSolve.solve!(CommonSolve.init(G, F, starts, alg, exec))
 end
 
-function solve(
-        G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
-        exec::E,
-    )::Result where {E <: AbstractExecutor}
-    return solve(G, F, starts, Continuation(), exec)
-end
-
-function CommonSolve.init(
-        G::CloneableSystem, F::CloneableSystem, starts::StartsLike, exec::E,
-    )::SolveCache{E} where {E <: AbstractExecutor}
-    return CommonSolve.init(G, F, starts, Continuation(), exec)
-end
-
 function CommonSolve.init(
         G::CloneableSystem,
         F::CloneableSystem,
@@ -173,16 +160,6 @@ function solve(
     return CommonSolve.solve!(CommonSolve.init(H, starts, alg, exec))
 end
 
-function solve(H::AbstractHomotopy, starts::StartsLike, exec::E)::Result where {E <: AbstractExecutor}
-    return solve(H, starts, Continuation(), exec)
-end
-
-function CommonSolve.init(
-        H::AbstractHomotopy, starts::StartsLike, exec::E,
-    )::SolveCache{E} where {E <: AbstractExecutor}
-    return CommonSolve.init(H, starts, Continuation(), exec)
-end
-
 function CommonSolve.init(
         H::AbstractHomotopy,
         starts::StartsLike,
@@ -225,18 +202,6 @@ function solve(
     return CommonSolve.solve!(CommonSolve.init(build_homotopy, starts, alg, exec))
 end
 
-function solve(
-        build_homotopy::Function, starts::StartsLike, exec::E,
-    )::Result where {E <: AbstractExecutor}
-    return solve(build_homotopy, starts, Continuation(), exec)
-end
-
-function CommonSolve.init(
-        build_homotopy::Function, starts::StartsLike, exec::E,
-    )::SolveCache{E} where {E <: AbstractExecutor}
-    return CommonSolve.init(build_homotopy, starts, Continuation(), exec)
-end
-
 function CommonSolve.init(
         build_homotopy::Function,
         starts::StartsLike,
@@ -256,8 +221,17 @@ function CommonSolve.init(
     return _homotopy_cache(exec, builder, H, starts, alg)
 end
 
+# Passing only an executor selects the default algorithm.
 for f in (:(solve), :(CommonSolve.init))
     @eval begin
+        $f(
+            G::CloneableSystem, F::CloneableSystem, starts::StartsLike, exec::E,
+        ) where {E <: AbstractExecutor} = $f(G, F, starts, Continuation(), exec)
+        $f(H::AbstractHomotopy, starts::StartsLike, exec::E) where {E <: AbstractExecutor} =
+            $f(H, starts, Continuation(), exec)
+        $f(build_homotopy::Function, starts::StartsLike, exec::E) where {E <: AbstractExecutor} =
+            $f(build_homotopy, starts, Continuation(), exec)
+
         $f(
             H::Homotopy, starts::StartsLike, alg::Continuation = Continuation(),
             exec::E = Serial(),
