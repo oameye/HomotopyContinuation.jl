@@ -2,6 +2,8 @@ name: Public Coverage
 
 on:
   pull_request:
+    branches:
+      - 'main'
     paths:
       - '.github/workflows/Coverage.yml'
       - 'src/**'
@@ -11,7 +13,11 @@ on:
       - 'quality/coverage_inventory.jl'
       - 'quality/coverage_union.jl'
       - 'Project.toml'
-    types: [opened, reopened, synchronize, ready_for_review]
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
   workflow_dispatch:
 
 concurrency:
@@ -27,7 +33,7 @@ env:
 
 jobs:
   coverage:
-    name: Ordinary suite / Julia ${{ matrix.version }}
+    name: Ordinary suite - Julia ${{ matrix.version }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:

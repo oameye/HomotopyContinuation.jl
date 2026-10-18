@@ -11,17 +11,6 @@ const HC_DECLARED_PUBLIC = let
 end
 const HC_PUBLIC_NAMES =
     union(Set(names(HomotopyContinuation; all = false, imported = false)), HC_DECLARED_PUBLIC)
-const QUALITY_CONTRACTS = Set(
-    [
-        "alloc_check_test.jl",
-        "aqua_test.jl",
-        "concrete_structs_test.jl",
-        "dispatch_doctor_test.jl",
-        "explicit_imports_test.jl",
-        "instruction_count_test.jl",
-        "jet_test.jl",
-    ],
-)
 
 # Ordinary tests should exercise the supported accessor surface rather than opaque
 # storage of Result, PathResult, System, evaluator, or monodromy implementation
@@ -184,10 +173,10 @@ function semantic_test_files(root::String)
         rel = relpath(dir, root)
         startswith(rel, "extensive") && continue
         startswith(rel, "strict") && continue
+        startswith(rel, "quality") && continue
         for name in names
             endswith(name, ".jl") || continue
             name == "public_surface_contract_test.jl" && continue
-            name in QUALITY_CONTRACTS && continue
             push!(files, joinpath(dir, name))
         end
     end

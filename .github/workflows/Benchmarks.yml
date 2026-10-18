@@ -2,7 +2,8 @@ name: Benchmarks
 
 on:
   push:
-    branches: [main]
+    branches:
+      - 'main'
     paths:
       - '.github/workflows/Benchmarks.yml'
       - 'src/**'
@@ -10,13 +11,19 @@ on:
       - 'benchmark/**'
       - 'Project.toml'
   pull_request:
+    branches:
+      - 'main'
     paths:
       - '.github/workflows/Benchmarks.yml'
       - 'src/**'
       - 'ext/**'
       - 'benchmark/**'
       - 'Project.toml'
-    types: [opened, reopened, synchronize, ready_for_review]
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -34,7 +41,7 @@ env:
 
 jobs:
   benchmark:
-    name: Benchmark tracking / Julia 1.13
+    name: Benchmark tracking - Julia 1.13
     runs-on: ubuntu-latest
     timeout-minutes: 120
     if: ${{ !github.event.pull_request.draft }}
@@ -102,7 +109,7 @@ jobs:
           key: steady-main-${{ runner.os }}-julia-1.13-${{ github.sha }}
 
   ttfx:
-    name: TTFX tracking / Julia 1.13
+    name: TTFX tracking - Julia 1.13
     runs-on: ubuntu-latest
     timeout-minutes: 120
     if: ${{ !github.event.pull_request.draft }}
@@ -193,7 +200,7 @@ jobs:
           if-no-files-found: warn
 
   ttfx-full:
-    name: TTFX full inventory / Julia 1.13
+    name: TTFX full inventory - Julia 1.13
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
