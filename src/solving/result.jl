@@ -420,7 +420,7 @@ function Base.show(io::IO, r::Result)
         print(io, " • ", n_excess, " excess solutions\n")
     end
     n_at_inf = nat_infinity(r)
-    n_failed = r.tracked_paths - count(is_success, r.path_results) - n_excess - n_at_inf
+    n_failed = nfailed(r)
     if n_failed > 0
         print(io, " • ", n_failed, " paths failed\n")
     end
@@ -579,15 +579,8 @@ end
 # nsolutions: nonsingular only. Use nresults for all (singular + nonsingular).
 nsolutions(r::AbstractSolutionResult)::Int = nnonsingular(r)
 
-function nsingular(r::AbstractSolutionResult)::Int
-    prs = path_results(r)
-    return count(i -> _singular(prs[i]), _solution_indices(r))
-end
-
-function nnonsingular(r::AbstractSolutionResult)::Int
-    prs = path_results(r)
-    return count(i -> !_singular(prs[i]), _solution_indices(r))
-end
+nsingular(r::AbstractSolutionResult)::Int = nresults(r; only_singular = true)
+nnonsingular(r::AbstractSolutionResult)::Int = nresults(r; only_nonsingular = true)
 
 nat_infinity(r::Result)::Int = count(is_at_infinity, r.path_results)
 
@@ -600,14 +593,8 @@ the original overdetermined system. Always 0 for square systems.
 nexcess_solutions(r::Result)::Int = count(is_excess_solution, r.path_results)
 
 # nreal: nonsingular real solutions only
-function nreal(
-        r::AbstractSolutionResult; tol::Float64 = DEFAULT_REAL_TOL,
-    )::Int
-    prs = path_results(r)
-    return count(_solution_indices(r)) do i
-        !_singular(prs[i]) && is_real(prs[i]; tol = tol)
-    end
-end
+nreal(r::AbstractSolutionResult; tol::Float64 = DEFAULT_REAL_TOL)::Int =
+    nresults(r; only_real = true, only_nonsingular = true, real_tol = tol)
 
 # Points are owned copies, never aliases.
 _start_points(
