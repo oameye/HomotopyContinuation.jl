@@ -2,7 +2,7 @@ name: Format Check
 
 on:
   push:
-    branches: [v3]
+    branches: [main]
     paths:
       - '.github/workflows/Format.yml'
       - '**.jl'

@@ -2,7 +2,7 @@ name: Benchmarks
 
 on:
   push:
-    branches: [v3]
+    branches: [main]
     paths:
       - '.github/workflows/Benchmarks.yml'
       - 'src/**'
@@ -53,9 +53,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .benchmark-history/steady.json
-          key: steady-v3-${{ runner.os }}-julia-1.13-${{ github.event.pull_request.base.sha || github.sha }}
+          key: steady-main-${{ runner.os }}-julia-1.13-${{ github.event.pull_request.base.sha || github.sha }}
           restore-keys: |
-            steady-v3-${{ runner.os }}-julia-1.13-
+            steady-main-${{ runner.os }}-julia-1.13-
       - name: Run benchmarks
         run: |
           cd benchmark
@@ -70,7 +70,7 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          name: HomotopyContinuation v3
+          name: HomotopyContinuation
           tool: julia
           output-file-path: benchmark/benchmarks_output.json
           external-data-json-path: .benchmark-history/steady.json
@@ -82,11 +82,11 @@ jobs:
           comment-always: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
           summary-always: true
           fail-on-alert: true
-      - name: Update benchmark history on v3
+      - name: Update benchmark history on main
         if: ${{ github.event_name == 'push' }}
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          name: HomotopyContinuation v3
+          name: HomotopyContinuation
           tool: julia
           output-file-path: benchmark/benchmarks_output.json
           external-data-json-path: .benchmark-history/steady.json
@@ -99,7 +99,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .benchmark-history/steady.json
-          key: steady-v3-${{ runner.os }}-julia-1.13-${{ github.sha }}
+          key: steady-main-${{ runner.os }}-julia-1.13-${{ github.sha }}
 
   ttfx:
     name: TTFX tracking / Julia 1.13
@@ -121,10 +121,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .benchmark-history/ttfx.json
-          key: ttfx-v3-${{ runner.os }}-julia-1.13-${{ github.event.pull_request.base.sha || github.sha }}
+          key: ttfx-main-${{ runner.os }}-julia-1.13-${{ github.event.pull_request.base.sha || github.sha }}
           restore-keys: |
-            ttfx-v3-${{ runner.os }}-julia-1.13-
-      - name: Prepare v3 environment
+            ttfx-main-${{ runner.os }}-julia-1.13-
+      - name: Prepare package environment
         run: julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using HomotopyContinuation'
       - name: Run representative first-call latency workloads
         env:
@@ -152,7 +152,7 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          name: HomotopyContinuation v3 TTFX
+          name: HomotopyContinuation TTFX
           tool: customSmallerIsBetter
           output-file-path: ttfx_benchmark.json
           external-data-json-path: .benchmark-history/ttfx.json
@@ -163,11 +163,11 @@ jobs:
           comment-always: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
           summary-always: true
           fail-on-alert: false
-      - name: Update TTFX history on v3
+      - name: Update TTFX history on main
         if: ${{ github.event_name == 'push' }}
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          name: HomotopyContinuation v3 TTFX
+          name: HomotopyContinuation TTFX
           tool: customSmallerIsBetter
           output-file-path: ttfx_benchmark.json
           external-data-json-path: .benchmark-history/ttfx.json
@@ -180,7 +180,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .benchmark-history/ttfx.json
-          key: ttfx-v3-${{ runner.os }}-julia-1.13-${{ github.sha }}
+          key: ttfx-main-${{ runner.os }}-julia-1.13-${{ github.sha }}
       - name: Upload TTFX results
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -207,7 +207,7 @@ jobs:
           version: '1.13'
           arch: x64
       - uses: julia-actions/cache@v3
-      - name: Prepare v3 environment
+      - name: Prepare package environment
         run: julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using HomotopyContinuation'
       - name: Run complete first-call latency inventory
         env:

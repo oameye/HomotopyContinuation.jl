@@ -2,7 +2,7 @@ name: JET
 
 on:
   push:
-    branches: [v3]
+    branches: [main]
     paths:
       - '.github/workflows/JET.yml'
       - 'src/**'
