@@ -84,13 +84,20 @@ var_index(vars::AbstractVector{Expression})::Dict{Symbol, Int} =
 function depends_on(e::Expression, var_to_idx::Dict{Symbol, Int})::Bool
     return @match e begin
         SymExpr.EVar(name) => haskey(var_to_idx, name)
-        SymExpr.EAdd(args) => any(a -> depends_on(a, var_to_idx), args)
-        SymExpr.EMul(args) => any(a -> depends_on(a, var_to_idx), args)
+        SymExpr.EAdd(args) => any_depends_on(args, var_to_idx)
+        SymExpr.EMul(args) => any_depends_on(args, var_to_idx)
         SymExpr.EPow(base, _) => depends_on(base, var_to_idx)
         SymExpr.ERPow(base, _) => depends_on(base, var_to_idx)
         SymExpr.EFn(_, arg) => depends_on(arg, var_to_idx)
         _ => false
     end
+end
+
+function any_depends_on(args::Vector{Expression}, var_to_idx::Dict{Symbol, Int})::Bool
+    for a in args
+        depends_on(a, var_to_idx) && return true
+    end
+    return false
 end
 
 @inline function accumulate_term!(acc::ExprTermDict, m::Vector{Int}, c::Expression)::Nothing

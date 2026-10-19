@@ -9,7 +9,10 @@ on:
       - 'src/**'
       - 'ext/**'
       - 'test/Project.toml'
-      - 'test/quality/jet_test.jl'
+      - 'test/quality/jet.jl'
+      - 'test/helpers/jet_analysis.jl'
+      - 'test/quality/exemptions.jl'
+      - 'workloads/**'
       - 'Project.toml'
   pull_request:
     branches:
@@ -19,7 +22,10 @@ on:
       - 'src/**'
       - 'ext/**'
       - 'test/Project.toml'
-      - 'test/quality/jet_test.jl'
+      - 'test/quality/jet.jl'
+      - 'test/helpers/jet_analysis.jl'
+      - 'test/quality/exemptions.jl'
+      - 'workloads/**'
       - 'Project.toml'
     types:
       - opened
@@ -57,4 +63,4 @@ jobs:
       - name: Set up test environment
         run: julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=".")); Pkg.instantiate()'
       - name: Run JET analysis
-        run: julia --project=test test/quality/jet_test.jl
+        run: julia --project=test test/quality/jet.jl

@@ -222,6 +222,13 @@ function init_total_degree_shaped(
 end
 
 function init_total_degree(
+        shape::UnderdeterminedShape, F::System, ::TotalDegree, ::E,
+        ::Random.MersenneTwister, ::ComplexF64,
+    )::SolveCache{E} where {E <: AbstractExecutor}
+    return check_square_or_overdetermined(shape, F)
+end
+
+function init_total_degree(
         ::SquareShape, F::CloneableSystem, alg::TotalDegree, exec::E,
         ::Random.MersenneTwister, γ::ComplexF64,
     )::SolveCache{E} where {E <: AbstractExecutor}

@@ -112,4 +112,4 @@ jobs:
           'using Pkg; Pkg.develop([PackageSpec(path="."),
           PackageSpec(path="lib/HomotopyContinuationCertification")]); Pkg.instantiate()'
       - name: Run certification suite
-        run: julia --project=lib/HomotopyContinuationCertification/test -t 4 lib/HomotopyContinuationCertification/test/runtests.jl
+        run: julia --project=lib/HomotopyContinuationCertification/test lib/HomotopyContinuationCertification/test/runtests.jl

@@ -255,11 +255,13 @@ IteratorCertificationStats() = IteratorCertificationStats(
     IteratorCertificationPhase.assignment, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 )
 
+const PROGRESS_DT = 0.2
+
 # How many passes the refinement needs is not known in advance, so the meter counts
 # paths tracked rather than a fraction of a known total.
 function _iterator_progress(delay::Float64 = 0.3)
     meter = ProgressMeter.ProgressUnknown(;
-        dt = 0.2, desc = "Certifying iterator... ", output = stdout, spinner = true,
+        dt = PROGRESS_DT, desc = "Certifying iterator... ", output = stdout, spinner = true,
     )
     meter.tlast += delay
     return meter
@@ -498,7 +500,7 @@ function _draw_progress!(
     )::Nothing
     meter = ctx.meter
     meter === nothing && return nothing
-    throttled && time() < meter.tlast + meter.dt && return nothing
+    throttled && time() < meter.tlast + PROGRESS_DT && return nothing
     ProgressMeter.update!(meter; showvalues = _showvalues(ctx.stats))
     return nothing
 end

@@ -1,0 +1,87 @@
+# Package call sites allowed to dispatch at runtime, keyed by `(function, path)`, each
+# with its reason. A dispatch inside a dependency is charged to the package line that
+# calls it (`call_site` in `test/helpers/jet_analysis.jl`). `test/quality/jet.jl`
+# fails on runtime dispatch anywhere else and on an entry that is no longer reached;
+# `test/quality/strict_mode/strict_mode.jl` accepts a `:typestable` failure only when
+# all of its dispatch is charged to entries here. Every entry is a candidate for
+# removal.
+
+const FUNCTION_WRAPPER =
+    "FunctionWrapper call; FunctionWrappers' cold `reinit_wrapper` branch for a null pointer dispatches"
+const NOSPECIALIZE = "@nospecialize dispatcher keeps each route out of the caller's inference"
+const BARRIER = "inferencebarrier keeps a lazily built route out of the caller's inference"
+const BOX = "RefValue{Any} box erases a factory or worker"
+const CODEGEN = "builds a RuntimeGeneratedFunction from an expression and erases it behind a FunctionWrapper"
+const PROGRESS = "ProgressMeter writes to `stdout`, an abstractly typed global, through untyped fields"
+const MESSAGE = "formats an error or warning message"
+const VARIABLE_NAME = "names a user variable through its own `string`/`Symbol`"
+
+const EXEMPTIONS = Dict(
+    (:evaluate!, "src/core/homotopy_evaluator.jl") => FUNCTION_WRAPPER,
+    (:evaluate_and_jacobian!, "src/core/homotopy_evaluator.jl") => FUNCTION_WRAPPER,
+    (:taylor!, "src/core/homotopy_evaluator.jl") => FUNCTION_WRAPPER,
+    (:evaluate!, "src/core/system_evaluator.jl") => FUNCTION_WRAPPER,
+    (:evaluate_and_jacobian!, "src/core/system_evaluator.jl") => FUNCTION_WRAPPER,
+    (:taylor!, "src/core/system_evaluator.jl") => FUNCTION_WRAPPER,
+    (:df64_evaluators, "src/core/system_evaluator.jl") => FUNCTION_WRAPPER,
+    (:build_zero_parameter_taylor_fws, "src/core/system.jl") => FUNCTION_WRAPPER,
+    (:weighted_stage_degrees, "src/core/composition_system.jl") => FUNCTION_WRAPPER,
+    (:factorize!, "src/primitives/linear_algebra.jl") => FUNCTION_WRAPPER,
+    (:ldiv!, "src/primitives/linear_algebra.jl") => FUNCTION_WRAPPER,
+    (:track_path!, "src/solving/builder.jl") => FUNCTION_WRAPPER,
+    (:track_paths, "src/solving/track_paths.jl") => FUNCTION_WRAPPER,
+    (:build_compiled_evaluator, "src/model_kit/codegen.jl") => CODEGEN,
+    (:build_taylor_fws, "src/model_kit/codegen.jl") => CODEGEN,
+    (:dispatch_parameter_taylor_fws, "src/core/system.jl") => NOSPECIALIZE,
+    (:invoke_polynomial_lowerer, "src/model_kit/polynomial_input.jl") => NOSPECIALIZE,
+    (:dispatch_solve_policy, "src/solving/track_paths.jl") => NOSPECIALIZE,
+    (:dispatch_monodromy_policy, "src/solving/monodromy/solve.jl") => NOSPECIALIZE,
+    (:dispatch_start_pair_strategy, "src/solving/monodromy/start_pair.jl") => NOSPECIALIZE,
+    (:init, "src/solving/solve.jl") => BARRIER,
+    (:init, "src/solving/polyhedral.jl") => BARRIER,
+    (:make_matrix_workspace, "src/primitives/linear_algebra.jl") => BARRIER,
+    (:DF64Installer, "src/core/system_evaluator.jl") => BARRIER,
+    (:clone_system_evaluator, "src/core/system_evaluator.jl") => BOX,
+    (:fold_composition, "src/core/composition_system.jl") => BOX,
+    (:PathBuilder, "src/solving/builder.jl") => BOX,
+    (:retarget!, "src/solving/sweep.jl") => BOX,
+    (:make_progress, "src/solving/progress.jl") => PROGRESS,
+    (:make_many_progress, "src/solving/progress.jl") => PROGRESS,
+    (:next_progress!, "src/solving/progress.jl") => PROGRESS,
+    (:update_progress!, "src/solving/progress.jl") => PROGRESS,
+    (:update_many_progress!, "src/solving/progress.jl") => PROGRESS,
+    (:solve, "src/solving/regeneration.jl") => PROGRESS,
+    (:support_mixed_volume, "src/solving/polyhedral.jl") => "MixedSubdivisions reports progress through ProgressMeter",
+    (:compile_exec_instruction, "src/model_kit/interpreter.jl") => MESSAGE,
+    (:decompose_with_solver, "src/solving/nid.jl") => MESSAGE,
+    (:hypersurface_witness_set, "src/solving/regeneration.jl") => MESSAGE,
+    (:monodromy_solve_body!, "src/solving/monodromy/solve.jl") => MESSAGE,
+    (:monomial_key, "src/model_kit/polynomial_compiler.jl") => VARIABLE_NAME,
+    (:polynomial_instruction_compiler, "src/model_kit/polynomial_compiler.jl") => VARIABLE_NAME,
+    (:symbol_index_map, "src/model_kit/symbolic_polynomial_compiler.jl") => VARIABLE_NAME,
+    (:support_coefficients, "src/solving/support.jl") => VARIABLE_NAME,
+    (:variable_group_indices, "src/core/system.jl") => VARIABLE_NAME,
+    (:fresh_variable_name, "src/solving/regeneration.jl") => VARIABLE_NAME,
+    (:build_verification_system, "src/solving/monodromy/completeness.jl") => "DynamicPolynomials' `subs` promotes coefficient types at runtime",
+    (:compute_angular_part!, "src/solving/binomial_system.jl") => "`setprecision` stores the precision in a ScopedValue",
+    (:log, "src/primitives/double_f64.jl") => "Base's generic `hypot` reaches a mixed-type `fma` error path",
+)
+
+# Functions in the allocation-free kernel files of
+# `test/quality/strict_mode/strict_mode.jl` that are not kernels.
+const CODE_GENERATION = "builds Taylor kernel expressions during code generation"
+const ALLOCATING = "allocating convenience that returns a new array"
+
+const NOT_KERNELS = Dict(
+    :cauchy_product_exprs => CODE_GENERATION,
+    :expr_sum => CODE_GENERATION,
+    :taylor_hyperbolic_stmts => CODE_GENERATION,
+    :taylor_pow_recurrence_expr => CODE_GENERATION,
+    :taylor_tangent_stmts => CODE_GENERATION,
+    :evaluate => ALLOCATING,
+    :jacobian => ALLOCATING,
+    :as_homotopy => "argument conversion for the allocating `evaluate` and `jacobian`",
+    :evaluation_arguments => "argument conversion for the allocating `evaluate` and `jacobian`",
+    :path_parameters => "argument conversion for the allocating `evaluate` and `jacobian`",
+    :Homotopy => "the symbolic constructor builds its system through the dispatch exemptions",
+)

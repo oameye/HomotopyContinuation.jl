@@ -35,7 +35,7 @@ end
 # equation `c·x − 1` is appended so the system is square.
 function sliced_system(
         polys::AbstractVector, vars::AbstractVector, L::LinearSubspace;
-        chart::AbstractVector = [],
+        chart::AbstractVector = ComplexF64[],
         params::AbstractVector = empty(vars),
         compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
@@ -46,7 +46,7 @@ function sliced_system(
 end
 
 """
-    slice(F::System, L::LinearSubspace; chart = []) -> System
+    slice(F::System, L::LinearSubspace; chart = ComplexF64[]) -> System
 
 Return the system whose zero set is `V(F) ∩ L`, namely `F` with the linear
 equations `A x − b` of `L` appended. The variables, parameters and compile mode
@@ -66,7 +66,7 @@ G = slice(F, L)   # square system with the two linear equations appended
 """
 function slice(
         F::System, L::LinearSubspace;
-        chart::AbstractVector = [],
+        chart::AbstractVector = ComplexF64[],
     )
     ambient_dim(L) == nvariables(F) || throw(
         ArgumentError(

@@ -208,10 +208,11 @@ function Base.show(
     end
     println(io, "]")
     print(io, "is_certified = ", is_certified(cert))
-    if !isnothing(certified_solution_interval(cert))
+    interval = certified_solution_interval(cert)
+    if !isnothing(interval)
         println(io)
         println(io, "certified_solution_interval = [")
-        for z in certified_solution_interval(cert)
+        for z in interval
             println(io, "  ", string(z; digits = digits, more = more), ",")
         end
         println(io, "]")

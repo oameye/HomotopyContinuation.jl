@@ -44,11 +44,15 @@ Solver routes use explicit local RNGs derived from a `UInt32` seed rather than m
 
 Rigorous certification depends on Arblib and defines certificate types containing Arb/Acb values. Keeping it in `lib/HomotopyContinuationCertification` prevents ordinary solving from loading that dependency and gives certification its own precision/memory contracts. It cannot be reduced to a lightweight extension while those public certificate types own Arblib values.
 
-## Instrumentation and allocation measurement are separate contracts
+## Type stability is proven statically
 
-DispatchDoctor's `@stable` instrumentation introduces wrappers/closures and changes allocation behavior. The strict environment therefore uses instrumentation to prove return/type-stability behavior, while production allocation assertions are measured without that instrumentation. A test may still execute the instrumented operation; it should not interpret instrumentation allocations as package allocations.
+StrictMode proves every specialization the workloads compile typestable, and the inference and concrete-layout contracts in `test/quality/` cover public constructors and result types. The package carries no runtime instrumentation such as DispatchDoctor's `@stable`: rerunning the whole suite instrumented multiplied its runtime several times over. No single analyzer is treated as the definition of quality: JET, StrictMode, concrete-layout checks, allocation checks, numerical tests, and performance/TTFX measurements cover different failure modes.
 
-StrictMode provides a complementary compiled-code proof. No single analyzer is treated as the definition of quality: JET, DispatchDoctor, StrictMode, concrete-layout checks, allocation checks, numerical tests, and performance/TTFX measurements cover different failure modes.
+## Setup dispatches through named erased boundaries
+
+Setup code may call dynamically, but only through deliberate boundaries: `FunctionWrapper` construction around generated evaluators, `Base.inferencebarrier` route selection, `@nospecialize` dispatchers, and `RefValue{Any}` factory boxes. Each keeps first-use compilation bounded by not inferring every system shape and route from the public entry point. `test/quality/exemptions.jl` lists every package call site allowed to dispatch at runtime, with its reason; a dispatch inside a dependency is charged to the package line that calls it. Besides the boundaries, the list holds the hot calls through a `FunctionWrapper`, whose cold `reinit_wrapper` branch dispatches, and setup code that formats messages, names user variables or reports progress.
+
+`test/quality/jet.jl` analyses every public workload and every specialization those workloads compile, which includes the tracking code behind the boundaries where analysis from the entry point stops. It fails on errors, on runtime dispatch charged to a site outside the list, and on an entry no longer reached, so the list cannot go stale. StrictMode checks the same specializations and accepts a `:typestable` failure only when all of its dispatch is charged to the list. Every entry is a candidate for removal.
 
 ## CSE and tape compilation are shared compiler infrastructure
 

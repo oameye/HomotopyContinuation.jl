@@ -54,7 +54,6 @@ Common commands:
 
 ```sh
 make test           # core + certification suites
-make test-strict    # DispatchDoctor-instrumented suite
 make test-cert      # certification only
 make test-extensive # long reference solves
 make benchmark      # steady-state benchmarks

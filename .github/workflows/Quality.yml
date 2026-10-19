@@ -11,8 +11,7 @@ on:
       - 'ext/**'
       - 'test/**'
       - 'lib/**'
-      - 'benchmark/**'
-      - 'quality/**'
+      - 'workloads/**'
   pull_request:
     branches:
       - 'main'
@@ -23,8 +22,7 @@ on:
       - 'ext/**'
       - 'test/**'
       - 'lib/**'
-      - 'benchmark/**'
-      - 'quality/**'
+      - 'workloads/**'
     types:
       - opened
       - reopened
@@ -61,14 +59,23 @@ jobs:
         run: julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=".")); Pkg.instantiate()'
       - name: Run package and compiler contracts
         run: |
-          julia --project=test test/quality/aqua_test.jl
-          julia --project=test test/quality/alloc_check_test.jl
-          julia --project=test test/quality/concrete_structs_test.jl
-          julia --project=test test/quality/explicit_imports_test.jl
-          julia --project=test test/quality/instruction_count_test.jl
-          julia --project=test test/quality/linear_subspace_compiler.jl
-          julia --project=test test/quality/monodromy_compiler.jl
-          julia --project=test test/quality/nid_compiler.jl
+          julia --project=test test/quality/aqua.jl
+          julia --project=test test/quality/allocations.jl
+          julia --project=test test/quality/concrete_types.jl
+          julia --project=test test/quality/explicit_imports.jl
+          julia --project=test test/quality/inference.jl
+          julia --project=test test/quality/instruction_count.jl
+      - name: Set up certification test environment
+        run: >-
+          julia --project=lib/HomotopyContinuationCertification/test -e
+          'using Pkg; Pkg.develop([PackageSpec(path="."),
+          PackageSpec(path="lib/HomotopyContinuationCertification")]); Pkg.instantiate()'
+      - name: Run certification package contracts
+        run: |
+          julia --project=lib/HomotopyContinuationCertification/test lib/HomotopyContinuationCertification/test/quality/aqua.jl
+          julia --project=lib/HomotopyContinuationCertification/test lib/HomotopyContinuationCertification/test/quality/concrete_types.jl
+          julia --project=lib/HomotopyContinuationCertification/test lib/HomotopyContinuationCertification/test/quality/explicit_imports.jl
+          julia --project=lib/HomotopyContinuationCertification/test lib/HomotopyContinuationCertification/test/quality/jet.jl
 
   strict-mode:
     name: StrictMode - Julia 1.13
@@ -93,6 +100,6 @@ jobs:
           arch: x64
       - uses: julia-actions/cache@v3
       - name: Instantiate quality environment
-        run: julia --project=quality -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+        run: julia --project=test/quality/strict_mode -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
       - name: Prove compiled type stability
-        run: julia --project=quality --threads=1 --color=yes quality/strict_mode.jl
+        run: julia --project=test/quality/strict_mode --threads=1 --color=yes test/quality/strict_mode/strict_mode.jl
