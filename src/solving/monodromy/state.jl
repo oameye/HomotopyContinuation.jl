@@ -32,7 +32,7 @@ end
 
 function MonodromyLoop(
         base::LinearSubspace, parameter_sampler::PS, rng::Random.AbstractRNG,
-        step::Float64 = _trace_step(base, PathResult[]),
+        step::Float64 = trace_step(base, PathResult[]),
     ) where {PS}
     L = convert(LinearSubspace{ComplexF64}, base)
     # The second linear space is just a translation in order to perform a
@@ -53,9 +53,9 @@ end
 # wider than the points inflates them until the equations lose accuracy at their
 # degree, while a narrower one stops separating the three slices. Both ends want
 # the step at the scale of the points themselves, which is what the median is.
-_trace_step(::Vector{ComplexF64}, ::Vector{PathResult})::Float64 = 0.0
+trace_step(::Vector{ComplexF64}, ::Vector{PathResult})::Float64 = 0.0
 
-function _trace_step(L::LinearSubspace, results::Vector{PathResult})::Float64
+function trace_step(L::LinearSubspace, results::Vector{PathResult})::Float64
     is_linear(L) || return 5.0
     norms = Float64[]
     for r in results

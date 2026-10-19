@@ -165,7 +165,7 @@ end
 
 # The last two default to what monodromy-as-a-subroutine wants; `Monodromy`
 # passes both, since there they are the user's to set.
-function _monodromy_solve!(
+function monodromy_solve!(
         MS::MonodromySolver{H, P},
         X::AbstractVector{<:AbstractVector},
         p::P,
@@ -176,17 +176,17 @@ function _monodromy_solve!(
         warning::Bool = false,
     )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
     runner = show_progress ?
-        _monodromy_with_progress! : _monodromy_without_progress!
+        monodromy_with_progress! : monodromy_without_progress!
     # Keeping the two bodies out of one inferred union means a quiet solve does
     # not compile ProgressMeter. The executor splits the same way one level down,
-    # where `_monodromy_solve_body!` specializes on it.
+    # where `monodromy_solve_body!` specializes on it.
     runner = Base.inferencebarrier(runner)
-    return _dispatch_monodromy_policy(
+    return dispatch_monodromy_policy(
         runner, MS, X, p, seed, executor, catch_interrupt, warning,
     )
 end
 
-@noinline function _dispatch_monodromy_policy(
+@noinline function dispatch_monodromy_policy(
         runner::Function, MS::MonodromySolver{H, P},
         X::AbstractVector{<:AbstractVector}, p::P, seed::UInt32,
         executor::E, catch_interrupt::Bool, warning::Bool,
@@ -196,7 +196,7 @@ end
 end
 
 
-function _make_monodromy_progress(MS::MonodromySolver)::ProgressMeter.ProgressUnknown
+function make_monodromy_progress(MS::MonodromySolver)::ProgressMeter.ProgressUnknown
     desc = if MS.options.equivalence_classes
         "Solutions (modulo group action) found:"
     else
@@ -207,21 +207,21 @@ function _make_monodromy_progress(MS::MonodromySolver)::ProgressMeter.ProgressUn
     return progress
 end
 
-@noinline function _monodromy_without_progress!(
+@noinline function monodromy_without_progress!(
         MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
         executor::E, catch_interrupt::Bool, warning::Bool,
     )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
-    return _monodromy_solve_body!(
+    return monodromy_solve_body!(
         MS, X, p, seed, nothing, executor, catch_interrupt, warning,
     )
 end
 
-@noinline function _monodromy_with_progress!(
+@noinline function monodromy_with_progress!(
         MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
         executor::E, catch_interrupt::Bool, warning::Bool,
     )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
-    return _monodromy_solve_body!(
-        MS, X, p, seed, _make_monodromy_progress(MS), executor,
+    return monodromy_solve_body!(
+        MS, X, p, seed, make_monodromy_progress(MS), executor,
         catch_interrupt, warning,
     )
 end
@@ -252,7 +252,7 @@ function threaded_monodromy_solve!(
     while length(MS.workers) < nthr
         push!(MS.workers, MS.builder())
     end
-    _size_certified_caches!(MS, nthr)
+    size_certified_caches!(MS, nthr)
 
     data_lock = MS.unique_points_lock
     t0 = time()
@@ -480,28 +480,28 @@ function threaded_monodromy_solve!(
     return retcode[]
 end
 
-function _run_monodromy_loop!(
+function run_monodromy_loop!(
         ::Serial, MS::MonodromySolver, results::Vector{PathResult},
         seed::UInt32, progress,
     )::MonodromyCode.T
     return serial_monodromy_solve!(MS, results, seed, progress)
 end
 
-function _run_monodromy_loop!(
+function run_monodromy_loop!(
         exec::Threaded, MS::MonodromySolver, results::Vector{PathResult},
         seed::UInt32, progress,
     )::MonodromyCode.T
     return threaded_monodromy_solve!(MS, results, seed, progress, exec.ntasks)
 end
 
-function _run_monodromy_loop!(
+function run_monodromy_loop!(
         executor::DistributedExecutor, MS::MonodromySolver,
         results::Vector{PathResult}, seed::UInt32, progress,
     )::MonodromyCode.T
-    return _distributed_monodromy_solve!(executor, MS, results, seed, progress)
+    return distributed_monodromy_solve!(executor, MS, results, seed, progress)
 end
 
-function _monodromy_solve_body!(
+function monodromy_solve_body!(
         MS::MonodromySolver{H, P},
         X::AbstractVector{<:AbstractVector},
         p::P,
@@ -513,7 +513,7 @@ function _monodromy_solve_body!(
     )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
     MS.statistics = MonodromyStatistics()
     empty!(MS.unique_points)
-    _reset_certified!(MS)
+    reset_certified!(MS)
     reset_trace!(MS)
     reset_loops!(MS)
     results = check_start_solutions!(MS, X)
@@ -524,7 +524,7 @@ function _monodromy_solve_body!(
         retcode = MonodromyCode.INVALID_STARTVALUE
     else
         try
-            retcode = _run_monodromy_loop!(executor, MS, results, seed, progress)
+            retcode = run_monodromy_loop!(executor, MS, results, seed, progress)
         catch e
             if !catch_interrupt || !(
                     isa(e, InterruptException) ||
@@ -629,7 +629,7 @@ hand to another process as to track.
 # The three start-data shapes, by dispatch. A parameter-free system is intersected
 # with a subspace, a parameterized one is tracked in parameter space, and `alg`'s
 # `SUBSPACE` parameter says which.
-@noinline function _monodromy_start_pair(G, rng::Random.AbstractRNG)
+@noinline function monodromy_start_pair(G, rng::Random.AbstractRNG)
     start_pair = find_start_pair(G; rng = rng)
     start_pair.found || error(
         "Cannot compute a start pair (x, p) using `find_start_pair(F)`." *
@@ -643,11 +643,11 @@ function solve(
         alg::Monodromy{MO, V, P, false},
         exec::E = Threaded(),
     )::ParameterMonodromyResult where {MO, V, P, E <: AbstractExecutor}
-    G = _monodromy_system(F, alg)
-    # A tagged stream: `_monodromy_solve!` seeds loop generation from `seed`
+    G = monodromy_system(F, alg)
+    # A tagged stream: `monodromy_solve!` seeds loop generation from `seed`
     # directly, so the setup draws here must stay uncorrelated with it.
-    rng = _tagged_rng(_seed(alg), 0x0000_0001)
-    start_pair = _monodromy_start_pair(G, rng)
+    rng = tagged_rng(algorithm_seed(alg), 0x0000_0001)
+    start_pair = monodromy_start_pair(G, rng)
     # The intended (co)dimension is required rather than guessed, so a forgotten
     # parameter argument is caught instead of silently reinterpreted.
     is_parameterized(start_pair) || error(
@@ -655,7 +655,7 @@ function solve(
             "with a linear subspace it is necessary to provide a " *
             "dimension (`dim`) or codimension (`codim`) of the component of interest.",
     )
-    return _monodromy_parameters(G, [start_pair.x], start_pair.p, alg, exec, rng)
+    return monodromy_parameters(G, [start_pair.x], start_pair.p, alg, exec, rng)
 end
 
 function solve(
@@ -663,9 +663,9 @@ function solve(
         alg::Monodromy{MO, V, P, true},
         exec::E = Threaded(),
     )::SubspaceMonodromyResult where {MO, V, P, E <: AbstractExecutor}
-    G = _monodromy_system(F, alg)
-    rng = _tagged_rng(_seed(alg), 0x0000_0001)
-    start_pair = _monodromy_start_pair(G, rng)
+    G = monodromy_system(F, alg)
+    rng = tagged_rng(algorithm_seed(alg), 0x0000_0001)
+    start_pair = monodromy_start_pair(G, rng)
     is_parameterized(start_pair) && error(
         "`dim` and `codim` are the expected (co)dimension of a component of a " *
             "parameter-free system, which this system is not: it has " *
@@ -678,7 +678,7 @@ function solve(
     # NOTE the swap: `dim`/`codim` are COMPONENT dimensions, so the subspace
     # takes the complementary ones.
     L = rand_subspace(rng, x; dim = codim_c, codim = alg.dim, affine = !projective)
-    return _monodromy_subspace(G, [x], L, alg, exec, rng)
+    return monodromy_subspace(G, [x], L, alg, exec, rng)
 end
 
 function solve(
@@ -688,10 +688,10 @@ function solve(
         alg::Monodromy,
         exec::E = Threaded(),
     )::MonodromyResult where {E <: AbstractExecutor}
-    G = _monodromy_system(F, alg)
-    return _monodromy_parameters(
-        G, _monodromy_starts(sols), p, alg, exec,
-        _tagged_rng(_seed(alg), 0x0000_0001),
+    G = monodromy_system(F, alg)
+    return monodromy_parameters(
+        G, monodromy_starts(sols), p, alg, exec,
+        tagged_rng(algorithm_seed(alg), 0x0000_0001),
     )
 end
 
@@ -702,17 +702,17 @@ function solve(
         alg::Monodromy,
         exec::E = Threaded(),
     )::MonodromyResult where {E <: AbstractExecutor}
-    G = _monodromy_system(F, alg)
-    return _monodromy_subspace(
-        G, _monodromy_starts(sols), L, alg, exec,
-        _tagged_rng(_seed(alg), 0x0000_0001),
+    G = monodromy_system(F, alg)
+    return monodromy_subspace(
+        G, monodromy_starts(sols), L, alg, exec,
+        tagged_rng(algorithm_seed(alg), 0x0000_0001),
     )
 end
 
 # A single solution is accepted as itself, not as a list of coordinates.
-_monodromy_starts(sols::AbstractVector{<:Number})::Vector{Vector{ComplexF64}} =
+monodromy_starts(sols::AbstractVector{<:Number})::Vector{Vector{ComplexF64}} =
     [Vector{ComplexF64}(ComplexF64.(sols))]
-_monodromy_starts(sols::StartsLike)::Vector{Vector{ComplexF64}} = _start_points(sols)
+monodromy_starts(sols::StartsLike)::Vector{Vector{ComplexF64}} = start_points(sols)
 
 """
     solve(F::System, R::MonodromyResult, p_target, alg = Continuation(), exec = Threaded())
@@ -735,32 +735,32 @@ function solve(
     return solve(F, R, p_target, Continuation(), exec)
 end
 
-function _monodromy_parameters(
+function monodromy_parameters(
         F::SystemLike, S::AbstractVector{<:AbstractVector}, p, alg::Monodromy,
         exec::E, rng::Random.AbstractRNG,
     )::ParameterMonodromyResult where {E <: AbstractExecutor}
     cp = convert(Vector{ComplexF64}, p)
     return with_monodromy_solver(
         F, cp;
-        options = alg.options, tracker_options = _tracker_options(alg), rng = rng,
+        options = alg.options, tracker_options = algorithm_tracker_options(alg), rng = rng,
         start_solutions = S,
     ) do MS
-        _monodromy_solve!(
-            MS, S, cp, _seed(alg), _show_progress(alg), exec,
+        monodromy_solve!(
+            MS, S, cp, algorithm_seed(alg), algorithm_show_progress(alg), exec,
             alg.catch_interrupt, alg.warning,
         )
     end
 end
 
-function _monodromy_subspace(
+function monodromy_subspace(
         F::SystemLike, S::AbstractVector{<:AbstractVector}, L, alg::Monodromy,
         exec::E, rng::Random.AbstractRNG,
     )::SubspaceMonodromyResult where {E <: AbstractExecutor}
     cp = convert(LinearSubspace{ComplexF64}, L)
     return with_monodromy_solver(
         F, cp;
-        options = alg.options, tracker_options = _tracker_options(alg),
-        intrinsic = _use_intrinsic(alg.coords, cp),
+        options = alg.options, tracker_options = algorithm_tracker_options(alg),
+        intrinsic = use_intrinsic(alg.coords, cp),
         rng = rng, start_solutions = S,
     ) do MS
         mH, nH = size(MS.workers[1].homotopy)
@@ -772,8 +772,8 @@ function _monodromy_subspace(
                     "overstated for this system.",
             ),
         )
-        _monodromy_solve!(
-            MS, S, cp, _seed(alg), _show_progress(alg), exec,
+        monodromy_solve!(
+            MS, S, cp, algorithm_seed(alg), algorithm_show_progress(alg), exec,
             alg.catch_interrupt, alg.warning,
         )
     end

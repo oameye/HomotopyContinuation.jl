@@ -126,7 +126,7 @@ end
 
 ## ── Coefficient computation ──────────────────────────────────────────────────
 
-function _update_toric_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
+function update_toric_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
     if H.t_cache[] == t
         return nothing
     end
@@ -152,11 +152,11 @@ function _update_toric_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
     return nothing
 end
 
-function _update_toric_dt_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
+function update_toric_dt_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
     if H.dt_cache[] == t
         return nothing
     end
-    _update_toric_coeffs!(H, t)
+    update_toric_coeffs!(H, t)
     tr = real(t)
     if tr > 0 && isreal(t)
         @fastmath t_inv = inv(tr)
@@ -200,11 +200,11 @@ end
 #   p₂ = w(w-1)/2 * c_j * t^{w-2}
 #   p₃ = w(w-1)(w-2)/6 * c_j * t^{w-3}
 
-function _update_toric_d2t_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
+function update_toric_d2t_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
     if H.d2t_cache[] == t
         return nothing
     end
-    _update_toric_coeffs!(H, t)
+    update_toric_coeffs!(H, t)
     tr = real(t)
     if tr > 0 && isreal(t)
         @fastmath t_inv = inv(tr)
@@ -240,11 +240,11 @@ function _update_toric_d2t_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
     return nothing
 end
 
-function _update_toric_d3t_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
+function update_toric_d3t_coeffs!(H::ToricHomotopy, t::ComplexF64)::Nothing
     if H.d3t_cache[] == t
         return nothing
     end
-    _update_toric_coeffs!(H, t)
+    update_toric_coeffs!(H, t)
     tr = real(t)
     if tr > 0 && isreal(t)
         @fastmath t_inv = inv(tr)
@@ -288,7 +288,7 @@ function evaluate!(
         u::FSVec{ComplexF64}, H::ToricHomotopy,
         x::Union{FSVec{ComplexF64}, FSVec{ComplexDF64}}, t::ComplexF64,
     )::Nothing
-    _update_toric_coeffs!(H, t)
+    update_toric_coeffs!(H, t)
     evaluate!(u, H.system, x, H.coeffs)
     return nothing
 end
@@ -297,7 +297,7 @@ function evaluate_and_jacobian!(
         u::FSVec{ComplexF64}, U::FSMat{ComplexF64},
         H::ToricHomotopy, x::FSVec{ComplexF64}, t::ComplexF64,
     )::Nothing
-    _update_toric_coeffs!(H, t)
+    update_toric_coeffs!(H, t)
     evaluate_and_jacobian!(u, U, H.system, x, H.coeffs)
     return nothing
 end
@@ -309,7 +309,7 @@ function taylor!(
         u::FSVec{ComplexF64}, ::Val{1}, H::ToricHomotopy,
         x::FSVec{ComplexF64}, t::ComplexF64,
     )::Nothing
-    _update_toric_dt_coeffs!(H, t)
+    update_toric_dt_coeffs!(H, t)
     evaluate!(u, H.system, x, H.dt_coeffs)
     return nothing
 end
@@ -320,12 +320,12 @@ end
 #   [H]_k = Σ_{j=0}^{k} [F(x)]_{k-j} · p_j
 # The interpreter's taylor_op_mul handles the Cauchy product automatically.
 
-@inline function _pack_param_taylor!(
+@inline function pack_param_taylor!(
         H::ToricHomotopy, t::ComplexF64, ::Val{2},
     )::Nothing
-    _update_toric_coeffs!(H, t)
-    _update_toric_dt_coeffs!(H, t)
-    _update_toric_d2t_coeffs!(H, t)
+    update_toric_coeffs!(H, t)
+    update_toric_dt_coeffs!(H, t)
+    update_toric_d2t_coeffs!(H, t)
     np = length(H.coeffs)
     @inbounds for i in 1:np
         H.tp2.data[1, i] = H.coeffs[i]
@@ -335,11 +335,11 @@ end
     return nothing
 end
 
-@inline function _pack_param_taylor!(
+@inline function pack_param_taylor!(
         H::ToricHomotopy, t::ComplexF64, ::Val{3},
     )::Nothing
-    _pack_param_taylor!(H, t, Val(2))
-    _update_toric_d3t_coeffs!(H, t)
+    pack_param_taylor!(H, t, Val(2))
+    update_toric_d3t_coeffs!(H, t)
     np = length(H.coeffs)
     @inbounds for i in 1:np
         H.tp3.data[1, i] = H.tp2.data[1, i]
@@ -354,7 +354,7 @@ function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::ToricHomotopy,
         tx::TaylorVector{3, ComplexF64}, t::ComplexF64,
     )::Nothing
-    _pack_param_taylor!(H, t, Val(2))
+    pack_param_taylor!(H, t, Val(2))
     taylor!(u, Val(2), H.system, tx, H.tp2)
     return nothing
 end
@@ -363,7 +363,7 @@ function taylor!(
         u::FSVec{ComplexF64}, ::Val{3}, H::ToricHomotopy,
         tx::TaylorVector{4, ComplexF64}, t::ComplexF64,
     )::Nothing
-    _pack_param_taylor!(H, t, Val(3))
+    pack_param_taylor!(H, t, Val(3))
     taylor!(u, Val(3), H.system, tx, H.tp3)
     return nothing
 end

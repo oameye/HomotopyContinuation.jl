@@ -100,9 +100,9 @@ ParameterHomotopy(
 
 Base.size(H::LinearParameterHomotopy) = size(H.system)
 
-_clone_homotopy(H::LinearParameterHomotopy{S}) where {S} =
+clone_homotopy(H::LinearParameterHomotopy{S}) where {S} =
     LinearParameterHomotopy{S}(
-    _clone_system_evaluator(H.system), H.start_p, H.target_p,
+    clone_system_evaluator(H.system), H.start_p, H.target_p,
 )
 
 ## Retargeting (cold path, e.g. 4 calls per monodromy loop). Recomputes dp and
@@ -140,7 +140,7 @@ end
 
 ## p(t) interpolation cache
 
-@inline function _update_p!(H::LinearParameterHomotopy, t::ComplexF64)::Nothing
+@inline function update_p!(H::LinearParameterHomotopy, t::ComplexF64)::Nothing
     H.t_cache[] == t && return nothing
     # Use real arithmetic when t is real to avoid complex-multiply roundoff.
     if isreal(t)
@@ -162,10 +162,10 @@ end
 ## Parameter TaylorVector packing: p₀ = p(t), p₁ = dp, higher orders zero
 ## (p(t) is linear in t).
 
-@inline function _pack_param_taylor!(
+@inline function pack_param_taylor!(
         tp::TaylorVector{N, ComplexF64}, H::LinearParameterHomotopy, t::ComplexF64,
     )::Nothing where {N}
-    _update_p!(H, t)
+    update_p!(H, t)
     np = length(H.p_t)
     @inbounds for i in 1:np
         tp.data[1, i] = H.p_t[i]
@@ -183,7 +183,7 @@ function evaluate!(
         u::FSVec{ComplexF64}, H::LinearParameterHomotopy,
         x::Union{FSVec{ComplexF64}, FSVec{ComplexDF64}}, t::ComplexF64,
     )::Nothing
-    _update_p!(H, t)
+    update_p!(H, t)
     evaluate!(u, H.system, x, H.p_t)
     return nothing
 end
@@ -194,7 +194,7 @@ function evaluate_and_jacobian!(
         u::FSVec{ComplexF64}, U::FSMat{ComplexF64},
         H::LinearParameterHomotopy, x::FSVec{ComplexF64}, t::ComplexF64,
     )::Nothing
-    _update_p!(H, t)
+    update_p!(H, t)
     evaluate_and_jacobian!(u, U, H.system, x, H.p_t)
     return nothing
 end
@@ -220,7 +220,7 @@ function taylor!(
         u::FSVec{ComplexF64}, ::Val{1}, H::LinearParameterHomotopy{false},
         x::FSVec{ComplexF64}, t::ComplexF64,
     )::Nothing
-    _pack_param_taylor!(H.tp1, H, t)
+    pack_param_taylor!(H.tp1, H, t)
     n = length(x)
     @inbounds for i in 1:n
         H.tx1.data[1, i] = x[i]
@@ -234,7 +234,7 @@ function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::LinearParameterHomotopy,
         tx::TaylorVector{3, ComplexF64}, t::ComplexF64,
     )::Nothing
-    _pack_param_taylor!(H.tp2, H, t)
+    pack_param_taylor!(H.tp2, H, t)
     taylor!(u, Val(2), H.system, tx, H.tp2)
     return nothing
 end
@@ -243,7 +243,7 @@ function taylor!(
         u::FSVec{ComplexF64}, ::Val{3}, H::LinearParameterHomotopy,
         tx::TaylorVector{4, ComplexF64}, t::ComplexF64,
     )::Nothing
-    _pack_param_taylor!(H.tp3, H, t)
+    pack_param_taylor!(H.tp3, H, t)
     taylor!(u, Val(3), H.system, tx, H.tp3)
     return nothing
 end

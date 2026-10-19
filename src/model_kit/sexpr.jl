@@ -133,20 +133,20 @@ end
 # Vector{SExprT}, Dict{SExprT,...}, Set{SExprT}, and function signatures.
 
 const SExprT = typeof(SExpr.SConst(zero(ComplexF64)))
-const _EMPTY_SEXPR_VEC = SExprT[]
+const EMPTY_SEXPR_VEC = SExprT[]
 
-@inline _owned_args(args::AbstractVector{<:SExprT})::Vector{SExprT} = collect(SExprT, args)
+@inline owned_args(args::AbstractVector{<:SExprT})::Vector{SExprT} = collect(SExprT, args)
 
 # Compound expressions are hashed structurally and used as Dict/Set keys in CSE.
 # They must therefore own stable child storage instead of aliasing caller vectors.
-@inline SExpr.SAdd(args::AbstractVector{<:SExprT}) = invoke(SExpr.SAdd, Tuple{Any}, _owned_args(args))
-@inline SExpr.SMul(args::AbstractVector{<:SExprT}) = invoke(SExpr.SMul, Tuple{Any}, _owned_args(args))
+@inline SExpr.SAdd(args::AbstractVector{<:SExprT}) = invoke(SExpr.SAdd, Tuple{Any}, owned_args(args))
+@inline SExpr.SMul(args::AbstractVector{<:SExprT}) = invoke(SExpr.SMul, Tuple{Any}, owned_args(args))
 @inline SExpr.SFuncSym(kind::SFuncKind.T, args::AbstractVector{<:SExprT}) =
-    invoke(SExpr.SFuncSym, Tuple{Any, Any}, kind, _owned_args(args))
+    invoke(SExpr.SFuncSym, Tuple{Any, Any}, kind, owned_args(args))
 
 ## ── Hashing (matches old symbol-seeded hash for CSE ordering stability) ──
 
-function _fold_hash(seed, args)::UInt
+function fold_hash(seed, args)::UInt
     h = hash(seed, zero(UInt))
     for a in args
         h = hash(a, h)
@@ -160,8 +160,8 @@ function Base.hash(e::SExprT, h::UInt)::UInt
         SExpr.SVar(idx) => hash(idx, hash(:SVar, h))
         SExpr.SParam(idx) => hash(idx, hash(:SParam, h))
         SExpr.STmp(id) => hash(id, hash(:STmp, h))
-        SExpr.SAdd(args) => hash(_fold_hash(:SAdd, args), h)
-        SExpr.SMul(args) => hash(_fold_hash(:SMul, args), h)
+        SExpr.SAdd(args) => hash(fold_hash(:SAdd, args), h)
+        SExpr.SMul(args) => hash(fold_hash(:SMul, args), h)
         SExpr.SPow(base, exp) =>
             hash(hash(exp, hash(base, hash(:SPow, zero(UInt)))), h)
         SExpr.SRPow(base, exp) =>
@@ -169,13 +169,13 @@ function Base.hash(e::SExprT, h::UInt)::UInt
         SExpr.SNeg(arg) => hash(arg, hash(:SNeg, h))
         SExpr.SUnary(kind, arg) => hash(arg, hash(kind, hash(:SUnary, h)))
         SExpr.SFuncSym(kind, args) =>
-            hash(_fold_hash((:SFuncSym, kind), args), h)
+            hash(fold_hash((:SFuncSym, kind), args), h)
     end
 end
 
 ## ── SExpr helpers ───────────────────────────────────────────────────────────
 
-@inline _is_atom(e::SExprT)::Bool = @match e begin
+@inline is_atom(e::SExprT)::Bool = @match e begin
     SExpr.SConst(_) => true
     SExpr.SVar(_) => true
     SExpr.SParam(_) => true
@@ -184,7 +184,7 @@ end
 end
 
 """Get the arguments (children) of a compound expression."""
-@inline _get_args(e::SExprT)::Vector{SExprT} = @match e begin
+@inline get_args(e::SExprT)::Vector{SExprT} = @match e begin
     SExpr.SAdd(args) => args::Vector{SExprT}
     SExpr.SMul(args) => args::Vector{SExprT}
     SExpr.SFuncSym(_, args) => args::Vector{SExprT}
@@ -192,14 +192,14 @@ end
     SExpr.SRPow(base, _) => SExprT[base::SExprT]
     SExpr.SNeg(arg) => SExprT[arg::SExprT]
     SExpr.SUnary(_, arg) => SExprT[arg::SExprT]
-    _ => _EMPTY_SEXPR_VEC
+    _ => EMPTY_SEXPR_VEC
 end
 
-@inline function _rebuild_funcsym(
+@inline function rebuild_funcsym(
         kind::SFuncKind.T, args::Vector{SExprT},
     )::SExprT
-    kind == SFuncKind.SFUNC_ADD && return _canonical_add(args)
-    kind == SFuncKind.SFUNC_MUL && return _canonical_mul(args)
+    kind == SFuncKind.SFUNC_ADD && return canonical_add(args)
+    kind == SFuncKind.SFUNC_MUL && return canonical_mul(args)
     if kind == SFuncKind.SFUNC_POW && length(args) == 2
         @match args[2] begin
             SExpr.SConst(val) => return SExpr.SPow(args[1], Int(real(val)))
@@ -209,24 +209,24 @@ end
     return SExpr.SFuncSym(kind, args)
 end
 
-@inline _rebuild_expr(expr::SExprT, args::Vector{SExprT})::SExprT = @match expr begin
-    SExpr.SAdd(_) => _canonical_add(args)
-    SExpr.SMul(_) => _canonical_mul(args)
+@inline rebuild_expr(expr::SExprT, args::Vector{SExprT})::SExprT = @match expr begin
+    SExpr.SAdd(_) => canonical_add(args)
+    SExpr.SMul(_) => canonical_mul(args)
     SExpr.SPow(_, exp) => SExpr.SPow(args[1], exp)
     SExpr.SRPow(_, exp) => SExpr.SRPow(args[1], exp)
     SExpr.SNeg(_) => SExpr.SNeg(args[1])
     SExpr.SUnary(kind, _) => SExpr.SUnary(kind, args[1])
-    SExpr.SFuncSym(kind, _) => _rebuild_funcsym(kind, args)
-    # Atoms have no children, so `_rebuild_expr` returns them unchanged.
+    SExpr.SFuncSym(kind, _) => rebuild_funcsym(kind, args)
+    # Atoms have no children, so `rebuild_expr` returns them unchanged.
     _ => expr
 end
 
-@inline _complex_lt(a::ComplexF64, b::ComplexF64)::Bool =
+@inline complex_lt(a::ComplexF64, b::ComplexF64)::Bool =
     real(a) < real(b) || (real(a) == real(b) && imag(a) < imag(b))
-@inline _sexpr_kind_lt(a::SFuncKind.T, b::SFuncKind.T)::Bool = Int(a) < Int(b)
-@inline _sexpr_kind_lt(a::SUnaryKind.T, b::SUnaryKind.T)::Bool = Int(a) < Int(b)
+@inline sexpr_kind_lt(a::SFuncKind.T, b::SFuncKind.T)::Bool = Int(a) < Int(b)
+@inline sexpr_kind_lt(a::SUnaryKind.T, b::SUnaryKind.T)::Bool = Int(a) < Int(b)
 
-@inline _sexpr_tag_order(e::SExprT)::UInt8 = @match e begin
+@inline sexpr_tag_order(e::SExprT)::UInt8 = @match e begin
     SExpr.SConst(_) => 0x01
     SExpr.SVar(_) => 0x02
     SExpr.SParam(_) => 0x03
@@ -240,57 +240,57 @@ end
     SExpr.SRPow(_, _) => 0x0b
 end
 
-function _sexpr_args_lt(a_args::Vector{SExprT}, b_args::Vector{SExprT})::Bool
+function sexpr_args_lt(a_args::Vector{SExprT}, b_args::Vector{SExprT})::Bool
     n = min(length(a_args), length(b_args))
     for i in 1:n
         a = a_args[i]
         b = b_args[i]
         a == b && continue
-        return _sexpr_struct_lt(a, b)
+        return sexpr_struct_lt(a, b)
     end
     return length(a_args) < length(b_args)
 end
 
-function _sexpr_struct_lt(a::SExprT, b::SExprT)::Bool
-    a_tag = _sexpr_tag_order(a)
-    b_tag = _sexpr_tag_order(b)
+function sexpr_struct_lt(a::SExprT, b::SExprT)::Bool
+    a_tag = sexpr_tag_order(a)
+    b_tag = sexpr_tag_order(b)
     a_tag == b_tag || return a_tag < b_tag
 
     # Same tag on both sides, so each arm binds one variant's fields from each.
     return @match (a, b) begin
-        (SExpr.SConst(x), SExpr.SConst(y)) => _complex_lt(x, y)
+        (SExpr.SConst(x), SExpr.SConst(y)) => complex_lt(x, y)
         (SExpr.SVar(x), SExpr.SVar(y)) => x < y
         (SExpr.SParam(x), SExpr.SParam(y)) => x < y
         (SExpr.STmp(x), SExpr.STmp(y)) => x < y
         (SExpr.SAdd(xs), SExpr.SAdd(ys)) =>
-            _sexpr_args_lt(xs, ys)
+            sexpr_args_lt(xs, ys)
         (SExpr.SMul(xs), SExpr.SMul(ys)) =>
-            _sexpr_args_lt(xs, ys)
+            sexpr_args_lt(xs, ys)
         (SExpr.SPow(xb, xe), SExpr.SPow(yb, ye)) => begin
             p = xb
             q = yb
-            p == q ? xe < ye : _sexpr_struct_lt(p, q)
+            p == q ? xe < ye : sexpr_struct_lt(p, q)
         end
         (SExpr.SRPow(xb, xe), SExpr.SRPow(yb, ye)) => begin
             p = xb
             q = yb
-            p == q ? _complex_lt(xe, ye) : _sexpr_struct_lt(p, q)
+            p == q ? complex_lt(xe, ye) : sexpr_struct_lt(p, q)
         end
-        (SExpr.SNeg(x), SExpr.SNeg(y)) => _sexpr_struct_lt(x, y)
+        (SExpr.SNeg(x), SExpr.SNeg(y)) => sexpr_struct_lt(x, y)
         (SExpr.SUnary(xk, x), SExpr.SUnary(yk, y)) =>
-            xk != yk ? _sexpr_kind_lt(xk, yk) : _sexpr_struct_lt(x, y)
+            xk != yk ? sexpr_kind_lt(xk, yk) : sexpr_struct_lt(x, y)
         (SExpr.SFuncSym(xk, xs), SExpr.SFuncSym(yk, ys)) =>
-            xk != yk ? _sexpr_kind_lt(xk, yk) :
-            _sexpr_args_lt(xs, ys)
-        _ => error("Unhandled SExpr variant in _sexpr_struct_lt")
+            xk != yk ? sexpr_kind_lt(xk, yk) :
+            sexpr_args_lt(xs, ys)
+        _ => error("Unhandled SExpr variant in sexpr_struct_lt")
     end
 end
 
-_sexpr_lt(a::SExprT, b::SExprT)::Bool = hash(a) < hash(b)
-_add_term_lt(a::SExprT, b::SExprT)::Bool = _sexpr_lt(_add_term_base(a), _add_term_base(b))
+sexpr_lt(a::SExprT, b::SExprT)::Bool = hash(a) < hash(b)
+add_term_lt(a::SExprT, b::SExprT)::Bool = sexpr_lt(add_term_base(a), add_term_base(b))
 
 """Return `empty_val` for 0 args, the single arg for 1, or `constructor(args)` for many."""
-function _wrap_args(args::Vector{SExprT}, empty_val::SExprT, constructor::F)::SExprT where {F}
+function wrap_args(args::Vector{SExprT}, empty_val::SExprT, constructor::F)::SExprT where {F}
     isempty(args) && return empty_val
     length(args) == 1 && return args[1]
     return constructor(args)
@@ -299,7 +299,7 @@ end
 """
 Extract the "base expression" of an Add term, stripping the leading coefficient.
 """
-function _add_term_base(e::SExprT)::SExprT
+function add_term_base(e::SExprT)::SExprT
     @match e begin
         SExpr.SMul(args) => begin
             xs = args
@@ -316,14 +316,14 @@ function _add_term_base(e::SExprT)::SExprT
     return e
 end
 
-function _flatten_add_arg!(
+function flatten_add_arg!(
         flat_args::Vector{SExprT},
         const_sum::Base.RefValue{ComplexF64},
         arg::SExprT,
     )::Nothing
     @match arg begin
         SExpr.SAdd(args) => for child in args
-            _flatten_add_arg!(flat_args, const_sum, child)
+            flatten_add_arg!(flat_args, const_sum, child)
         end
         SExpr.SConst(val) => (const_sum[] += val)
         _ => push!(flat_args, arg)
@@ -331,56 +331,56 @@ function _flatten_add_arg!(
     return nothing
 end
 
-function _canonical_add(args::Vector{SExprT})::SExprT
+function canonical_add(args::Vector{SExprT})::SExprT
     flat_args = SExprT[]
     const_sum = Ref(zero(ComplexF64))
     for arg in args
-        _flatten_add_arg!(flat_args, const_sum, arg)
+        flatten_add_arg!(flat_args, const_sum, arg)
     end
-    sort!(flat_args; lt = _sexpr_lt)
+    sort!(flat_args; lt = sexpr_lt)
     !iszero(const_sum[]) && pushfirst!(flat_args, SExpr.SConst(const_sum[]))
-    return _wrap_args(flat_args, SExpr.SConst(zero(ComplexF64)), SExpr.SAdd)
+    return wrap_args(flat_args, SExpr.SConst(zero(ComplexF64)), SExpr.SAdd)
 end
 
-function _flatten_mul_arg!(
+function flatten_mul_arg!(
         flat_args::Vector{SExprT},
         coeff::Base.RefValue{ComplexF64},
         arg::SExprT,
     )::Nothing
     @match arg begin
         SExpr.SMul(args) => for child in args
-            _flatten_mul_arg!(flat_args, coeff, child)
+            flatten_mul_arg!(flat_args, coeff, child)
         end
         SExpr.SConst(val) => (coeff[] *= val)
         SExpr.SNeg(a) => begin
             coeff[] = -coeff[]
-            _flatten_mul_arg!(flat_args, coeff, a)
+            flatten_mul_arg!(flat_args, coeff, a)
         end
         _ => push!(flat_args, arg)
     end
     return nothing
 end
 
-function _canonical_mul(args::Vector{SExprT})::SExprT
+function canonical_mul(args::Vector{SExprT})::SExprT
     flat_args = SExprT[]
     coeff = Ref(one(ComplexF64))
     for arg in args
-        _flatten_mul_arg!(flat_args, coeff, arg)
+        flatten_mul_arg!(flat_args, coeff, arg)
     end
     iszero(coeff[]) && return SExpr.SConst(zero(ComplexF64))
-    sort!(flat_args; lt = _sexpr_lt)
+    sort!(flat_args; lt = sexpr_lt)
     coeff[] != one(ComplexF64) && pushfirst!(flat_args, SExpr.SConst(coeff[]))
-    return _wrap_args(flat_args, SExpr.SConst(one(ComplexF64)), SExpr.SMul)
+    return wrap_args(flat_args, SExpr.SConst(one(ComplexF64)), SExpr.SMul)
 end
 
-function _canonical_unary(kind::SUnaryKind.T, arg::SExprT)::SExprT
+function canonical_unary(kind::SUnaryKind.T, arg::SExprT)::SExprT
     return @match arg begin
         SExpr.SConst(val) => SExpr.SConst(apply_unary(kind, val))
         _ => SExpr.SUnary(kind, arg)
     end
 end
 
-function _canonical_rpow(base::SExprT, exp::ComplexF64)::SExprT
+function canonical_rpow(base::SExprT, exp::ComplexF64)::SExprT
     return @match base begin
         SExpr.SConst(val) => SExpr.SConst(val^exp)
         _ => SExpr.SRPow(base, exp)
@@ -389,7 +389,7 @@ end
 
 ## ── Polynomial → SExpr conversion ──────────────────────────────────────────
 
-@noinline _unknown_symbol_error(sym::Symbol)::ArgumentError = ArgumentError(
+@noinline unknown_symbol_error(sym::Symbol)::ArgumentError = ArgumentError(
     "symbol $sym is neither a variable nor a parameter of the system",
 )
 
@@ -420,7 +420,7 @@ function poly_to_sexpr(
                 SExpr.SVar(idx_var)
             else
                 idx_param = get(param_to_idx, sym, 0)
-                idx_param > 0 || throw(_unknown_symbol_error(sym))
+                idx_param > 0 || throw(unknown_symbol_error(sym))
                 SExpr.SParam(idx_param)
             end
             push!(factors, exp == 1 ? base : SExpr.SPow(base, exp))
@@ -436,6 +436,6 @@ function poly_to_sexpr(
         end
     end
 
-    length(terms) > 1 && sort!(terms; lt = _add_term_lt)
-    return _wrap_args(terms, SExpr.SConst(zero(ComplexF64)), SExpr.SAdd)
+    length(terms) > 1 && sort!(terms; lt = add_term_lt)
+    return wrap_args(terms, SExpr.SConst(zero(ComplexF64)), SExpr.SAdd)
 end

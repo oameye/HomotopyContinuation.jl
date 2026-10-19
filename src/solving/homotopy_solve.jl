@@ -4,9 +4,9 @@
 
 # ── solve(G, F, starts) ────────────────────────────────────────────────────
 
-function _check_start_target(G::CloneableSystem, F::CloneableSystem)::Nothing
-    _check_parameter_free(G, "`solve(G, F, starts)`")
-    _check_parameter_free(F, "`solve(G, F, starts)`")
+function check_start_target(G::CloneableSystem, F::CloneableSystem)::Nothing
+    check_parameter_free(G, "`solve(G, F, starts)`")
+    check_parameter_free(F, "`solve(G, F, starts)`")
     size(G) == size(F) || throw(
         ArgumentError(
             "the start system has size $(size(G)), but the target system has size " *
@@ -21,14 +21,14 @@ function _check_start_target(G::CloneableSystem, F::CloneableSystem)::Nothing
         ),
     )
     if is_homogeneous(F)
-        _check_projective_determined(F, "`solve(G, F, starts)`")
+        check_projective_determined(F, "`solve(G, F, starts)`")
     else
-        _check_square_or_overdetermined(F)
+        check_square_or_overdetermined(F)
     end
     return nothing
 end
 
-function _check_start_length(points::Vector{Vector{ComplexF64}}, n::Int)::Nothing
+function check_start_length(points::Vector{Vector{ComplexF64}}, n::Int)::Nothing
     for x in points
         length(x) == n || throw(
             ArgumentError(
@@ -74,22 +74,22 @@ function CommonSolve.init(
         alg::Continuation = Continuation(),
         exec::E = Threaded(),
     )::SolveCache{E} where {E <: AbstractExecutor}
-    _check_start_target(G, F)
+    check_start_target(G, F)
 
-    seed = _seed(alg)
+    seed = algorithm_seed(alg)
     rng = Random.MersenneTwister(seed)
-    γ = _random_gamma(rng)
-    chart = is_homogeneous(F) ? _affine_chart(rng, F) : ComplexF64[]
+    γ = random_gamma(rng)
+    chart = is_homogeneous(F) ? random_affine_chart(rng, F) : ComplexF64[]
 
-    points = _start_points(starts)
-    _check_start_length(points, nvariables(F))
-    isempty(chart) || _place_on_chart!(points, chart)
+    points = start_points(starts)
+    check_start_length(points, nvariables(F))
+    isempty(chart) || place_on_chart!(points, chart)
 
     builder = StartTargetBuilder(
-        G, F, chart, γ, _tracker_options(alg), _endgame_options(alg),
+        G, F, chart, γ, algorithm_tracker_options(alg), algorithm_endgame_options(alg),
     )
-    return _solve_cache(
-        exec, builder, points, seed, ExcessCheckers(), _show_progress(alg),
+    return solve_cache(
+        exec, builder, points, seed, ExcessCheckers(), algorithm_show_progress(alg),
         early_stop_callback(alg),
     )
 end
@@ -97,13 +97,13 @@ end
 # ── solve(H, starts) ───────────────────────────────────────────────────────
 
 # A chart row makes the start points projective representatives.
-_place_on_chart!(::Vector{Vector{ComplexF64}}, ::AbstractHomotopy)::Nothing = nothing
+place_on_chart!(::Vector{Vector{ComplexF64}}, ::AbstractHomotopy)::Nothing = nothing
 
-_place_on_chart!(
+place_on_chart!(
     points::Vector{Vector{ComplexF64}}, H::AffineChartHomotopy,
-)::Nothing = _place_on_chart!(points, H.chart)
+)::Nothing = place_on_chart!(points, H.chart)
 
-function _place_on_chart!(
+function place_on_chart!(
         points::Vector{Vector{ComplexF64}}, chart::Vector{ComplexF64},
     )::Nothing
     for x in points
@@ -112,7 +112,7 @@ function _place_on_chart!(
     return nothing
 end
 
-function _homotopy_cache(
+function homotopy_cache(
         exec::E, builder::AbstractPathBuilder, H::AbstractHomotopy, starts,
         alg::Continuation,
     )::SolveCache{E} where {E <: AbstractExecutor}
@@ -124,11 +124,11 @@ function _homotopy_cache(
                 "finitely many solutions are supported.",
         ),
     )
-    points = _start_points(starts)
-    _check_start_length(points, n)
-    _place_on_chart!(points, H)
-    return _solve_cache(
-        exec, builder, points, _seed(alg), ExcessCheckers(), _show_progress(alg),
+    points = start_points(starts)
+    check_start_length(points, n)
+    place_on_chart!(points, H)
+    return solve_cache(
+        exec, builder, points, algorithm_seed(alg), ExcessCheckers(), algorithm_show_progress(alg),
         early_stop_callback(alg),
     )
 end
@@ -166,22 +166,22 @@ function CommonSolve.init(
         alg::Continuation = Continuation(),
         exec::E = Serial(),
     )::SolveCache{E} where {E <: AbstractExecutor}
-    builder = _homotopy_builder(
-        exec, H, _tracker_options(alg), _endgame_options(alg),
+    builder = homotopy_builder(
+        exec, H, algorithm_tracker_options(alg), algorithm_endgame_options(alg),
     )
-    return _homotopy_cache(exec, builder, H, starts, alg)
+    return homotopy_cache(exec, builder, H, starts, alg)
 end
 
-_homotopy_builder(
+homotopy_builder(
     ::Serial, H::AbstractHomotopy, tracker_options::TrackerOptions,
     endgame_options::EndgameOptions,
 ) = SharedHomotopyBuilder(H, tracker_options, endgame_options)
 
-function _homotopy_builder(
+function homotopy_builder(
         ::AbstractExecutor, H::AbstractHomotopy, tracker_options::TrackerOptions,
         endgame_options::EndgameOptions,
     )
-    _clone_homotopy(H)   # a homotopy that cannot be rebuilt fails here, not in a task
+    clone_homotopy(H)   # a homotopy that cannot be rebuilt fails here, not in a task
     return ClonedHomotopyBuilder(H, tracker_options, endgame_options)
 end
 
@@ -216,9 +216,9 @@ function CommonSolve.init(
         ),
     )
     builder = HomotopyBuilder(
-        build_homotopy, _tracker_options(alg), _endgame_options(alg),
+        build_homotopy, algorithm_tracker_options(alg), algorithm_endgame_options(alg),
     )
-    return _homotopy_cache(exec, builder, H, starts, alg)
+    return homotopy_cache(exec, builder, H, starts, alg)
 end
 
 # Passing only an executor selects the default algorithm.
@@ -235,32 +235,32 @@ for f in (:(solve), :(CommonSolve.init))
         $f(
             H::Homotopy, starts::StartsLike, alg::Continuation = Continuation(),
             exec::E = Serial(),
-        ) where {E <: AbstractExecutor} = $f(_as_homotopy(H), starts, alg, exec)
+        ) where {E <: AbstractExecutor} = $f(as_homotopy(H), starts, alg, exec)
         $f(H::Homotopy, starts::StartsLike, exec::E) where {E <: AbstractExecutor} =
-            $f(_as_homotopy(H), starts, Continuation(), exec)
+            $f(as_homotopy(H), starts, Continuation(), exec)
 
         $f(
             ::CloneableSystem, ::CloneableSystem, starts,
             ::Continuation = Continuation(), ::AbstractExecutor = Threaded(),
-        ) = _bad_starts(starts)
+        ) = bad_starts(starts)
         $f(
             ::CloneableSystem, ::CloneableSystem, starts, ::AbstractExecutor,
-        ) = _bad_starts(starts)
+        ) = bad_starts(starts)
 
         $f(
             ::AbstractHomotopy, starts, ::Continuation = Continuation(),
             ::AbstractExecutor = Serial(),
-        ) = _bad_starts(starts)
-        $f(::AbstractHomotopy, starts, ::AbstractExecutor) = _bad_starts(starts)
+        ) = bad_starts(starts)
+        $f(::AbstractHomotopy, starts, ::AbstractExecutor) = bad_starts(starts)
 
         $f(
             ::Homotopy, starts, ::Continuation = Continuation(),
             ::AbstractExecutor = Serial(),
-        ) = _bad_starts(starts)
-        $f(::Homotopy, starts, ::AbstractExecutor) = _bad_starts(starts)
+        ) = bad_starts(starts)
+        $f(::Homotopy, starts, ::AbstractExecutor) = bad_starts(starts)
 
         $f(::Function, starts, ::Continuation, ::AbstractExecutor) =
-            _bad_starts(starts)
-        $f(::Function, starts, ::AbstractExecutor) = _bad_starts(starts)
+            bad_starts(starts)
+        $f(::Function, starts, ::AbstractExecutor) = bad_starts(starts)
     end
 end

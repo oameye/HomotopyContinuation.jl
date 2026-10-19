@@ -13,7 +13,7 @@ struct TrackWork{B}
     starts::Vector{Vector{ComplexF64}}
 end
 
-(w::TrackWork)(state, i::Int)::PathResult = _track_path!(state, w.starts[i], i)
+(w::TrackWork)(state, i::Int)::PathResult = track_path!(state, w.starts[i], i)
 
 struct PolyhedralWork{B}
     builder::B
@@ -24,7 +24,7 @@ end
 
 function (w::PolyhedralWork)(state, i::Int)::PathResult
     cell, x₀ = w.starts[i]
-    return _track_polyhedral_path!(state, w.support, w.lifting, cell, x₀, i)
+    return track_polyhedral_path!(state, w.support, w.lifting, cell, x₀, i)
 end
 
 """
@@ -43,10 +43,10 @@ path_work(cache::PolyhedralSolveCache) = PolyhedralWork(
     cache.builder, cache.start_solutions, cache.support, cache.lifting,
 )
 
-_excess_checkers(cache::Union{SolveCache, PolyhedralSolveCache})::ExcessCheckers =
+cache_excess_checkers(cache::Union{SolveCache, PolyhedralSolveCache})::ExcessCheckers =
     cache.excess_checkers
 # The subspace routes never square up, so they carry nothing to re-check.
-_excess_checkers(::WorkerSolveCache)::ExcessCheckers = ExcessCheckers()
+cache_excess_checkers(::WorkerSolveCache)::ExcessCheckers = ExcessCheckers()
 
 # ── Loops ───────────────────────────────────────────────────────────────────
 #
@@ -96,7 +96,7 @@ function track_paths(
             is_success(pr) && stop(pr) && (stopped[] = true)
         end
     end
-    return _assigned_results(results)
+    return assigned_results(results)
 end
 
 # The Distributed extension adds the method for the work units above.
@@ -104,7 +104,7 @@ function track_paths(
         ::DistributedExecutor, worker, work, n::Int, progress, stop::EarlyStop,
     )
     Base.@nospecialize worker work progress
-    return _distributed_ext_missing()
+    return distributed_ext_missing()
 end
 
 function track_all_paths(cache::PathSolveCache, progress)::Result
@@ -113,7 +113,7 @@ function track_all_paths(cache::PathSolveCache, progress)::Result
         length(cache.start_solutions), progress, cache.early_stop,
     )
     # `tracked_paths` is what ran, which is what `nfailed` is derived from.
-    return _finalize_result(prs, length(prs), cache.seed, _excess_checkers(cache))
+    return finalize_result(prs, length(prs), cache.seed, cache_excess_checkers(cache))
 end
 
 # ── CommonSolve.solve! ──────────────────────────────────────────────────────
@@ -126,10 +126,10 @@ end
 # compiles only the one it runs.
 function CommonSolve.solve!(cache::PathSolveCache)::Result
     runner = cache.show_progress ? track_all_paths_with_progress : track_all_paths
-    return _dispatch_solve_policy(Base.inferencebarrier(runner), cache)
+    return dispatch_solve_policy(Base.inferencebarrier(runner), cache)
 end
 
-@noinline function _dispatch_solve_policy(solver::Function, cache)::Result
+@noinline function dispatch_solve_policy(solver::Function, cache)::Result
     Base.@nospecialize solver cache
     return solver(cache)
 end

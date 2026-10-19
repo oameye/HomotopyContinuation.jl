@@ -5,7 +5,7 @@
 # ---------------------------------------------------------------------------
 
 """
-    _cluster_solutions(path_results, atol, rtol, group_actions) -> (clusters, multiplicity)
+    cluster_solutions(path_results, atol, rtol, group_actions) -> (clusters, multiplicity)
 
 Group successful path results by solution proximity. Returns:
 - `clusters::Vector{Vector{Int}}` — groups of indices into `path_results`
@@ -29,12 +29,12 @@ pair tolerance) need the exact distance check. Typical cost is O(k log k);
 the worst case (all keys within one window) degrades gracefully to an
 O(k²) pairwise scan.
 
-With `group_actions`, `_orbit_merge!` additionally merges clusters sharing an orbit,
+With `group_actions`, `orbit_merge!` additionally merges clusters sharing an orbit,
 so `clusters` holds one entry per orbit. `multiplicity` is read off the proximity
 clusters before that merge, so it reports the multiplicity of the root rather than
 the size of its orbit.
 """
-function _cluster_solutions(
+function cluster_solutions(
         path_results::Vector{PathResult}, atol::Float64, rtol::Float64, group_actions::GA,
     )::Tuple{Vector{Vector{Int}}, Vector{Int}} where {GA}
     n = length(path_results)
@@ -51,7 +51,7 @@ function _cluster_solutions(
     parent = collect(1:k)
     rank = zeros(Int, k)
 
-    function _find(x::Int)::Int
+    function find_root(x::Int)::Int
         while parent[x] != x
             parent[x] = parent[parent[x]]  # path halving
             x = parent[x]
@@ -59,9 +59,9 @@ function _cluster_solutions(
         return x
     end
 
-    function _union!(a::Int, b::Int)::Nothing
-        ra = _find(a)
-        rb = _find(b)
+    function union_roots!(a::Int, b::Int)::Nothing
+        ra = find_root(a)
+        rb = find_root(b)
         ra == rb && return nothing
         if rank[ra] < rank[rb]
             parent[ra] = rb
@@ -104,7 +104,7 @@ function _cluster_solutions(
             d = inf_distance(sol_j, path_results[success_idx[l]].solution)
             tol = max(atol, rtol * max(norm_j, norms[l]))
             if d <= tol
-                _union!(j, l)
+                union_roots!(j, l)
             end
         end
     end
@@ -113,7 +113,7 @@ function _cluster_solutions(
     prox_root = Vector{Int}(undef, k)
     prox_size = zeros(Int, k)
     for j in 1:k
-        root = _find(j)
+        root = find_root(j)
         prox_root[j] = root
         prox_size[root] += 1
     end
@@ -122,8 +122,8 @@ function _cluster_solutions(
     end
 
     if group_actions !== nothing
-        _orbit_merge!(
-            _union!, path_results, success_idx, prox_root, norms,
+        orbit_merge!(
+            union_roots!, path_results, success_idx, prox_root, norms,
             atol, rtol, group_actions,
         )
     end
@@ -131,7 +131,7 @@ function _cluster_solutions(
     # Extract connected components
     comp = Dict{Int, Vector{Int}}()
     for j in 1:k
-        root = _find(j)
+        root = find_root(j)
         idx = success_idx[j]
         if haskey(comp, root)
             push!(comp[root], idx)
@@ -148,7 +148,7 @@ function _cluster_solutions(
 end
 
 """
-    _orbit_merge!(do_union!, path_results, success_idx, prox_root, norms, atol, rtol, actions)
+    orbit_merge!(do_union!, path_results, success_idx, prox_root, norms, atol, rtol, actions)
 
 Merge proximity clusters that lie in a common orbit of `actions`, by calling
 `do_union!(a, b)` for every pair of distinct cluster representatives found
@@ -158,7 +158,7 @@ Every representative is indexed before any is queried, and each is unioned with
 every representative its images land on, so `actions` need only be a generating
 set of the symmetry group rather than an enumeration of whole orbits.
 """
-function _orbit_merge!(
+function orbit_merge!(
         do_union!::F, path_results::Vector{PathResult}, success_idx::Vector{Int},
         prox_root::Vector{Int}, norms::Vector{Float64},
         atol::Float64, rtol::Float64, actions::GA,
@@ -171,7 +171,7 @@ function _orbit_merge!(
     for j in reps
         insert!(tree, path_results[success_idx[j]].solution, j)
     end
-    acts = _as_group_actions(actions)
+    acts = as_group_actions(actions)
     for j in reps
         tol = max(atol, rtol * norms[j])
         apply_actions(acts, path_results[success_idx[j]].solution) do w
@@ -216,12 +216,12 @@ struct Result <: AbstractSolutionResult
 end
 
 function Result(path_results::Vector{PathResult}, tracked_paths::Int, seed::UInt32)
-    clusters, multiplicity = _cluster_solutions(
+    clusters, multiplicity = cluster_solutions(
         path_results, DEFAULT_CLUSTER_ATOL, DEFAULT_CLUSTER_RTOL, nothing,
     )
     # Stamp each path with its multiplicity so `multiplicity(::PathResult)`
     # reports the cluster size without a back-reference to the `Result`.
-    prs = PathResult[_with_multiplicity(pr, multiplicity[i]) for (i, pr) in enumerate(path_results)]
+    prs = PathResult[with_multiplicity(pr, multiplicity[i]) for (i, pr) in enumerate(path_results)]
     return Result(prs, tracked_paths, seed, clusters, multiplicity)
 end
 
@@ -265,11 +265,11 @@ function recluster(
         atol::Float64 = DEFAULT_CLUSTER_ATOL,
         rtol::Float64 = DEFAULT_CLUSTER_RTOL,
     )::Result
-    clusters, multiplicity = _cluster_solutions(
-        r.path_results, atol, rtol, _as_group_actions(group_actions),
+    clusters, multiplicity = cluster_solutions(
+        r.path_results, atol, rtol, as_group_actions(group_actions),
     )
     prs = PathResult[
-        _with_multiplicity(pr, multiplicity[i]) for (i, pr) in enumerate(r.path_results)
+        with_multiplicity(pr, multiplicity[i]) for (i, pr) in enumerate(r.path_results)
     ]
     return Result(prs, r.tracked_paths, r.seed, clusters, multiplicity)
 end
@@ -285,15 +285,15 @@ path_results(r::Result)::Vector{PathResult} = r.path_results
 
 # Index of one representative path per distinct solution. `Result` clusters a
 # fixed path set afterwards, so several paths share one entry.
-_solution_indices(r::Result) = (first(c) for c in r.clusters)
+solution_indices(r::Result) = (first(c) for c in r.clusters)
 
 # One filter, so the four accessors above cannot drift apart.
-@inline function _passes(
+@inline function passes_filter(
         pr::PathResult, only_real::Bool, only_nonsingular::Bool,
         only_singular::Bool, real_tol::Float64,
     )::Bool
-    only_nonsingular && _singular(pr) && return false
-    only_singular && !_singular(pr) && return false
+    only_nonsingular && counts_as_singular(pr) && return false
+    only_singular && !counts_as_singular(pr) && return false
     only_real && !is_real(pr; tol = real_tol) && return false
     return true
 end
@@ -392,17 +392,17 @@ function statistics(r::Result; real_tol::Float64 = DEFAULT_REAL_TOL)::ResultStat
 end
 
 """
-    _finalize_result(path_results, tracked_paths, seed, excess_checkers) -> Result
+    finalize_result(path_results, tracked_paths, seed, excess_checkers) -> Result
 
 Shared tail of every `solve!` method: reclassify excess solutions of an
 overdetermined solve (a no-op when `excess_checkers` is empty, which is what a
 square solve carries), then assemble the `Result`.
 """
-function _finalize_result(
+function finalize_result(
         path_results::Vector{PathResult}, tracked_paths::Int, seed::UInt32,
         excess_checkers::ExcessCheckers,
     )::Result
-    _check_excess_solutions!(path_results, excess_checkers)
+    check_excess_solutions!(path_results, excess_checkers)
     return Result(path_results, tracked_paths, seed)
 end
 
@@ -445,8 +445,8 @@ function nresults(
     )::Int
     prs = path_results(r)
     n = 0
-    for i in _solution_indices(r)
-        _passes(
+    for i in solution_indices(r)
+        passes_filter(
             prs[i], only_real, only_nonsingular, only_singular, real_tol,
         ) && (n += 1)
     end
@@ -456,7 +456,7 @@ end
 # An early stop leaves the tracked paths a subsequence of `1:n`, so a path number
 # is no longer its position. Contiguous numbering hits the first branch; results
 # whose paths carry no number (0) can only be addressed positionally.
-function _path_position(r::Result, i::Int)::Int
+function path_position(r::Result, i::Int)::Int
     prs = r.path_results
     checkbounds(Bool, prs, i) && path_number(prs[i]) == i && return i
     if isempty(prs) || path_number(first(prs)) == 0
@@ -475,7 +475,7 @@ Multiplicity of path `i`: the number of paths that converged to the same point.
 Returns 0 for non-success paths. Unaffected by an orbit merge, so it reports the
 multiplicity of the solution even after [`recluster`](@ref) with a group action.
 """
-multiplicity(r::Result, i::Int)::Int = r.multiplicity[_path_position(r, i)]
+multiplicity(r::Result, i::Int)::Int = r.multiplicity[path_position(r, i)]
 
 """
     clusters(r::Result) -> Vector{Vector{PathResult}}
@@ -501,7 +501,7 @@ After [`recluster`](@ref) with a group action this is the orbit of solution `i`,
 so `cluster_of(r, path_number(pr))` gets the symmetric partners of `pr`.
 """
 function cluster_of(r::Result, i::Int)::Vector{PathResult}
-    pos = _path_position(r, i)
+    pos = path_position(r, i)
     for cl in r.clusters
         if pos in cl
             return PathResult[r.path_results[j] for j in cl]
@@ -526,11 +526,11 @@ function results(
     )::Vector{PathResult}
     prs = path_results(r)
     out = PathResult[]
-    idxs = multiple_results ? eachindex(prs) : _solution_indices(r)
+    idxs = multiple_results ? eachindex(prs) : solution_indices(r)
     for i in idxs
         pr = prs[i]
         multiple_results && !is_success(pr) && continue
-        _passes(pr, only_real, only_nonsingular, only_singular, real_tol) &&
+        passes_filter(pr, only_real, only_nonsingular, only_singular, real_tol) &&
             push!(out, pr)
     end
     return out
@@ -548,9 +548,9 @@ function solutions(
     )::Vector{Vector{ComplexF64}}
     prs = path_results(r)
     out = Vector{ComplexF64}[]
-    for i in _solution_indices(r)
+    for i in solution_indices(r)
         pr = prs[i]
-        _singular(pr) && continue
+        counts_as_singular(pr) && continue
         only_real && !is_real(pr; tol = real_tol) && continue
         push!(out, pr.solution)
     end
@@ -567,9 +567,9 @@ function real_solutions(
     )::Vector{Vector{Float64}}
     prs = path_results(r)
     out = Vector{Float64}[]
-    for i in _solution_indices(r)
+    for i in solution_indices(r)
         pr = prs[i]
-        _singular(pr) && continue
+        counts_as_singular(pr) && continue
         is_real(pr; tol = tol) && push!(out, Float64.(real.(pr.solution)))
     end
     return out
@@ -597,16 +597,16 @@ nreal(r::AbstractSolutionResult; tol::Float64 = DEFAULT_REAL_TOL)::Int =
     nresults(r; only_real = true, only_nonsingular = true, real_tol = tol)
 
 # Points are owned copies, never aliases.
-_start_points(
+start_points(
     starts::AbstractVector{<:AbstractVector{<:Number}},
 )::Vector{Vector{ComplexF64}} = [Vector{ComplexF64}(ComplexF64.(s)) for s in starts]
-_start_points(r::Result)::Vector{Vector{ComplexF64}} = [copy(s) for s in solutions(r)]
-_start_points(x) = _bad_starts(x)
+start_points(r::Result)::Vector{Vector{ComplexF64}} = [copy(s) for s in solutions(r)]
+start_points(x) = bad_starts(x)
 
 # A solve stopped early leaves holes: `@tasks` cannot break, so its iterations skip
 # instead and those slots stay undefined. Dropping them keeps the path numbers
-# ascending but no longer equal to the position, which `_path_position` resolves.
-function _assigned_results(results::Vector{PathResult})::Vector{PathResult}
+# ascending but no longer equal to the position, which `path_position` resolves.
+function assigned_results(results::Vector{PathResult})::Vector{PathResult}
     all(i -> isassigned(results, i), eachindex(results)) && return results
     return PathResult[results[i] for i in eachindex(results) if isassigned(results, i)]
 end

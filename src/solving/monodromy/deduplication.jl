@@ -5,7 +5,7 @@
 # Deduplication tolerances for a finished PathResult under the solver's policy.
 # Shared by the serial `add!(MS, …)` and the threaded worker so the two paths
 # cannot drift apart.
-function _dedup_tolerances(opts::MonodromyOptions, res::PathResult)::Tuple{Float64, Float64}
+function dedup_tolerances(opts::MonodromyOptions, res::PathResult)::Tuple{Float64, Float64}
     rtol = isnan(opts.unique_points_rtol) ? uniqueness_rtol(res) :
         opts.unique_points_rtol
     return opts.unique_points_atol, rtol
@@ -15,9 +15,9 @@ end
 # is none or the run keeps no equivalence classes. Call with the lock guarding the
 # stored solutions held.
 # Returns the id of the stored orbit duplicate, or `0` when there is none.
-function _orbit_duplicate(MS::MonodromySolver, res::PathResult)::Int
+function orbit_duplicate(MS::MonodromySolver, res::PathResult)::Int
     MS.options.equivalence_classes || return 0
-    atol, rtol = _dedup_tolerances(MS.options, res)
+    atol, rtol = dedup_tolerances(MS.options, res)
     x = solution(res)
     UP = MS.unique_points
     return search_in_radius(UP, x, tolerance_radius(UP, x, atol, rtol))
@@ -34,7 +34,7 @@ function certify_candidate(MS::CertifiedMonodromySolver, res::PathResult, tid::I
     # the search under the lock it files in, which is what settles the race with a
     # task that stored the image in between.
     if MS.options.equivalence_classes
-        orbit = Base.@lock MS.unique_points_lock _orbit_duplicate(MS, res)
+        orbit = Base.@lock MS.unique_points_lock orbit_duplicate(MS, res)
         iszero(orbit) || return NoCandidate()
     end
     Threads.atomic_add!(MS.statistics.certification_attempts, 1)
@@ -53,7 +53,7 @@ add!(MS::CertifiedMonodromySolver, res::PathResult, id::Int) =
 function add!(
         MS::HeuristicMonodromySolver, res::PathResult, id::Int, ::NoCandidate,
     )
-    atol, rtol = _dedup_tolerances(MS.options, res)
+    atol, rtol = dedup_tolerances(MS.options, res)
     found, added = add!(MS.unique_points, solution(res), id; atol = atol, rtol = rtol)
     return (found, added, res)
 end
@@ -65,7 +65,7 @@ function add!(
         MS::CertifiedMonodromySolver, res::PathResult, id::Int,
         candidate::AbstractCertifiedCandidate,
     )
-    orbit = _orbit_duplicate(MS, res)
+    orbit = orbit_duplicate(MS, res)
     iszero(orbit) || return (orbit, false, res)
     # Nothing was certified for this endpoint: it is an orbit image, or the target
     # count was already met when it finished.
@@ -81,8 +81,8 @@ function add!(
         Threads.atomic_add!(stats.uncertified_discards, 1)
         return (0, false, res)
     end
-    accepted = _certified_endpoint(res, certified::CertifiedEndpoint)
-    atol, rtol = _dedup_tolerances(MS.options, res)
+    accepted = certified_endpoint(res, certified::CertifiedEndpoint)
+    atol, rtol = dedup_tolerances(MS.options, res)
     add!(MS.unique_points, solution(accepted), id; atol = atol, rtol = rtol)
     return (id, true, accepted)
 end
@@ -91,7 +91,7 @@ function add_tracked_result!(
         MS::HeuristicMonodromySolver, res::PathResult, id::Int, ::NoCandidate,
         tid::Int = 1,
     )
-    atol, rtol = _dedup_tolerances(MS.options, res)
+    atol, rtol = dedup_tolerances(MS.options, res)
     x = solution(res)
     UP = MS.unique_points
     existing = search_in_radius(UP, x, tolerance_radius(UP, x, atol, rtol))

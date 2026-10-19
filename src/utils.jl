@@ -29,12 +29,12 @@ end
     (@atomic :release cache.value = value; nothing)
 @inline Base.getindex(cache::LazyRef{T}) where {T} = @atomic :acquire cache.value
 
-_random_gamma(rng::Random.AbstractRNG)::ComplexF64 = cis(2π * rand(rng))
-_random_gamma(seed::UInt32)::ComplexF64 = _random_gamma(Random.MersenneTwister(seed))
+random_gamma(rng::Random.AbstractRNG)::ComplexF64 = cis(2π * rand(rng))
+random_gamma(seed::UInt32)::ComplexF64 = random_gamma(Random.MersenneTwister(seed))
 
 # A second stream from the same seed: the seed vector differs from the one
 # `MersenneTwister(seed)` builds, so the two never share draws.
-_tagged_rng(seed::UInt32, tag::UInt32)::Random.MersenneTwister =
+tagged_rng(seed::UInt32, tag::UInt32)::Random.MersenneTwister =
     Random.MersenneTwister(UInt32[seed, tag])
 
 nanmin(a, b) = isnan(a) ? b : (isnan(b) ? a : min(a, b))
@@ -42,11 +42,11 @@ nanmax(a, b) = isnan(a) ? b : (isnan(b) ? a : max(a, b))
 
 # Insertion sort is O(n²); beyond this cutoff a stable MergeSort wins. The
 # vertex lists sorted during System construction can reach thousands of entries.
-const _STABLE_SORT_CUTOFF = 32
+const STABLE_SORT_CUTOFF = 32
 
-function _stable_sort!(values::Vector{T}, lt::F)::Vector{T} where {T, F}
+function stable_sort!(values::Vector{T}, lt::F)::Vector{T} where {T, F}
     n = length(values)
-    if n > _STABLE_SORT_CUTOFF
+    if n > STABLE_SORT_CUTOFF
         sort!(values; alg = MergeSort, lt = lt)
         return values
     end
@@ -62,9 +62,9 @@ function _stable_sort!(values::Vector{T}, lt::F)::Vector{T} where {T, F}
     return values
 end
 
-function _stable_sort_by!(values::Vector{T}, by::F)::Vector{T} where {T, F}
+function stable_sort_by!(values::Vector{T}, by::F)::Vector{T} where {T, F}
     n = length(values)
-    if n > _STABLE_SORT_CUTOFF
+    if n > STABLE_SORT_CUTOFF
         sort!(values; alg = MergeSort, by = by)
         return values
     end
@@ -146,7 +146,7 @@ end
 
 dist_to_target(S::SegmentStepper)::Float64 = S.forward ? S.abs_Δ - S.s : S.s
 
-function _t_helper(
+function t_helper(
         start::ComplexF64,
         target::ComplexF64,
         s::Float64,
@@ -179,7 +179,7 @@ function Base.getproperty(S::SegmentStepper, sym::Symbol)
         forward = getfield(S, :forward)
         return forward ? s′ - s : s - s′
     elseif sym === :t
-        return _t_helper(
+        return t_helper(
             getfield(S, :start),
             getfield(S, :target),
             getfield(S, :s),
@@ -187,7 +187,7 @@ function Base.getproperty(S::SegmentStepper, sym::Symbol)
             getfield(S, :forward),
         )
     elseif sym === :t′
-        return _t_helper(
+        return t_helper(
             getfield(S, :start),
             getfield(S, :target),
             getfield(S, :s′),
@@ -222,7 +222,7 @@ end
 # `x` with the fields named in `updates` replaced, rebuilt through its default
 # constructor. Field order is not part of the call, so a field added to the struct is
 # carried over without a change in any caller.
-_with_fields(x::T, updates::NamedTuple) where {T} = T(
+with_fields(x::T, updates::NamedTuple) where {T} = T(
     ntuple(
         i -> get(updates, fieldname(T, i), getfield(x, i)), Val(fieldcount(T)),
     )...,

@@ -17,8 +17,8 @@ struct AffineChartSystem <: AbstractSystem
 end
 
 Base.size(F::AffineChartSystem) = (size(F.system)[1] + 1, size(F.system)[2])
-_clone_system(F::AffineChartSystem)::AffineChartSystem =
-    AffineChartSystem(_clone_system_evaluator(F.system), copy(F.chart))
+clone_system(F::AffineChartSystem)::AffineChartSystem =
+    AffineChartSystem(clone_system_evaluator(F.system), copy(F.chart))
 nparameters(F::AffineChartSystem)::Int = nparameters(F.system)
 
 """
@@ -35,8 +35,8 @@ end
 
 Base.size(H::AffineChartHomotopy) = (size(H.homotopy)[1] + 1, size(H.homotopy)[2])
 
-_clone_homotopy(H::AffineChartHomotopy)::AffineChartHomotopy =
-    AffineChartHomotopy(_clone_homotopy(H.homotopy), copy(H.chart))
+clone_homotopy(H::AffineChartHomotopy)::AffineChartHomotopy =
+    AffineChartHomotopy(clone_homotopy(H.homotopy), copy(H.chart))
 
 """
     on_affine_chart(F::System)
@@ -137,7 +137,7 @@ function evaluate_and_jacobian!(
 end
 
 # The order-K coefficient of the affine row `v'x - 1` is `v'x_K`, not zero.
-@inline function _chart_taylor_row(
+@inline function chart_taylor_row(
         chart::Vector{ComplexF64}, tx::TaylorVector{N, ComplexF64}, ::Val{K},
     )::ComplexF64 where {N, K}
     x_K = vectors(tx)[K + 1]
@@ -153,7 +153,7 @@ function taylor!(
         tx::TaylorVector{N, ComplexF64}, p::FSVec{ComplexF64},
     )::Nothing where {K, N}
     taylor!(u, v, F.system, tx, p)
-    u[size(F.system)[1] + 1] = _chart_taylor_row(F.chart, tx, v)
+    u[size(F.system)[1] + 1] = chart_taylor_row(F.chart, tx, v)
     return nothing
 end
 
@@ -162,7 +162,7 @@ function taylor!(
         tx::TaylorVector{N, ComplexF64}, tp::TaylorVector{M, ComplexF64},
     )::Nothing where {K, N, M}
     taylor!(u, v, F.system, tx, tp)
-    u[size(F.system)[1] + 1] = _chart_taylor_row(F.chart, tx, v)
+    u[size(F.system)[1] + 1] = chart_taylor_row(F.chart, tx, v)
     return nothing
 end
 
@@ -276,7 +276,7 @@ function with_linear_subspace_homotopy(
         F::System,
         V::LinearSubspace,
         W::LinearSubspace;
-        intrinsic::Bool = _default_intrinsic(V),
+        intrinsic::Bool = default_intrinsic(V),
         gamma::ComplexF64 = cis(2 * pi * rand()),
     ) where {Fn}
     projective = is_linear(V) && is_linear(W) && is_homogeneous(F)

@@ -7,7 +7,7 @@
 # covers division, non-integer and negative powers, and the unary functions that
 # `MP.differentiate` cannot express.
 
-function _expression_index_map(values::AbstractVector{Expression})::Dict{Symbol, Int}
+function expression_index_map(values::AbstractVector{Expression})::Dict{Symbol, Int}
     index_map = Dict{Symbol, Int}()
     for (i, value) in enumerate(values)
         index_map[Symbol(value)] = i
@@ -15,7 +15,7 @@ function _expression_index_map(values::AbstractVector{Expression})::Dict{Symbol,
     return index_map
 end
 
-function _build_instruction_sequence_from_expressions(
+function build_instruction_sequence_from_expressions(
         exprs::AbstractVector{Expression},
         variables::AbstractVector{Expression},
         parameters::AbstractVector{Expression},
@@ -25,8 +25,8 @@ function _build_instruction_sequence_from_expressions(
     nparams = length(parameters)
     output_dim = length(exprs)
 
-    var_to_idx = _expression_index_map(variables)
-    param_to_idx = _expression_index_map(parameters)
+    var_to_idx = expression_index_map(variables)
+    param_to_idx = expression_index_map(parameters)
 
     all_exprs = Vector{SExprT}(undef, output_dim)
     for i in eachindex(exprs)
@@ -40,7 +40,7 @@ function _build_instruction_sequence_from_expressions(
             for f in exprs
                 push!(
                     all_exprs,
-                    expression_to_sexpr(_differentiate(f, sym), var_to_idx, param_to_idx),
+                    expression_to_sexpr(differentiate_expression(f, sym), var_to_idx, param_to_idx),
                 )
             end
         end

@@ -5,12 +5,12 @@
 # stored at its global path index, so the output is independent of the order in
 # which batches come back.
 
-_transport_workers()::Vector{Int} = Distributed.workers()
-_transport_myid()::Int = Distributed.myid()
-_transport_channel(::Type{T}, n::Int) where {T} =
+transport_workers()::Vector{Int} = Distributed.workers()
+transport_myid()::Int = Distributed.myid()
+transport_channel(::Type{T}, n::Int) where {T} =
     Distributed.RemoteChannel(() -> Channel{T}(n))
-_transport_run(f, pid::Int, args...) = Distributed.remotecall_wait(f, pid, args...)
-_transport_query(f, pid::Int, args...) = Distributed.remotecall_fetch(f, pid, args...)
+transport_run(f, pid::Int, args...) = Distributed.remotecall_wait(f, pid, args...)
+transport_query(f, pid::Int, args...) = Distributed.remotecall_fetch(f, pid, args...)
 
 const BatchResult = Tuple{UnitRange{Int}, Vector{HCN.PathResult}}
 
@@ -22,10 +22,10 @@ const STOP_TOKEN = 1:0
 
 # `workers()` reports the driver itself when no worker process was started, which
 # would run the whole solve here.
-function _resolve_pids(exec::HCN.DistributedExecutor)::Vector{Int}
+function resolve_pids(exec::HCN.DistributedExecutor)::Vector{Int}
     isempty(exec.pids) || return exec.pids
-    pids = _transport_workers()
-    (length(pids) == 1 && only(pids) == _transport_myid()) && throw(
+    pids = transport_workers()
+    (length(pids) == 1 && only(pids) == transport_myid()) && throw(
         ArgumentError(
             "`DistributedExecutor` found no processes to track on. Start some " *
                 "with `Distributed.addprocs(n)`, or name them with `pids`.",
@@ -34,12 +34,12 @@ function _resolve_pids(exec::HCN.DistributedExecutor)::Vector{Int}
     return pids
 end
 
-function _check_pids(pids::Vector{Int})::Nothing
+function check_pids(pids::Vector{Int})::Nothing
     id = Base.PkgId(HCN)
-    me = _transport_myid()
+    me = transport_myid()
     for pid in pids
         pid == me && continue
-        _transport_query(Base.root_module_exists, pid, id) || throw(
+        transport_query(Base.root_module_exists, pid, id) || throw(
             ArgumentError(
                 "process $pid does not have HomotopyContinuation loaded. Run " *
                     "`@everywhere using HomotopyContinuation` before solving " *
@@ -53,7 +53,7 @@ end
 # Enough batches per process that a run of expensive paths cannot hold up the
 # solve, but never fewer paths than a process has tasks. The driver's own thread
 # count stands in for that floor, since `tasks_per_process == 0` resolves remotely.
-function _batch_ranges(
+function batch_ranges(
         n_paths::Int, exec::HCN.DistributedExecutor, nprocs::Int,
     )::Vector{UnitRange{Int}}
     bs = if exec.batch_size > 0
@@ -67,12 +67,12 @@ end
 
 # `@sync` wraps a worker failure in nested task/capture layers; report the error
 # the user's system actually threw.
-function _root_cause(e)
-    e isa TaskFailedException && return _root_cause(e.task.exception)
+function root_cause(e)
+    e isa TaskFailedException && return root_cause(e.task.exception)
     e isa CompositeException &&
-        !isempty(e.exceptions) && return _root_cause(e.exceptions[1])
-    e isa Distributed.RemoteException && return _root_cause(e.captured)
-    e isa CapturedException && return _root_cause(e.ex)
+        !isempty(e.exceptions) && return root_cause(e.exceptions[1])
+    e isa Distributed.RemoteException && return root_cause(e.captured)
+    e isa CapturedException && return root_cause(e.ex)
     return e
 end
 
@@ -81,7 +81,7 @@ end
 # A state carries fresh interpreter tapes and, under a compiled mode, freshly
 # generated code, so states persist across batches and are built only as tasks
 # come to need them.
-function _grow_states!(states::Vector{S}, builder::B, want::Int)::Nothing where {S, B}
+function grow_states!(states::Vector{S}, builder::B, want::Int)::Nothing where {S, B}
     have = length(states)
     have ≥ want && return nothing
     resize!(states, want)
@@ -91,7 +91,7 @@ function _grow_states!(states::Vector{S}, builder::B, want::Int)::Nothing where 
     return nothing
 end
 
-function _run_batch!(
+function run_batch!(
         work::W, states::Vector{S}, batch::UnitRange{Int},
         out::Distributed.RemoteChannel,
     )::Nothing where {W, S}
@@ -116,7 +116,7 @@ end
 # One long-lived call per process. Only this task touches the channels; the
 # per-path work runs on tasks that share nothing but the results array, so all
 # socket traffic stays on a single thread.
-function _run_batches(
+function run_batches(
         work::W, jobs::Distributed.RemoteChannel,
         out::Distributed.RemoteChannel, tasks_per_process::Int,
         stopflag::Distributed.RemoteChannel,
@@ -129,8 +129,8 @@ function _run_batches(
     # `isready` never blocks, so an early stop costs one poll per batch and the
     # loop exits normally rather than through a closed channel.
     while !isempty(batch) && !isready(stopflag)
-        _grow_states!(states, work.builder, min(nt, length(batch)))
-        _run_batch!(work, states, batch, out)
+        grow_states!(states, work.builder, min(nt, length(batch)))
+        run_batch!(work, states, batch, out)
         batch = take!(jobs)
     end
     return nothing
@@ -140,7 +140,7 @@ end
 
 # Driver-side, so a user callback never has to cross to a worker process.
 # Granularity is one batch.
-function _batch_trips_stop(
+function batch_trips_stop(
         early_stop::HCN.EarlyStop, prs::Vector{HCN.PathResult},
     )::Bool
     for pr in prs
@@ -149,24 +149,24 @@ function _batch_trips_stop(
     return false
 end
 
-function _distributed_map(
+function distributed_map(
         exec::HCN.DistributedExecutor, work::W, n_paths::Int, report::R,
         early_stop::HCN.EarlyStop = HCN.NEVER_STOP,
     )::Vector{HCN.PathResult} where {W, R}
     results = Vector{HCN.PathResult}(undef, n_paths)
     n_paths == 0 && return results
 
-    pids = _resolve_pids(exec)
-    _check_pids(pids)
-    batches = _batch_ranges(n_paths, exec, length(pids))
+    pids = resolve_pids(exec)
+    check_pids(pids)
+    batches = batch_ranges(n_paths, exec, length(pids))
     n_batches = length(batches)
     # Receiving a work unit rebuilds the system's evaluator, so a process that
     # could only draw a stop token is left out.
     n_batches < length(pids) && (pids = pids[1:n_batches])
 
-    jobs = _transport_channel(UnitRange{Int}, n_batches + length(pids))
-    out = _transport_channel(BatchResult, n_batches)
-    stopflag = _transport_channel(Bool, 1)
+    jobs = transport_channel(UnitRange{Int}, n_batches + length(pids))
+    out = transport_channel(BatchResult, n_batches)
+    stopflag = transport_channel(Bool, 1)
     try
         for batch in batches
             put!(jobs, batch)
@@ -179,8 +179,8 @@ function _distributed_map(
         tracking = @async begin
             try
                 @sync for pid in pids
-                    @async _transport_run(
-                        _run_batches, pid, work, jobs, out, ntasks, stopflag,
+                    @async transport_run(
+                        run_batches, pid, work, jobs, out, ntasks, stopflag,
                     )
                 end
             finally
@@ -197,7 +197,7 @@ function _distributed_map(
                 copyto!(results, first(batch), prs, 1, length(prs))
                 received += 1
                 report(batch, prs)
-                if _batch_trips_stop(early_stop, prs)
+                if batch_trips_stop(early_stop, prs)
                     # Tell the workers before leaving, or they block on `out`.
                     stopped = true
                     put!(stopflag, true)
@@ -212,7 +212,7 @@ function _distributed_map(
         try
             wait(tracking)
         catch e
-            throw(_root_cause(e))
+            throw(root_cause(e))
         end
         stopped || received == n_batches || error(
             "distributed tracking returned $received of $n_batches batches",

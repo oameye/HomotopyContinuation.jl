@@ -192,7 +192,7 @@ end
 end
 
 # Helper: fold an Expr vector by addition (no closures)
-function _expr_sum(terms::Vector{Expr})::Expr
+function expr_sum(terms::Vector{Expr})::Expr
     acc = terms[1]
     for i in 2:length(terms)
         acc = Expr(:call, :+, acc, terms[i])
@@ -202,11 +202,11 @@ end
 
 # Helper: generate Cauchy product expressions for orders 1..N (1-indexed)
 # Returns Vector{Expr} where exprs[k] = Σ_{j=1}^{k} a.val[j] * b.val[k+1-j]
-function _cauchy_product_exprs(N::Int)::Vector{Expr}
+function cauchy_product_exprs(N::Int)::Vector{Expr}
     exprs = Vector{Expr}(undef, N)
     for k in 1:N
         terms = Expr[:(a.val[$j] * b.val[$(k + 1 - j)]) for j in 1:k]
-        exprs[k] = _expr_sum(terms)
+        exprs[k] = expr_sum(terms)
     end
     return exprs
 end
@@ -214,7 +214,7 @@ end
 # OP_MUL # a * b  (Cauchy product)
 # c[k] = Σ_{j=0}^{k} a[j] * b[k-j]  (0-indexed), i.e., val[k+1] = Σ_{j=1}^{k+1} a.val[j]*b.val[k+2-j]
 @generated function taylor_op_mul(a::TTS{N, T}, b::TTS{N, T}) where {N, T}
-    exprs = _cauchy_product_exprs(N)
+    exprs = cauchy_product_exprs(N)
     return quote
         Base.@_inline_meta
         TTS($(Expr(:tuple, exprs...)))
@@ -234,7 +234,7 @@ end
         for j in 1:(k - 1)
             push!(sum_terms, :($(Symbol(:c, j)) * b.val[$(k + 1 - j)]))
         end
-        sum_expr = _expr_sum(sum_terms)
+        sum_expr = expr_sum(sum_terms)
         push!(stmts, :($(Symbol(:c, k)) = (a.val[$k] - $sum_expr) / b.val[1]))
     end
     cvars = Symbol[Symbol(:c, k) for k in 1:N]
@@ -257,7 +257,7 @@ end
         for j in 1:(k - 1)
             push!(sum_terms, :($(Symbol(:c, j)) * a.val[$(k + 1 - j)]))
         end
-        sum_expr = _expr_sum(sum_terms)
+        sum_expr = expr_sum(sum_terms)
         push!(stmts, :($(Symbol(:c, k)) = -($sum_expr * c1)))
     end
     cvars = Symbol[Symbol(:c, k) for k in 1:N]
@@ -292,7 +292,7 @@ end
                 for j in 1:(half + 1)
                     push!(terms, :(a.val[$j] * a.val[$(ord + 2 - j)]))
                 end
-                sum_expr = _expr_sum(terms)
+                sum_expr = expr_sum(terms)
                 exprs[k] = :(2 * ($sum_expr))
             end
         else
@@ -306,7 +306,7 @@ end
             if isempty(terms)
                 exprs[k] = :(a.val[$mid] * a.val[$mid])
             else
-                sum_expr = _expr_sum(terms)
+                sum_expr = expr_sum(terms)
                 exprs[k] = :(2 * ($sum_expr) + a.val[$mid] * a.val[$mid])
             end
         end
@@ -351,7 +351,7 @@ end
         for j in 2:(k - 1)
             push!(sum_terms, :($(Symbol(:c, j)) * $(Symbol(:c, k + 1 - j))))
         end
-        sum_expr = _expr_sum(sum_terms)
+        sum_expr = expr_sum(sum_terms)
         push!(stmts, :($(Symbol(:c, k)) = (a.val[$k] - $sum_expr) / two_c1))
     end
     cvars = Symbol[Symbol(:c, k) for k in 1:N]
@@ -371,14 +371,14 @@ end
 # keeps the non-finite result.
 @inline function taylor_op_pow_int(a::TTS{N, T}, r::I) where {N, T, I <: Integer}
     if N > 1 && iszero(a.val[1]) && r > 0
-        return _taylor_pow_by_squaring(a, r)
+        return taylor_pow_by_squaring(a, r)
     end
-    return _taylor_op_pow_int_recurrence(a, r)
+    return taylor_op_pow_int_recurrence(a, r)
 end
 
 # `r ≥ 1`, so at most `2 log₂ r` truncated multiplications, each of which is a
 # short unrolled convolution.
-function _taylor_pow_by_squaring(a::TTS{N, T}, r::I) where {N, T, I <: Integer}
+function taylor_pow_by_squaring(a::TTS{N, T}, r::I) where {N, T, I <: Integer}
     n = r
     base = a
     result = one(TTS{N, T})
@@ -397,7 +397,7 @@ end
 # w[k] = (1/k) * (1/a[0]) * Σ_{j=1}^{k} (r*j - (k-j)) * a[j] * w[k-j]
 # This is the standard recurrence from Griewank & Walther (Chapter 13). It is
 # generic in `r`; only the order-0 term needs to know whether `r` is an integer.
-function _taylor_pow_recurrence_expr(N::Int, w0_call::Symbol)::Expr
+function taylor_pow_recurrence_expr(N::Int, w0_call::Symbol)::Expr
     stmts = Expr[]
     push!(stmts, :(w1 = $w0_call(a.val[1], r)))
     if N >= 2
@@ -417,7 +417,7 @@ function _taylor_pow_recurrence_expr(N::Int, w0_call::Symbol)::Expr
                 ),
             )
         end
-        sum_expr = _expr_sum(sum_terms)
+        sum_expr = expr_sum(sum_terms)
         push!(stmts, :($(Symbol(:w, k)) = a0_inv * ($sum_expr) / $(k - 1)))
     end
     wvars = Symbol[Symbol(:w, k) for k in 1:N]
@@ -428,16 +428,16 @@ function _taylor_pow_recurrence_expr(N::Int, w0_call::Symbol)::Expr
     end
 end
 
-@generated function _taylor_op_pow_int_recurrence(
+@generated function taylor_op_pow_int_recurrence(
         a::TTS{N, T}, r::I,
     ) where {N, T, I <: Integer}
-    return _taylor_pow_recurrence_expr(N, :op_pow_int)
+    return taylor_pow_recurrence_expr(N, :op_pow_int)
 end
 
-@generated function _taylor_op_pow_recurrence(
+@generated function taylor_op_pow_recurrence(
         a::TTS{N, T}, r::R,
     ) where {N, T, R <: Number}
-    return _taylor_pow_recurrence_expr(N, :op_pow)
+    return taylor_pow_recurrence_expr(N, :op_pow)
 end
 
 # OP_POW # a^r where r is a non-integer number
@@ -445,7 +445,7 @@ end
 # The exponent is a constant slot, so only its order-0 coefficient carries anything.
 # A vanishing `a[0]` is a branch point, and the recurrence reports it as non-finite.
 @inline taylor_op_pow(a::TTS{N, T}, r::TTS{N, S}) where {N, T, S} =
-    _taylor_op_pow_recurrence(a, r.val[1])
+    taylor_op_pow_recurrence(a, r.val[1])
 
 # OP_SIN and OP_COS
 # Coupled recurrence (0-indexed):
@@ -466,14 +466,14 @@ end
             for j in 1:(k - 1)
                 push!(sum_terms, :($j * a.val[$(j + 1)] * $(Symbol(:c, k - j))))
             end
-            sum_expr = _expr_sum(sum_terms)
+            sum_expr = expr_sum(sum_terms)
             push!(stmts, :($(Symbol(:s, k)) = ($sum_expr) / $(k - 1)))
             # c[k-1] in 0-indexed: c_k = -(1/(k-1)) * Σ_{j=1}^{k-1} j*a[j]*s[k-j]
             csum_terms = Expr[]
             for j in 1:(k - 1)
                 push!(csum_terms, :($j * a.val[$(j + 1)] * $(Symbol(:s, k - j))))
             end
-            csum_expr = _expr_sum(csum_terms)
+            csum_expr = expr_sum(csum_terms)
             push!(stmts, :($(Symbol(:c, k)) = -($csum_expr) / $(k - 1)))
         end
     end
@@ -496,13 +496,13 @@ end
             for j in 1:(k - 1)
                 push!(sum_terms, :($j * a.val[$(j + 1)] * $(Symbol(:c, k - j))))
             end
-            sum_expr = _expr_sum(sum_terms)
+            sum_expr = expr_sum(sum_terms)
             push!(stmts, :($(Symbol(:s, k)) = ($sum_expr) / $(k - 1)))
             csum_terms = Expr[]
             for j in 1:(k - 1)
                 push!(csum_terms, :($j * a.val[$(j + 1)] * $(Symbol(:s, k - j))))
             end
-            csum_expr = _expr_sum(csum_terms)
+            csum_expr = expr_sum(csum_terms)
             push!(stmts, :($(Symbol(:c, k)) = -($csum_expr) / $(k - 1)))
         end
     end
@@ -521,7 +521,7 @@ end
     stmts = Expr[:(e1 = exp(a.val[1]))]
     for k in 2:N
         terms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:e, k - j))) for j in 1:(k - 1)]
-        push!(stmts, :($(Symbol(:e, k)) = ($(_expr_sum(terms))) / $(k - 1)))
+        push!(stmts, :($(Symbol(:e, k)) = ($(expr_sum(terms))) / $(k - 1)))
     end
     evars = Symbol[Symbol(:e, k) for k in 1:N]
     return quote
@@ -543,7 +543,7 @@ end
             terms = Expr[
                 :($j * a.val[$(j + 1)] * b.val[$(k - j + 1)]) for j in 1:k
             ]
-            push!(stmts, :($(Symbol(:l, k + 1)) = ($(_expr_sum(terms))) / $k))
+            push!(stmts, :($(Symbol(:l, k + 1)) = ($(expr_sum(terms))) / $k))
         end
     end
     lvars = Symbol[Symbol(:l, k) for k in 1:N]
@@ -558,19 +558,19 @@ end
 # Coupled recurrence, as for sin/cos but with no sign flip:
 # s[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * c[k-j]
 # c[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * s[k-j]
-function _taylor_hyperbolic_stmts(N::Int)::Vector{Expr}
+function taylor_hyperbolic_stmts(N::Int)::Vector{Expr}
     stmts = Expr[:(s1 = sinh(a.val[1])), :(c1 = cosh(a.val[1]))]
     for k in 2:N
         sterms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:c, k - j))) for j in 1:(k - 1)]
-        push!(stmts, :($(Symbol(:s, k)) = ($(_expr_sum(sterms))) / $(k - 1)))
+        push!(stmts, :($(Symbol(:s, k)) = ($(expr_sum(sterms))) / $(k - 1)))
         cterms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:s, k - j))) for j in 1:(k - 1)]
-        push!(stmts, :($(Symbol(:c, k)) = ($(_expr_sum(cterms))) / $(k - 1)))
+        push!(stmts, :($(Symbol(:c, k)) = ($(expr_sum(cterms))) / $(k - 1)))
     end
     return stmts
 end
 
 @generated function taylor_op_sinh(a::TTS{N, T}) where {N, T}
-    stmts = N == 1 ? Expr[:(s1 = sinh(a.val[1]))] : _taylor_hyperbolic_stmts(N)
+    stmts = N == 1 ? Expr[:(s1 = sinh(a.val[1]))] : taylor_hyperbolic_stmts(N)
     svars = Symbol[Symbol(:s, k) for k in 1:N]
     return quote
         Base.@_inline_meta
@@ -580,7 +580,7 @@ end
 end
 
 @generated function taylor_op_cosh(a::TTS{N, T}) where {N, T}
-    stmts = N == 1 ? Expr[:(c1 = cosh(a.val[1]))] : _taylor_hyperbolic_stmts(N)
+    stmts = N == 1 ? Expr[:(c1 = cosh(a.val[1]))] : taylor_hyperbolic_stmts(N)
     cvars = Symbol[Symbol(:c, k) for k in 1:N]
     return quote
         Base.@_inline_meta
@@ -592,10 +592,10 @@ end
 # OP_TAN and OP_TANH
 # `t' = u·a'` with `u = 1 + t²` for tan and `u = 1 - t²` for tanh, so
 # t[k] = (1/k) * Σ_{j=1}^{k} j * a[j] * u[k-j],  u = ±(t ⋆ t) shifted by 1.
-function _taylor_tangent_stmts(N::Int, t0::Symbol, sign::Int)::Vector{Expr}
+function taylor_tangent_stmts(N::Int, t0::Symbol, sign::Int)::Vector{Expr}
     stmts = Expr[:(t1 = $t0(a.val[1]))]
     for k in 1:(N - 1)
-        sq = _expr_sum(
+        sq = expr_sum(
             Expr[:($(Symbol(:t, i)) * $(Symbol(:t, k + 1 - i))) for i in 1:k],
         )
         push!(
@@ -604,13 +604,13 @@ function _taylor_tangent_stmts(N::Int, t0::Symbol, sign::Int)::Vector{Expr}
                 :($(Symbol(:u, k)) = $sign * $sq),
         )
         terms = Expr[:($j * a.val[$(j + 1)] * $(Symbol(:u, k + 1 - j))) for j in 1:k]
-        push!(stmts, :($(Symbol(:t, k + 1)) = ($(_expr_sum(terms))) / $k))
+        push!(stmts, :($(Symbol(:t, k + 1)) = ($(expr_sum(terms))) / $k))
     end
     return stmts
 end
 
 @generated function taylor_op_tan(a::TTS{N, T}) where {N, T}
-    stmts = _taylor_tangent_stmts(N, :tan, 1)
+    stmts = taylor_tangent_stmts(N, :tan, 1)
     tvars = Symbol[Symbol(:t, k) for k in 1:N]
     return quote
         Base.@_inline_meta
@@ -620,7 +620,7 @@ end
 end
 
 @generated function taylor_op_tanh(a::TTS{N, T}) where {N, T}
-    stmts = _taylor_tangent_stmts(N, :tanh, -1)
+    stmts = taylor_tangent_stmts(N, :tanh, -1)
     tvars = Symbol[Symbol(:t, k) for k in 1:N]
     return quote
         Base.@_inline_meta
@@ -632,13 +632,13 @@ end
 # OP_ASIN
 # `y' · g = a'` with `g = √(1 - a²)`, so
 # y[k] = (k*a[k] - Σ_{j=1}^{k-1} j*y[j]*g[k-j]) / (k*g[0]).
-@generated function _taylor_asin_from(a::TTS{N, T}, g::TTS{N, T}) where {N, T}
+@generated function taylor_asin_from(a::TTS{N, T}, g::TTS{N, T}) where {N, T}
     stmts = Expr[:(y1 = asin(a.val[1]))]
     for k in 2:N
         m = k - 1
         expr = :($m * a.val[$k])
         if m >= 2
-            sub = _expr_sum(
+            sub = expr_sum(
                 Expr[
                     :($j * $(Symbol(:y, j + 1)) * g.val[$(m - j + 1)]) for j in 1:(m - 1)
                 ],
@@ -657,7 +657,7 @@ end
 
 @inline function taylor_op_asin(a::TTS{N, T}) where {N, T}
     N == 1 && return TTS((asin(a.val[1]),))
-    return _taylor_asin_from(a, taylor_op_sqrt(taylor_op_sub(one(TTS{N, T}), taylor_op_sqr(a))))
+    return taylor_asin_from(a, taylor_op_sqrt(taylor_op_sub(one(TTS{N, T}), taylor_op_sqr(a))))
 end
 
 # OP_ACOS # acos = π/2 - asin, so every coefficient past the first is negated.
@@ -676,7 +676,7 @@ end
 
 # OP_MULADD # a * b + c
 @generated function taylor_op_muladd(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T}
-    cp = _cauchy_product_exprs(N)
+    cp = cauchy_product_exprs(N)
     exprs = Expr[:($(cp[k]) + c.val[$k]) for k in 1:N]
     return quote
         Base.@_inline_meta
@@ -686,7 +686,7 @@ end
 
 # OP_MULSUB # a * b - c
 @generated function taylor_op_mulsub(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T}
-    cp = _cauchy_product_exprs(N)
+    cp = cauchy_product_exprs(N)
     exprs = Expr[:($(cp[k]) - c.val[$k]) for k in 1:N]
     return quote
         Base.@_inline_meta
@@ -696,7 +696,7 @@ end
 
 # OP_SUBMUL # c - a * b
 @generated function taylor_op_submul(a::TTS{N, T}, b::TTS{N, T}, c::TTS{N, T}) where {N, T}
-    cp = _cauchy_product_exprs(N)
+    cp = cauchy_product_exprs(N)
     exprs = Expr[:(c.val[$k] - $(cp[k])) for k in 1:N]
     return quote
         Base.@_inline_meta

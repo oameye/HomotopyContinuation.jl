@@ -43,7 +43,7 @@ for n in [3, 5, 7]
     m = n + 1
     for (label, mode) in [("interp  ", CompileMode.INTERPRETED), ("compiled", CompileMode.COMPILED)]
         sys = System(F; compile = mode)
-        se = HC._total_degree_startevaluator(HC.degrees(sys))
+        se = HC.total_degree_startevaluator(HC.degrees(sys))
         H = StraightLineHomotopy(se, sys.evaluator; γ = 0.7 + 0.3im)
         he = HomotopyEvaluator(H)
         x = FSVec{ComplexF64}(ComplexF64.(randn(m)))

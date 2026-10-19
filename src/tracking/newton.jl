@@ -77,10 +77,10 @@ end
 
 function NewtonCache(F::SystemLike)::NewtonCache
     m, n = size(F)
-    return _newton_cache(m, n)
+    return newton_cache(m, n)
 end
 
-function _newton_cache(m::Int, n::Int)::NewtonCache
+function newton_cache(m::Int, n::Int)::NewtonCache
     workspace = m >= n ? MatrixWorkspace(m, n) : MatrixWorkspace(1, 1)
     J_wide = if m < n
         FSMat{ComplexF64}(zeros(ComplexF64, m, n))
@@ -99,7 +99,7 @@ end
 
 # Least-squares Newton step for the underdetermined case via column-pivoted QR.
 # Cold path: allocates the factorization freely.
-function _solve_wide!(
+function solve_wide!(
         Δx::FSVec{ComplexF64}, J::FSMat{ComplexF64}, r::FSVec{ComplexF64},
     )::Nothing
     M = Matrix{ComplexF64}(J)
@@ -160,14 +160,14 @@ function newton(
         )
         FSVec{ComplexF64}(ComplexF64.(p))
     end
-    return _newton(
+    return newton_iterate(
         F.evaluator, cache, x₀, params, atol, rtol, max_iters, extended_precision,
         contraction_factor, min_contraction_iters, max_abs_norm_first_update,
         max_rel_norm_first_update,
     )
 end
 
-function _newton(
+function newton_iterate(
         S::SystemEvaluator,
         cache::NewtonCache,
         x₀::AbstractVector,
@@ -203,11 +203,11 @@ function _newton(
             updated!(WS)
         end
         if extended_precision
-            _copy_df64!(x_ext, x)
+            copy_df64!(x_ext, x)
             evaluate!(r, S, x_ext, p)
         end
         if wide
-            _solve_wide!(Δx, cache.J_wide, r)
+            solve_wide!(Δx, cache.J_wide, r)
         else
             LA.ldiv!(Δx, WS, r)
         end

@@ -31,7 +31,7 @@ function RandomizedSystem(
         throw(ArgumentError("Randomization block must have size ($n, $(m - n)), got $(size(A))"))
     length(perm) == m ||
         throw(ArgumentError("Equation permutation must have length $m, got $(length(perm))"))
-    # _randomize! indexes v[perm[i]] under @inbounds; a malformed perm would be
+    # randomize_values! indexes v[perm[i]] under @inbounds; a malformed perm would be
     # memory-unsafe, so validate once at construction time.
     isperm(perm) ||
         throw(ArgumentError("Equation permutation must be a permutation of 1:$m"))
@@ -48,15 +48,15 @@ nparameters(R::RandomizedSystem)::Int = nparameters(R.system)
 
 # Canonical square-up wrap: every consumer (solve init, worker builders) goes
 # through this so the evaluator construction cannot drift between call sites.
-_randomized_evaluator(
+randomized_evaluator(
     inner::SystemEvaluator, A::FSMat{ComplexF64}, perm::Vector{Int},
 )::SystemEvaluator = SystemEvaluator(RandomizedSystem(inner, A, perm))
 
-_clone_system(R::RandomizedSystem)::RandomizedSystem =
-    RandomizedSystem(_clone_system_evaluator(R.system), R.A, R.perm)
+clone_system(R::RandomizedSystem)::RandomizedSystem =
+    RandomizedSystem(clone_system_evaluator(R.system), R.A, R.perm)
 
 # u[i] = v[perm[i]] + Σ_j A[i,j]·v[perm[n+j]]
-function _randomize!(
+function randomize_values!(
         u::FSVec{ComplexF64}, A::FSMat{ComplexF64}, perm::Vector{Int},
         v::FSVec{ComplexF64},
     )::Nothing
@@ -76,7 +76,7 @@ end
 # DF64 fold variants: near a solution of G the identity term and the A fold
 # cancel, so accumulate in extended precision (ComplexF64 · ComplexDF64
 # promotes) and round only on store into the output.
-function _randomize!(
+function randomize_values!(
         u::FSVec{ComplexF64}, A::FSMat{ComplexF64}, perm::Vector{Int},
         v::FSVec{ComplexDF64},
     )::Nothing
@@ -91,7 +91,7 @@ function _randomize!(
     return nothing
 end
 
-function _randomize!(
+function randomize_values!(
         u::FSVec{ComplexDF64}, A::FSMat{ComplexF64}, perm::Vector{Int},
         v::FSVec{ComplexDF64},
     )::Nothing
@@ -107,7 +107,7 @@ function _randomize!(
 end
 
 # U[i,k] = V[perm[i],k] + Σ_j A[i,j]·V[perm[n+j],k]
-function _randomize_jacobian!(
+function randomize_jacobian!(
         U::FSMat{ComplexF64}, A::FSMat{ComplexF64}, perm::Vector{Int},
         V::FSMat{ComplexF64},
     )::Nothing
@@ -131,7 +131,7 @@ function evaluate!(
         x::FSVec{ComplexF64}, p::FSVec{ComplexF64},
     )::Nothing
     evaluate!(R.u_full, R.system, x, p)
-    _randomize!(u, R.A, R.perm, R.u_full)
+    randomize_values!(u, R.A, R.perm, R.u_full)
     return nothing
 end
 
@@ -140,7 +140,7 @@ function evaluate!(
         x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
     )::Nothing
     evaluate!(R.ū_full, R.system, x, p)
-    _randomize!(u, R.A, R.perm, R.ū_full)
+    randomize_values!(u, R.A, R.perm, R.ū_full)
     return nothing
 end
 
@@ -149,8 +149,8 @@ function evaluate_and_jacobian!(
         R::RandomizedSystem, x::FSVec{ComplexF64}, p::FSVec{ComplexF64},
     )::Nothing
     evaluate_and_jacobian!(R.u_full, R.U_full, R.system, x, p)
-    _randomize!(u, R.A, R.perm, R.u_full)
-    _randomize_jacobian!(U, R.A, R.perm, R.U_full)
+    randomize_values!(u, R.A, R.perm, R.u_full)
+    randomize_jacobian!(U, R.A, R.perm, R.U_full)
     return nothing
 end
 
@@ -160,6 +160,6 @@ function taylor!(
         p::Union{FSVec{ComplexF64}, TaylorVector{<:Any, ComplexF64}},
     )::Nothing where {K, N}
     taylor!(R.u_full, v, R.system, tx, p)
-    _randomize!(u, R.A, R.perm, R.u_full)
+    randomize_values!(u, R.A, R.perm, R.u_full)
     return nothing
 end

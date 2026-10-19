@@ -58,7 +58,7 @@ GeodesicCache() = GeodesicCache(
 )
 
 # Index of the cached geodesic for this frame pair, 0 if there is none.
-function _find_geodesic(
+function find_geodesic(
         cache::GeodesicCache, start_frame::Matrix{ComplexF64},
         target_frame::Matrix{ComplexF64},
     )::Int
@@ -70,7 +70,7 @@ function _find_geodesic(
     return 0
 end
 
-function _store_geodesic!(
+function store_geodesic!(
         cache::GeodesicCache, start_frame::Matrix{ComplexF64},
         target_frame::Matrix{ComplexF64}, path::GrassmannianGeodesic,
     )::GrassmannianGeodesic
@@ -88,27 +88,27 @@ function _store_geodesic!(
     return path
 end
 
-function _geodesic!(
+function cached_geodesic!(
         cache::GeodesicCache, start::IntrinsicDescription{ComplexF64},
         target::IntrinsicDescription{ComplexF64},
     )::GrassmannianGeodesic
-    i = _find_geodesic(cache, start.X, target.X)
+    i = find_geodesic(cache, start.X, target.X)
     i == 0 || return cache.geodesics[i]
-    return _store_geodesic!(cache, start.X, target.X, GrassmannianGeodesic(start, target))
+    return store_geodesic!(cache, start.X, target.X, GrassmannianGeodesic(start, target))
 end
 
-function _geodesic!(
+function cached_geodesic!(
         cache::GeodesicCache, start::ExtrinsicDescription{ComplexF64},
         target::ExtrinsicDescription{ComplexF64},
     )::GrassmannianGeodesic
-    i = _find_geodesic(cache, start.A, target.A)
+    i = find_geodesic(cache, start.A, target.A)
     i == 0 || return cache.geodesics[i]
-    return _store_geodesic!(cache, start.A, target.A, GrassmannianGeodesic(start, target))
+    return store_geodesic!(cache, start.A, target.A, GrassmannianGeodesic(start, target))
 end
 
 # γ(t) = Q_cos * cos(t Θ) + Q * sin(t Θ) columnwise: t = 0 gives the target
 # frame Q_cos, t = 1 the start frame returned here.
-function _geodesic_start_frame(
+function geodesic_start_frame(
         Q_cos::Matrix{ComplexF64}, Q::Matrix{ComplexF64}, Θ::Vector{Float64},
     )::Matrix{ComplexF64}
     γ1 = similar(Q_cos)
@@ -131,7 +131,7 @@ function GrassmannianGeodesic(
     )
     Q, Θ, U = grassmannian_svd(target, start)
     Q_cos = transpose(target.A) * U
-    γ1 = _geodesic_start_frame(Q_cos, Q, Θ)
+    γ1 = geodesic_start_frame(Q_cos, Q, Θ)
     return GrassmannianGeodesic(
         Q, Q_cos, Θ, U, γ1, transpose(γ1) * start.A', transpose(Q_cos) * target.A',
     )
@@ -142,7 +142,7 @@ function GrassmannianGeodesic(
     )
     Q, Θ, U = grassmannian_svd(target, start)
     Q_cos = target.X * U
-    γ1 = _geodesic_start_frame(Q_cos, Q, Θ)
+    γ1 = geodesic_start_frame(Q_cos, Q, Θ)
     empty_B = Matrix{ComplexF64}(undef, 0, 0)
     return GrassmannianGeodesic(Q, Q_cos, Θ, U, γ1, empty_B, empty_B)
 end
@@ -191,18 +191,18 @@ end
 
 # `start` already carries the perturbation, so undo it and let the constructor
 # reapply; `gamma` keeps its meaning for a later `set_subspaces!`.
-_clone_homotopy(H::IntrinsicSubspaceHomotopy)::IntrinsicSubspaceHomotopy =
+clone_homotopy(H::IntrinsicSubspaceHomotopy)::IntrinsicSubspaceHomotopy =
     IntrinsicSubspaceHomotopy(
-    _clone_system_evaluator(H.system), _apply_gamma(inv(H.gamma), H.start), H.target;
+    clone_system_evaluator(H.system), apply_gamma(inv(H.gamma), H.start), H.target;
     gamma = H.gamma,
 )
 
 # Normalize a caller-supplied gamma to |gamma| = 1. Pass `one(ComplexF64)` to
-# disable the perturbation: `_apply_gamma` is the identity there.
-_normalize_gamma(gamma::ComplexF64)::ComplexF64 = gamma / abs(gamma)
+# disable the perturbation: `apply_gamma` is the identity there.
+normalize_gamma(gamma::ComplexF64)::ComplexF64 = gamma / abs(gamma)
 
 # Apply the genericity perturbation to a start subspace (identity when g == 1).
-function _apply_gamma(g::ComplexF64, L::LinearSubspace{ComplexF64})::LinearSubspace{ComplexF64}
+function apply_gamma(g::ComplexF64, L::LinearSubspace{ComplexF64})::LinearSubspace{ComplexF64}
     isone(g) && return L
     return LinearSubspace(g .* extrinsic(L).A, g .* extrinsic(L).b)
 end
@@ -213,12 +213,12 @@ function IntrinsicSubspaceHomotopy(
         target::LinearSubspace;
         gamma::ComplexF64 = cis(2 * pi * rand()),
     )
-    g = _normalize_gamma(gamma)
+    g = normalize_gamma(gamma)
     # multiply with random complex number to get generic paths
-    start_c = _apply_gamma(g, convert(LinearSubspace{ComplexF64}, start))
+    start_c = apply_gamma(g, convert(LinearSubspace{ComplexF64}, start))
     target_c = convert(LinearSubspace{ComplexF64}, target)
     geodesics = GeodesicCache()
-    path = _geodesic!(geodesics, intrinsic(start_c), intrinsic(target_c))
+    path = cached_geodesic!(geodesics, intrinsic(start_c), intrinsic(target_c))
     Q = path.Q
     n = size(Q, 1)
 
@@ -292,9 +292,9 @@ mutable struct ExtrinsicSubspaceHomotopy <: AbstractHomotopy
     const gamma::ComplexF64
 end
 
-_clone_homotopy(H::ExtrinsicSubspaceHomotopy)::ExtrinsicSubspaceHomotopy =
+clone_homotopy(H::ExtrinsicSubspaceHomotopy)::ExtrinsicSubspaceHomotopy =
     ExtrinsicSubspaceHomotopy(
-    _clone_system_evaluator(H.system), _apply_gamma(inv(H.gamma), H.start), H.target;
+    clone_system_evaluator(H.system), apply_gamma(inv(H.gamma), H.start), H.target;
     gamma = H.gamma,
 )
 
@@ -304,12 +304,12 @@ function ExtrinsicSubspaceHomotopy(
         target::LinearSubspace;
         gamma::ComplexF64 = cis(2 * pi * rand()),
     )
-    g = _normalize_gamma(gamma)
-    start_c = _apply_gamma(g, convert(LinearSubspace{ComplexF64}, start))
+    g = normalize_gamma(gamma)
+    start_c = apply_gamma(g, convert(LinearSubspace{ComplexF64}, start))
     target_c = convert(LinearSubspace{ComplexF64}, target)
 
     geodesics = GeodesicCache()
-    path = _geodesic!(geodesics, extrinsic(start_c), extrinsic(target_c))
+    path = cached_geodesic!(geodesics, extrinsic(start_c), extrinsic(target_c))
     # Get correct coordinates for a and b in the Stiefel homotopy:
     # extrinsic(start).A is replaced by transpose(path.γ1) and
     # extrinsic(target).A by transpose(path.Q_cos).
@@ -357,19 +357,19 @@ a stale γ if the first query after a retarget is exactly t = 0).
 """
 set_subspaces!(
     H::SubspaceHomotopy, start::LinearSubspace, target::LinearSubspace,
-)::Nothing = _set_subspaces!(
-    H, _apply_gamma(H.gamma, convert(LinearSubspace{ComplexF64}, start)), target,
+)::Nothing = update_subspaces!(
+    H, apply_gamma(H.gamma, convert(LinearSubspace{ComplexF64}, start)), target,
 )
 
 # `start_c` is already γ-rotated: γ belongs to the caller's start subspace, not to
 # each retarget.
-function _set_subspaces!(
+function update_subspaces!(
         H::IntrinsicSubspaceHomotopy, start_c::LinearSubspace{ComplexF64},
         target::LinearSubspace,
     )::Nothing
     H.start = start_c
     H.target = convert(LinearSubspace{ComplexF64}, target)
-    H.path = _geodesic!(H.geodesics, intrinsic(H.start), intrinsic(H.target))
+    H.path = cached_geodesic!(H.geodesics, intrinsic(H.start), intrinsic(H.target))
     H.a_minus_b .= intrinsic(H.start).b .- intrinsic(H.target).b
     H.offset .= intrinsic(H.target).b
     H.t_cache[] = complex(NaN)
@@ -378,13 +378,13 @@ function _set_subspaces!(
     return nothing
 end
 
-function _set_subspaces!(
+function update_subspaces!(
         H::ExtrinsicSubspaceHomotopy, start_c::LinearSubspace{ComplexF64},
         target::LinearSubspace,
     )::Nothing
     H.start = start_c
     H.target = convert(LinearSubspace{ComplexF64}, target)
-    H.path = _geodesic!(H.geodesics, extrinsic(H.start), extrinsic(H.target))
+    H.path = cached_geodesic!(H.geodesics, extrinsic(H.start), extrinsic(H.target))
     LA.mul!(H.a0, H.path.B_start, extrinsic(H.start).b)
     LA.mul!(H.b0, H.path.B_target, extrinsic(H.target).b)
     H.a_minus_b .= H.a0 .- H.b0
@@ -398,7 +398,7 @@ end
 start_parameters!(H::SubspaceHomotopy, p::LinearSubspace)::Nothing =
     set_subspaces!(H, convert(LinearSubspace{ComplexF64}, p), H.target)
 target_parameters!(H::SubspaceHomotopy, q::LinearSubspace)::Nothing =
-    _set_subspaces!(H, H.start, convert(LinearSubspace{ComplexF64}, q))
+    update_subspaces!(H, H.start, convert(LinearSubspace{ComplexF64}, q))
 parameters!(H::SubspaceHomotopy, p::LinearSubspace, q::LinearSubspace)::Nothing =
     set_subspaces!(
     H,
@@ -412,9 +412,9 @@ parameters!(H::SubspaceHomotopy, p::LinearSubspace, q::LinearSubspace)::Nothing 
 function γ!(H::SubspaceHomotopy, t::ComplexF64)::Matrix{ComplexF64}
     H.t_cache[] != t || return first(H.taylor_γ)
     if isreal(t)
-        _γ!(H, real(t))
+        γ_at!(H, real(t))
     else
-        _γ!(H, t)
+        γ_at!(H, t)
     end
     H.t_cache[] = t
     # The order-0 frame was just overwritten in place; the cached higher-order
@@ -425,7 +425,7 @@ function γ!(H::SubspaceHomotopy, t::ComplexF64)::Matrix{ComplexF64}
     return first(H.taylor_γ)
 end
 
-@inline function _γ!(H::SubspaceHomotopy, t::Number)
+@inline function γ_at!(H::SubspaceHomotopy, t::Number)
     Q, Q_cos, Θ = H.path.Q, H.path.Q_cos, H.path.Θ
     γ = first(H.taylor_γ)
     n, k = size(γ)
@@ -443,10 +443,10 @@ function γ̇!(H::SubspaceHomotopy, t::ComplexF64)
     # Overwrites the order-1 frame in place; invalidate the taylor_γ! cache for
     # the same reason as in γ!.
     H.taylor_t_cache[] = complex(NaN, NaN)
-    return isreal(t) ? _γ̇!(H, real(t)) : _γ̇!(H, t)
+    return isreal(t) ? γ̇_at!(H, real(t)) : γ̇_at!(H, t)
 end
 
-@inline function _γ̇!(H::SubspaceHomotopy, t::Number)
+@inline function γ̇_at!(H::SubspaceHomotopy, t::Number)
     Q, Q_cos, Θ = H.path.Q, H.path.Q_cos, H.path.Θ
     γ̇ = H.taylor_γ[2]
     n, k = size(γ̇)
@@ -463,12 +463,12 @@ end
 end
 
 # Compute the offset at parameter t: offset(t) = t*a + (1-t)*b = t(a-b) + b
-@inline function _compute_offset!(H::IntrinsicSubspaceHomotopy, t::ComplexF64)
+@inline function compute_offset!(H::IntrinsicSubspaceHomotopy, t::ComplexF64)
     H.offset .= intrinsic(H.target).b
     LA.axpy!(t, H.a_minus_b, H.offset)
     return H.offset_t_cache[] = t
 end
-@inline function _compute_offset!(H::ExtrinsicSubspaceHomotopy, t::ComplexF64)
+@inline function compute_offset!(H::ExtrinsicSubspaceHomotopy, t::ComplexF64)
     H.offset .= H.b0
     LA.axpy!(t, H.a_minus_b, H.offset)
     return H.offset_t_cache[] = t
@@ -476,13 +476,13 @@ end
 
 @inline function offset_at_t!(H::SubspaceHomotopy, t::ComplexF64)
     if H.offset_t_cache[] != t
-        _compute_offset!(H, t)
+        compute_offset!(H, t)
     end
     return H.offset
 end
 
 # Taylor coefficients of γ(t) up to order 3, the predictor's maximum order.
-function _taylor_γ!(H::SubspaceHomotopy, t::Number)
+function update_taylor_γ!(H::SubspaceHomotopy, t::Number)
     Q, Q_cos, Θ = H.path.Q, H.path.Q_cos, H.path.Θ
     γ, γ¹, γ², γ³ = H.taylor_γ
     n, k = size(γ)
@@ -511,9 +511,9 @@ function taylor_γ!(H::SubspaceHomotopy, t::ComplexF64)
     H.taylor_t_cache[] != t || return H.taylor_γ
 
     if isreal(t)
-        _taylor_γ!(H, real(t))
+        update_taylor_γ!(H, real(t))
     else
-        _taylor_γ!(H, t)
+        update_taylor_γ!(H, t)
     end
     H.taylor_t_cache[] = t
     # The order-0 frame is now valid for γ! too.
@@ -580,7 +580,7 @@ function evaluate!(
     LA.mul!(H.x, γ, v)
     offset_at_t!(H, t)
     H.x .+= H.offset
-    evaluate!(u, H.system, H.x, _EMPTY_PARAMS)
+    evaluate!(u, H.system, H.x, EMPTY_PARAMS)
     return nothing
 end
 
@@ -598,7 +598,7 @@ function evaluate!(
         end
         H.x_high[i] = acc
     end
-    evaluate!(u, H.system, H.x_high, _EMPTY_PARAMS)
+    evaluate!(u, H.system, H.x_high, EMPTY_PARAMS)
     return nothing
 end
 
@@ -610,7 +610,7 @@ function evaluate_and_jacobian!(
     LA.mul!(H.x, γ, v)
     offset_at_t!(H, t)
     H.x .+= H.offset
-    evaluate_and_jacobian!(u, H.J, H.system, H.x, _EMPTY_PARAMS)
+    evaluate_and_jacobian!(u, H.J, H.system, H.x, EMPTY_PARAMS)
     LA.mul!(U, H.J, γ)
     return nothing
 end
@@ -630,7 +630,7 @@ function taylor!(
     H.x .+= H.offset
     H.ẋ .+= H.a_minus_b  # a_minus_b = ḃ = derivative of the offset in t
 
-    evaluate_and_jacobian!(u, H.J, H.system, H.x, _EMPTY_PARAMS)
+    evaluate_and_jacobian!(u, H.J, H.system, H.x, EMPTY_PARAMS)
     LA.mul!(u, H.J, H.ẋ)
     return nothing
 end
@@ -653,7 +653,7 @@ function taylor!(
     LA.mul!(x², γ¹, v¹, true, true)
     # No γ v² term: the caller zeroes the highest-order row of tv.
 
-    taylor!(u, Val(2), H.system, H.tx2, _EMPTY_PARAMS)
+    taylor!(u, Val(2), H.system, H.tx2, EMPTY_PARAMS)
     return nothing
 end
 
@@ -679,7 +679,7 @@ function taylor!(
     LA.mul!(x³, γ¹, v², true, true)
     # No γ v³ term: the caller zeroes the highest-order row of tv.
 
-    taylor!(u, Val(3), H.system, H.tx3, _EMPTY_PARAMS)
+    taylor!(u, Val(3), H.system, H.tx3, EMPTY_PARAMS)
     return nothing
 end
 
@@ -695,7 +695,7 @@ function evaluate!(
     offset_at_t!(H, t)
     n, k = size(γ) # linear equation is: transpose(γ) x - offset
 
-    evaluate!(u, H.system, x, _EMPTY_PARAMS)
+    evaluate!(u, H.system, x, EMPTY_PARAMS)
     m = size(H.system)[1]
     # transpose(γ) x - offset, one column of γ at a time (column-major).
     @inbounds for i in 1:k
@@ -716,7 +716,7 @@ function evaluate!(
     offset_at_t!(H, t)
     n, k = size(γ)
 
-    evaluate!(u, H.system, x, _EMPTY_PARAMS)
+    evaluate!(u, H.system, x, EMPTY_PARAMS)
     m = size(H.system)[1]
     # transpose(γ) x - offset accumulated in DF64, one γ column at a time.
     @inbounds for i in 1:k
@@ -739,7 +739,7 @@ function evaluate_and_jacobian!(
 
     # The interpreter writes only the first m rows of u and U (Cartesian
     # indexing); the appended linear rows are written afterwards.
-    evaluate_and_jacobian!(u, U, H.system, x, _EMPTY_PARAMS)
+    evaluate_and_jacobian!(u, U, H.system, x, EMPTY_PARAMS)
     m = size(H.system)[1]
     # transpose(γ) x - offset, one column of γ at a time (column-major).
     @inbounds for i in 1:k
@@ -788,7 +788,7 @@ function taylor!(
     LA.mul!(H.L, transpose(γ¹), v¹)
     LA.mul!(H.L, transpose(γ²), v, true, true)
 
-    taylor!(u, Val(2), H.system, tv, _EMPTY_PARAMS)
+    taylor!(u, Val(2), H.system, tv, EMPTY_PARAMS)
     m = size(H.system)[1]
     k = size(γ, 2)
     @inbounds for i in 1:k
@@ -809,7 +809,7 @@ function taylor!(
     LA.mul!(H.L, transpose(γ²), v¹, true, true)
     LA.mul!(H.L, transpose(γ³), v, true, true)
 
-    taylor!(u, Val(3), H.system, tv, _EMPTY_PARAMS)
+    taylor!(u, Val(3), H.system, tv, EMPTY_PARAMS)
     m = size(H.system)[1]
     k = size(γ, 2)
     @inbounds for i in 1:k

@@ -91,7 +91,7 @@ end
 function _certified_diagnostics(
         d::MonodromyCertifiedSolutions, x::Vector{ComplexF64}, cache::CertificationCache,
     )::CertifiedEndpoint
-    step = _newton(
+    step = newton_iterate(
         cache.system_evaluator, cache.newton_cache, x, d.newton_params,
         0.0, 0.0, 1, false, 1.0, typemax(Int), Inf, Inf,
     )

@@ -30,13 +30,13 @@ mutable struct Valuation
 end
 
 function Valuation(n::Int)
-    _nanvec() = FSVec{Float64}(fill(NaN, n))
+    nanvec() = FSVec{Float64}(fill(NaN, n))
     return Valuation(
-        _nanvec(), _nanvec(), _nanvec(), _nanvec(),  # val_x, val_tẋ, Δval_x, Δval_tẋ
-        _nanvec(), _nanvec(),                          # val_x_1, val_x_2
-        _nanvec(), _nanvec(),                          # val_ẋ_1, val_ẋ_2
-        _nanvec(), _nanvec(),                          # logx_1, logx_2
-        _nanvec(), _nanvec(),                          # logẋ_1, logẋ_2
+        nanvec(), nanvec(), nanvec(), nanvec(),  # val_x, val_tẋ, Δval_x, Δval_tẋ
+        nanvec(), nanvec(),                          # val_x_1, val_x_2
+        nanvec(), nanvec(),                          # val_ẋ_1, val_ẋ_2
+        nanvec(), nanvec(),                          # logx_1, logx_2
+        nanvec(), nanvec(),                          # logẋ_1, logẋ_2
         NaN, NaN,                                       # logt_1, logt_2
         0,                                              # samples
     )
@@ -57,7 +57,7 @@ function init!(val::Valuation)::Nothing
 end
 
 # Non-uniform 2-point finite difference for valuation derivative estimates
-@inline function _finite_diff(
+@inline function finite_diff(
         f3::Float64, s3::Float64, f2::Float64, s2::Float64, f1::Float64, s1::Float64,
     )::Float64
     Δ1 = s3 - s1
@@ -67,7 +67,7 @@ end
 end
 
 # Valuation: ν(x, ẋ, t) = t * Re(x̄·ẋ) / |x|²
-@inline function _val(x::ComplexF64, ẋ::ComplexF64, t::Float64)::Float64
+@inline function valuation_term(x::ComplexF64, ẋ::ComplexF64, t::Float64)::Float64
     return t * (real(x) * real(ẋ) + imag(x) * imag(ẋ)) / abs2(x)
 end
 
@@ -78,7 +78,7 @@ end
 # dν/dt = l + t * dl/dt
 # dl/dt = [Re(ẋ·ẋ) + Re(x̄·x'') - 2*Re(x̄·ẋ)² / |x|²] / |x|²
 #       = [(|ẋ|² + Re(x̄·x̃²)) - 2*(xẋ)²/r2] / r2
-@inline function _val_dval(
+@inline function val_dval(
         x::ComplexF64, ẋ::ComplexF64, x̃2::ComplexF64, t::Float64,
     )::Tuple{Float64, Float64}
     r2 = abs2(x)
@@ -154,7 +154,7 @@ end
     update!(val, pred, t)
 
 Update valuations from predictor Taylor coefficients at homotopy parameter `t`.
-- m==1 (or insufficient history): direct Taylor formula via `_val_dval`
+- m==1 (or insufficient history): direct Taylor formula via `val_dval`
 - m>1 with history: nested finite differences
 Always rotates history buffers.
 """
@@ -174,8 +174,8 @@ function update!(val::Valuation, pred::Predictor, t::Float64)::Nothing
 
         if use_fd
             # Finite-difference path (m > 1)
-            νi = _val(xi, ẋi, t)
-            Δνi = _finite_diff(
+            νi = valuation_term(xi, ẋi, t)
+            Δνi = finite_diff(
                 νi, logt, val.val_x_2[i], val.logt_2,
                 val.val_x_1[i], val.logt_1
             )
@@ -186,11 +186,11 @@ function update!(val::Valuation, pred::Predictor, t::Float64)::Nothing
                 val.val_tẋ[i] = 1.0
                 val.Δval_tẋ[i] = 0.0
             else
-                val_ẋi = _finite_diff(
+                val_ẋi = finite_diff(
                     logẋi, logt, val.logẋ_2[i], val.logt_2,
                     val.logẋ_1[i], val.logt_1
                 )
-                Δval_ẋi = _finite_diff(
+                Δval_ẋi = finite_diff(
                     val_ẋi, logt, val.val_ẋ_2[i], val.logt_2,
                     val.val_ẋ_1[i], val.logt_1
                 )
@@ -199,11 +199,11 @@ function update!(val::Valuation, pred::Predictor, t::Float64)::Nothing
             end
         else
             # Direct Taylor path (m == 1 or insufficient history)
-            νi, ν1i = _val_dval(xi, ẋi, 2.0 * x2i, t)
+            νi, ν1i = val_dval(xi, ẋi, 2.0 * x2i, t)
             val.val_x[i] = νi
             val.Δval_x[i] = t * ν1i
 
-            val_ẋi, ν1_ẋi = _val_dval(ẋi, 2.0 * x2i, 6.0 * x3i, t)
+            val_ẋi, ν1_ẋi = val_dval(ẋi, 2.0 * x2i, 6.0 * x3i, t)
             val.val_tẋ[i] = val_ẋi + 1.0
             val.Δval_tẋ[i] = t * ν1_ẋi
         end

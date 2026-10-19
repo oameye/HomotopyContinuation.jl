@@ -2,7 +2,7 @@
 ## the two evaluators. Both stages see the same parameter vector, so a stage
 ## that declares no parameters ignores it.
 
-struct _ComposedSystem <: AbstractSystem
+struct ComposedSystem <: AbstractSystem
     g::SystemEvaluator
     f::SystemEvaluator
     # undoes the inner stage's equation normalization, which changes `F` as a map
@@ -18,9 +18,9 @@ struct _ComposedSystem <: AbstractSystem
     tu::TaylorVector{4, ComplexF64}
 end
 
-function _ComposedSystem(
+function ComposedSystem(
         g::SystemEvaluator, f::SystemEvaluator, f_scale::AbstractVector{Float64},
-    )::_ComposedSystem
+    )::ComposedSystem
     k, ng = size(g)
     m, n = size(f)
     ng == m || throw(
@@ -34,7 +34,7 @@ function _ComposedSystem(
         ),
     )
     np = max(nparameters(g), nparameters(f))
-    return _ComposedSystem(
+    return ComposedSystem(
         g, f,
         FSVec{Float64}(collect(Float64, f_scale)),
         FSVec{ComplexF64}(zeros(ComplexF64, n)),
@@ -47,18 +47,18 @@ function _ComposedSystem(
     )
 end
 
-_clone_system(C::_ComposedSystem)::_ComposedSystem = _ComposedSystem(
-    _clone_system_evaluator(C.g), _clone_system_evaluator(C.f), C.f_scale,
+clone_system(C::ComposedSystem)::ComposedSystem = ComposedSystem(
+    clone_system_evaluator(C.g), clone_system_evaluator(C.f), C.f_scale,
 )
 
-Base.size(C::_ComposedSystem)::Tuple{Int, Int} = (size(C.g)[1], size(C.f)[2])
-nparameters(C::_ComposedSystem)::Int = max(nparameters(C.g), nparameters(C.f))
+Base.size(C::ComposedSystem)::Tuple{Int, Int} = (size(C.g)[1], size(C.f)[2])
+nparameters(C::ComposedSystem)::Int = max(nparameters(C.g), nparameters(C.f))
 
-_composition_evaluator(
+composition_evaluator(
     g::SystemEvaluator, f::SystemEvaluator, f_scale::AbstractVector{Float64},
-)::SystemEvaluator = SystemEvaluator(_ComposedSystem(g, f, f_scale))
+)::SystemEvaluator = SystemEvaluator(ComposedSystem(g, f, f_scale))
 
-@inline function _unscale!(
+@inline function unscale_values!(
         v::FSVec{T}, scale::FSVec{Float64},
     )::Nothing where {T <: Complex}
     @inbounds for i in eachindex(v)
@@ -68,11 +68,11 @@ _composition_evaluator(
 end
 
 function evaluate!(
-        u::FSVec{ComplexF64}, C::_ComposedSystem,
+        u::FSVec{ComplexF64}, C::ComposedSystem,
         x::FSVec{ComplexF64}, p::FSVec{ComplexF64},
     )::Nothing
     evaluate!(C.f_u, C.f, x, p)
-    _unscale!(C.f_u, C.f_scale)
+    unscale_values!(C.f_u, C.f_scale)
     evaluate!(u, C.g, C.f_u, p)
     return nothing
 end
@@ -80,21 +80,21 @@ end
 # The inner value is `G`'s argument, so an extended-precision residual needs it
 # unrounded.
 function evaluate!(
-        u::Union{FSVec{ComplexF64}, FSVec{ComplexDF64}}, C::_ComposedSystem,
+        u::Union{FSVec{ComplexF64}, FSVec{ComplexDF64}}, C::ComposedSystem,
         x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
     )::Nothing
     evaluate!(C.f_ū, C.f, x, p)
-    _unscale!(C.f_ū, C.f_scale)
+    unscale_values!(C.f_ū, C.f_scale)
     evaluate!(u, C.g, C.f_ū, p)
     return nothing
 end
 
 function evaluate_and_jacobian!(
-        u::FSVec{ComplexF64}, U::FSMat{ComplexF64}, C::_ComposedSystem,
+        u::FSVec{ComplexF64}, U::FSMat{ComplexF64}, C::ComposedSystem,
         x::FSVec{ComplexF64}, p::FSVec{ComplexF64},
     )::Nothing
     evaluate_and_jacobian!(C.f_u, C.f_U, C.f, x, p)
-    _unscale!(C.f_u, C.f_scale)
+    unscale_values!(C.f_u, C.f_scale)
     scale = C.f_scale
     @inbounds for j in axes(C.f_U, 2), i in axes(C.f_U, 1)
         C.f_U[i, j] *= scale[i]
@@ -108,7 +108,7 @@ end
 ## of `F` truncated at order K, and a `SystemEvaluator` returns one order per
 ## call, so a composed order costs K + 1 runs of the inner tape.
 
-@inline function _store_taylor_order!(
+@inline function store_taylor_order!(
         tu::TaylorVector{4, ComplexF64}, order::Int, v::FSVec{ComplexF64},
     )::Nothing
     d = tu.data
@@ -120,23 +120,23 @@ end
 
 # `TaylorVector` reads rows 1 to N of its backing matrix, so a lower-order view
 # shares the matrix instead of copying it.
-@inline _truncate_series(
+@inline truncate_series(
     tp::TaylorVector{M, ComplexF64}, ::Val{N},
 ) where {M, N} = TaylorVector{N, ComplexF64}(tp.data)
 
-@inline function _truncated_parameters(
+@inline function truncated_parameters(
         p::FSVec{ComplexF64}, ::Val{N},
     )::FSVec{ComplexF64} where {N}
     return p
 end
-@inline _truncated_parameters(
+@inline truncated_parameters(
     tp::TaylorVector{M, ComplexF64}, v::Val{N},
-) where {M, N} = _truncate_series(tp, v)
+) where {M, N} = truncate_series(tp, v)
 
-@inline _order0_parameters(
+@inline order0_parameters(
     p::FSVec{ComplexF64}, ::FSVec{ComplexF64},
 )::FSVec{ComplexF64} = p
-@inline function _order0_parameters(
+@inline function order0_parameters(
         tp::TaylorVector{M, ComplexF64}, buf::FSVec{ComplexF64},
     )::FSVec{ComplexF64} where {M}
     d = tp.data
@@ -146,40 +146,40 @@ end
     return buf
 end
 
-@inline function _inner_series!(
-        C::_ComposedSystem, ::Val{0}, tx::TaylorVector{N, ComplexF64}, p,
+@inline function inner_series!(
+        C::ComposedSystem, ::Val{0}, tx::TaylorVector{N, ComplexF64}, p,
     )::Nothing where {N}
     x0 = C.x0
     d = tx.data
     @inbounds for i in eachindex(x0)
         x0[i] = d[1, i]
     end
-    evaluate!(C.f_u, C.f, x0, _order0_parameters(p, C.p0))
-    _unscale!(C.f_u, C.f_scale)
-    _store_taylor_order!(C.tu, 0, C.f_u)
+    evaluate!(C.f_u, C.f, x0, order0_parameters(p, C.p0))
+    unscale_values!(C.f_u, C.f_scale)
+    store_taylor_order!(C.tu, 0, C.f_u)
     return nothing
 end
 
-@inline function _inner_series!(
-        C::_ComposedSystem, ::Val{K}, tx::TaylorVector{N, ComplexF64}, p,
+@inline function inner_series!(
+        C::ComposedSystem, ::Val{K}, tx::TaylorVector{N, ComplexF64}, p,
     )::Nothing where {K, N}
-    _inner_series!(C, Val(K - 1), tx, p)
+    inner_series!(C, Val(K - 1), tx, p)
     taylor!(
-        C.f_u, Val(K), C.f, _truncate_series(tx, Val(K + 1)),
-        _truncated_parameters(p, Val(K + 1)),
+        C.f_u, Val(K), C.f, truncate_series(tx, Val(K + 1)),
+        truncated_parameters(p, Val(K + 1)),
     )
-    _unscale!(C.f_u, C.f_scale)
-    _store_taylor_order!(C.tu, K, C.f_u)
+    unscale_values!(C.f_u, C.f_scale)
+    store_taylor_order!(C.tu, K, C.f_u)
     return nothing
 end
 
 function taylor!(
-        u::FSVec{ComplexF64}, v::Val{K}, C::_ComposedSystem,
+        u::FSVec{ComplexF64}, v::Val{K}, C::ComposedSystem,
         tx::TaylorVector{N, ComplexF64},
         p::Union{FSVec{ComplexF64}, TaylorVector{<:Any, ComplexF64}},
     )::Nothing where {K, N}
-    _inner_series!(C, v, tx, p)
-    taylor!(u, v, C.g, _truncate_series(C.tu, Val(K + 1)), p)
+    inner_series!(C, v, tx, p)
+    taylor!(u, v, C.g, truncate_series(C.tu, Val(K + 1)), p)
     return nothing
 end
 
@@ -191,17 +191,17 @@ end
 # behind a second thunk.
 const StageEquations = FunctionWrapper{Vector{Expression}, Tuple{}}
 
-struct _SystemCloner{S <: System}
+struct SystemCloner{S <: System}
     system::S
 end
 
-(cloner::_SystemCloner)()::SystemEvaluator = _clone_system_evaluator(cloner.system)
+(cloner::SystemCloner)()::SystemEvaluator = clone_system_evaluator(cloner.system)
 
-struct _StageEquations{S <: System}
+struct StageEquationsThunk{S <: System}
     system::S
 end
 
-(eqs::_StageEquations)()::Vector{Expression} =
+(eqs::StageEquationsThunk)()::Vector{Expression} =
     as_expressions(collect(eqs.system.polys))
 
 struct CompositionStage
@@ -254,22 +254,22 @@ A [`System`](@ref) or a [`CompositionSystem`](@ref): input that carries a
 """
 const SystemLike = Union{System, CompositionSystem}
 
-_composition_stages(F::System)::Vector{CompositionStage} = CompositionStage[
+composition_stages(F::System)::Vector{CompositionStage} = CompositionStage[
     CompositionStage(
-        SystemFactory(_SystemCloner(F)),
-        StageEquations(_StageEquations(F)),
-        _as_expression_vector(F.variables),
+        SystemFactory(SystemCloner(F)),
+        StageEquations(StageEquationsThunk(F)),
+        as_expression_vector(F.variables),
         equation_scales(F),
         degrees(F),
         is_homogeneous(F),
     ),
 ]
-_composition_stages(C::CompositionSystem)::Vector{CompositionStage} = copy(C.stages)
+composition_stages(C::CompositionSystem)::Vector{CompositionStage} = copy(C.stages)
 
-function _fold_composition(stages::Vector{CompositionStage})::SystemEvaluator
+function fold_composition(stages::Vector{CompositionStage})::SystemEvaluator
     evaluator = (stages[1].factory[])()::SystemEvaluator
     for k in 2:length(stages)
-        evaluator = _composition_evaluator(
+        evaluator = composition_evaluator(
             (stages[k].factory[])()::SystemEvaluator, evaluator, stages[k - 1].scales,
         )
     end
@@ -280,37 +280,37 @@ end
 # when `gⱼ` is homogeneous in those weights and every `fᵢ` is. Uniform `deg(fᵢ)`
 # collapses that to `deg(gⱼ) · d` with `gⱼ` homogeneous, which the stage already
 # records; that branch is kept because it reads no equations.
-function _fold_composition_degrees(
+function fold_composition_degrees(
         stages::Vector{CompositionStage},
     )::Tuple{Vector{Int}, Bool}
     degs = copy(stages[1].degrees)
     homogeneous = stages[1].is_homogeneous
     for k in 2:length(stages)
         stage = stages[k]
-        d = _uniform_degree(degs)
+        d = uniform_degree(degs)
         if d >= 0 && all(>=(0), stage.degrees)
             degs = stage.degrees .* d
             homogeneous &= stage.is_homogeneous
         else
-            degs, homogeneous = _weighted_stage_degrees(stage, degs, homogeneous)
+            degs, homogeneous = weighted_stage_degrees(stage, degs, homogeneous)
         end
     end
     return degs, homogeneous
 end
 
 # `inner` holds one degree per variable of the stage, `-1` where it is unknown.
-function _weighted_stage_degrees(
+function weighted_stage_degrees(
         stage::CompositionStage, inner::Vector{Int}, inner_homogeneous::Bool,
     )::Tuple{Vector{Int}, Bool}
     weights = Dict{Symbol, Int}(
         Symbol(v) => inner[i] for (i, v) in enumerate(stage.variables)
     )
-    degs, homogeneous = _weighted_degrees(stage.equations(), weights)
+    degs, homogeneous = weighted_degrees(stage.equations(), weights)
     return degs, homogeneous & inner_homogeneous
 end
 
 # The degree shared by every entry, or `-1` when they differ or one is unknown.
-function _uniform_degree(degs::Vector{Int})::Int
+function uniform_degree(degs::Vector{Int})::Int
     isempty(degs) && return -1
     d = @inbounds degs[1]
     d < 0 && return -1
@@ -320,16 +320,16 @@ function _uniform_degree(degs::Vector{Int})::Int
     return d
 end
 
-_as_expression_vector(vars::AbstractVector)::Vector{Expression} =
+as_expression_vector(vars::AbstractVector)::Vector{Expression} =
     Expression[convert(Expression, v) for v in vars]
 
-_composition_variables(F::System)::Vector{Expression} =
-    _as_expression_vector(F.variables)
-_composition_variables(C::CompositionSystem)::Vector{Expression} = C.variables
+composition_variables(F::System)::Vector{Expression} =
+    as_expression_vector(F.variables)
+composition_variables(C::CompositionSystem)::Vector{Expression} = C.variables
 
-_composition_parameters(F::System)::Vector{Expression} =
-    _as_expression_vector(F.parameters)
-_composition_parameters(C::CompositionSystem)::Vector{Expression} = C.parameters
+composition_parameters(F::System)::Vector{Expression} =
+    as_expression_vector(F.parameters)
+composition_parameters(C::CompositionSystem)::Vector{Expression} = C.parameters
 
 """
     compose(G::SystemLike, F::SystemLike) -> CompositionSystem
@@ -353,16 +353,16 @@ function compose(g::SystemLike, f::SystemLike)::CompositionSystem
             "cannot compose `G ∘ F`: `G` has $ng variables but `F` has $m equations",
         ),
     )
-    pg = _composition_parameters(g)
-    pf = _composition_parameters(f)
+    pg = composition_parameters(g)
+    pf = composition_parameters(f)
     (isempty(pg) || isempty(pf) || pg == pf) || throw(
         ArgumentError("cannot compose two systems with different parameters"),
     )
-    stages = CompositionStage[_composition_stages(f); _composition_stages(g)]
-    degs, homogeneous = _fold_composition_degrees(stages)
+    stages = CompositionStage[composition_stages(f); composition_stages(g)]
+    degs, homogeneous = fold_composition_degrees(stages)
     return CompositionSystem(
-        stages, _fold_composition(stages),
-        _composition_variables(f), isempty(pg) ? pf : pg,
+        stages, fold_composition(stages),
+        composition_variables(f), isempty(pg) ? pf : pg,
         degs, homogeneous,
     )
 end
@@ -382,12 +382,12 @@ is_homogeneous(C::CompositionSystem)::Bool = C.is_homogeneous
     return m == n ? f(SquareShape()) : f(OverdeterminedShape())
 end
 
-_clone_system_evaluator(C::CompositionSystem)::SystemEvaluator =
-    _fold_composition(C.stages)
+clone_system_evaluator(C::CompositionSystem)::SystemEvaluator =
+    fold_composition(C.stages)
 
 # The evaluator undoes an inner stage's normalization and leaves the outermost
 # stage's in place, so the symbolic fold has to do the same.
-function _stage_equations(stage::CompositionStage, unscale::Bool)::Vector{Expression}
+function stage_equations(stage::CompositionStage, unscale::Bool)::Vector{Expression}
     eqs = stage.equations()
     unscale || return eqs
     scales = stage.scales
@@ -414,9 +414,9 @@ function System(
     )::System
     stages = C.stages
     last_stage = length(stages)
-    exprs = _stage_equations(stages[1], true)
+    exprs = stage_equations(stages[1], true)
     for k in 2:last_stage
-        outer = _stage_equations(stages[k], k < last_stage)
+        outer = stage_equations(stages[k], k < last_stage)
         exprs = subs(outer, stages[k].variables => exprs)
     end
     return System(

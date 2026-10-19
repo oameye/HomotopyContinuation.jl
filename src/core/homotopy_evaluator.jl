@@ -72,7 +72,7 @@ Base.size(H::HomotopyEvaluator) = H._size
 Base.deepcopy_internal(::HomotopyEvaluator, ::IdDict) = throw(
     ArgumentError(
         "a HomotopyEvaluator cannot be copied; give the homotopy holding it a " *
-            "`_clone_homotopy` method.",
+            "`clone_homotopy` method.",
     ),
 )
 

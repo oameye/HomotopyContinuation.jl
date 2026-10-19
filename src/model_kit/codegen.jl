@@ -9,15 +9,15 @@ struct InterpretedCompile <: SystemCompileStrategy end
 struct CompiledCompile <: SystemCompileStrategy end
 struct CompiledAllCompile <: SystemCompileStrategy end
 
-function _op_globalref(op::OpType.T)::GlobalRef
+function op_globalref(op::OpType.T)::GlobalRef
     return GlobalRef(parentmodule(OpType), op_call(op))
 end
 
-function _taylor_op_globalref(op::OpType.T)::GlobalRef
+function taylor_op_globalref(op::OpType.T)::GlobalRef
     return GlobalRef(parentmodule(OpType), Symbol(:taylor_, op_call(op)))
 end
 
-function _build_tape_symbol_map(seq::InstructionSequence)::Dict{Int32, Any}
+function build_tape_symbol_map(seq::InstructionSequence)::Dict{Int32, Any}
     tape_sym = Dict{Int32, Any}()
     for (i, k) in enumerate(seq.constants_range)
         tape_sym[Int32(k)] = seq.constants[i]
@@ -32,7 +32,7 @@ function _build_tape_symbol_map(seq::InstructionSequence)::Dict{Int32, Any}
 end
 
 # Shared preamble for Taylor tape symbol maps: constants → TTS locals, variables → TTS locals
-function _taylor_preamble!(
+function taylor_preamble!(
         tape_sym::Dict{Int32, Any},
         preamble::Vector{Any},
         seq::InstructionSequence,
@@ -53,13 +53,13 @@ function _taylor_preamble!(
 end
 
 # Scalar parameters: promote to order-0 TTS
-function _build_taylor_tape_symbol_map(
+function build_taylor_tape_symbol_map(
         seq::InstructionSequence, ::Val{K},
     )::Tuple{Dict{Int32, Any}, Vector{Any}} where {K}
     N = K + 1
     tape_sym = Dict{Int32, Any}()
     preamble = Any[]
-    _taylor_preamble!(tape_sym, preamble, seq, N)
+    taylor_preamble!(tape_sym, preamble, seq, N)
     for (i, k) in enumerate(seq.parameters_range)
         sym = Symbol(:_p, i)
         tape_sym[Int32(k)] = sym
@@ -69,13 +69,13 @@ function _build_taylor_tape_symbol_map(
 end
 
 # TaylorVector parameters: load full TTS from TaylorVector
-function _build_taylor_param_tape_symbol_map(
+function build_taylor_param_tape_symbol_map(
         seq::InstructionSequence, ::Val{K},
     )::Tuple{Dict{Int32, Any}, Vector{Any}} where {K}
     N = K + 1
     tape_sym = Dict{Int32, Any}()
     preamble = Any[]
-    _taylor_preamble!(tape_sym, preamble, seq, N)
+    taylor_preamble!(tape_sym, preamble, seq, N)
     for (i, k) in enumerate(seq.parameters_range)
         sym = Symbol(:_p, i)
         tape_sym[Int32(k)] = sym
@@ -84,11 +84,11 @@ function _build_taylor_param_tape_symbol_map(
     return tape_sym, preamble
 end
 
-function _emit_instruction_body!(
+function emit_instruction_body!(
         body::Vector{Any},
         tape_sym::Dict{Int32, Any},
         instructions::Vector{Instruction},
-        globalref_fn::F = _op_globalref,
+        globalref_fn::F = op_globalref,
     )::Nothing where {F}
     for instr in instructions
         op = instruction_op(instr)
@@ -118,7 +118,7 @@ function _emit_instruction_body!(
 end
 
 # Shared tail for Taylor expr generators: extract order-K coefficients into u
-function _taylor_extract_output!(
+function taylor_extract_output!(
         body::Vector{Any},
         tape_sym::Dict{Int32, Any},
         seq::InstructionSequence,
@@ -136,7 +136,7 @@ function _taylor_extract_output!(
 end
 
 """
-    _instruction_sequence_to_taylor_expr(seq, Val(K)) -> Expr
+    instruction_sequence_to_taylor_expr(seq, Val(K)) -> Expr
 
 Generate `(u, tx, p) -> nothing` as straight-line Taylor code for order K.
 `p` is a scalar parameter vector; parameters are promoted to order-0 TTS.
@@ -144,13 +144,13 @@ Generate `(u, tx, p) -> nothing` as straight-line Taylor code for order K.
 All inputs are pre-bound to local variables in the preamble to avoid
 repeated TaylorVector indexing.
 """
-function _instruction_sequence_to_taylor_expr(
+function instruction_sequence_to_taylor_expr(
         seq::InstructionSequence, ::Val{K},
     )::Expr where {K}
-    tape_sym, preamble = _build_taylor_tape_symbol_map(seq, Val(K))
+    tape_sym, preamble = build_taylor_tape_symbol_map(seq, Val(K))
     body = copy(preamble)
-    _emit_instruction_body!(body, tape_sym, seq.instructions, _taylor_op_globalref)
-    _taylor_extract_output!(body, tape_sym, seq, K)
+    emit_instruction_body!(body, tape_sym, seq.instructions, taylor_op_globalref)
+    taylor_extract_output!(body, tape_sym, seq, K)
 
     return :(
         (u, tx, p) -> @inbounds begin
@@ -160,19 +160,19 @@ function _instruction_sequence_to_taylor_expr(
 end
 
 """
-    _instruction_sequence_to_taylor_param_expr(seq, Val(K)) -> Expr
+    instruction_sequence_to_taylor_param_expr(seq, Val(K)) -> Expr
 
 Generate `(u, tx, tp) -> nothing` as straight-line Taylor code for order K.
 `tp` is a `TaylorVector{K+1}` carrying full Taylor series for parameters.
 This is the production path used by CoefficientHomotopy and ToricHomotopy.
 """
-function _instruction_sequence_to_taylor_param_expr(
+function instruction_sequence_to_taylor_param_expr(
         seq::InstructionSequence, ::Val{K},
     )::Expr where {K}
-    tape_sym, preamble = _build_taylor_param_tape_symbol_map(seq, Val(K))
+    tape_sym, preamble = build_taylor_param_tape_symbol_map(seq, Val(K))
     body = copy(preamble)
-    _emit_instruction_body!(body, tape_sym, seq.instructions, _taylor_op_globalref)
-    _taylor_extract_output!(body, tape_sym, seq, K)
+    emit_instruction_body!(body, tape_sym, seq.instructions, taylor_op_globalref)
+    taylor_extract_output!(body, tape_sym, seq, K)
 
     return :(
         (u, tx, tp) -> @inbounds begin
@@ -182,14 +182,14 @@ function _instruction_sequence_to_taylor_param_expr(
 end
 
 """
-    _instruction_sequence_to_eval_expr(seq::InstructionSequence) -> Expr
+    instruction_sequence_to_eval_expr(seq::InstructionSequence) -> Expr
 
 Generate `(u, x, p) -> nothing` as straight-line Julia code.
 """
-function _instruction_sequence_to_eval_expr(seq::InstructionSequence)::Expr
-    tape_sym = _build_tape_symbol_map(seq)
+function instruction_sequence_to_eval_expr(seq::InstructionSequence)::Expr
+    tape_sym = build_tape_symbol_map(seq)
     body = Any[]
-    _emit_instruction_body!(body, tape_sym, seq.instructions)
+    emit_instruction_body!(body, tape_sym, seq.instructions)
 
     ref(k::Int32) = tape_sym[k]
     if !seq.all_u_assigned
@@ -208,14 +208,14 @@ function _instruction_sequence_to_eval_expr(seq::InstructionSequence)::Expr
 end
 
 """
-    _instruction_sequence_to_jac_expr(seq::InstructionSequence) -> Expr
+    instruction_sequence_to_jac_expr(seq::InstructionSequence) -> Expr
 
 Generate `(u, U, x, p) -> nothing` for simultaneous eval + Jacobian.
 """
-function _instruction_sequence_to_jac_expr(seq::InstructionSequence)::Expr
-    tape_sym = _build_tape_symbol_map(seq)
+function instruction_sequence_to_jac_expr(seq::InstructionSequence)::Expr
+    tape_sym = build_tape_symbol_map(seq)
     body = Any[]
-    _emit_instruction_body!(body, tape_sym, seq.instructions)
+    emit_instruction_body!(body, tape_sym, seq.instructions)
 
     ref(k::Int32) = tape_sym[k]
 
@@ -248,7 +248,7 @@ end
 ## ── Compiled evaluator builder ──────────────────────────────────────────────
 
 # Interpreter-based Taylor FunctionWrappers
-function _build_taylor_fws(
+function build_taylor_fws(
         interp_t1::Interpreter{Vector{TruncatedTaylorSeries{2, ComplexF64}}},
         interp_t2::Interpreter{Vector{TruncatedTaylorSeries{3, ComplexF64}}},
         interp_t3::Interpreter{Vector{TruncatedTaylorSeries{4, ComplexF64}}},
@@ -264,13 +264,13 @@ function _build_taylor_fws(
 end
 
 # RGF-compiled Taylor FunctionWrappers
-function _build_taylor_fws(seq_eval::InstructionSequence)
-    _f1 = @RuntimeGeneratedFunction(_instruction_sequence_to_taylor_expr(seq_eval, Val(1)))
-    _f2 = @RuntimeGeneratedFunction(_instruction_sequence_to_taylor_expr(seq_eval, Val(2)))
-    _f3 = @RuntimeGeneratedFunction(_instruction_sequence_to_taylor_expr(seq_eval, Val(3)))
-    _f1p = @RuntimeGeneratedFunction(_instruction_sequence_to_taylor_param_expr(seq_eval, Val(1)))
-    _f2p = @RuntimeGeneratedFunction(_instruction_sequence_to_taylor_param_expr(seq_eval, Val(2)))
-    _f3p = @RuntimeGeneratedFunction(_instruction_sequence_to_taylor_param_expr(seq_eval, Val(3)))
+function build_taylor_fws(seq_eval::InstructionSequence)
+    _f1 = @RuntimeGeneratedFunction(instruction_sequence_to_taylor_expr(seq_eval, Val(1)))
+    _f2 = @RuntimeGeneratedFunction(instruction_sequence_to_taylor_expr(seq_eval, Val(2)))
+    _f3 = @RuntimeGeneratedFunction(instruction_sequence_to_taylor_expr(seq_eval, Val(3)))
+    _f1p = @RuntimeGeneratedFunction(instruction_sequence_to_taylor_param_expr(seq_eval, Val(1)))
+    _f2p = @RuntimeGeneratedFunction(instruction_sequence_to_taylor_param_expr(seq_eval, Val(2)))
+    _f3p = @RuntimeGeneratedFunction(instruction_sequence_to_taylor_param_expr(seq_eval, Val(3)))
     return (
         SysTaylor1FW((u, tx, p) -> (_f1(u, tx, p); nothing)),
         SysTaylor2FW((u, tx, p) -> (_f2(u, tx, p); nothing)),
@@ -281,7 +281,7 @@ function _build_taylor_fws(seq_eval::InstructionSequence)
     )
 end
 
-function _build_compiled_evaluator(
+function build_compiled_evaluator(
         mode::Union{CompiledCompile, CompiledAllCompile},
         seq_eval::InstructionSequence,
         seq_jac::InstructionSequence,
@@ -291,16 +291,16 @@ function _build_compiled_evaluator(
         nvars::Int,
         nparams::Int,
     )::SystemEvaluator
-    eval_fn = @RuntimeGeneratedFunction(_instruction_sequence_to_eval_expr(seq_eval))
-    jac_fn = @RuntimeGeneratedFunction(_instruction_sequence_to_jac_expr(seq_jac))
+    eval_fn = @RuntimeGeneratedFunction(instruction_sequence_to_eval_expr(seq_eval))
+    jac_fn = @RuntimeGeneratedFunction(instruction_sequence_to_jac_expr(seq_jac))
 
     return SystemEvaluator(
         SysEvalFW((u, x, p) -> (eval_fn(u, x, p); nothing)),
-        _lazy_df64_interpreted(interp_df64)...,
+        lazy_df64_interpreted(interp_df64)...,
         SysEvalJacFW((u, U, x, p) -> (jac_fn(u, U, x, p); nothing)),
         taylor_fws...,
         (neqs, nvars),
         nparams,
-        SystemFactory(_CompiledCloner(mode, seq_eval, seq_jac, neqs, nvars, nparams)),
+        SystemFactory(CompiledCloner(mode, seq_eval, seq_jac, neqs, nvars, nparams)),
     )
 end

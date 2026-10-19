@@ -51,12 +51,12 @@ function iterator(
     return PathIterator{ComplexF64}(tracker)
 end
 
-_t_value(t::ComplexF64, ::PathIterator{Float64})::Float64 = real(t)
-_t_value(t::ComplexF64, ::PathIterator{ComplexF64})::ComplexF64 = t
+t_value(t::ComplexF64, ::PathIterator{Float64})::Float64 = real(t)
+t_value(t::ComplexF64, ::PathIterator{ComplexF64})::ComplexF64 = t
 
-_current_x_t(iter::PathIterator) = (
+current_x_t(iter::PathIterator) = (
     Vector{ComplexF64}(iter.tracker.state.x),
-    _t_value(iter.tracker.state.segment.t, iter),
+    t_value(iter.tracker.state.segment.t, iter),
 )
 
 function Base.iterate(iter::PathIterator, i::Int = 0)
@@ -70,7 +70,7 @@ function Base.iterate(iter::PathIterator, i::Int = 0)
         end
         accepted || return nothing
     end
-    return _current_x_t(iter), i + 1
+    return current_x_t(iter), i + 1
 end
 
 # ── Path info ───────────────────────────────────────────────────────────────
@@ -199,37 +199,37 @@ end
 
 # ── Step table ──────────────────────────────────────────────────────────────
 
-const _PATH_INFO_HEADER = (
+const PATH_INFO_HEADER = (
     "", "s", "Δs", "ω", "|Δx₀|", "h₀", "acc", "μ", "τ", "Δx_t", "Δpred", "cond", "|x|",
 )
-const _PATH_INFO_NCOLS = length(_PATH_INFO_HEADER)
-const _PathRow = NTuple{_PATH_INFO_NCOLS, String}
-const _PATH_INFO_ELISION = ntuple(_ -> "⋮", Val(_PATH_INFO_NCOLS))
+const PATH_INFO_NCOLS = length(PATH_INFO_HEADER)
+const PathRow = NTuple{PATH_INFO_NCOLS, String}
+const PATH_INFO_ELISION = ntuple(_ -> "⋮", Val(PATH_INFO_NCOLS))
 
-_path_info_cell(v::Float64)::String = Printf.@sprintf("%.2g", v)
+path_info_cell(v::Float64)::String = Printf.@sprintf("%.2g", v)
 
-function _path_info_row(step::PathStep)::_PathRow
+function path_info_row(step::PathStep)::PathRow
     return (
         step.accepted ? "✓" : "✗",
-        _path_info_cell(step.s),
-        _path_info_cell(step.Δs),
-        _path_info_cell(step.ω),
-        _path_info_cell(step.Δx₀),
-        _path_info_cell(step.ω * step.Δx₀),
-        _path_info_cell(step.accuracy),
-        step.extended_prec ? string(_path_info_cell(step.μ), "*") :
-            _path_info_cell(step.μ),
-        _path_info_cell(step.τ),
-        _path_info_cell(step.Δx_t),
-        _path_info_cell(step.Δx̂x),
-        _path_info_cell(step.cond),
-        _path_info_cell(step.norm_x),
+        path_info_cell(step.s),
+        path_info_cell(step.Δs),
+        path_info_cell(step.ω),
+        path_info_cell(step.Δx₀),
+        path_info_cell(step.ω * step.Δx₀),
+        path_info_cell(step.accuracy),
+        step.extended_prec ? string(path_info_cell(step.μ), "*") :
+            path_info_cell(step.μ),
+        path_info_cell(step.τ),
+        path_info_cell(step.Δx_t),
+        path_info_cell(step.Δx̂x),
+        path_info_cell(step.cond),
+        path_info_cell(step.norm_x),
     )
 end
 
 # The 12 lines left free carry the summary, the three rules, the header and the
 # elision row.
-function _path_table_rows(io::IO, n::Int)::Tuple{UnitRange{Int}, UnitRange{Int}}
+function path_table_rows(io::IO, n::Int)::Tuple{UnitRange{Int}, UnitRange{Int}}
     get(io, :limit, false) || return (1:n, 1:0)
     k = max(displaysize(io)[1] - 12, 10)
     n <= k && return (1:n, 1:0)
@@ -237,7 +237,7 @@ function _path_table_rows(io::IO, n::Int)::Tuple{UnitRange{Int}, UnitRange{Int}}
     return (1:head, (n - (k - head) + 1):n)
 end
 
-function _print_rule(io::IO, widths::Vector{Int}, l::Char, m::Char, r::Char)::Nothing
+function print_rule(io::IO, widths::Vector{Int}, l::Char, m::Char, r::Char)::Nothing
     print(io, l)
     for j in eachindex(widths)
         j > 1 && print(io, m)
@@ -248,7 +248,7 @@ function _print_rule(io::IO, widths::Vector{Int}, l::Char, m::Char, r::Char)::No
 end
 
 # The mark column is left-aligned, the numbers right-aligned.
-function _print_row(io::IO, widths::Vector{Int}, row::_PathRow)::Nothing
+function print_row(io::IO, widths::Vector{Int}, row::PathRow)::Nothing
     print(io, "│")
     for j in eachindex(widths)
         cell = j == 1 ? Base.rpad(row[j], widths[j]) : Base.lpad(row[j], widths[j])
@@ -268,27 +268,27 @@ Every step is printed unless `io` limits its height, as the display of `info`
 itself does.
 """
 function path_table(io::IO, info::PathInfo)::Nothing
-    head, tail = _path_table_rows(io, length(info))
-    rows = Vector{_PathRow}(undef, length(head) + length(tail))
+    head, tail = path_table_rows(io, length(info))
+    rows = Vector{PathRow}(undef, length(head) + length(tail))
     k = 0
     for part in (head, tail), i in part
         k += 1
-        rows[k] = _path_info_row(info[i])
+        rows[k] = path_info_row(info[i])
     end
 
-    widths = collect(map(length, _PATH_INFO_HEADER))
+    widths = collect(map(length, PATH_INFO_HEADER))
     for row in rows, j in eachindex(widths)
         widths[j] = max(widths[j], length(row[j]))
     end
 
-    _print_rule(io, widths, '┌', '┬', '┐')
-    _print_row(io, widths, _PATH_INFO_HEADER)
-    _print_rule(io, widths, '├', '┼', '┤')
+    print_rule(io, widths, '┌', '┬', '┐')
+    print_row(io, widths, PATH_INFO_HEADER)
+    print_rule(io, widths, '├', '┼', '┤')
     for (i, row) in enumerate(rows)
-        i == length(head) + 1 && _print_row(io, widths, _PATH_INFO_ELISION)
-        _print_row(io, widths, row)
+        i == length(head) + 1 && print_row(io, widths, PATH_INFO_ELISION)
+        print_row(io, widths, row)
     end
-    _print_rule(io, widths, '└', '┴', '┘')
+    print_rule(io, widths, '└', '┴', '┘')
     return nothing
 end
 

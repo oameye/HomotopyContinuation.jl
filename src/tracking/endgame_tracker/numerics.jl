@@ -77,7 +77,7 @@ function scaled_cond(
     else
         ws.factorized || factorize!(ws)
         return scaled_inf_norm_matrix(ws, row_scaling, col_scaling) *
-            _inverse_inf_norm_est(
+            scaled_inverse_inf_norm_est(
             ws.lu, row_scaling, col_scaling, ws.row_scaling, ws.scaled,
             ws.inf_norm_est_work, ws.inf_norm_est_rwork,
         )

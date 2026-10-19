@@ -15,19 +15,19 @@ struct SolveCache{E <: AbstractExecutor}
 end
 
 """
-    _check_square_or_overdetermined(F)
+    check_square_or_overdetermined(F)
 
 Throw for underdetermined input (positive-dimensional solution set).
 """
-function _check_square_or_overdetermined(F::System)::Nothing
+function check_square_or_overdetermined(F::System)::Nothing
     return with_system_shape(F) do shape
-        _check_square_or_overdetermined(shape, F)
+        check_square_or_overdetermined(shape, F)
     end
 end
 
-_check_square_or_overdetermined(::SquareShape, ::System)::Nothing = nothing
-_check_square_or_overdetermined(::OverdeterminedShape, ::System)::Nothing = nothing
-function _check_square_or_overdetermined(::UnderdeterminedShape, F::System)::Nothing
+check_square_or_overdetermined(::SquareShape, ::System)::Nothing = nothing
+check_square_or_overdetermined(::OverdeterminedShape, ::System)::Nothing = nothing
+function check_square_or_overdetermined(::UnderdeterminedShape, F::System)::Nothing
     m, n = size(F.evaluator)
     throw(
         ArgumentError(
@@ -38,11 +38,11 @@ function _check_square_or_overdetermined(::UnderdeterminedShape, F::System)::Not
     )
 end
 
-_check_square_or_overdetermined(F::FixedParameterSystem)::Nothing =
-    _check_square_or_overdetermined(F.system)
+check_square_or_overdetermined(F::FixedParameterSystem)::Nothing =
+    check_square_or_overdetermined(F.system)
 
 # A composition carries no shape parameter, so the same check reads its size.
-function _check_square_or_overdetermined(C::CompositionSystem)::Nothing
+function check_square_or_overdetermined(C::CompositionSystem)::Nothing
     m, n = size(C)
     m >= n || throw(
         ArgumentError(
@@ -55,12 +55,12 @@ function _check_square_or_overdetermined(C::CompositionSystem)::Nothing
 end
 
 """
-    _check_projective_determined(F, route)
+    check_projective_determined(F, route)
 
 Throw for a homogeneous system whose projective solution set is
 positive-dimensional. `route` names the algorithm in the message.
 """
-function _check_projective_determined(F::CloneableSystem, route::String)::Nothing
+function check_projective_determined(F::CloneableSystem, route::String)::Nothing
     m, n = size(F)
     m + 1 >= n || throw(
         ArgumentError(
@@ -72,19 +72,19 @@ function _check_projective_determined(F::CloneableSystem, route::String)::Nothin
     return nothing
 end
 
-_is_grouped(F::System)::Bool = !isempty(F.variable_groups)
-_is_grouped(::CloneableSystem)::Bool = false
+is_grouped(F::System)::Bool = !isempty(F.variable_groups)
+is_grouped(::CloneableSystem)::Bool = false
 
 """
-    _check_single_group(F)
+    check_single_group(F)
 
 Throw for a system with more than one variable group, on a route that is about
 to put it on a single affine chart. One chart leaves such a system a cone in
 each of its other groups.
 """
-_check_single_group(::CloneableSystem)::Nothing = nothing
+check_single_group(::CloneableSystem)::Nothing = nothing
 
-function _check_single_group(F::System)::Nothing
+function check_single_group(F::System)::Nothing
     M = length(variable_groups(F))
     M <= 1 || throw(
         ArgumentError(
@@ -96,29 +96,29 @@ function _check_single_group(F::System)::Nothing
     return nothing
 end
 
-_polynomial_system(F::System)::System = F
-_polynomial_system(C::CompositionSystem)::System = System(C)
-_polynomial_system(F::FixedParameterSystem)::System =
-    fix_parameters(_polynomial_system(F.system), F.parameters)
+as_polynomial_system(F::System)::System = F
+as_polynomial_system(C::CompositionSystem)::System = System(C)
+as_polynomial_system(F::FixedParameterSystem)::System =
+    fix_parameters(as_polynomial_system(F.system), F.parameters)
 
 # Solved on a random affine chart: the slice by the whole ambient space, whose
 # chart row makes `m = n - 1` square.
-function _init_projective(
+function init_projective(
         F::CloneableSystem, alg::TotalDegree, exec::E, route::String,
     )::SolveCache{E} where {E <: AbstractExecutor}
     # Before the count check, whose message is confusing for grouped input.
-    _check_single_group(F)
-    _check_projective_determined(F, route)
-    G = _polynomial_system(F)
-    return CommonSolve.init(G, _full_subspace(nvariables(G)), alg, exec)
+    check_single_group(F)
+    check_projective_determined(F, route)
+    G = as_polynomial_system(F)
+    return CommonSolve.init(G, full_subspace(nvariables(G)), alg, exec)
 end
 
 """
-    _check_parameter_free(F, route)
+    check_parameter_free(F, route)
 
 Throw when `F` still has parameters. `route` names the algorithm in the message.
 """
-function _check_parameter_free(F::CloneableSystem, route::String)::Nothing
+function check_parameter_free(F::CloneableSystem, route::String)::Nothing
     np = nparameters(F)
     np == 0 || throw(
         ArgumentError(
@@ -132,12 +132,12 @@ function _check_parameter_free(F::CloneableSystem, route::String)::Nothing
 end
 
 """
-    _check_polynomial(F, route)
+    check_polynomial(F, route)
 
 Throw when `F` has an equation that is not polynomial in its variables. `System`
 records those with a degree of `-1`.
 """
-function _check_polynomial(F::System, route::String)::Nothing
+function check_polynomial(F::System, route::String)::Nothing
     any(<(0), F.degrees) || return nothing
     throw(
         ArgumentError(
@@ -150,11 +150,11 @@ function _check_polynomial(F::System, route::String)::Nothing
     )
 end
 
-_check_polynomial(F::FixedParameterSystem, route::String)::Nothing =
-    _check_polynomial(F.system, route)
+check_polynomial(F::FixedParameterSystem, route::String)::Nothing =
+    check_polynomial(F.system, route)
 
 # A composed degree of `-1` comes from a stage, so the message names one.
-function _check_polynomial(C::CompositionSystem, route::String)::Nothing
+function check_polynomial(C::CompositionSystem, route::String)::Nothing
     any(<(0), degrees(C)) || return nothing
     throw(
         ArgumentError(
@@ -169,7 +169,7 @@ end
 
 # ── CommonSolve.init: System + TotalDegree ────────────────────────────────
 
-function _solve_cache(
+function solve_cache(
         exec::E,
         builder::AbstractPathBuilder,
         starts::Vector{Vector{ComplexF64}},
@@ -191,77 +191,77 @@ function CommonSolve.init(
         F::CloneableSystem, alg::TotalDegree,
         exec::E = Threaded(),
     )::SolveCache{E} where {E <: AbstractExecutor}
-    _check_parameter_free(F, "`TotalDegree`")
-    _check_polynomial(F, "`TotalDegree`")
-    if _is_grouped(F)
+    check_parameter_free(F, "`TotalDegree`")
+    check_polynomial(F, "`TotalDegree`")
+    if is_grouped(F)
         # First: for a grouped system homogeneity is per group. Dynamic call, as below.
-        return Base.inferencebarrier(_init_multi_homogeneous)(F, alg, exec)
+        return Base.inferencebarrier(init_multi_homogeneous)(F, alg, exec)
     end
     if is_homogeneous(F)
         # Dynamic call: inferring the projective wrapper stack from here costs the
         # common path ~3s.
-        return Base.inferencebarrier(_init_projective)(F, alg, exec, "`TotalDegree`")
+        return Base.inferencebarrier(init_projective)(F, alg, exec, "`TotalDegree`")
     end
-    _check_square_or_overdetermined(F)
+    check_square_or_overdetermined(F)
 
-    rng = Random.MersenneTwister(_seed(alg))
-    γ = _random_gamma(rng)
+    rng = Random.MersenneTwister(algorithm_seed(alg))
+    γ = random_gamma(rng)
     # Dynamic call: specializes the body on the concrete `System` so that
     # the shape branch resolves against the concrete system.
-    initializer = Base.inferencebarrier(_init_total_degree_shaped)
+    initializer = Base.inferencebarrier(init_total_degree_shaped)
     return initializer(F, alg, exec, rng, γ)
 end
 
-function _init_total_degree_shaped(
+function init_total_degree_shaped(
         F::CloneableSystem, alg::TotalDegree, exec::E,
         rng::Random.MersenneTwister, γ::ComplexF64,
     )::SolveCache{E} where {E <: AbstractExecutor}
     return with_system_shape(F) do shape
-        _init_total_degree(shape, F, alg, exec, rng, γ)
+        init_total_degree(shape, F, alg, exec, rng, γ)
     end
 end
 
-function _init_total_degree(
+function init_total_degree(
         ::SquareShape, F::CloneableSystem, alg::TotalDegree, exec::E,
         ::Random.MersenneTwister, γ::ComplexF64,
     )::SolveCache{E} where {E <: AbstractExecutor}
     degs = degrees(F)
     builder = StraightLineBuilder(
-        degs, F, γ, _tracker_options(alg), _endgame_options(alg),
+        degs, F, γ, algorithm_tracker_options(alg), algorithm_endgame_options(alg),
     )
-    return _solve_cache(
-        exec, builder, total_degree_start_solutions(degs), _seed(alg),
-        ExcessCheckers(), _show_progress(alg), early_stop_callback(alg),
+    return solve_cache(
+        exec, builder, total_degree_start_solutions(degs), algorithm_seed(alg),
+        ExcessCheckers(), algorithm_show_progress(alg), early_stop_callback(alg),
     )
 end
 
-function _init_total_degree(
+function init_total_degree(
         ::OverdeterminedShape, F::CloneableSystem, alg::TotalDegree,
         exec::E, rng::Random.MersenneTwister, γ::ComplexF64,
     )::SolveCache{E} where {E <: AbstractExecutor}
     n = nvariables(F)
     A, perm, excess_checker =
-        _square_up(rng, F.evaluator, degrees(F), alg.excess_residual_tol)
+        square_up(rng, F.evaluator, degrees(F), alg.excess_residual_tol)
     degs = degrees(F)[perm[1:n]]
     builder = RandomizedStraightLineBuilder(
-        degs, F, A, perm, γ, _tracker_options(alg), _endgame_options(alg),
+        degs, F, A, perm, γ, algorithm_tracker_options(alg), algorithm_endgame_options(alg),
     )
-    return _solve_cache(
-        exec, builder, total_degree_start_solutions(degs), _seed(alg),
-        ExcessCheckers([excess_checker]), _show_progress(alg), early_stop_callback(alg),
+    return solve_cache(
+        exec, builder, total_degree_start_solutions(degs), algorithm_seed(alg),
+        ExcessCheckers([excess_checker]), algorithm_show_progress(alg), early_stop_callback(alg),
     )
 end
 
 # `start_solution` is copied: the caller's `starts` vector outlives the result.
-function _track_path!(
+function track_path!(
         eg::EndgameTracker, x₀::Vector{ComplexF64}, k::Int,
     )::PathResult
     track!(eg, x₀)
     return PathResult(eg; path_number = k, start_solution = copy(x₀))
 end
 
-_track_path!(ws::TrackingWorkerState, x₀::Vector{ComplexF64}, k::Int)::PathResult =
-    _track_path!(ws.tracker, x₀, k)
+track_path!(ws::TrackingWorkerState, x₀::Vector{ComplexF64}, k::Int)::PathResult =
+    track_path!(ws.tracker, x₀, k)
 
 # ── Convenience: solve(F, alg, exec) ─────────────────────────────────────
 
@@ -312,13 +312,13 @@ paths_to_track(System([x * y - 2, x^2 - 4]; variable_groups = [[x], [y]]))  # 2
 ```
 """
 paths_to_track(F::CloneableSystem, alg::TotalDegree = TotalDegree())::Int =
-    length(CommonSolve.init(F, _quiet(alg), Serial()).start_solutions)
+    length(CommonSolve.init(F, without_progress(alg), Serial()).start_solutions)
 
 # The BKK bound of the prepared support, not a solve: building the start solutions
 # means a binomial solve per mixed cell and both trackers, all of it discarded.
 paths_to_track(F::Union{System, CompositionSystem}, alg::Polyhedral)::Int =
     with_polyhedral_system(F, alg) do G
-    _mixed_volume(_polyhedral_support(G, alg))
+    support_mixed_volume(polyhedral_support(G, alg))
 end
 
 """
@@ -423,7 +423,7 @@ function CommonSolve.init(
         alg::Continuation = Continuation(),
         exec::E = Threaded(),
     )::SolveCache{E} where {E <: AbstractExecutor}
-    _check_square_or_overdetermined(F)
+    check_square_or_overdetermined(F)
     np = nparameters(F)
     np > 0 || throw(
         ArgumentError(
@@ -445,12 +445,12 @@ function CommonSolve.init(
     sp = ComplexF64.(p_start)
     tp = ComplexF64.(p_target)
     builder = ParameterBuilder(
-        F, sp, tp, _tracker_options(alg), _endgame_options(alg),
+        F, sp, tp, algorithm_tracker_options(alg), algorithm_endgame_options(alg),
     )
 
-    return _solve_cache(
-        exec, builder, _start_points(starts), _seed(alg), ExcessCheckers(),
-        _show_progress(alg), early_stop_callback(alg),
+    return solve_cache(
+        exec, builder, start_points(starts), algorithm_seed(alg), ExcessCheckers(),
+        algorithm_show_progress(alg), early_stop_callback(alg),
     )
 end
 
@@ -466,11 +466,11 @@ for f in (:(solve), :(CommonSolve.init))
             ::SystemLike, starts, ::AbstractVector{<:Number},
             ::AbstractVector{<:Number}, ::Continuation = Continuation(),
             ::AbstractExecutor = Threaded(),
-        ) = _bad_starts(starts)
+        ) = bad_starts(starts)
 
         $f(
             ::SystemLike, starts, ::AbstractVector{<:Number},
             ::AbstractVector{<:Number}, ::AbstractExecutor,
-        ) = _bad_starts(starts)
+        ) = bad_starts(starts)
     end
 end

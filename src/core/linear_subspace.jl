@@ -3,7 +3,7 @@
 # Cold path: all fields are plain Matrix/Vector (they feed LAPACK svd/qr).
 
 # References
-const _LKK19 = """Lim, Lek-Heng, Ken Sze-Wai Wong, and Ke Ye. "Numerical algorithms on the affine Grassmannian." SIAM Journal on Matrix Analysis and Applications 40.2 (2019): 371-393"""
+const LKK19_REFERENCE = """Lim, Lek-Heng, Ken Sze-Wai Wong, and Ke Ye. "Numerical algorithms on the affine Grassmannian." SIAM Journal on Matrix Analysis and Applications 40.2 (2019): 371-393"""
 
 abstract type AbstractSubspace{T} end
 
@@ -61,14 +61,14 @@ struct ExtrinsicDescription{T}
 end
 (A::ExtrinsicDescription)(x::AbstractVector) = A.A * x - A.b
 
-function _all_zero(b::AbstractVector)::Bool
+function all_entries_zero(b::AbstractVector)::Bool
     for i in eachindex(b)
         iszero(b[i]) || return false
     end
     return true
 end
 
-function _all_equal(A::AbstractArray, B::AbstractArray)::Bool
+function all_equal(A::AbstractArray, B::AbstractArray)::Bool
     axes(A) == axes(B) || return false
     for i in eachindex(A, B)
         A[i] == B[i] || return false
@@ -104,7 +104,7 @@ Codimension of the (affine) linear subspace `A`.
 codim(A::ExtrinsicDescription) = size(A.A, 1)
 
 Base.:(==)(A::ExtrinsicDescription, B::ExtrinsicDescription)::Bool =
-    _all_equal(A.A, B.A) && _all_equal(A.b, B.b)
+    all_equal(A.A, B.A) && all_equal(A.b, B.b)
 function Base.copy!(A::ExtrinsicDescription, B::ExtrinsicDescription)
     copy!(A.A, B.A)
     copy!(A.b, B.b)
@@ -200,7 +200,7 @@ Codimension of the (affine) linear subspace `A`.
 codim(I::IntrinsicDescription) = size(I.A, 1) - size(I.A, 2)
 
 function Base.:(==)(A::IntrinsicDescription, B::IntrinsicDescription)::Bool
-    return _all_equal(A.A, B.A) && _all_equal(A.b, B.b) && _all_equal(A.Y, B.Y)
+    return all_equal(A.A, B.A) && all_equal(A.b, B.b) && all_equal(A.Y, B.Y)
 end
 
 function Base.show(io::IO, A::IntrinsicDescription{T}) where {T}
@@ -228,7 +228,7 @@ function IntrinsicDescription(E::ExtrinsicDescription{T})::IntrinsicDescription{
     svd = LA.svd(E.A; full = true)
     m = size(E.A, 1)
     A = Matrix((@view svd.Vt[(m + 1):end, :])')
-    b = if _all_zero(E.b)
+    b = if all_entries_zero(E.b)
         zeros(eltype(E.b), size(A, 1))
     else
         svd \ E.b
@@ -240,7 +240,7 @@ function ExtrinsicDescription(I::IntrinsicDescription{T})::ExtrinsicDescription{
     svd = LA.svd(I.A; full = true)
     n = size(I.A, 2)
     A = Matrix((@view svd.U[:, (n + 1):end])')
-    b = if _all_zero(I.b)
+    b = if all_entries_zero(I.b)
         zeros(eltype(A), size(A, 1))
     else
         A * I.b
@@ -311,7 +311,7 @@ Codimension of the (affine) linear subspace `A`.
 """
 codim(A::LinearSubspace) = codim(A.intrinsic)
 
-_default_intrinsic(A::LinearSubspace)::Bool = dim(A) <= codim(A)
+default_intrinsic(A::LinearSubspace)::Bool = dim(A) <= codim(A)
 
 """
     SubspaceCoords.AUTO
@@ -329,8 +329,8 @@ end
 
 # The choice is made against the start subspace, which the algorithm struct does
 # not know, so `AUTO` is resolved here rather than at construction.
-_use_intrinsic(coords::SubspaceCoords.T, L::LinearSubspace)::Bool =
-    coords == SubspaceCoords.AUTO ? _default_intrinsic(L) :
+use_intrinsic(coords::SubspaceCoords.T, L::LinearSubspace)::Bool =
+    coords == SubspaceCoords.AUTO ? default_intrinsic(L) :
     coords == SubspaceCoords.INTRINSIC
 
 """
@@ -346,7 +346,7 @@ ambient_dim(A::LinearSubspace) = dim(A) + codim(A)
 Returns `true` if the space is a proper linear subspace, i.e., described by
 ``L = \\{ x | Ax = 0 \\}``.
 """
-is_linear(A::LinearSubspace)::Bool = _all_zero(extrinsic(A).b)
+is_linear(A::LinearSubspace)::Bool = all_entries_zero(extrinsic(A).b)
 
 function Base.show(io::IO, A::LinearSubspace{T}) where {T}
     if is_linear(A)
@@ -399,7 +399,7 @@ end
 # `-1` marks an unset dimension. A given `dim` or `codim` is non-negative, so the
 # sentinel cannot collide with a real value, and demanding exactly one of them
 # turns a silently ignored argument into an error.
-function _subspace_dim(dim::Int, codim::Int, n::Int)::Int
+function subspace_dim(dim::Int, codim::Int, n::Int)::Int
     dim >= 0 || codim >= 0 ||
         throw(ArgumentError("Neither `dim` nor `codim` specified."))
     dim >= 0 && codim >= 0 && throw(
@@ -439,7 +439,7 @@ function rand_subspace(
         codim::Int = -1,
         affine::Bool = true,
     )::LinearSubspace{T} where {T}
-    k = _subspace_dim(dim, codim, Int(n))
+    k = subspace_dim(dim, codim, Int(n))
     A = randn(rng, T, n - k, n)
     return if affine
         LinearSubspace(A, randn(rng, T, n - k))
@@ -512,7 +512,7 @@ function rand_subspace(
         affine::Bool = true,
     )
     n = length(x)
-    k = _subspace_dim(dim, codim, n)
+    k = subspace_dim(dim, codim, n)
 
     if !affine && k == 0 && !all(iszero, x)
         throw(
@@ -625,7 +625,7 @@ Compute the geodesic distance between `V = {x | Ax = a}` and `W = {x | Bx = b}`
 as `sqrt(d^2 + ||a-b||^2)`, where `d` is the distance from the column span of
 `A` to the column span of `B` in the Grassmannian, following [^LKK19].
 
-[^LKK19]: $_LKK19.
+[^LKK19]: $LKK19_REFERENCE.
 """
 geodesic_distance(A::LinearSubspace, B::LinearSubspace) =
     geodesic_distance(A.intrinsic, B.intrinsic)
@@ -644,7 +644,7 @@ Computes the factors ``Q``, ``Θ`` and ``U`` from Corollary 4.3 in [^LKK19].
 These values are necessary to construct the geodesic path from `A` to `B`
 (parameter 0 at `A`, parameter 1 at `B`).
 
-[^LKK19]: $_LKK19
+[^LKK19]: $LKK19_REFERENCE
 """
 grassmannian_svd(A::LinearSubspace, B::LinearSubspace) =
     grassmannian_svd(extrinsic(A), extrinsic(B))
@@ -707,7 +707,7 @@ Convention: `γ(1) == V` and `γ(0) == W` for BOTH the direction and the
 offset, matching the homotopy convention where tracking runs from `t = 1`
 (start) to `t = 0` (target).
 
-[^LKK19]: $_LKK19
+[^LKK19]: $LKK19_REFERENCE
 """
 geodesic(A::LinearSubspace, B::LinearSubspace) = geodesic(A.intrinsic, B.intrinsic)
 function geodesic(A::IntrinsicDescription, B::IntrinsicDescription)

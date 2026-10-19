@@ -266,13 +266,13 @@ end
         end
     end
 
-    @testset "_BoundParameterSystem" begin
+    @testset "BoundParameterSystem" begin
         for X in (ComplexF64, HC.ComplexDF64)
             @test isempty(
                 _real_allocs(
                     HC.evaluate!,
                     (
-                        FSVec{ComplexF64}, HC._BoundParameterSystem,
+                        FSVec{ComplexF64}, HC.BoundParameterSystem,
                         FSVec{X}, FSVec{ComplexF64},
                     ),
                 )
@@ -282,7 +282,7 @@ end
             _real_allocs(
                 HC.evaluate!,
                 (
-                    FSVec{HC.ComplexDF64}, HC._BoundParameterSystem,
+                    FSVec{HC.ComplexDF64}, HC.BoundParameterSystem,
                     FSVec{HC.ComplexDF64}, FSVec{ComplexF64},
                 ),
             )
@@ -291,7 +291,7 @@ end
             _real_allocs(
                 HC.evaluate_and_jacobian!,
                 (
-                    FSVec{ComplexF64}, FSMat{ComplexF64}, HC._BoundParameterSystem,
+                    FSVec{ComplexF64}, FSMat{ComplexF64}, HC.BoundParameterSystem,
                     FSVec{ComplexF64}, FSVec{ComplexF64},
                 ),
             )
@@ -302,7 +302,7 @@ end
                     _real_allocs(
                         HC.taylor!,
                         (
-                            FSVec{ComplexF64}, V, HC._BoundParameterSystem,
+                            FSVec{ComplexF64}, V, HC.BoundParameterSystem,
                             TaylorVector{N, ComplexF64}, P,
                         ),
                     )

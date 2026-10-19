@@ -7,7 +7,7 @@
 # their own files. This file only owns the front-end glue from polynomial input
 # to the symbolic pipeline.
 
-function _symbol_index_map(values)::Dict{Symbol, Int}
+function symbol_index_map(values)::Dict{Symbol, Int}
     index_map = Dict{Symbol, Int}()
     for (i, value) in enumerate(values)
         index_map[Symbol(value)] = i
@@ -15,7 +15,7 @@ function _symbol_index_map(values)::Dict{Symbol, Int}
     return index_map
 end
 
-function _sexprs_from_polys(
+function sexprs_from_polys(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         var_to_idx::Dict{Symbol, Int},
         param_to_idx::Dict{Symbol, Int},
@@ -28,7 +28,7 @@ function _sexprs_from_polys(
     return exprs
 end
 
-function _build_instruction_sequence_via_sexpr(
+function build_instruction_sequence_via_sexpr(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         variables::AbstractVector,
         parameters::AbstractVector,
@@ -39,10 +39,10 @@ function _build_instruction_sequence_via_sexpr(
     nparams = length(parameters)
     output_dim = length(polys)
 
-    var_to_idx = _symbol_index_map(variables)
-    param_to_idx = _symbol_index_map(parameters)
+    var_to_idx = symbol_index_map(variables)
+    param_to_idx = symbol_index_map(parameters)
 
-    f_exprs = _sexprs_from_polys(polys, var_to_idx, param_to_idx)
+    f_exprs = sexprs_from_polys(polys, var_to_idx, param_to_idx)
 
     jac_exprs = SExprT[]
     if include_jacobian

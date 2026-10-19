@@ -13,7 +13,7 @@
 
 # ── Worker side ─────────────────────────────────────────────────────────────
 
-function _run_monodromy_job(
+function run_monodromy_job(
         ws::S, job::HCN.MonodromyJob,
     )::HCN.MonodromyJobResult where {S}
     sink = HCN.TraceColumns()
@@ -26,7 +26,7 @@ end
 
 # A state carries fresh tapes and, under a compiled mode, freshly generated code,
 # so it is built only once this task has drawn real work.
-function _monodromy_task_loop(
+function monodromy_task_loop(
         builder::B, jobs::Distributed.RemoteChannel,
         out::Distributed.RemoteChannel,
     )::Nothing where {B}
@@ -34,7 +34,7 @@ function _monodromy_task_loop(
     isempty(batch) && return nothing
     ws = builder()
     while !isempty(batch)
-        put!(out, [_run_monodromy_job(ws, job) for job in batch])
+        put!(out, [run_monodromy_job(ws, job) for job in batch])
         batch = take!(jobs)
     end
     return nothing
@@ -42,12 +42,12 @@ end
 
 # One long-lived call per process, `ntasks` consumers inside it. Only these tasks
 # touch the channels, and they share nothing else.
-function _run_monodromy_tasks(
+function run_monodromy_tasks(
         builder::B, jobs::Distributed.RemoteChannel,
         out::Distributed.RemoteChannel, ntasks::Int,
     )::Nothing where {B}
     @sync for _ in 1:ntasks
-        Threads.@spawn _monodromy_task_loop(builder, jobs, out)
+        Threads.@spawn monodromy_task_loop(builder, jobs, out)
     end
     return nothing
 end
@@ -56,36 +56,36 @@ end
 
 # `tasks_per_process == 0` resolves remotely, and the driver needs the exact count
 # to end every consumer.
-function _monodromy_task_counts(
+function monodromy_task_counts(
         exec::HCN.DistributedExecutor, pids::Vector{Int},
     )::Vector{Int}
     exec.tasks_per_process > 0 && return fill(exec.tasks_per_process, length(pids))
-    return [_transport_query(Threads.nthreads, pid) for pid in pids]
+    return [transport_query(Threads.nthreads, pid) for pid in pids]
 end
 
-function HCN._distributed_monodromy_solve!(
+function HCN.distributed_monodromy_solve!(
         exec::HCN.DistributedExecutor, MS::HCN.MonodromySolver,
         results::Vector{HCN.PathResult}, seed::UInt32, progress,
     )::HCN.MonodromyCode.T
-    pids = _resolve_pids(exec)
-    _check_pids(pids)
-    ntasks = _monodromy_task_counts(exec, pids)
+    pids = resolve_pids(exec)
+    check_pids(pids)
+    ntasks = monodromy_task_counts(exec, pids)
     total_tasks = sum(ntasks)
     batch_size = exec.batch_size > 0 ? exec.batch_size : 8
     # Two batches per task: one being tracked, one waiting behind it.
     window = 2 * total_tasks * batch_size
 
     JobT = Vector{HCN.MonodromyJob{typeof(MS.workers[1].base)}}
-    jobs = _transport_channel(JobT, typemax(Int))
-    out = _transport_channel(Vector{HCN.MonodromyJobResult}, typemax(Int))
+    jobs = transport_channel(JobT, typemax(Int))
+    out = transport_channel(Vector{HCN.MonodromyJobResult}, typemax(Int))
 
     retcode = HCN.MonodromyCode.IN_PROGRESS
     try
         tracking = @async begin
             try
                 @sync for (k, pid) in enumerate(pids)
-                    @async _transport_run(
-                        _run_monodromy_tasks, pid, MS.builder, jobs, out, ntasks[k],
+                    @async transport_run(
+                        run_monodromy_tasks, pid, MS.builder, jobs, out, ntasks[k],
                     )
                 end
             finally
@@ -95,7 +95,7 @@ function HCN._distributed_monodromy_solve!(
         end
 
         try
-            retcode = _drive_monodromy!(
+            retcode = drive_monodromy!(
                 MS, results, progress, jobs, out, JobT, batch_size, window,
                 total_tasks, Random.MersenneTwister(seed),
             )
@@ -112,7 +112,7 @@ function HCN._distributed_monodromy_solve!(
         try
             wait(tracking)
         catch e
-            throw(_root_cause(e))
+            throw(root_cause(e))
         end
     finally
         close(jobs)
@@ -120,7 +120,7 @@ function HCN._distributed_monodromy_solve!(
     return retcode
 end
 
-function _drive_monodromy!(
+function drive_monodromy!(
         MS::HCN.MonodromySolver, results::Vector{HCN.PathResult}, progress,
         jobs::Distributed.RemoteChannel, out::Distributed.RemoteChannel,
         ::Type{JobT}, batch_size::Int, window::Int, total_tasks::Int,
@@ -206,7 +206,7 @@ function _drive_monodromy!(
                 # A decided retcode still collects what is in flight, since every
                 # result counts towards the permutations, but starts no new loop.
                 undecided = retcode == HCN.MonodromyCode.IN_PROGRESS
-                _handle_monodromy_result!(MS, results, queue, r, undecided, rng)
+                handle_monodromy_result!(MS, results, queue, r, undecided, rng)
 
                 HCN.update_progress!(
                     progress, stats;
@@ -237,7 +237,7 @@ end
 
 # The deduplicate-and-schedule half of the serial solve loop, driven by a result
 # that came back from another process.
-function _handle_monodromy_result!(
+function handle_monodromy_result!(
         MS::HCN.MonodromySolver, results::Vector{HCN.PathResult},
         queue::Vector{HCN.LoopTrackingJob}, r::HCN.MonodromyJobResult,
         schedule_more::Bool, rng::Random.MersenneTwister,
@@ -251,9 +251,9 @@ function _handle_monodromy_result!(
     if isempty(columns)
         collect_trace = opts.trace_test && HCN.nloops(MS) == r.loop_id &&
             MS.workers[1].base isa HCN.LinearSubspace
-        collect_trace && HCN._trace_dropped!(MS)
+        collect_trace && HCN.count_trace_dropped!(MS)
     else
-        HCN._accumulate_trace!(MS, columns)
+        HCN.accumulate_trace!(MS, columns)
     end
 
     res = r.result

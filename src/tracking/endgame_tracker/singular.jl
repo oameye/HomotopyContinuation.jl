@@ -171,7 +171,7 @@ function singular_endgame_step!(eg::EndgameTracker)::Nothing
     reinit!(tracker.state.segment, complex(t_current), complex(t_new))
     tracker.state.code = TrackerCode.TRACKING
     tracker.state.Δs_prev = 0.0
-    Δs = _compute_initial_stepsize(
+    Δs = compute_initial_stepsize(
         tracker.state, tracker.predictor, tracker.options, tracker.constants,
     )
     propose_step!(tracker.state.segment, Δs)

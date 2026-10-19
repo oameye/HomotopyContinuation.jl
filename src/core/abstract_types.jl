@@ -71,12 +71,12 @@ Compute order-K Taylor coefficient of F.
 function taylor! end
 
 # Rebuild `F` with its own mutable state; read-only data may be shared.
-function _clone_system end
+function clone_system end
 
 # `deepcopy` gives independent buffers, and the `SystemEvaluator` hook rebuilds
 # tapes rather than copying a pointer into the original ones. A method that
 # shares the read-only data is faster.
-_clone_system(F::AbstractSystem) = deepcopy(F)
+clone_system(F::AbstractSystem) = deepcopy(F)
 
 # ── AbstractHomotopy interface ──
 
@@ -121,9 +121,9 @@ get_solution!(
 )::Nothing = (copyto!(out, x); nothing)
 
 # Rebuild `H` with its own mutable state, cloning the evaluators it holds.
-function _clone_homotopy end
+function clone_homotopy end
 
-_clone_homotopy(H::AbstractHomotopy) = deepcopy(H)
+clone_homotopy(H::AbstractHomotopy) = deepcopy(H)
 
 """
     start_parameters!(H::AbstractHomotopy, p) -> nothing

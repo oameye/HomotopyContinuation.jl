@@ -28,7 +28,7 @@ function UniquePoints(
         group_actions = group_action === nothing ? nothing : GroupActions(group_action),
         triangle_inequality::Bool = satisfies_triangle_inequality(distance),
     )
-    group_actions = _as_group_actions(group_actions)
+    group_actions = as_group_actions(group_actions)
     tree = VoronoiTree{ComplexF64}(
         d; distance = distance, triangle_inequality = triangle_inequality,
     )
@@ -100,7 +100,7 @@ end
 # `add!` and `search_in_radius` are asked for.
 tolerance_radius(
     UP::UniquePoints, v::AbstractVector, atol::Float64, rtol::Float64,
-)::Float64 = max(atol, rtol * _vt_distance(UP.tree.distance, v, UP.zero_vec))
+)::Float64 = max(atol, rtol * vt_distance(UP.tree.distance, v, UP.zero_vec))
 
 function add!(
         UP::UniquePoints{T, M, GA}, v::AbstractVector, id::Int;

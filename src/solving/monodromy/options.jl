@@ -30,7 +30,7 @@ end
     NOT_CERTIFIED
 end
 
-@noinline _certification_required() = throw(
+@noinline certification_required() = throw(
     ArgumentError(
         "`duplicate_check = DuplicateCheck.CERTIFIED` needs Krawczyk certification: run " *
             "`using HomotopyContinuationCertification`.",
@@ -58,31 +58,31 @@ struct NoCandidate <: AbstractCertifiedCandidate end
 function monodromy_certified_solutions(
         ::SystemLike, ::Union{Nothing, Vector{ComplexF64}}, ::Int, ::Bool,
     )::AbstractCertifiedSolutions
-    return _certification_required()
+    return certification_required()
 end
 
 
 function monodromy_certify_candidate(
         ::AbstractCertifiedSolutions, ::Vector{ComplexF64}, ::Int,
     )::AbstractCertifiedCandidate
-    return _certification_required()
+    return certification_required()
 end
 
 function monodromy_file_certified!(
         ::AbstractCertifiedSolutions, ::AbstractCertifiedCandidate, ::Int,
     )::Tuple{AddSolutionCode.T, Int, Union{Nothing, CertifiedEndpoint}}
-    return _certification_required()
+    return certification_required()
 end
 
 # One certification cache per task index, sized for `ntasks` before a threaded solve
 # hands them out.
 function monodromy_size_caches!(::AbstractCertifiedSolutions, ::Int)
-    return _certification_required()
+    return certification_required()
 end
 
 # Drop every stored solution, keeping the caches. Declared with the hooks above for
 # the same reason: the certified route has to infer in core alone.
-Base.empty!(::AbstractCertifiedSolutions) = _certification_required()
+Base.empty!(::AbstractCertifiedSolutions) = certification_required()
 
 always_false(args...) = false
 
@@ -238,7 +238,7 @@ end
 
 # A loop returns to the base parameters, where the solutions are regular, so this
 # route runs no endgame. Fixed rather than exposed: there is nothing to tune.
-const _MONODROMY_ENDGAME = EndgameOptions(; endgame_start = 0.0)
+const MONODROMY_ENDGAME = EndgameOptions(; endgame_start = 0.0)
 
 """
     Monodromy([options]; variables, parameters, dim, codim, coords, catch_interrupt, warning, options...)
@@ -282,15 +282,15 @@ end
 
 # `dim`/`codim` are the subspace route's only input, so whether one was given is
 # the route.
-_subspace_route(::Nothing, ::Nothing)::Val{false} = Val(false)
-_subspace_route(::Int, ::Nothing)::Val{true} = Val(true)
-_subspace_route(::Nothing, ::Int)::Val{true} = Val(true)
-_subspace_route(::Int, ::Int)::Val{true} = Val(true)
+subspace_route(::Nothing, ::Nothing)::Val{false} = Val(false)
+subspace_route(::Int, ::Nothing)::Val{true} = Val(true)
+subspace_route(::Nothing, ::Int)::Val{true} = Val(true)
+subspace_route(::Int, ::Int)::Val{true} = Val(true)
 
-_route_dim(::Nothing)::Int = -1
-_route_dim(d::Int)::Int = d
+route_dim(::Nothing)::Int = -1
+route_dim(d::Int)::Int = d
 
-_monodromy_algorithm(
+monodromy_algorithm(
     ::Val{S}, common::CommonOptions, options::MO, variables::V, parameters::P,
     dim::Int, codim::Int, coords::SubspaceCoords.T, catch_interrupt::Bool,
     warning::Bool,
@@ -358,10 +358,10 @@ function Monodromy(;
         unique_points_rtol,
         single_loop_per_start_solution,
     )
-    return _monodromy_algorithm(
-        _subspace_route(dim, codim),
-        CommonOptions(tracker_options, _MONODROMY_ENDGAME, seed, show_progress),
-        opts, variables, parameters, _route_dim(dim), _route_dim(codim), coords,
+    return monodromy_algorithm(
+        subspace_route(dim, codim),
+        CommonOptions(tracker_options, MONODROMY_ENDGAME, seed, show_progress),
+        opts, variables, parameters, route_dim(dim), route_dim(codim), coords,
         catch_interrupt, warning,
     )
 end
@@ -381,23 +381,23 @@ function Monodromy(
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         show_progress::Bool = true,
     )
-    return _monodromy_algorithm(
-        _subspace_route(dim, codim),
-        CommonOptions(tracker_options, _MONODROMY_ENDGAME, seed, show_progress),
-        options, variables, parameters, _route_dim(dim), _route_dim(codim), coords,
+    return monodromy_algorithm(
+        subspace_route(dim, codim),
+        CommonOptions(tracker_options, MONODROMY_ENDGAME, seed, show_progress),
+        options, variables, parameters, route_dim(dim), route_dim(codim), coords,
         catch_interrupt, warning,
     )
 end
 
 # The polynomial input forms need the variable/parameter split, which the shared
-# `_as_system` cannot know. Unannotated on purpose: an annotation would assert the
+# `as_system` cannot know. Unannotated on purpose: an annotation would assert the
 # UnionAll and lose the concrete `System` parameters.
-_monodromy_system(F::SystemLike, ::Monodromy) = F
-_monodromy_system(F::AbstractVector{<:MP.AbstractPolynomialLike}, alg::Monodromy) =
+monodromy_system(F::SystemLike, ::Monodromy) = F
+monodromy_system(F::AbstractVector{<:MP.AbstractPolynomialLike}, alg::Monodromy) =
     System(
     F;
     variables = isempty(alg.variables) ? nothing : alg.variables,
     parameters = isempty(alg.parameters) ? nothing : alg.parameters,
 )
-_monodromy_system(f::MP.AbstractPolynomialLike, alg::Monodromy) =
-    _monodromy_system([f], alg)
+monodromy_system(f::MP.AbstractPolynomialLike, alg::Monodromy) =
+    monodromy_system([f], alg)

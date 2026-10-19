@@ -5,11 +5,11 @@
 # Chart-normalizing wrapper implementing the 2-arg `actions(cb, s)` protocol
 # for UniquePoints: every orbit image is renormalized onto the chart before
 # comparison. Used when tracking on an affine chart (projective problems).
-struct _ChartActions{GA <: GroupActions}
+struct ChartActions{GA <: GroupActions}
     chart::Vector{ComplexF64}
     actions::GA
 end
-function (CA::_ChartActions)(cb::CB, s) where {CB}
+function (CA::ChartActions)(cb::CB, s) where {CB}
     return apply_actions(CA.actions, s) do v
         w = copy(v)
         on_chart!(w, CA.chart)
@@ -45,21 +45,21 @@ MonodromyWorkerState(
 
 ## Retargeting through the concrete handle
 
-function _retarget!(
+function retarget!(
         ws::MonodromyWorkerState{ParameterHomotopy}, p::Vector{ComplexF64},
         q::Vector{ComplexF64},
     )::Nothing
     parameters!(ws.homotopy, p, q)
     return nothing
 end
-function _retarget!(
+function retarget!(
         ws::MonodromyWorkerState{AffineChartHomotopy{ParameterHomotopy}},
         p::Vector{ComplexF64}, q::Vector{ComplexF64},
     )::Nothing
     parameters!(ws.homotopy, p, q)
     return nothing
 end
-function _retarget!(
+function retarget!(
         ws::MonodromyWorkerState, p::LinearSubspace{ComplexF64},
         q::LinearSubspace{ComplexF64},
     )::Nothing
@@ -67,7 +67,7 @@ function _retarget!(
     return nothing
 end
 
-parameters!(ws::MonodromyWorkerState{ParameterHomotopy}, p, q) = _retarget!(ws, p, q)
+parameters!(ws::MonodromyWorkerState{ParameterHomotopy}, p, q) = retarget!(ws, p, q)
 
 """
     set_loop_segment!(ws, loop::MonodromyLoop, segment::Int)
@@ -78,19 +78,19 @@ segments (`p → p₁ → p₂ → p`), subspace loops 4 (`p → p₀₁ → p�
 function set_loop_segment!(
         ws::MonodromyWorkerState, loop::MonodromyLoop{Vector{ComplexF64}}, segment::Int,
     )::Nothing
-    segment == 1 && return _retarget!(ws, loop.p, loop.p₁)
-    segment == 2 && return _retarget!(ws, loop.p₁, loop.p₂)
-    segment == 3 && return _retarget!(ws, loop.p₂, loop.p)
+    segment == 1 && return retarget!(ws, loop.p, loop.p₁)
+    segment == 2 && return retarget!(ws, loop.p₁, loop.p₂)
+    segment == 3 && return retarget!(ws, loop.p₂, loop.p)
     throw(ArgumentError("Vector-parameter loops have 3 segments, got $segment."))
 end
 function set_loop_segment!(
         ws::MonodromyWorkerState, loop::MonodromyLoop{LinearSubspace{ComplexF64}},
         segment::Int,
     )::Nothing
-    segment == 1 && return _retarget!(ws, loop.p, loop.p₀₁)
-    segment == 2 && return _retarget!(ws, loop.p₀₁, loop.p₁)
-    segment == 3 && return _retarget!(ws, loop.p₁, loop.p₂)
-    segment == 4 && return _retarget!(ws, loop.p₂, loop.p)
+    segment == 1 && return retarget!(ws, loop.p, loop.p₀₁)
+    segment == 2 && return retarget!(ws, loop.p₀₁, loop.p₁)
+    segment == 3 && return retarget!(ws, loop.p₁, loop.p₂)
+    segment == 4 && return retarget!(ws, loop.p₂, loop.p)
     throw(ArgumentError("Subspace loops have 4 segments, got $segment."))
 end
 
@@ -98,7 +98,7 @@ end
 
 # Write the tracker-side start coordinates for the current segment (t = 1)
 # from ws.x_buffer into ws.u_buffer and return it.
-function _tracker_input!(ws::MonodromyWorkerState{IntrinsicSubspaceHomotopy})
+function tracker_input!(ws::MonodromyWorkerState{IntrinsicSubspaceHomotopy})
     # Projective case: the wrapped system carries a chart row v'x = 1, so the
     # ambient representative must be rescaled onto the chart first (the
     # subspace is linear, so rescaling stays on it).
@@ -106,11 +106,11 @@ function _tracker_input!(ws::MonodromyWorkerState{IntrinsicSubspaceHomotopy})
     intrinsic_coordinates!(ws.u_buffer, ws.homotopy, ws.x_buffer, complex(1.0))
     return ws.u_buffer
 end
-function _tracker_input!(ws::MonodromyWorkerState)
+function tracker_input!(ws::MonodromyWorkerState)
     copyto!(ws.u_buffer, ws.x_buffer)
     return ws.u_buffer
 end
-function _tracker_input!(ws::MonodromyWorkerState{<:AffineChartHomotopy})
+function tracker_input!(ws::MonodromyWorkerState{<:AffineChartHomotopy})
     copyto!(ws.u_buffer, ws.x_buffer)
     # The chart row v'x = 1 must hold at the start point.
     on_chart!(ws.u_buffer, ws.homotopy)
@@ -118,13 +118,13 @@ function _tracker_input!(ws::MonodromyWorkerState{<:AffineChartHomotopy})
 end
 
 # Convert the tracker's endpoint (t = 0) back into ws.x_buffer (ambient).
-function _tracker_output!(
+function tracker_output!(
         ws::MonodromyWorkerState{IntrinsicSubspaceHomotopy}, u::AbstractVector{ComplexF64},
     )::Nothing
     ambient_coordinates!(ws.x_buffer, ws.homotopy, u, complex(0.0))
     return nothing
 end
-function _tracker_output!(
+function tracker_output!(
         ws::MonodromyWorkerState, u::AbstractVector{ComplexF64},
     )::Nothing
     copyto!(ws.x_buffer, u)
@@ -132,9 +132,9 @@ function _tracker_output!(
 end
 
 # Renormalize a finished ambient solution for dedup (chart case only).
-_normalize_solution!(::MonodromyWorkerState, x::AbstractVector{ComplexF64})::Nothing =
+normalize_solution!(::MonodromyWorkerState, x::AbstractVector{ComplexF64})::Nothing =
     nothing
-function _normalize_solution!(
+function normalize_solution!(
         ws::MonodromyWorkerState{<:AffineChartHomotopy}, x::AbstractVector{ComplexF64},
     )::Nothing
     on_chart!(x, ws.homotopy)
@@ -142,7 +142,7 @@ function _normalize_solution!(
 end
 
 # Copy of `r` with its solution replaced by the ambient conversion.
-function _with_solution(r::PathResult, sol::Vector{ComplexF64})::PathResult
+function with_solution(r::PathResult, sol::Vector{ComplexF64})::PathResult
     return PathResult(
         r.return_code, sol, r.t, r.accuracy, r.ω, r.μ, r.residual,
         r.condition_jacobian, r.winding_number, r.singular,
@@ -154,22 +154,22 @@ end
 
 # Build the solver-facing PathResult from the endgame tracker: convert the
 # endpoint to ambient coordinates and chart-normalize when required.
-function _finalize_result(ws::MonodromyWorkerState, r::PathResult)::PathResult
-    _tracker_output!(ws, r.solution)
-    _normalize_solution!(ws, ws.x_buffer)
-    return _with_solution(r, copy(ws.x_buffer))
+function finalize_result(ws::MonodromyWorkerState, r::PathResult)::PathResult
+    tracker_output!(ws, r.solution)
+    normalize_solution!(ws, ws.x_buffer)
+    return with_solution(r, copy(ws.x_buffer))
 end
 
 # Track ws.x_buffer through the current (already retargeted) segment with the
 # RAW inner tracker (no endgame), warm-started, updating ws.x_buffer in place.
-function _track_middle_segment!(
+function track_middle_segment!(
         ws::MonodromyWorkerState, ω::Float64, μ::Float64, extended_precision::Bool,
     )::Bool
     tr = ws.tracker.tracker
-    u = _tracker_input!(ws)
+    u = tracker_input!(ws)
     code = track!(tr, u; ω = ω, μ = μ, extended_precision = extended_precision)
     code == TrackerCode.TRACKER_SUCCESS || return false
-    _tracker_output!(ws, tr.state.x)
+    tracker_output!(ws, tr.state.x)
     return true
 end
 
@@ -184,11 +184,11 @@ return code, so a caller that wants only converged points filters on
 function track_start!(
         ws::MonodromyWorkerState, x::AbstractVector{ComplexF64},
     )::PathResult
-    _retarget!(ws, ws.base, ws.base)
+    retarget!(ws, ws.base, ws.base)
     copyto!(ws.x_buffer, x)
-    u = _tracker_input!(ws)
+    u = tracker_input!(ws)
     track!(ws.tracker, u)
-    return _finalize_result(ws, PathResult(ws.tracker))
+    return finalize_result(ws, PathResult(ws.tracker))
 end
 
 """
@@ -245,11 +245,11 @@ const CertifiedMonodromySolver = MonodromySolver{
 # Run `f` on the group actions the deduplication compares orbits with: none when
 # the options ask for none or switch them off, and a chart-normalizing wrapper
 # when the solutions are projective.
-_with_chart_actions(
+with_chart_actions(
     f::Fn, ::MonodromyOptions{<:Any, Nothing}, ::Vector{ComplexF64}, ::Bool,
 ) where {Fn} = f(nothing)
 
-function _with_chart_actions(
+function with_chart_actions(
         f::Fn, options::MonodromyOptions, chart::Vector{ComplexF64}, use_chart::Bool,
     ) where {Fn}
     options.equivalence_classes || return f(nothing)
@@ -257,10 +257,10 @@ function _with_chart_actions(
     # The constructor clears `equivalence_classes` when there is no group action,
     # so this branch is unreachable; it is what tells inference so.
     actions === nothing && return f(nothing)
-    return use_chart ? f(_ChartActions(chart, actions)) : f(actions)
+    return use_chart ? f(ChartActions(chart, actions)) : f(actions)
 end
 
-function _with_monodromy_solver_from_builder(
+function with_monodromy_solver_from_builder(
         f::Fn, worker::MonodromyWorkerState{H, P}, builder::B, n::Int,
         options::MO, chart::Vector{ComplexF64}, use_chart::Bool,
         # Required, so a new route cannot silently downgrade to the heuristic check.
@@ -269,16 +269,16 @@ function _with_monodromy_solver_from_builder(
         Fn, H, P, B, MO <: MonodromyOptions,
         CS <: Union{Nothing, AbstractCertifiedSolutions},
     }
-    return _with_chart_actions(options, chart, use_chart) do group_actions
+    return with_chart_actions(options, chart, use_chart) do group_actions
         f(
-            _monodromy_solver_from_builder(
+            monodromy_solver_from_builder(
                 worker, builder, n, options, group_actions, certified_solutions,
             ),
         )
     end
 end
 
-function _monodromy_solver_from_builder(
+function monodromy_solver_from_builder(
         worker::MonodromyWorkerState{H, P}, builder::B, n::Int, options::MO,
         group_actions::GA, certified_solutions::CS,
     ) where {
@@ -308,7 +308,7 @@ function _monodromy_solver_from_builder(
     )
 end
 
-function _parameter_monodromy_worker(
+function parameter_monodromy_worker(
         sys_eval::SystemEvaluator, p::Vector{ComplexF64}, n::Int,
         tracker_options::TrackerOptions,
     )::MonodromyWorkerState{ParameterHomotopy, Vector{ComplexF64}}
@@ -321,7 +321,7 @@ function _parameter_monodromy_worker(
     )
 end
 
-function _chart_parameter_monodromy_worker(
+function chart_parameter_monodromy_worker(
         sys_eval::SystemEvaluator, p::Vector{ComplexF64},
         chart::Vector{ComplexF64}, n::Int, tracker_options::TrackerOptions,
     )::MonodromyWorkerState{
@@ -344,8 +344,8 @@ struct ParameterMonodromyBuilder{S <: SystemLike} <: AbstractPathBuilder
 end
 
 function (builder::ParameterMonodromyBuilder)()
-    return _parameter_monodromy_worker(
-        _clone_system_evaluator(builder.system), builder.parameters,
+    return parameter_monodromy_worker(
+        clone_system_evaluator(builder.system), builder.parameters,
         builder.nvariables, builder.tracker_options,
     )
 end
@@ -359,14 +359,14 @@ struct ChartParameterMonodromyBuilder{S <: SystemLike} <: AbstractPathBuilder
 end
 
 function (builder::ChartParameterMonodromyBuilder)()
-    return _chart_parameter_monodromy_worker(
-        _clone_system_evaluator(builder.system), builder.parameters,
+    return chart_parameter_monodromy_worker(
+        clone_system_evaluator(builder.system), builder.parameters,
         builder.chart, builder.nvariables, builder.tracker_options,
     )
 end
 
 # Smallest normalized alignment |v'x| / (‖v‖‖x‖) over the start solutions.
-function _chart_alignment(
+function chart_alignment(
         v::Vector{ComplexF64}, S::AbstractVector{<:AbstractVector},
     )::Float64
     q = Inf
@@ -387,15 +387,15 @@ end
 # `on_chart!` divides by v'x, so a chart normal near-orthogonal to a start
 # solution inflates that representative by 1/|v'x| and costs the tracker the
 # digits the trace test needs. Keep the best of a few draws.
-function _conditioned_chart(
+function conditioned_chart(
         rng::Random.AbstractRNG, n::Int, S::AbstractVector{<:AbstractVector},
     )::Vector{ComplexF64}
     chart = randn(rng, ComplexF64, n)
-    q = _chart_alignment(chart, S)
+    q = chart_alignment(chart, S)
     for _ in 2:16
         q >= 0.2 && break
         v = randn(rng, ComplexF64, n)
-        qv = _chart_alignment(v, S)
+        qv = chart_alignment(v, S)
         if qv > q
             chart, q = v, qv
         end
@@ -403,7 +403,7 @@ function _conditioned_chart(
     return chart
 end
 
-@noinline _certification_needs_equations(F) = throw(
+@noinline certification_needs_equations(F) = throw(
     ArgumentError(
         "`duplicate_check = DuplicateCheck.CERTIFIED` certifies the equations of a " *
             "`System`, which a $(typeof(F)) does not carry.",
@@ -416,21 +416,21 @@ end
 # keeps its own coefficient type.
 with_certified_system(fn::F, G::System, chart::Vector{ComplexF64}) where {F} =
     isempty(chart) ? fn(G) :
-    fn(slice(G, _full_subspace(nvariables(G)); chart = chart))
+    fn(slice(G, full_subspace(nvariables(G)); chart = chart))
 with_certified_system(
     fn::F, G::System, L::LinearSubspace{ComplexF64}, chart::Vector{ComplexF64},
-) where {F} = fn(_rebuild_sliced(G, L, chart))
+) where {F} = fn(rebuild_sliced(G, L, chart))
 with_certified_system(::F, G::SystemLike, ::Vector{ComplexF64}) where {F} =
-    _certification_needs_equations(G)
+    certification_needs_equations(G)
 with_certified_system(
     ::F, G::SystemLike, ::LinearSubspace{ComplexF64}, ::Vector{ComplexF64},
-) where {F} = _certification_needs_equations(G)
+) where {F} = certification_needs_equations(G)
 
 # Run `f` on the accumulator the certified duplicate check files into, or on
 # `nothing` under `DuplicateCheck.HEURISTIC`. A parameter run passes the
 # parameters it certifies at, a witness-set run the subspace it intersects with;
 # `chart` is empty unless the solutions are projective.
-function _with_certified_accumulator(
+function with_certified_accumulator(
         f::Fn, F::SystemLike, options::MonodromyOptions, p::Vector{ComplexF64},
         chart::Vector{ComplexF64},
     ) where {Fn}
@@ -445,7 +445,7 @@ function _with_certified_accumulator(
     end
 end
 
-function _with_certified_accumulator(
+function with_certified_accumulator(
         f::Fn, F::SystemLike, options::MonodromyOptions,
         L::LinearSubspace{ComplexF64}, chart::Vector{ComplexF64},
     ) where {Fn}
@@ -483,48 +483,48 @@ function with_monodromy_solver(
         start_solutions::AbstractVector{<:AbstractVector} = Vector{ComplexF64}[],
     ) where {Fn}
     return is_homogeneous(F) ?
-        _with_chart_parameter_solver(
+        with_chart_parameter_solver(
             f, F, p, options, tracker_options, rng, start_solutions,
         ) :
-        _with_affine_parameter_solver(f, F, p, options, tracker_options)
+        with_affine_parameter_solver(f, F, p, options, tracker_options)
 end
 
 # Homogeneous system: solutions are projective, put the problem on a random
 # affine chart. All workers must share the SAME chart so deduplication is
 # consistent.
-function _with_chart_parameter_solver(
+function with_chart_parameter_solver(
         f::Fn, F::SystemLike, p::Vector{ComplexF64}, options::MonodromyOptions,
         tracker_options::TrackerOptions, rng::Random.AbstractRNG,
         start_solutions::AbstractVector{<:AbstractVector},
     ) where {Fn}
     n = nvariables(F)
-    chart = _conditioned_chart(rng, n, start_solutions)
+    chart = conditioned_chart(rng, n, start_solutions)
     builder = ChartParameterMonodromyBuilder(F, p, chart, n, tracker_options)
-    worker = _chart_parameter_monodromy_worker(
+    worker = chart_parameter_monodromy_worker(
         F.evaluator, p, chart, n, tracker_options,
     )
-    return _with_certified_accumulator(F, options, copy(p), chart) do cs
-        _with_monodromy_solver_from_builder(
+    return with_certified_accumulator(F, options, copy(p), chart) do cs
+        with_monodromy_solver_from_builder(
             f, worker, builder, n, options, chart, true, cs,
         )
     end
 end
 
-function _with_affine_parameter_solver(
+function with_affine_parameter_solver(
         f::Fn, F::SystemLike, p::Vector{ComplexF64}, options::MonodromyOptions,
         tracker_options::TrackerOptions,
     ) where {Fn}
     n = nvariables(F)
     builder = ParameterMonodromyBuilder(F, p, n, tracker_options)
-    worker = _parameter_monodromy_worker(F.evaluator, p, n, tracker_options)
-    return _with_certified_accumulator(F, options, copy(p), ComplexF64[]) do cs
-        _with_monodromy_solver_from_builder(
+    worker = parameter_monodromy_worker(F.evaluator, p, n, tracker_options)
+    return with_certified_accumulator(F, options, copy(p), ComplexF64[]) do cs
+        with_monodromy_solver_from_builder(
             f, worker, builder, n, options, ComplexF64[], false, cs,
         )
     end
 end
 
-function _subspace_monodromy_worker(
+function subspace_monodromy_worker(
         H::AbstractHomotopy, tracker_options::TrackerOptions,
         L::LinearSubspace{ComplexF64}, n::Int, worker_chart::Vector{ComplexF64},
     )
@@ -556,7 +556,7 @@ function (builder::SubspaceMonodromyBuilder{S, INTRINSIC, PROJECTIVE})() where {
         S, INTRINSIC, PROJECTIVE,
     }
     L = builder.subspace
-    sys_eval = _clone_system_evaluator(builder.system)
+    sys_eval = clone_system_evaluator(builder.system)
     H = if INTRINSIC
         base_eval = PROJECTIVE ?
             SystemEvaluator(AffineChartSystem(sys_eval, builder.chart)) : sys_eval
@@ -569,7 +569,7 @@ function (builder::SubspaceMonodromyBuilder{S, INTRINSIC, PROJECTIVE})() where {
     # wrapped AffineChartSystem, so the worker keeps its own reference for
     # normalizing start points (extrinsic reaches it via the homotopy).
     worker_chart = INTRINSIC && PROJECTIVE ? builder.chart : ComplexF64[]
-    return _subspace_monodromy_worker(
+    return subspace_monodromy_worker(
         H, builder.tracker_options, L, builder.nvariables, worker_chart,
     )
 end
@@ -578,7 +578,7 @@ function with_monodromy_solver(
         f::Fn, F::SystemLike, L::LinearSubspace{ComplexF64};
         options::MonodromyOptions = MonodromyOptions(),
         tracker_options::TrackerOptions = TrackerOptions(),
-        intrinsic::Bool = _default_intrinsic(L),
+        intrinsic::Bool = default_intrinsic(L),
         rng::Random.AbstractRNG = Random.default_rng(),
         start_solutions::AbstractVector{<:AbstractVector} = Vector{ComplexF64}[],
     ) where {Fn}
@@ -586,16 +586,16 @@ function with_monodromy_solver(
     projective = is_linear(L) && is_homogeneous(F)
     # All workers must share the SAME chart so deduplication is consistent. It
     # is unused affinely, where the draw only keeps the random stream in step.
-    chart = projective ? _conditioned_chart(rng, n, start_solutions) :
+    chart = projective ? conditioned_chart(rng, n, start_solutions) :
         randn(rng, ComplexF64, n)
-    gamma = _random_gamma(rng)
-    return _with_subspace_builder(
+    gamma = random_gamma(rng)
+    return with_subspace_builder(
         F, L, chart, n, tracker_options, intrinsic, projective, gamma,
     ) do builder
-        _with_certified_accumulator(
+        with_certified_accumulator(
             F, options, L, projective ? chart : ComplexF64[],
         ) do cs
-            _with_monodromy_solver_from_builder(
+            with_monodromy_solver_from_builder(
                 f, builder(), builder, n, options, chart, projective, cs,
             )
         end
@@ -603,7 +603,7 @@ function with_monodromy_solver(
 end
 
 # `intrinsic` and `projective` decide which of three homotopies every worker gets.
-function _with_subspace_builder(
+function with_subspace_builder(
         f::Fn, F::SystemLike, L::LinearSubspace{ComplexF64},
         chart::Vector{ComplexF64}, n::Int, tracker_options::TrackerOptions,
         intrinsic::Bool, projective::Bool, gamma::ComplexF64,
@@ -629,7 +629,7 @@ function add_loop!(
     push!(
         MS.loops,
         MonodromyLoop(
-            base, MS.options.parameter_sampler, rng, _trace_step(base, results),
+            base, MS.options.parameter_sampler, rng, trace_step(base, results),
         ),
     )
     Threads.atomic_add!(MS.statistics.generated_loops, 1)
@@ -641,12 +641,12 @@ end
 loop(MS::MonodromySolver, i::Int) = MS.loops[i]
 nloops(MS::MonodromySolver)::Int = length(MS.loops)
 
-_reset_certified!(::HeuristicMonodromySolver) = nothing
-_reset_certified!(MS::CertifiedMonodromySolver) =
+reset_certified!(::HeuristicMonodromySolver) = nothing
+reset_certified!(MS::CertifiedMonodromySolver) =
     (empty!(MS.certified_solutions); nothing)
 
-_size_certified_caches!(::HeuristicMonodromySolver, ::Int) = nothing
-_size_certified_caches!(MS::CertifiedMonodromySolver, ntasks::Int) =
+size_certified_caches!(::HeuristicMonodromySolver, ::Int) = nothing
+size_certified_caches!(MS::CertifiedMonodromySolver, ntasks::Int) =
     monodromy_size_caches!(MS.certified_solutions, ntasks)
 
 function reset_loops!(MS::MonodromySolver)
@@ -706,7 +706,7 @@ end
 
 TraceColumns() = TraceColumns(Matrix{ComplexF64}(undef, 0, 0))
 
-function _accumulate_trace!(
+function accumulate_trace!(
         MS::MonodromySolver, x₀::Vector{ComplexF64}, x₀₁::Vector{ComplexF64},
         x₁::Vector{ComplexF64},
     )::Nothing
@@ -722,16 +722,16 @@ function _accumulate_trace!(
 end
 
 # A path asked for trace columns that never reached the halfway subspace.
-function _trace_dropped!(MS::MonodromySolver)::Nothing
+function count_trace_dropped!(MS::MonodromySolver)::Nothing
     Base.@lock MS.trace_lock (MS.trace_dropped += 1)
     return nothing
 end
 
 # The driver counts for a `TraceColumns` sink: the worker returning it is a
 # separate process and holds no solver.
-_trace_dropped!(::TraceColumns)::Nothing = nothing
+count_trace_dropped!(::TraceColumns)::Nothing = nothing
 
-function _accumulate_trace!(
+function accumulate_trace!(
         sink::TraceColumns, x₀::Vector{ComplexF64}, x₀₁::Vector{ComplexF64},
         x₁::Vector{ComplexF64},
     )::Nothing
@@ -740,7 +740,7 @@ function _accumulate_trace!(
 end
 
 # Fold columns collected elsewhere into the solver's trace matrix.
-function _accumulate_trace!(MS::MonodromySolver, columns::Matrix{ComplexF64})::Nothing
+function accumulate_trace!(MS::MonodromySolver, columns::Matrix{ComplexF64})::Nothing
     Base.@lock MS.trace_lock begin
         for j in 1:3, i in axes(columns, 1)
             MS.trace[i, j] += columns[i, j]
@@ -788,35 +788,35 @@ function track_loop!(
     if P === LinearSubspace{ComplexF64} && collect_trace
         x₀ = copy(x)
         set_loop_segment!(ws, loop, 1)   # p → p₀₁
-        if !_track_middle_segment!(ws, ω, μ, extended_precision)
-            _trace_dropped!(trace_sink)
+        if !track_middle_segment!(ws, ω, μ, extended_precision)
+            count_trace_dropped!(trace_sink)
             return PathResult(tr; start_solution = x_start)
         end
         x₀₁ = copy(x)
         set_loop_segment!(ws, loop, 2)   # p₀₁ → p₁
-        if !_track_middle_segment!(ws, tr.state.ω, tr.state.μ, tr.state.extended_prec)
-            _trace_dropped!(trace_sink)
+        if !track_middle_segment!(ws, tr.state.ω, tr.state.μ, tr.state.extended_prec)
+            count_trace_dropped!(trace_sink)
             return PathResult(tr; start_solution = x_start)
         end
         x₁ = copy(x)
-        _accumulate_trace!(trace_sink, x₀, x₀₁, x₁)
+        accumulate_trace!(trace_sink, x₀, x₀₁, x₁)
     else
         # p → p₁ directly (the halfway point is skipped without trace).
-        _retarget!(ws, loop.p, loop.p₁)
-        _track_middle_segment!(ws, ω, μ, extended_precision) ||
+        retarget!(ws, loop.p, loop.p₁)
+        track_middle_segment!(ws, ω, μ, extended_precision) ||
             return PathResult(tr; start_solution = x_start)
     end
 
-    _retarget!(ws, loop.p₁, loop.p₂)
-    _track_middle_segment!(ws, tr.state.ω, tr.state.μ, tr.state.extended_prec) ||
+    retarget!(ws, loop.p₁, loop.p₂)
+    track_middle_segment!(ws, tr.state.ω, tr.state.μ, tr.state.extended_prec) ||
         return PathResult(tr; start_solution = x_start)
 
     # Final segment back to base: full endgame tracker produces the PathResult.
-    _retarget!(ws, loop.p₂, loop.p)
-    u = _tracker_input!(ws)
+    retarget!(ws, loop.p₂, loop.p)
+    u = tracker_input!(ws)
     track!(
         ws.tracker, u;
         ω = tr.state.ω, μ = tr.state.μ, extended_precision = tr.state.extended_prec,
     )
-    return _finalize_result(ws, PathResult(ws.tracker))
+    return finalize_result(ws, PathResult(ws.tracker))
 end

@@ -14,7 +14,7 @@ using MultivariatePolynomials: differentiate as mp_diff
 
 @polyvar _nx[1:8]
 
-function _term(vars, coeff, exps)
+function expression_term(vars, coeff, exps)
     t = coeff
     for i in eachindex(exps)
         e = exps[i]
@@ -23,7 +23,7 @@ function _term(vars, coeff, exps)
     end
     return t
 end
-_poly(vars, spec) = reduce(+, (_term(vars, c, exps) for (c, exps) in spec))
+_poly(vars, spec) = reduce(+, (expression_term(vars, c, exps) for (c, exps) in spec))
 
 function _cyclic_specs(n)
     specs = Vector{Vector{Tuple{ComplexF64, Vector{Int}}}}()
@@ -140,15 +140,15 @@ end
 # If you improve the pipeline, lower these numbers.
 #
 # Each number is the largest count over the Julia versions we support, because
-# the count is not the same on all of them. `_eadd` and `_emul` put a sum or
-# product in canonical order with `sort!(collected; lt = _expr_lt)`, and
-# `_expr_lt` compares `hash`. `hash(::ComplexF64)` changed between 1.11 and
+# the count is not the same on all of them. `eadd` and `emul` put a sum or
+# product in canonical order with `sort!(collected; lt = expr_lt)`, and
+# `expr_lt` compares `hash`. `hash(::ComplexF64)` changed between 1.11 and
 # 1.13, so systems with complex coefficients reach CSE with their terms in a
 # different order and come out a few instructions apart: 13 of the 26 below
 # differ across those two versions, in both directions.
 #
 # So lower a number only once the smaller count holds on the oldest supported
-# Julia, not just on the newest. Making `_expr_lt` order on something stable
+# Julia, not just on the newest. Making `expr_lt` order on something stable
 # across Julia versions would remove the split, and is worth doing separately.
 
 const _MAX_EVAL_INSTRS = Dict(

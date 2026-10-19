@@ -171,7 +171,7 @@ certificate_index(C::AbstractSolutionCertificate)::Int = C.index
 # The same certificate under another index, for a caller that learns the index only
 # after certifying. The enclosures are shared, not copied.
 _with_index(C::AbstractSolutionCertificate, index::Int) =
-    _with_fields(C, (index = index,))
+    with_fields(C, (index = index,))
 
 """
     precision(certificate::AbstractSolutionCertificate)
@@ -718,7 +718,7 @@ function CertificationCache(F::System)
     seq_eval = F._interp_f64.sequence
     seq_jac = F._interp_jac.sequence
     return CertificationCache(
-        _clone_system_evaluator(F),
+        clone_system_evaluator(F),
         Interpreter(Vector{IComplexF64}, seq_eval),
         Interpreter(Vector{IComplexF64}, seq_jac),
         Interpreter(Vector{ComplexF64}, seq_jac),
@@ -971,7 +971,7 @@ function certify_solution(
     # Refine to machine precision. Use the cache's private evaluator clone (not
     # `F.evaluator`) so concurrent certification tasks never share tape state.
     if refine_solution
-        res = _newton(
+        res = newton_iterate(
             cert_cache.system_evaluator,
             cert_cache.newton_cache,
             candidate,

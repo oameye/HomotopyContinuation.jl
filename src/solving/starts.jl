@@ -49,7 +49,7 @@ const SolutionsLike = Union{StartsLike, AbstractVector{<:Number}}
 
 # Typing the `starts` slot puts anything else out of reach of dispatch, so each
 # route carries a less specific method that lands here. One message, one place.
-@noinline function _bad_starts(x)
+@noinline function bad_starts(x)
     Base.@nospecialize x
     throw(
         ArgumentError(

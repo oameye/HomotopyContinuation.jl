@@ -29,10 +29,10 @@ end
 function (w::SweepWork)(state::SweepState, f::Int)::HCN.PathResult
     k, i = fldmod1(f, w.npaths)
     if state.targeted != k
-        HCN._retarget!(state.worker, w.qs[k])
+        HCN.retarget!(state.worker, w.qs[k])
         state.targeted = k
     end
-    return HCN._track_path!(state.worker, w.starts[i], i)
+    return HCN.track_path!(state.worker, w.starts[i], i)
 end
 
 # ── Progress reporters ──────────────────────────────────────────────────────
@@ -92,14 +92,14 @@ function HCN.track_paths(
         n::Int, progress::P, stop::HCN.EarlyStop,
     )::Vector{HCN.PathResult} where {P}
     report = progress === nothing ? NoReport() : PathReport(progress)
-    return HCN._assigned_results(_distributed_map(exec, work, n, report, stop))
+    return HCN.assigned_results(distributed_map(exec, work, n, report, stop))
 end
 
 # ── Many-target sweeps ──────────────────────────────────────────────────────
 
 # As in the threaded sweep, every target is tracked before any is transformed:
 # it is the (target, path) product that gets batched.
-function HCN._distributed_sweep_entries(
+function HCN.distributed_sweep_entries(
         cache::HCN.WorkerSolveCache{HCN.DistributedExecutor},
         targets::AbstractVector, idxs::Vector, first_q,
         transform_result::TR, transform_parameters::TP, progress,
@@ -108,8 +108,8 @@ function HCN._distributed_sweep_entries(
         k == 1 ? first_q : transform_parameters(targets[idxs[k]])
             for k in eachindex(idxs)
     ]
-    results = _sweep_results_distributed(cache, qs, progress)
-    out = HCN._entry_vector(
+    results = sweep_results_distributed(cache, qs, progress)
+    out = HCN.entry_vector(
         transform_result(results[1], targets[idxs[1]]), length(results),
     )
     for k in 2:length(results)
@@ -118,7 +118,7 @@ function HCN._distributed_sweep_entries(
     return out
 end
 
-function _sweep_results_distributed(
+function sweep_results_distributed(
         cache::HCN.WorkerSolveCache{HCN.DistributedExecutor},
         qs::Vector{Q}, progress,
     )::Vector{HCN.Result} where {Q}
@@ -130,12 +130,12 @@ function _sweep_results_distributed(
     work = SweepWork(SweepBuilder(cache.builder), starts, qs, np)
     report = progress === nothing ? NoReport() :
         SweepReport(progress, n_targets, np)
-    flat = _distributed_map(cache.executor, work, n_targets * np, report)
+    flat = distributed_map(cache.executor, work, n_targets * np, report)
 
     prs = [Vector{HCN.PathResult}(undef, np) for _ in 1:n_targets]
     for f in eachindex(flat)
         k, i = fldmod1(f, np)
         prs[k][i] = flat[f]
     end
-    return [HCN._finalize_result(prs[k], np, seed, HCN.ExcessCheckers()) for k in 1:n_targets]
+    return [HCN.finalize_result(prs[k], np, seed, HCN.ExcessCheckers()) for k in 1:n_targets]
 end

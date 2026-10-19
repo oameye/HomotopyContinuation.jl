@@ -23,7 +23,7 @@ function Serialization.deserialize(
     return Serialization.deserialize(s)()::HCN.SystemEvaluator
 end
 
-function _compile_strategy(mode::HCN.CompileMode.T)
+function compile_strategy(mode::HCN.CompileMode.T)
     mode === HCN.CompileMode.INTERPRETED && return HCN.InterpretedCompile()
     mode === HCN.CompileMode.COMPILED && return HCN.CompiledCompile()
     return HCN.CompiledAllCompile()
@@ -50,15 +50,15 @@ function Serialization.deserialize(
     lowered = Serialization.deserialize(s)::HCN.LoweredInput
     compile_mode = Serialization.deserialize(s)::HCN.CompileMode.T
 
-    return HCN._build_compiled_system(
-        _compile_strategy(compile_mode), polys, variables, parameters, lowered,
+    return HCN.build_compiled_system(
+        compile_strategy(compile_mode), polys, variables, parameters, lowered,
         length(polys), length(variables), length(parameters),
     )::HCN.System{P, V}
 end
 
-# ── _SupportSystem ──────────────────────────────────────────────────────────
+# ── SupportSystem ──────────────────────────────────────────────────────────
 
-function Serialization.serialize(s::AbstractSer, sys::HCN._SupportSystem)
+function Serialization.serialize(s::AbstractSer, sys::HCN.SupportSystem)
     Serialization.serialize_type(s, typeof(sys))
     Serialization.serialize(s, sys.eval_sequence)
     Serialization.serialize(s, sys.jacobian_sequence)
@@ -68,14 +68,14 @@ function Serialization.serialize(s::AbstractSer, sys::HCN._SupportSystem)
 end
 
 function Serialization.deserialize(
-        s::AbstractSer, ::Type{HCN._SupportSystem},
-    )::HCN._SupportSystem
+        s::AbstractSer, ::Type{HCN.SupportSystem},
+    )::HCN.SupportSystem
     eval_sequence = Serialization.deserialize(s)::HCN.InstructionSequence
     jacobian_sequence = Serialization.deserialize(s)::HCN.InstructionSequence
     neqs, nvariables = Serialization.deserialize(s)::Tuple{Int, Int}
     nparams = Serialization.deserialize(s)::Int
-    return HCN._SupportSystem(
-        HCN._support_evaluator(
+    return HCN.SupportSystem(
+        HCN.support_evaluator(
             eval_sequence, jacobian_sequence, neqs, nvariables, nparams,
         ),
         eval_sequence, jacobian_sequence,
@@ -102,12 +102,12 @@ end
 
 # ── CompositionSystem ───────────────────────────────────────────────────────
 
-_stage_system(stage::HCN.CompositionStage) =
-    (stage.factory[]::HCN._SystemCloner).system
+stage_system(stage::HCN.CompositionStage) =
+    (stage.factory[]::HCN.SystemCloner).system
 
 function Serialization.serialize(s::AbstractSer, C::HCN.CompositionSystem)
     Serialization.serialize_type(s, typeof(C))
-    Serialization.serialize(s, [_stage_system(stage) for stage in C.stages])
+    Serialization.serialize(s, [stage_system(stage) for stage in C.stages])
     Serialization.serialize(s, C.variables)
     Serialization.serialize(s, C.parameters)
     Serialization.serialize(s, C.degrees)
@@ -124,10 +124,10 @@ function Serialization.deserialize(
     degrees = Serialization.deserialize(s)::Vector{Int}
     is_homogeneous = Serialization.deserialize(s)::Bool
     stages = HCN.CompositionStage[
-        only(HCN._composition_stages(sys::HCN.System)) for sys in stage_systems
+        only(HCN.composition_stages(sys::HCN.System)) for sys in stage_systems
     ]
     return HCN.CompositionSystem(
-        stages, HCN._fold_composition(stages), variables, parameters,
+        stages, HCN.fold_composition(stages), variables, parameters,
         degrees, is_homogeneous,
     )
 end

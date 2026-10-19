@@ -56,7 +56,7 @@ function Base.show(io::IO, solver::HCSolver)
     return
 end
 
-function _solve_set(
+function solve_set(
         V::SemialgebraicSets.AbstractAlgebraicSet, solver::HCSolver,
     )::Union{Nothing, Vector{Vector{Float64}}}
     eqs = SemialgebraicSets.equalities(V)
@@ -70,7 +70,7 @@ end
 
 CommonSolve.solve(
     V::SemialgebraicSets.AbstractAlgebraicSet, solver::HCSolver,
-)::Union{Nothing, Vector{Vector{Float64}}} = _solve_set(V, solver)
+)::Union{Nothing, Vector{Vector{Float64}}} = solve_set(V, solver)
 
 HCN.solve(
     V::SemialgebraicSets.AbstractAlgebraicSet,
@@ -82,7 +82,7 @@ function HCN.real_solutions(
         V::SemialgebraicSets.AbstractAlgebraicSet,
         solver::HCSolver = HCN.SemialgebraicSetsHCSolver(),
     )::Vector{Vector{Float64}}
-    points = _solve_set(V, solver)
+    points = solve_set(V, solver)
     points === nothing && throw(
         ArgumentError(
             "the set has fewer equations than unknowns, so its solutions are " *

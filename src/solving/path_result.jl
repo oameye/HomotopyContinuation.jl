@@ -37,11 +37,11 @@ struct PathResult
 end
 
 """
-    _add_steps(r, accepted, rejected)
+    add_steps(r, accepted, rejected)
 
 Return a copy of `r` with additional accepted/rejected steps added (e.g. from a prior phase).
 """
-_add_steps(r::PathResult, accepted::Int, rejected::Int)::PathResult = _with_fields(
+add_steps(r::PathResult, accepted::Int, rejected::Int)::PathResult = with_fields(
     r,
     (
         accepted_steps = r.accepted_steps + accepted,
@@ -59,7 +59,7 @@ const CertifiedEndpoint = @NamedTuple{
 # `e.solution` is the midpoint of an interval proven to contain a single solution,
 # so it is simple whatever the tracker concluded from its condition estimate. The
 # fields not listed describe the path rather than the endpoint, and stay.
-_certified_endpoint(r::PathResult, e::CertifiedEndpoint)::PathResult = _with_fields(
+certified_endpoint(r::PathResult, e::CertifiedEndpoint)::PathResult = with_fields(
     r,
     (
         solution = e.solution, accuracy = e.accuracy, residual = e.residual,
@@ -86,7 +86,7 @@ return_code(r::PathResult)::PathResultCode.T = r.return_code
 ill-conditioned to be told apart from one at the precision used. A `true` result is
 therefore not a proof of multiplicity; `certify` decides that question rigorously.
 """
-is_singular(r::PathResult)::Bool = is_success(r) && _singular(r)
+is_singular(r::PathResult)::Bool = is_success(r) && counts_as_singular(r)
 
 """
     is_nonsingular(r::PathResult)
@@ -94,11 +94,11 @@ is_singular(r::PathResult)::Bool = is_success(r) && _singular(r)
 `true` if the path succeeded and its endpoint is a regular root (see
 [`is_singular`](@ref)).
 """
-is_nonsingular(r::PathResult)::Bool = is_success(r) && !_singular(r)
+is_nonsingular(r::PathResult)::Bool = is_success(r) && !counts_as_singular(r)
 
 # Derived on read, not stored, so `recluster` at a different tolerance cannot inherit a
 # stale `true`. `multiplicity` is 0 until `Result` clusters.
-_singular(r::PathResult)::Bool = r.singular || r.multiplicity > 1
+counts_as_singular(r::PathResult)::Bool = r.singular || r.multiplicity > 1
 
 is_at_infinity(r::PathResult)::Bool =
     r.return_code == PathResultCode.PATH_AT_INFINITY ||
@@ -251,11 +251,11 @@ function Base.show(io::IO, ::MIME"text/plain", r::PathResult)
 end
 
 """
-    _with_return_code(r, code)
+    with_return_code(r, code)
 
 Return a copy of `r` with the return code replaced (used to reclassify excess solutions).
 """
-function _with_return_code(r::PathResult, code::PathResultCode.T)::PathResult
+function with_return_code(r::PathResult, code::PathResultCode.T)::PathResult
     return PathResult(
         code, r.solution, r.t, r.accuracy, r.ω, r.μ, r.residual,
         r.condition_jacobian,
@@ -266,12 +266,12 @@ function _with_return_code(r::PathResult, code::PathResultCode.T)::PathResult
 end
 
 """
-    _with_multiplicity(r, m)
+    with_multiplicity(r, m)
 
 Return a copy of `r` with its `multiplicity` field set to `m` (filled in by the
 `Result` constructor once solutions have been clustered).
 """
-function _with_multiplicity(r::PathResult, m::Int)::PathResult
+function with_multiplicity(r::PathResult, m::Int)::PathResult
     return PathResult(
         r.return_code, r.solution, r.t, r.accuracy, r.ω, r.μ, r.residual,
         r.condition_jacobian,
@@ -282,7 +282,7 @@ function _with_multiplicity(r::PathResult, m::Int)::PathResult
 end
 
 """
-    _to_ambient(r, H::IntrinsicSubspaceHomotopy)
+    to_ambient(r, H::IntrinsicSubspaceHomotopy)
 
 Return a copy of `r` whose `solution` and `last_path_point` are converted from
 the intrinsic coordinates of `H` to ambient coordinates. Each point is converted
@@ -291,7 +291,7 @@ not at 0) convert on the subspace they actually stopped on. The diagnostics
 (`accuracy`, `residual`, `condition_jacobian`) and `valuation` stay in intrinsic
 coordinates; `start_solution` is already ambient.
 """
-function _to_ambient(r::PathResult, H::IntrinsicSubspaceHomotopy)::PathResult
+function to_ambient(r::PathResult, H::IntrinsicSubspaceHomotopy)::PathResult
     n = length(H.x)
     solution = Vector{ComplexF64}(undef, n)
     ambient_coordinates!(solution, H, r.solution, complex(r.t))
@@ -310,7 +310,7 @@ function is_real(r::PathResult; tol::Float64 = DEFAULT_REAL_TOL)::Bool
     return is_success(r) && all(x -> abs(imag(x)) < tol * max(1.0, abs(x)), r.solution)
 end
 
-function _tracker_code_to_path_code(code::TrackerCode.T)::PathResultCode.T
+function tracker_code_to_path_code(code::TrackerCode.T)::PathResultCode.T
     if code == TrackerCode.TRACKER_SUCCESS
         return PathResultCode.PATH_SUCCESS
     elseif code == TrackerCode.TERMINATED_MAX_STEPS
@@ -330,7 +330,7 @@ function _tracker_code_to_path_code(code::TrackerCode.T)::PathResultCode.T
     end
 end
 
-function _endgame_code_to_path_code(code::EndgameCode.T)::PathResultCode.T
+function endgame_code_to_path_code(code::EndgameCode.T)::PathResultCode.T
     if code == EndgameCode.SUCCESS
         return PathResultCode.PATH_SUCCESS
     elseif code == EndgameCode.AT_INFINITY
@@ -358,7 +358,7 @@ end
 
 # Residual ‖H(x, t)‖∞ of the endpoint, evaluated in-place into `scratch`
 # (reuses the corrector residual buffer — safe at end of path).
-function _homotopy_residual!(
+function homotopy_residual!(
         scratch::FSVec{ComplexF64}, H::HomotopyEvaluator,
         x::FSVec{ComplexF64}, t::ComplexF64,
     )::Float64
@@ -374,11 +374,11 @@ function PathResult(
     )
     state = tracker.state
     t = real(state.segment.t)
-    residual = _homotopy_residual!(
+    residual = homotopy_residual!(
         tracker.corrector.r, tracker.homotopy, state.x, state.segment.t,
     )
     return PathResult(
-        _tracker_code_to_path_code(state.code),
+        tracker_code_to_path_code(state.code),
         Vector{ComplexF64}(state.x),
         t,
         state.accuracy,
@@ -432,9 +432,9 @@ function PathResult(
     # Residual of the reported endpoint: evaluate H at the extrapolated solution
     # (t = 0) for success, otherwise at the tracker's actual terminal point.
     residual = if success
-        _homotopy_residual!(eg.tracker.corrector.r, eg.tracker.homotopy, state.solution, complex(0.0))
+        homotopy_residual!(eg.tracker.corrector.r, eg.tracker.homotopy, state.solution, complex(0.0))
     else
-        _homotopy_residual!(eg.tracker.corrector.r, eg.tracker.homotopy, ts.x, ts.segment.t)
+        homotopy_residual!(eg.tracker.corrector.r, eg.tracker.homotopy, ts.x, ts.segment.t)
     end
 
     # Per-coordinate Puiseux valuation, recorded only once the endgame has taken
@@ -442,7 +442,7 @@ function PathResult(
     valuation = eg.val.samples > 0 ? Vector{Float64}(eg.val.val_x) : Float64[]
 
     return PathResult(
-        _endgame_code_to_path_code(state.code),
+        endgame_code_to_path_code(state.code),
         solution,
         t,
         accuracy,
