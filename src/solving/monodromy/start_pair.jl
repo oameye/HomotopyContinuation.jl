@@ -45,12 +45,12 @@ function find_start_pair(
     )::StartPair
     refine_atol = atol > 0 ? atol : 1.0e-12
     strategy = nparameters(F) == 0 ?
-        _parameter_free_start_pair : _parameterized_start_pair
+        parameter_free_start_pair : parameterized_start_pair
     # Parameter count is construction-time policy stored as a runtime field.
     # Prevent inference from traversing both Newton-on-F and parameter-system
     # construction for every automatic monodromy start.
     strategy = Base.inferencebarrier(strategy)
-    return _dispatch_start_pair_strategy(
+    return dispatch_start_pair_strategy(
         strategy, F, rng, max_tries, refine_atol, rtol,
     )
 end
@@ -66,14 +66,14 @@ function find_start_pair(
     )::StartPair
     refine_atol = atol > 0 ? atol : 1.0e-12
     strategy = nparameters(C) == 0 ?
-        _parameter_free_start_pair : _composition_start_pair
+        parameter_free_start_pair : composition_start_pair
     strategy = Base.inferencebarrier(strategy)
-    return _dispatch_start_pair_strategy(
+    return dispatch_start_pair_strategy(
         strategy, C, rng, max_tries, refine_atol, rtol,
     )
 end
 
-@noinline function _dispatch_start_pair_strategy(
+@noinline function dispatch_start_pair_strategy(
         strategy::Function, F::SystemLike, rng::Random.AbstractRNG, max_tries::Int,
         refine_atol::Float64, rtol::Float64,
     )::StartPair
@@ -81,19 +81,19 @@ end
     return strategy(F, rng, max_tries, refine_atol, rtol)
 end
 
-@noinline function _composition_start_pair(
+@noinline function composition_start_pair(
         C::CompositionSystem, rng::Random.AbstractRNG, max_tries::Int,
         refine_atol::Float64, rtol::Float64,
     )::StartPair
     m, n = size(C)
     np = nparameters(C)
-    joint = SystemEvaluator(_StartPairSystem(C.evaluator))
-    joint_cache = _newton_cache(m, n + np)
+    joint = SystemEvaluator(StartPairSystem(C.evaluator))
+    joint_cache = newton_cache(m, n + np)
     cache = NewtonCache(C)
     for _ in 1:max_tries
         xp₀ = randn(rng, ComplexF64, n + np)
-        res = _newton(
-            joint, joint_cache, xp₀, _EMPTY_PARAMS, 1.0e-8, 1.0e-8, 20, false,
+        res = newton_iterate(
+            joint, joint_cache, xp₀, EMPTY_PARAMS, 1.0e-8, 1.0e-8, 20, false,
             1.0, typemax(Int), Inf, Inf,
         )
         if res.return_code == NewtonReturnCode.NEWTON_SUCCESS
@@ -110,7 +110,7 @@ end
     return StartPair()
 end
 
-@noinline function _parameter_free_start_pair(
+@noinline function parameter_free_start_pair(
         F::SystemLike, rng::Random.AbstractRNG, max_tries::Int,
         refine_atol::Float64, rtol::Float64,
     )::StartPair
@@ -131,7 +131,7 @@ end
     return StartPair()
 end
 
-@noinline function _parameterized_start_pair(
+@noinline function parameterized_start_pair(
         F::System, rng::Random.AbstractRNG, max_tries::Int,
         refine_atol::Float64, rtol::Float64,
     )::StartPair
@@ -140,20 +140,20 @@ end
     # fresh random x₀ internally, so a bad draw should retry, not abandon the
     # fast path.
     for _ in 1:3
-        pair = _linear_in_params_start_pair(F, rng)
+        pair = linear_in_params_start_pair(F, rng)
         pair.found && return pair
     end
 
     # The joint-Newton fallback is rare and much wider than the linear path.
     # Cross a hard function barrier so successful linear starts do not compile
     # it speculatively.
-    fallback = Base.inferencebarrier(_joint_newton_start_pair)
-    return _dispatch_start_pair_strategy(
+    fallback = Base.inferencebarrier(joint_newton_start_pair)
+    return dispatch_start_pair_strategy(
         fallback, F, rng, max_tries, refine_atol, rtol,
     )
 end
 
-@noinline function _joint_newton_start_pair(
+@noinline function joint_newton_start_pair(
         F::System, rng::Random.AbstractRNG, max_tries::Int,
         refine_atol::Float64, rtol::Float64,
     )::StartPair
@@ -186,7 +186,7 @@ end
 # result is linear in the parameters (every term touches at most one parameter,
 # with exponent at most 1, and every equation actually contains a parameter).
 # Then solve the linear system A p = b exactly.
-function _linear_in_params_start_pair(
+function linear_in_params_start_pair(
         F::System, rng::Random.AbstractRNG,
     )::StartPair
     # The term walk below needs a polynomial representation.

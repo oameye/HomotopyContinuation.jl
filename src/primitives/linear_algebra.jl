@@ -11,14 +11,14 @@ const QRSolveFW =
 # A square workspace never reaches the QR branch. Both entry points are erased
 # behind a shape-chosen `FunctionWrapper`, and the tall pair is built through a
 # dynamic call so a square-only session never compiles `qr!`.
-_unreachable_qr_factorize(::QRFact)::Nothing = nothing
-_unreachable_qr_solve(
+unreachable_qr_factorize(::QRFact)::Nothing = nothing
+unreachable_qr_solve(
     ::FSVec{ComplexF64}, ::QRFact, ::FSVec{ComplexF64},
 )::Nothing = nothing
 
-_square_qr_ops()::Tuple{QRFactorizeFW, QRSolveFW} =
-    (QRFactorizeFW(_unreachable_qr_factorize), QRSolveFW(_unreachable_qr_solve))
-_tall_qr_ops()::Tuple{QRFactorizeFW, QRSolveFW} =
+square_qr_ops()::Tuple{QRFactorizeFW, QRSolveFW} =
+    (QRFactorizeFW(unreachable_qr_factorize), QRSolveFW(unreachable_qr_solve))
+tall_qr_ops()::Tuple{QRFactorizeFW, QRSolveFW} =
     (QRFactorizeFW(qr!), QRSolveFW(qr_ldiv!))
 
 """
@@ -51,10 +51,10 @@ end
 
 function MatrixWorkspace(m::Integer, n::Integer)::MatrixWorkspace
     A = FSMat{ComplexF64}(zeros(ComplexF64, m, n))
-    return _make_matrix_workspace(A, m, n)
+    return make_matrix_workspace(A, m, n)
 end
 
-function _make_matrix_workspace(
+function make_matrix_workspace(
         A::FSMat{ComplexF64}, m::Int, n::Int,
     )::MatrixWorkspace
     m >= n || throw(ArgumentError("Expected m >= n, got m=$m, n=$n"))
@@ -71,8 +71,8 @@ function _make_matrix_workspace(
         copyto!(Matrix{ComplexF64}(undef, m, n), A)
     qr = LA.QR(qr_factors, Vector{ComplexF64}(undef, size(qr_factors, 2)))
     qr_x = FSVec{ComplexF64}(Vector{ComplexF64}(undef, m == n ? 0 : n))
-    qr_factorize, qr_solve = m == n ? _square_qr_ops() :
-        Base.inferencebarrier(_tall_qr_ops)()::Tuple{QRFactorizeFW, QRSolveFW}
+    qr_factorize, qr_solve = m == n ? square_qr_ops() :
+        Base.inferencebarrier(tall_qr_ops)()::Tuple{QRFactorizeFW, QRSolveFW}
 
     r = FSVec{ComplexF64}(zeros(ComplexF64, m))
     r̄ = FSVec{ComplexDF64}(zeros(ComplexDF64, m))
@@ -270,15 +270,15 @@ end
 # ldiv! helpers
 # ---------------------------------------------------------------------------
 
-@inline function _ipiv!(LU::LA.LU, b::AbstractVector)
-    return _apply_ipiv!(b, 1:length(LU.ipiv), LU.ipiv)
+@inline function forward_ipiv!(LU::LA.LU, b::AbstractVector)
+    return apply_ipiv!(b, 1:length(LU.ipiv), LU.ipiv)
 end
 
-@inline function _inverse_ipiv!(LU::LA.LU, b::AbstractVector)
-    return _apply_ipiv!(b, length(LU.ipiv):-1:1, LU.ipiv)
+@inline function inverse_ipiv!(LU::LA.LU, b::AbstractVector)
+    return apply_ipiv!(b, length(LU.ipiv):-1:1, LU.ipiv)
 end
 
-@inline function _apply_ipiv!(b::AbstractVector, range::OrdinalRange, ipiv::Vector{Int64})
+@inline function apply_ipiv!(b::AbstractVector, range::OrdinalRange, ipiv::Vector{Int64})
     @inbounds for i in range
         if i != ipiv[i]
             b[i], b[ipiv[i]] = b[ipiv[i]], b[i]
@@ -319,7 +319,7 @@ function lu_ldiv!(
         x::AbstractVector{ComplexF64}, LU::LA.LU, b::AbstractVector{ComplexF64},
     )
     x === b || copyto!(x, b)
-    _ipiv!(LU, x)
+    forward_ipiv!(LU, x)
     ldiv_unit_lower!(LU.factors, x)
     ldiv_upper!(LU.factors, x)
     return x
@@ -433,7 +433,7 @@ function lu_ldiv_adj!(
     x === b || copyto!(x, b)
     ldiv_adj_upper!(LU.factors, x)
     ldiv_adj_unit_lower!(LU.factors, x)
-    _inverse_ipiv!(LU, x)
+    inverse_ipiv!(LU, x)
     return x
 end
 
@@ -621,7 +621,7 @@ function iterative_refinement!(
         tol::Float64,
         max_iters::Int,
     )
-    return _iterative_refinement_loop!(
+    return iterative_refinement_loop!(
         mixed_precision_iterative_refinement!, tol, max_iters, x, M, b, norm,
     )
 end
@@ -653,8 +653,8 @@ function iterative_refinement!(
         tol::Float64,
         max_iters::Int,
     )
-    return _iterative_refinement_loop!(
-        _mixed_precision_refinement_infnorm!, tol, max_iters, x, M, b,
+    return iterative_refinement_loop!(
+        mixed_precision_refinement_infnorm!, tol, max_iters, x, M, b,
     )
 end
 
@@ -671,7 +671,7 @@ end
 # Shared refinement loop — Julia specializes on the concrete type of `refine!`,
 # so this has zero dispatch overhead. `args` is passed through rather than
 # captured, so `refine!` stays a named method the stability gate can see.
-@inline function _iterative_refinement_loop!(
+@inline function iterative_refinement_loop!(
         refine!::F, tol::Float64, max_iters::Int, args::Vararg{Any, N},
     ) where {F, N}
     δ = refine!(args...)
@@ -688,7 +688,7 @@ end
     return (accuracy = δ, diverged = false)
 end
 
-function _mixed_precision_refinement_infnorm!(
+function mixed_precision_refinement_infnorm!(
         x::AbstractVector{ComplexF64},
         M::MatrixWorkspace,
         b::AbstractVector{ComplexF64},
@@ -715,7 +715,7 @@ end
 # Condition Number Estimation (Higham 1988)
 # ---------------------------------------------------------------------------
 
-@inline function _norm_inf_real(x::AbstractVector{Float64})::Float64
+@inline function norm_inf_real(x::AbstractVector{Float64})::Float64
     isempty(x) && return 0.0
     @inbounds m = abs(x[1])
     @inbounds for i in 2:length(x)
@@ -738,14 +738,14 @@ function inverse_inf_norm_est(WS::MatrixWorkspace)::Float64
     work = WS.inf_norm_est_work
     rwork = WS.inf_norm_est_rwork
     return if WS.scaled
-        _inverse_inf_norm_est_row(WS.lu, WS.row_scaling, work, rwork)
+        inverse_inf_norm_est_row(WS.lu, WS.row_scaling, work, rwork)
     else
-        _inverse_inf_norm_est_noscale(WS.lu, work, rwork)
+        inverse_inf_norm_est_noscale(WS.lu, work, rwork)
     end
 end
 
 # Higham (1988) inverse infinity-norm estimator — no scaling.
-function _inverse_inf_norm_est_noscale(
+function inverse_inf_norm_est_noscale(
         lu::LA.LU{ComplexF64, FSMat{ComplexF64}, Vector{Int64}},
         work::FSVec{ComplexF64},
         rwork::FSVec{Float64},
@@ -820,7 +820,7 @@ function _inverse_inf_norm_est_noscale(
         end
 
         k += 1
-        if @inbounds(x[j] == _norm_inf_real(x)) || k > 2
+        if @inbounds(x[j] == norm_inf_real(x)) || k > 2
             break
         end
     end
@@ -829,7 +829,7 @@ function _inverse_inf_norm_est_noscale(
 end
 
 # Higham (1988) inverse infinity-norm estimator — row scaling only.
-function _inverse_inf_norm_est_row(
+function inverse_inf_norm_est_row(
         lu::LA.LU{ComplexF64, FSMat{ComplexF64}, Vector{Int64}},
         row_scaling::FSVec{Float64},
         work::FSVec{ComplexF64},
@@ -919,7 +919,7 @@ function _inverse_inf_norm_est_row(
         end
 
         k += 1
-        if @inbounds(x[j] == _norm_inf_real(x)) || k > 2
+        if @inbounds(x[j] == norm_inf_real(x)) || k > 2
             break
         end
     end
@@ -930,7 +930,7 @@ end
 # Higham (1988) inverse infinity-norm estimator (a lower bound) for `D_r A D_c`,
 # `D_r = diag(row_scaling)`, `D_c = diag(col_scaling)`. `factors_scaled` marks a
 # factorization of `diag(lu_row_scaling) A` instead of `A`.
-function _inverse_inf_norm_est(
+function scaled_inverse_inf_norm_est(
         lu::LA.LU{ComplexF64, FSMat{ComplexF64}, Vector{Int64}},
         row_scaling::FSVec{Float64},
         col_scaling::FSVec{Float64},
@@ -955,7 +955,7 @@ function _inverse_inf_norm_est(
     lu_ldiv_adj!(y, lu, y)
 
     @inbounds for i in 1:n
-        y[i] *= _row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
+        y[i] *= row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
     end
 
     γ = sum(fast_abs, y)
@@ -965,7 +965,7 @@ function _inverse_inf_norm_est(
         ξ[i] = iszero(ay) ? one(ComplexF64) : y[i] / ay
     end
     @inbounds for i in 1:n
-        ξ[i] *= _row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
+        ξ[i] *= row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
     end
 
     lu_ldiv!(z, lu, ξ)
@@ -997,7 +997,7 @@ function _inverse_inf_norm_est(
         lu_ldiv_adj!(y, lu, y)
 
         @inbounds for i in 1:n
-            y[i] *= _row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
+            y[i] *= row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
         end
 
         γ̄ = γ
@@ -1013,7 +1013,7 @@ function _inverse_inf_norm_est(
             ξ[i] = iszero(ay) ? one(ComplexF64) : y[i] / ay
         end
         @inbounds for i in 1:n
-            ξ[i] *= _row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
+            ξ[i] *= row_unscale(row_scaling, lu_row_scaling, factors_scaled, i)
         end
 
         lu_ldiv!(z, lu, ξ)
@@ -1023,7 +1023,7 @@ function _inverse_inf_norm_est(
         end
 
         k += 1
-        if @inbounds(x[j] == _norm_inf_real(x)) || k > 2
+        if @inbounds(x[j] == norm_inf_real(x)) || k > 2
             break
         end
     end
@@ -1031,7 +1031,7 @@ function _inverse_inf_norm_est(
     return nanmin(γ, Inf)
 end
 
-@inline function _row_unscale(
+@inline function row_unscale(
         row_scaling::FSVec{Float64},
         lu_row_scaling::FSVec{Float64},
         factors_scaled::Bool,

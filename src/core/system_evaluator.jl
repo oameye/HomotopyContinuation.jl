@@ -87,7 +87,7 @@ struct SystemEvaluator
 end
 
 # An evaluator equal to `S` with its own tapes, usable from another task.
-_clone_system_evaluator(S::SystemEvaluator)::SystemEvaluator =
+clone_system_evaluator(S::SystemEvaluator)::SystemEvaluator =
     (S._clone[])()::SystemEvaluator
 
 # A copied `FunctionWrapper` keeps a raw pointer to the original closure, so a
@@ -95,37 +95,37 @@ _clone_system_evaluator(S::SystemEvaluator)::SystemEvaluator =
 Base.deepcopy_internal(S::SystemEvaluator, stackdict::IdDict)::SystemEvaluator =
     get!(() -> (S._clone[])()::SystemEvaluator, stackdict, S)
 
-struct _EvaluatorCloner{F <: AbstractSystem}
+struct EvaluatorCloner{F <: AbstractSystem}
     system::F
 end
 
-(c::_EvaluatorCloner)()::SystemEvaluator = SystemEvaluator(_clone_system(c.system))
+(c::EvaluatorCloner)()::SystemEvaluator = SystemEvaluator(clone_system(c.system))
 
 ## Lazy extended-precision wrappers
 
 """
-    _lazy_df64(make) -> (cache, installer)
+    lazy_df64(make) -> (cache, installer)
 
 Pair a fresh empty cache with a wrapper that fills it by calling `make`, which
 must return `(evaluate_df64!, evaluate_df64_out!)`. `make` is invoked through a
 dynamic call so that compiling the installer does not compile `make`.
 """
-function _lazy_df64(make::F)::Tuple{LazyRef{SysEvalDF64Pair}, SysDF64InstallFW} where {F}
+function lazy_df64(make::F)::Tuple{LazyRef{SysEvalDF64Pair}, SysDF64InstallFW} where {F}
     cache = LazyRef{SysEvalDF64Pair}()
-    return cache, SysDF64InstallFW(_DF64Installer(cache, make))
+    return cache, SysDF64InstallFW(DF64Installer(cache, make))
 end
 
-struct _DF64Installer{F}
+struct DF64Installer{F}
     cache::LazyRef{SysEvalDF64Pair}
     make::F
 end
 
-function (installer::_DF64Installer)()::Nothing
-    Base.inferencebarrier(_install_df64!)(installer.cache, installer.make)
+function (installer::DF64Installer)()::Nothing
+    Base.inferencebarrier(install_df64!)(installer.cache, installer.make)
     return nothing
 end
 
-@noinline function _install_df64!(
+@noinline function install_df64!(
         cache::LazyRef{SysEvalDF64Pair}, make,
     )::Nothing
     Base.@nospecialize make
@@ -135,7 +135,7 @@ end
 
 # Two threads racing here install equivalent wrappers; the duplicate work is the
 # only cost, since `LazyRef` publishes the pair as a single atomic store.
-function _df64_evaluators(S::SystemEvaluator)::SysEvalDF64Pair
+function df64_evaluators(S::SystemEvaluator)::SysEvalDF64Pair
     cache = S._df64
     is_installed(cache) || S._install_df64!()
     return cache[]
@@ -158,7 +158,7 @@ function evaluate!(
         u::FSVec{ComplexF64}, S::SystemEvaluator,
         x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
     )::Nothing
-    first(_df64_evaluators(S))(u, x, p)
+    first(df64_evaluators(S))(u, x, p)
     return nothing
 end
 
@@ -166,7 +166,7 @@ function evaluate!(
         u::FSVec{ComplexDF64}, S::SystemEvaluator,
         x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
     )::Nothing
-    last(_df64_evaluators(S))(u, x, p)
+    last(df64_evaluators(S))(u, x, p)
     return nothing
 end
 
@@ -233,7 +233,7 @@ end
 function SystemEvaluator(F::AbstractSystem)
     return SystemEvaluator(
         SysEvalFW((u, x, p) -> (evaluate!(u, F, x, p); nothing)),
-        _lazy_df64(
+        lazy_df64(
             () -> (
                 SysEvalDF64FW((u, x, p) -> (evaluate!(u, F, x, p); nothing)),
                 SysEvalDF64OutFW((u, x, p) -> (evaluate!(u, F, x, p); nothing)),
@@ -248,6 +248,6 @@ function SystemEvaluator(F::AbstractSystem)
         SysTaylor3ParamFW((u, tx, tp) -> (taylor!(u, Val(3), F, tx, tp); nothing)),
         size(F),
         nparameters(F),
-        SystemFactory(_EvaluatorCloner(F)),
+        SystemFactory(EvaluatorCloner(F)),
     )
 end

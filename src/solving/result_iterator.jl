@@ -10,7 +10,7 @@
 
 # ── One path per cache kind ────────────────────────────────────────────────
 
-_path_result(cache::PathSolveCache, i::Int)::PathResult =
+path_result_at(cache::PathSolveCache, i::Int)::PathResult =
     path_work(cache)(cache.worker, i)
 
 # ── Iteration ──────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ Base.length(ri::ResultIterator)::Int = count(ri.mask)
 function Base.iterate(ri::ResultIterator, i::Int = 1)
     j = findnext(ri.mask, i)
     j === nothing && return nothing
-    return (_path_result(ri.cache, j), j + 1)
+    return (path_result_at(ri.cache, j), j + 1)
 end
 
 Base.firstindex(::ResultIterator)::Int = 1
@@ -40,7 +40,7 @@ function Base.getindex(ri::ResultIterator, k::Int)::PathResult
     for _ in 1:k
         i = something(findnext(ri.mask, i + 1))
     end
-    return _path_result(ri.cache, i)
+    return path_result_at(ri.cache, i)
 end
 
 # ── Replay across tasks ────────────────────────────────────────────────────
@@ -49,35 +49,35 @@ end
 # tracker. Tracking the same paths concurrently needs one worker state per task,
 # which is what the cache's builder makes.
 
-# `worker` comes from `_path_worker` over the same cache.
-_path_result(cache::PathSolveCache, worker, i::Int)::PathResult =
+# `worker` comes from `path_worker` over the same cache.
+path_result_at(cache::PathSolveCache, worker, i::Int)::PathResult =
     path_work(cache)(worker, i)
 """
-    _replay_ntasks(ri::ResultIterator, exec::AbstractExecutor)
+    replay_ntasks(ri::ResultIterator, exec::AbstractExecutor)
 
-The number of tasks [`_foreach_path`](@ref) will use to replay `ri` under `exec`.
+The number of tasks [`foreach_path`](@ref) will use to replay `ri` under `exec`.
 One whatever `exec` asks for when the cache's builder cannot hand out independent
 workers, which is the case for a cache built around a caller's homotopy: the
 alternative is tracking it on several tasks at once. A caller sizing its own
 per-task resources reads it from here rather than from `exec`.
 """
-_replay_ntasks(ri::ResultIterator, exec::AbstractExecutor)::Int =
-    _builds_independent_workers(ri.cache.builder) ? _local_ntasks(exec) : 1
+replay_ntasks(ri::ResultIterator, exec::AbstractExecutor)::Int =
+    builds_independent_workers(ri.cache.builder) ? local_ntasks(exec) : 1
 
 """
-    _path_workers(ri::ResultIterator, ntasks::Int)
+    path_workers(ri::ResultIterator, ntasks::Int)
 
-One worker state per task, ready to be handed to [`_foreach_path`](@ref). Building
+One worker state per task, ready to be handed to [`foreach_path`](@ref). Building
 one clones a system evaluator and an endgame tracker, so a caller that replays `ri`
 (or any iterator over the same cache) more than once builds them once here rather
-than per pass. `ntasks` is [`_replay_ntasks`](@ref).
+than per pass. `ntasks` is [`replay_ntasks`](@ref).
 """
-_path_workers(ri::ResultIterator, ntasks::Int) =
-    [_path_worker(ri.cache) for _ in 1:max(ntasks, 1)]
+path_workers(ri::ResultIterator, ntasks::Int) =
+    [path_worker(ri.cache) for _ in 1:max(ntasks, 1)]
 
 """
-    _foreach_path(f, make_state, ri::ResultIterator, exec::AbstractExecutor)
-    _foreach_path(f, make_state, ri::ResultIterator, exec, workers)
+    foreach_path(f, make_state, ri::ResultIterator, exec::AbstractExecutor)
+    foreach_path(f, make_state, ri::ResultIterator, exec, workers)
 
 Track every path `ri` selects and call `f(state, k, path_result)` for each, where
 `k` is the path's position in `ri`'s selection. `state` is what `make_state()`
@@ -85,24 +85,24 @@ returns, once per task.
 
 The paths are tracked concurrently, so `f` must be thread-safe and must not depend
 on the order it is called in. A path result never depends on the task count, which
-is [`_replay_ntasks`](@ref) rather than whatever `exec` asks for.
+is [`replay_ntasks`](@ref) rather than whatever `exec` asks for.
 
-`workers` are [`_path_workers`](@ref) over the same cache, reused rather than
+`workers` are [`path_workers`](@ref) over the same cache, reused rather than
 rebuilt; the task count is then bounded by how many were given.
 """
-function _foreach_path(
+function foreach_path(
         f::F, make_state::G, ri::ResultIterator, exec::AbstractExecutor,
     )::Nothing where {F, G}
-    workers = _path_workers(ri, _replay_ntasks(ri, exec))
-    return _foreach_path(f, make_state, ri, exec, workers)
+    workers = path_workers(ri, replay_ntasks(ri, exec))
+    return foreach_path(f, make_state, ri, exec, workers)
 end
 
-function _foreach_path(
+function foreach_path(
         f::F, make_state::G, ri::ResultIterator, exec::AbstractExecutor,
         workers::Vector{W},
     )::Nothing where {F, G, W}
     idxs = findall(ri.mask)
-    ntasks = min(_replay_ntasks(ri, exec), length(workers))
+    ntasks = min(replay_ntasks(ri, exec), length(workers))
     if ntasks > 1 && length(idxs) > 1
         nt = min(ntasks, length(idxs))
         # A task draws whichever worker is free rather than owning one by index,
@@ -118,19 +118,19 @@ function _foreach_path(
                 worker = take!(pool)
                 state = make_state()
             end
-            f(state, k, _path_result(ri.cache, worker, idxs[k]))
+            f(state, k, path_result_at(ri.cache, worker, idxs[k]))
         end
         close(pool)
     else
         state = make_state()
         for (k, i) in enumerate(idxs)
-            f(state, k, _path_result(ri.cache, workers[1], i))
+            f(state, k, path_result_at(ri.cache, workers[1], i))
         end
     end
     return nothing
 end
 
-_path_worker(cache::PathSolveCache) = cache.builder()
+path_worker(cache::PathSolveCache) = cache.builder()
 
 function Base.show(io::IO, ri::ResultIterator)
     print(
@@ -164,7 +164,7 @@ track. Fresh vectors, so writing to one cannot change what a later `collect`
 tracks from.
 """
 start_solutions(ri::ResultIterator)::Vector{Vector{ComplexF64}} =
-    _start_points(ri.cache.start_solutions)
+    start_points(ri.cache.start_solutions)
 
 """
     nstart_solutions(ri::ResultIterator)
@@ -193,7 +193,7 @@ function selection(f, ri::ResultIterator)::BitVector
     mask = falses(length(ri.mask))
     for i in eachindex(ri.mask)
         ri.mask[i] || continue
-        mask[i] = f(_path_result(ri.cache, i))::Bool
+        mask[i] = f(path_result_at(ri.cache, i))::Bool
     end
     return mask
 end
@@ -259,7 +259,7 @@ reclassification.
 """
 function Result(ri::ResultIterator)::Result
     prs = collect(ri)
-    return _finalize_result(prs, length(prs), seed(ri), _excess_checkers(ri.cache))
+    return finalize_result(prs, length(prs), seed(ri), cache_excess_checkers(ri.cache))
 end
 
 
@@ -296,48 +296,48 @@ restrict(ri, keep)
 ```
 """
 result_iterator(F::System, alg::TotalDegree = TotalDegree())::ResultIterator =
-    ResultIterator(CommonSolve.init(F, _quiet(alg), Serial()))
+    ResultIterator(CommonSolve.init(F, without_progress(alg), Serial()))
 
 result_iterator(F::System, alg::Polyhedral)::ResultIterator =
-    ResultIterator(CommonSolve.init(F, _quiet(alg), Serial()))
+    ResultIterator(CommonSolve.init(F, without_progress(alg), Serial()))
 
 result_iterator(
     F::System, L::LinearSubspace, alg::TotalDegree = TotalDegree(),
-)::ResultIterator = ResultIterator(CommonSolve.init(F, L, _quiet(alg), Serial()))
+)::ResultIterator = ResultIterator(CommonSolve.init(F, L, without_progress(alg), Serial()))
 
 result_iterator(
     F::System, L::LinearSubspace, alg::Polyhedral,
-)::ResultIterator = ResultIterator(CommonSolve.init(F, L, _quiet(alg), Serial()))
+)::ResultIterator = ResultIterator(CommonSolve.init(F, L, without_progress(alg), Serial()))
 
 result_iterator(
     F::System, starts::StartsLike, p_start::AbstractVector{<:Number},
     p_target::AbstractVector{<:Number}, alg::Continuation = Continuation(),
 )::ResultIterator = ResultIterator(
-    CommonSolve.init(F, starts, p_start, p_target, _quiet(alg), Serial()),
+    CommonSolve.init(F, starts, p_start, p_target, without_progress(alg), Serial()),
 )
 
 result_iterator(
     G::CloneableSystem, F::CloneableSystem, starts::StartsLike,
     alg::Continuation = Continuation(),
 )::ResultIterator = ResultIterator(
-    CommonSolve.init(G, F, starts, _quiet(alg), Serial()),
+    CommonSolve.init(G, F, starts, without_progress(alg), Serial()),
 )
 
 result_iterator(
     F::System, starts::StartsLike, L_start::LinearSubspace,
     L_target::LinearSubspace, alg::Continuation = Continuation(),
 )::ResultIterator = ResultIterator(
-    CommonSolve.init(F, starts, L_start, L_target, _quiet(alg), Serial()),
+    CommonSolve.init(F, starts, L_start, L_target, without_progress(alg), Serial()),
 )
 
 result_iterator(
     H::HomotopyLike, starts::StartsLike, alg::Continuation = Continuation(),
 )::ResultIterator = ResultIterator(
-    CommonSolve.init(H, starts, _quiet(alg), Serial()),
+    CommonSolve.init(H, starts, without_progress(alg), Serial()),
 )
 
 # A `ResultIterator` used as start solutions contributes every successful
 # endpoint, tracked on the spot. Singular endpoints are kept, unlike
-# `_start_points(::Result)`, which goes through `solutions` (nonsingular only).
-_start_points(ri::ResultIterator)::Vector{Vector{ComplexF64}} =
+# `start_points(::Result)`, which goes through `solutions` (nonsingular only).
+start_points(ri::ResultIterator)::Vector{Vector{ComplexF64}} =
     [solution(pr) for pr in ri if is_success(pr)]

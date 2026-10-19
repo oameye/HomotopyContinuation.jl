@@ -451,7 +451,7 @@ function _certified_pass(
     # certified counts mean anything; later passes recertify inside one leaf.
     counting = stats.phase === IteratorCertificationPhase.assignment
 
-    _foreach_path(() -> take!(caches), ri, exec, ctx.workers) do cache, k, path_result
+    foreach_path(() -> take!(caches), ri, exec, ctx.workers) do cache, k, path_result
         if !(ctx.predicate(path_result)::Bool && is_success(path_result))
             Base.@lock lk begin
                 stats.ntracked += 1
@@ -765,15 +765,15 @@ function _certify_iterator(
         ),
     )
 
-    # Only as many caches and workers as tasks will actually run: `_replay_ntasks`
+    # Only as many caches and workers as tasks will actually run: `replay_ntasks`
     # drops to one for a cache that cannot hand out independent workers, and
     # neither a `CertificationCache` nor a worker is cheap enough to build one per
     # idle task.
     selected = findall(selection(ri))
-    ntasks = min(_replay_ntasks(ri, exec), max(length(selected), 1))
+    ntasks = min(replay_ntasks(ri, exec), max(length(selected), 1))
     ctx = IteratorCertificationContext(
         F, cert_params, is_real(F), predicate, CertT, alg, randn(ComplexF64, n),
-        _cache_set(F, cache, ntasks), _path_workers(ri, ntasks), selected,
+        _cache_set(F, cache, ntasks), path_workers(ri, ntasks), selected,
         IteratorCertificationStats(),
         alg.certification.show_progress ? _iterator_progress() : nothing,
     )

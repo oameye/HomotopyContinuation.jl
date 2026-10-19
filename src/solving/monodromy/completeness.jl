@@ -4,7 +4,7 @@
 # Augmented system `[F(x, p + λv); (Σᵢ aᵢxᵢ - 1)λ + t]` used by the trace test.
 # DynamicPolynomials variables are identity distinct, so the fresh variables
 # below cannot collide with user variables of the same name.
-function _build_verification_system(
+function build_verification_system(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         x::AbstractVector, p::AbstractVector, n::Int, m::Int,
     )
@@ -29,7 +29,7 @@ end
 
 # `Expression` variables are keyed by name, so the fresh ones are renamed until
 # they no longer clash.
-function _build_verification_system(
+function build_verification_system(
         polys::AbstractVector{Expression},
         x::AbstractVector, p::AbstractVector, n::Int, m::Int,
     )::System{Expression, Expression}
@@ -52,13 +52,13 @@ end
 # parameter (the trace variable t) fixed at zero. The LinearSubspace method
 # exists only to keep the sampler total over both MonodromyLoop branches; the
 # auxiliary system always has vector parameters, so it is unreachable.
-function _zero_first_parameter_sampler(
+function zero_first_parameter_sampler(
         rng::Random.AbstractRNG, pp::AbstractVector,
     )::Vector{ComplexF64}
     return [0.0 + 0.0im; randn(rng, ComplexF64, length(pp) - 1)]
 end
 
-function _zero_first_parameter_sampler(::Random.AbstractRNG, ::LinearSubspace)
+function zero_first_parameter_sampler(::Random.AbstractRNG, ::LinearSubspace)
     throw(ArgumentError("the completeness verification sampler only supports vector parameters"))
 end
 
@@ -131,13 +131,13 @@ function verify_solution_completeness(
         trace_tol::Float64 = 1.0e-14,
         endgame_options::EndgameOptions = EndgameOptions(),
     )::Completeness.T where {E <: AbstractExecutor}
-    show_progress = _show_progress(alg)
-    seed = _seed(alg)
-    tracker_options = _tracker_options(alg)
+    show_progress = algorithm_show_progress(alg)
+    seed = algorithm_seed(alg)
+    tracker_options = algorithm_tracker_options(alg)
     n = nvariables(F)
     m = nparameters(F)
 
-    verify_system = _build_verification_system(
+    verify_system = build_verification_system(
         F.polys, collect(F.variables), collect(F.parameters), n, m,
     )
 
@@ -171,7 +171,7 @@ function verify_solution_completeness(
     additional_mres = solve(
         verify_system, Y, [0.0; base_params],
         Monodromy(;
-            parameter_sampler = _zero_first_parameter_sampler,
+            parameter_sampler = zero_first_parameter_sampler,
             seed = rand(rng, UInt32), show_progress = show_progress,
             tracker_options = tracker_options,
             max_loops_no_progress = alg.options.max_loops_no_progress,

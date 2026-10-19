@@ -54,5 +54,5 @@ end
 
 # The evaluator carries the thunk that rebuilds it, so the compile mode is
 # already accounted for and a system only has to hand over its evaluator.
-_clone_system_evaluator(sys::System)::SystemEvaluator =
-    _clone_system_evaluator(sys.evaluator)
+clone_system_evaluator(sys::System)::SystemEvaluator =
+    clone_system_evaluator(sys.evaluator)

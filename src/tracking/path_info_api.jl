@@ -13,7 +13,7 @@ function iterator(
         t₁::Real = 1.0, t₀::Real = 0.0;
         tracker_options::TrackerOptions = TrackerOptions(),
     )::PathIterator{Float64}
-    return _path_iterator(
+    return path_iterator(
         Tracker(HomotopyEvaluator(H); options = tracker_options),
         x₀, ComplexF64(t₁), ComplexF64(t₀), Float64,
     )
@@ -24,13 +24,13 @@ function iterator(
         t₁::Number, t₀::Number = 0.0;
         tracker_options::TrackerOptions = TrackerOptions(),
     )::PathIterator{ComplexF64}
-    return _path_iterator(
+    return path_iterator(
         Tracker(HomotopyEvaluator(H); options = tracker_options),
         x₀, ComplexF64(t₁), ComplexF64(t₀), ComplexF64,
     )
 end
 
-function _path_iterator(
+function path_iterator(
         tracker::Tracker, x₀::AbstractVector{<:Number},
         t₁::ComplexF64, t₀::ComplexF64, ::Type{T},
     )::PathIterator{T} where {T <: Union{Float64, ComplexF64}}

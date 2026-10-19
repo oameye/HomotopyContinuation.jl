@@ -204,7 +204,7 @@ const ExecInstructionT = typeof(ExecInstruction.Stop(Int32(0)))
 # One entry per `OpType`, in `@data ExecInstruction` declaration order. Any other
 # order costs the emitted switch (cyclic-7 Jacobian 387ns -> 710ns when reordered
 # by op frequency).
-const _EXEC_INSTRUCTION_SPECS = (
+const EXEC_INSTRUCTION_SPECS = (
     (:Stop, :OP_STOP),
     (:Cb, :OP_CB),
     (:Cos, :OP_COS),
@@ -274,55 +274,55 @@ function Interpreter(
         ::Type{V},
         seq::InstructionSequence,
     ) where {V <: AbstractVector}
-    instructions = _compile_exec_instructions(seq.instructions)
+    instructions = compile_exec_instructions(seq.instructions)
     tape = create_tape(V, seq)
     return Interpreter{V}(seq, instructions, tape)
 end
 
 ## Inner execution loop — variant-based dispatch
 
-function _compile_exec_instruction_call(variant::Symbol, op::OpType.T)::Expr
+function compile_exec_instruction_call(variant::Symbol, op::OpType.T)::Expr
     ctor = Expr(:., :ExecInstruction, QuoteNode(variant))
     args = op == OpType.OP_STOP ? Any[:out] : Any[Symbol(:arg_, k) for k in 1:arity(op)]
     op == OpType.OP_STOP || push!(args, :out)
     return Expr(:call, ctor, args...)
 end
 
-function _compile_exec_instruction_branches()::Vector{Tuple{Expr, Expr}}
+function compile_exec_instruction_branches()::Vector{Tuple{Expr, Expr}}
     return [
         (
             :(op == $op),
-            :(return $(_compile_exec_instruction_call(variant, op))),
-        ) for (variant, op_name) in _EXEC_INSTRUCTION_SPECS
+            :(return $(compile_exec_instruction_call(variant, op))),
+        ) for (variant, op_name) in EXEC_INSTRUCTION_SPECS
             for op in (getfield(OpType, op_name),)
     ]
 end
 
-@eval @inline function _compile_exec_instruction(instr::Instruction)::ExecInstructionT
+@eval @inline function compile_exec_instruction(instr::Instruction)::ExecInstructionT
     arg_1, arg_2, arg_3, arg_4 = instr.input
     out = instr.output
     op = instr.op
     $(
         nested_ifs(
-            _compile_exec_instruction_branches(),
+            compile_exec_instruction_branches(),
             :(error("Unknown instruction op: ", op)),
         )
     )
 end
 
-function _compile_exec_instructions(
+function compile_exec_instructions(
         instructions::Vector{Instruction},
     )::Vector{ExecInstructionT}
     compiled = Vector{ExecInstructionT}(undef, length(instructions))
     @inbounds for i in eachindex(instructions)
-        compiled[i] = _compile_exec_instruction(instructions[i])
+        compiled[i] = compile_exec_instruction(instructions[i])
     end
     return compiled
 end
 
 ## Generated single-function execute loops
 
-function _build_execute_call(op::OpType.T, fn_name::Symbol)
+function build_execute_call(op::OpType.T, fn_name::Symbol)
     args = Any[]
     for k in 1:arity(op)
         field = Symbol(:arg_, k)
@@ -331,9 +331,9 @@ function _build_execute_call(op::OpType.T, fn_name::Symbol)
     return Expr(:call, fn_name, args...)
 end
 
-function _generate_execute_arms(fn_mapper::Function)
+function generate_execute_arms(fn_mapper::Function)
     arms = Expr[]
-    for (variant, op_name) in _EXEC_INSTRUCTION_SPECS
+    for (variant, op_name) in EXEC_INSTRUCTION_SPECS
         op = getfield(OpType, op_name)
         binds = op == OpType.OP_STOP ? Any[] : Any[Symbol(:arg_, k) for k in 1:arity(op)]
         push!(binds, :output)
@@ -341,14 +341,14 @@ function _generate_execute_arms(fn_mapper::Function)
         body = if op == OpType.OP_STOP
             :(return nothing)
         else
-            :(@inbounds tape[output] = $(_build_execute_call(op, fn_mapper(op))))
+            :(@inbounds tape[output] = $(build_execute_call(op, fn_mapper(op))))
         end
         push!(arms, Expr(:call, :(=>), pattern, body))
     end
     return arms
 end
 
-let arms = _generate_execute_arms(op -> op_call(op))
+let arms = generate_execute_arms(op -> op_call(op))
     @eval Base.@propagate_inbounds function execute_instructions!(
             tape::AbstractVector,
             instructions::Vector{ExecInstructionT},
@@ -362,7 +362,7 @@ let arms = _generate_execute_arms(op -> op_call(op))
     end
 end
 
-let arms = _generate_execute_arms(op -> Symbol(:taylor_, op_call(op)))
+let arms = generate_execute_arms(op -> Symbol(:taylor_, op_call(op)))
     @eval Base.@propagate_inbounds function execute_taylor_instructions!(
             tape::AbstractVector,
             instructions::Vector{ExecInstructionT},
@@ -378,7 +378,7 @@ end
 
 ## execute! helpers
 
-Base.@propagate_inbounds function _load_inputs!(
+Base.@propagate_inbounds function load_inputs!(
         I::Interpreter, x::AbstractVector,
     )::Nothing
     @inbounds for (i, k) in enumerate(I.sequence.variables_range)
@@ -387,7 +387,7 @@ Base.@propagate_inbounds function _load_inputs!(
     return nothing
 end
 
-Base.@propagate_inbounds function _load_inputs!(
+Base.@propagate_inbounds function load_inputs!(
         I::Interpreter, x::AbstractVector, p::AbstractVector,
     )::Nothing
     @inbounds for (i, k) in enumerate(I.sequence.parameters_range)
@@ -399,7 +399,7 @@ Base.@propagate_inbounds function _load_inputs!(
     return nothing
 end
 
-Base.@propagate_inbounds function _extract_u!(u::AbstractVector, I::Interpreter)::Nothing
+Base.@propagate_inbounds function extract_u!(u::AbstractVector, I::Interpreter)::Nothing
     I.sequence.all_u_assigned || fill!(u, zero(eltype(u)))
     @inbounds for (i, k) in I.sequence.u_assignments
         u[i] = I.tape[k]
@@ -407,7 +407,7 @@ Base.@propagate_inbounds function _extract_u!(u::AbstractVector, I::Interpreter)
     return nothing
 end
 
-Base.@propagate_inbounds function _extract_U!(U::AbstractMatrix, I::Interpreter)::Nothing
+Base.@propagate_inbounds function extract_U!(U::AbstractMatrix, I::Interpreter)::Nothing
     I.sequence.all_U_assigned || fill!(U, zero(eltype(U)))
     idx = CartesianIndices((I.sequence.output_dim, size(U, 2)))
     @inbounds for (j, k) in I.sequence.U_assignments
@@ -418,18 +418,18 @@ end
 
 ## execute! — evaluate system
 
-Base.@propagate_inbounds function _execute_eval!(u::AbstractVector, I::Interpreter)
+Base.@propagate_inbounds function execute_eval!(u::AbstractVector, I::Interpreter)
     @inbounds execute_instructions!(I.tape, I.instructions)
-    _extract_u!(u, I)
+    extract_u!(u, I)
     return u
 end
 
-Base.@propagate_inbounds function _execute_jac!(
+Base.@propagate_inbounds function execute_jac!(
         u::AbstractVector, U::AbstractMatrix, I::Interpreter,
     )
     @inbounds execute_instructions!(I.tape, I.instructions)
-    _extract_U!(U, I)
-    _extract_u!(u, I)
+    extract_U!(U, I)
+    extract_u!(u, I)
     return u
 end
 
@@ -438,15 +438,15 @@ Base.@propagate_inbounds function execute!(
     )
     isempty(I.sequence.parameters_range) ||
         error("Interpreter expects parameters; call execute!(u, I, x, p)")
-    _load_inputs!(I, x)
-    return _execute_eval!(u, I)
+    load_inputs!(I, x)
+    return execute_eval!(u, I)
 end
 
 Base.@propagate_inbounds function execute!(
         u::AbstractVector, I::Interpreter, x::AbstractVector, p::AbstractVector,
     )
-    _load_inputs!(I, x, p)
-    return _execute_eval!(u, I)
+    load_inputs!(I, x, p)
+    return execute_eval!(u, I)
 end
 
 Base.@propagate_inbounds function execute!(
@@ -454,16 +454,16 @@ Base.@propagate_inbounds function execute!(
     )
     isempty(I.sequence.parameters_range) ||
         error("Interpreter expects parameters; call execute!(u, U, I, x, p)")
-    _load_inputs!(I, x)
-    return _execute_jac!(u, U, I)
+    load_inputs!(I, x)
+    return execute_jac!(u, U, I)
 end
 
 Base.@propagate_inbounds function execute!(
         u::AbstractVector, U::AbstractMatrix, I::Interpreter,
         x::AbstractVector, p::AbstractVector,
     )
-    _load_inputs!(I, x, p)
-    return _execute_jac!(u, U, I)
+    load_inputs!(I, x, p)
+    return execute_jac!(u, U, I)
 end
 
 ## execute_taylor! — evaluate Taylor coefficients
@@ -505,7 +505,7 @@ via the tape's element type conversion.
     @inbounds execute_taylor_instructions!(I.tape, I.instructions)
 
     # Extract order-K coefficients into u (skip the zero-fill when every
-    # output index is assigned, mirroring _extract_u!)
+    # output index is assigned, mirroring extract_u!)
     I.sequence.all_u_assigned || fill!(u, zero(eltype(u)))
     @inbounds for (i, k) in I.sequence.u_assignments
         u[i] = I.tape[k][K]

@@ -1,7 +1,7 @@
 ## GroupActions and SymmetricGroup: composed symmetry-group actions for dedup.
 #
 # Cold path over user closures: no FSVec, no EnumX. The recursion in
-# _apply_actions passes only the REMAINING actions (Base.tail) to each produced
+# apply_action_tuple passes only the REMAINING actions (Base.tail) to each produced
 # image; re-applying the full tuple would recurse forever.
 
 """
@@ -51,13 +51,13 @@ function (actions::GroupActions)(s)
     return S
 end
 
-apply_actions(cb, action::GroupActions, s) = _apply_actions(action.actions, s, cb)
-@inline function _apply_actions(actions::Tuple, x, cb::F) where {F}
+apply_actions(cb, action::GroupActions, s) = apply_action_tuple(action.actions, s, cb)
+@inline function apply_action_tuple(actions::Tuple, x, cb::F) where {F}
     f, rest = first(actions), Base.tail(actions)
     y = f(x)
     if isa(x, AbstractVector{<:Number}) && isa(y, AbstractVector{<:Number})
         cb(y) && return true
-        if _apply_actions(rest, y, cb)
+        if apply_action_tuple(rest, y, cb)
             return true
         end
     else
@@ -66,19 +66,19 @@ apply_actions(cb, action::GroupActions, s) = _apply_actions(action.actions, s, c
         # and would disagree with `y` for a nondeterministic action).
         for yᵢ in y
             cb(yᵢ) && return true
-            if _apply_actions(rest, yᵢ, cb)
+            if apply_action_tuple(rest, yᵢ, cb)
                 return true
             end
         end
     end
-    return _apply_actions(rest, x, cb)
+    return apply_action_tuple(rest, x, cb)
 end
-@inline _apply_actions(::Tuple{}, s, cb) = false
+@inline apply_action_tuple(::Tuple{}, s, cb) = false
 
 apply_actions(cb::G, actions::F, s) where {G, F} = actions(cb, s)
 
 # `nothing`, a `GroupActions` and 2-arg-protocol callables pass through.
-_as_group_actions(actions) =
+as_group_actions(actions) =
     actions isa Function || actions isa Tuple || actions isa AbstractVector ?
     GroupActions(actions) : actions
 

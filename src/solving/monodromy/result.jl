@@ -103,7 +103,7 @@ path_results(r::MonodromyResult)::Vector{PathResult} = r.results
 
 # Monodromy dedups during the run through `UniquePoints`, so `results` already
 # holds one entry per distinct solution and every index is a representative.
-_solution_indices(r::MonodromyResult) = eachindex(r.results)
+solution_indices(r::MonodromyResult) = eachindex(r.results)
 
 """
     parameters(result::MonodromyResult)

@@ -62,16 +62,16 @@ function System(
     nvars = length(variables)
     nparams = length(parameters)
     builder = if compile == CompileMode.INTERPRETED
-        _build_interpreted_system
+        build_interpreted_system
     elseif compile == CompileMode.COMPILED
-        _build_codegen_system
+        build_codegen_system
     else
-        _build_codegen_all_system
+        build_codegen_all_system
     end
     normalized, lowered = lower_input(polys, variables, parameters)
     isempty(variable_groups) ||
         (lowered = group_input(lowered, normalized, variables, variable_groups))
-    return _dispatch_system_build(
+    return dispatch_system_build(
         builder, normalized, variables, parameters, lowered, neqs, nvars, nparams,
     )
 end
@@ -111,10 +111,10 @@ function System(
         variable_groups = nothing,
         compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
-    parameters === nothing && (parameters = _empty_vars(polys))
+    parameters === nothing && (parameters = empty_vars(polys))
     if variables === nothing
         variables = variable_groups === nothing ?
-            _effective_variables(polys, parameters) : reduce(vcat, variable_groups)
+            effective_variables_excluding(polys, parameters) : reduce(vcat, variable_groups)
     end
     return System(
         polys, parameters, variables, compile,
@@ -147,7 +147,7 @@ function System(
     elseif variable_groups !== nothing
         as_variables(reduce(vcat, variable_groups))
     else
-        _default_variables(exprs, params)
+        default_variables(exprs, params)
     end
     return System(
         exprs, params, vars, compile, variable_group_indices(variable_groups, vars),
@@ -170,7 +170,7 @@ function System(
         as_variables(reduce(vcat, variable_groups))
     else
         as_variables(
-            _rational_variables(polys, parameters === nothing ? () : parameters),
+            rational_variables(polys, parameters === nothing ? () : parameters),
         )
     end
     return System(
@@ -250,7 +250,7 @@ function support_coefficients(F::System)::SupportCoefficients
     return cache[]
 end
 
-@inline _to_fsvec(xs::AbstractVector{T}) where {T} = FSVec{T}(collect(xs))
+@inline to_fsvec(xs::AbstractVector{T}) where {T} = FSVec{T}(collect(xs))
 
 # Linear scan: a `Set` costs more to compile than the scan costs to run, as long
 # as callers keep the scan off the innermost loop.
@@ -346,7 +346,7 @@ group_degrees(
 
 group_degrees(
     exprs::AbstractVector{Expression}, vars::AbstractVector,
-)::Tuple{Vector{Int}, Bool} = _expression_degrees(exprs, as_variables(vars))
+)::Tuple{Vector{Int}, Bool} = expression_degrees(exprs, as_variables(vars))
 
 ## ── Front-end lowering ──────────────────────────────────────────────────────
 
@@ -406,8 +406,8 @@ end
     normalized, scales = normalize_polys(polys)
     degs, is_homogeneous = variable_degrees(normalized, variables)
     return normalized, LoweredInput(
-            _build_instruction_sequence(normalized, variables, parameters, false),
-            _build_instruction_sequence(normalized, variables, parameters, true),
+            build_instruction_sequence(normalized, variables, parameters, false),
+            build_instruction_sequence(normalized, variables, parameters, true),
             degs, is_homogeneous, scales,
         )
 end
@@ -420,10 +420,10 @@ end
     normalized, scales = normalize_expressions(exprs)
     vars = as_variables(variables)
     params = as_variables(parameters)
-    degs, is_homogeneous = _expression_degrees(normalized, vars)
+    degs, is_homogeneous = expression_degrees(normalized, vars)
     return normalized, LoweredInput(
-            _build_instruction_sequence_from_expressions(normalized, vars, params, false),
-            _build_instruction_sequence_from_expressions(normalized, vars, params, true),
+            build_instruction_sequence_from_expressions(normalized, vars, params, false),
+            build_instruction_sequence_from_expressions(normalized, vars, params, true),
             degs, is_homogeneous, scales,
         )
 end
@@ -475,12 +475,12 @@ end
 # Dividing an equation by a constant leaves `V(F)` unchanged, so one whose scale sits
 # outside this band is brought back towards unity. A scale of `0` (the zero equation) or
 # a non-finite one carries no information and is left alone.
-const _MIN_NORM_SCALE = 1.0e-6
-const _MAX_NORM_SCALE = 1.0e8
+const MIN_NORM_SCALE = 1.0e-6
+const MAX_NORM_SCALE = 1.0e8
 
 function normalization_scale(nrm::Float64)::Float64
     (iszero(nrm) || !isfinite(nrm)) && return 1.0
-    _MIN_NORM_SCALE <= nrm <= _MAX_NORM_SCALE && return 1.0
+    MIN_NORM_SCALE <= nrm <= MAX_NORM_SCALE && return 1.0
     return nrm
 end
 
@@ -501,7 +501,7 @@ end
 ## ── FW-compatible wrapper functions ──────────────────────────────────────────
 
 
-@noinline function _dispatch_system_build(
+@noinline function dispatch_system_build(
         builder::Function,
         polys::AbstractVector,
         variables::AbstractVector,
@@ -515,40 +515,40 @@ end
     return builder(polys, variables, parameters, lowered, neqs, nvars, nparams)
 end
 
-@noinline function _build_interpreted_system(
+@noinline function build_interpreted_system(
         polys, variables, parameters, lowered::LoweredInput,
         neqs::Int, nvars::Int, nparams::Int,
     )
     Base.@nospecialize polys variables parameters
-    return _build_compiled_system(
+    return build_compiled_system(
         InterpretedCompile(), polys, variables, parameters, lowered,
         neqs, nvars, nparams,
     )
 end
 
-@noinline function _build_codegen_system(
+@noinline function build_codegen_system(
         polys, variables, parameters, lowered::LoweredInput,
         neqs::Int, nvars::Int, nparams::Int,
     )
     Base.@nospecialize polys variables parameters
-    return _build_compiled_system(
+    return build_compiled_system(
         CompiledCompile(), polys, variables, parameters, lowered,
         neqs, nvars, nparams,
     )
 end
 
-@noinline function _build_codegen_all_system(
+@noinline function build_codegen_all_system(
         polys, variables, parameters, lowered::LoweredInput,
         neqs::Int, nvars::Int, nparams::Int,
     )
     Base.@nospecialize polys variables parameters
-    return _build_compiled_system(
+    return build_compiled_system(
         CompiledAllCompile(), polys, variables, parameters, lowered,
         neqs, nvars, nparams,
     )
 end
 
-@noinline function _build_compiled_system(
+@noinline function build_compiled_system(
         strategy::C,
         polys::AbstractVector,
         variables::AbstractVector,
@@ -569,17 +569,17 @@ end
     interp_t2 = Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval)
     interp_t3 = Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval)
 
-    evaluator = _build_mode_evaluator(
+    evaluator = build_mode_evaluator(
         strategy, seq_eval, seq_jac,
         interp_f64, interp_df64, interp_jac,
         interp_t1, interp_t2, interp_t3,
         neqs, nvars, nparams,
     )
-    M = _compile_mode(strategy)
+    M = compile_mode_of(strategy)
 
-    fs_polys = _to_fsvec(polys)
-    fs_parameters = _to_fsvec(parameters)
-    fs_variables = _to_fsvec(variables)
+    fs_polys = to_fsvec(polys)
+    fs_parameters = to_fsvec(parameters)
+    fs_variables = to_fsvec(variables)
     return System{eltype(fs_polys), eltype(fs_variables)}(
         fs_polys,
         fs_parameters,
@@ -593,45 +593,45 @@ end
     )
 end
 
-@inline _compile_mode(::InterpretedCompile) = CompileMode.INTERPRETED
-@inline _compile_mode(::CompiledCompile) = CompileMode.COMPILED
-@inline _compile_mode(::CompiledAllCompile) = CompileMode.COMPILED_ALL
+@inline compile_mode_of(::InterpretedCompile) = CompileMode.INTERPRETED
+@inline compile_mode_of(::CompiledCompile) = CompileMode.COMPILED
+@inline compile_mode_of(::CompiledAllCompile) = CompileMode.COMPILED_ALL
 
-function _build_mode_evaluator(
+function build_mode_evaluator(
         ::InterpretedCompile, ::InstructionSequence, ::InstructionSequence,
         interp_f64, interp_df64, interp_jac, interp_t1, interp_t2, interp_t3,
         neqs::Int, nvars::Int, nparams::Int,
     )::SystemEvaluator
-    return _build_system_evaluator(
+    return build_system_evaluator(
         interp_f64, interp_df64, interp_jac,
         interp_t1, interp_t2, interp_t3,
         neqs, nvars, nparams,
     )
 end
 
-function _build_mode_evaluator(
+function build_mode_evaluator(
         mode::CompiledCompile, seq_eval::InstructionSequence,
         seq_jac::InstructionSequence,
         ::Interpreter{Vector{ComplexF64}}, interp_df64,
         ::Interpreter{Vector{ComplexF64}}, interp_t1, interp_t2, interp_t3,
         neqs::Int, nvars::Int, nparams::Int,
     )::SystemEvaluator
-    return _build_compiled_evaluator(
+    return build_compiled_evaluator(
         mode, seq_eval, seq_jac, interp_df64,
-        _build_taylor_fws(interp_t1, interp_t2, interp_t3),
+        build_taylor_fws(interp_t1, interp_t2, interp_t3),
         neqs, nvars, nparams,
     )
 end
 
-function _build_mode_evaluator(
+function build_mode_evaluator(
         mode::CompiledAllCompile, seq_eval::InstructionSequence,
         seq_jac::InstructionSequence,
         ::Interpreter{Vector{ComplexF64}}, interp_df64,
         ::Interpreter{Vector{ComplexF64}}, ::Interpreter, ::Interpreter, ::Interpreter,
         neqs::Int, nvars::Int, nparams::Int,
     )::SystemEvaluator
-    return _build_compiled_evaluator(
-        mode, seq_eval, seq_jac, interp_df64, _build_taylor_fws(seq_eval),
+    return build_compiled_evaluator(
+        mode, seq_eval, seq_jac, interp_df64, build_taylor_fws(seq_eval),
         neqs, nvars, nparams,
     )
 end
@@ -639,7 +639,7 @@ end
 # One cloner per compile mode: the sequences are the whole recipe, the tapes
 # around them are what must not be shared.
 
-struct _InterpretedCloner
+struct InterpretedCloner
     seq_eval::InstructionSequence
     seq_jac::InstructionSequence
     neqs::Int
@@ -647,9 +647,9 @@ struct _InterpretedCloner
     nparams::Int
 end
 
-function (c::_InterpretedCloner)()::SystemEvaluator
+function (c::InterpretedCloner)()::SystemEvaluator
     seq_eval, seq_jac = c.seq_eval, c.seq_jac
-    return _build_system_evaluator(
+    return build_system_evaluator(
         Interpreter(Vector{ComplexF64}, seq_eval),
         Interpreter(Vector{ComplexDF64}, seq_eval),
         Interpreter(Vector{ComplexF64}, seq_jac),
@@ -660,7 +660,7 @@ function (c::_InterpretedCloner)()::SystemEvaluator
     )
 end
 
-struct _CompiledCloner{M <: Union{CompiledCompile, CompiledAllCompile}}
+struct CompiledCloner{M <: Union{CompiledCompile, CompiledAllCompile}}
     mode::M
     seq_eval::InstructionSequence
     seq_jac::InstructionSequence
@@ -669,81 +669,81 @@ struct _CompiledCloner{M <: Union{CompiledCompile, CompiledAllCompile}}
     nparams::Int
 end
 
-function (c::_CompiledCloner)()::SystemEvaluator
+function (c::CompiledCloner)()::SystemEvaluator
     seq_eval = c.seq_eval
-    return _build_compiled_evaluator(
+    return build_compiled_evaluator(
         c.mode, seq_eval, c.seq_jac,
         Interpreter(Vector{ComplexDF64}, seq_eval),
-        _clone_taylor_fws(c.mode, seq_eval),
+        clone_taylor_fws(c.mode, seq_eval),
         c.neqs, c.nvars, c.nparams,
     )
 end
 
-_clone_taylor_fws(::CompiledCompile, seq_eval::InstructionSequence) =
-    _build_taylor_fws(
+clone_taylor_fws(::CompiledCompile, seq_eval::InstructionSequence) =
+    build_taylor_fws(
     Interpreter(Vector{TruncatedTaylorSeries{2, ComplexF64}}, seq_eval),
     Interpreter(Vector{TruncatedTaylorSeries{3, ComplexF64}}, seq_eval),
     Interpreter(Vector{TruncatedTaylorSeries{4, ComplexF64}}, seq_eval),
 )
 
-_clone_taylor_fws(::CompiledAllCompile, seq_eval::InstructionSequence) =
-    _build_taylor_fws(seq_eval)
+clone_taylor_fws(::CompiledAllCompile, seq_eval::InstructionSequence) =
+    build_taylor_fws(seq_eval)
 
-@noinline function _execute_eval_fw!(
+@noinline function execute_eval_fw!(
         u::AbstractVector, interp::Interpreter, x::AbstractVector, p::AbstractVector,
     )::Nothing
     if isempty(interp.sequence.parameters_range)
-        _load_inputs!(interp, x)
+        load_inputs!(interp, x)
     else
-        _load_inputs!(interp, x, p)
+        load_inputs!(interp, x, p)
     end
-    _execute_eval!(u, interp)
+    execute_eval!(u, interp)
     return nothing
 end
 
-@noinline function _execute_jac_fw!(
+@noinline function execute_jac_fw!(
         u::AbstractVector, U::AbstractMatrix, interp::Interpreter,
         x::AbstractVector, p::AbstractVector,
     )::Nothing
     if isempty(interp.sequence.parameters_range)
-        _load_inputs!(interp, x)
+        load_inputs!(interp, x)
     else
-        _load_inputs!(interp, x, p)
+        load_inputs!(interp, x, p)
     end
-    _execute_jac!(u, U, interp)
+    execute_jac!(u, U, interp)
     return nothing
 end
 
-function _lazy_df64_interpreted(interp_df64::Interpreter{Vector{ComplexDF64}})
-    return _lazy_df64(
+function lazy_df64_interpreted(interp_df64::Interpreter{Vector{ComplexDF64}})
+    return lazy_df64(
         () -> (
             SysEvalDF64FW(
-                (u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing),
+                (u, x, p) -> (execute_eval_fw!(u, interp_df64, x, p); nothing),
             ),
             SysEvalDF64OutFW(
-                (u, x, p) -> (_execute_eval_fw!(u, interp_df64, x, p); nothing),
+                (u, x, p) -> (execute_eval_fw!(u, interp_df64, x, p); nothing),
             ),
         ),
     )
 end
 
-function _build_interpreted_evaluation_fws(
+function build_interpreted_evaluation_fws(
         interp_f64::Interpreter{Vector{ComplexF64}},
         interp_df64::Interpreter{Vector{ComplexDF64}},
         interp_jac::Interpreter{Vector{ComplexF64}},
     )
     return (
         SysEvalFW(
-            (u, x, p) -> (_execute_eval_fw!(u, interp_f64, x, p); nothing),
+            (u, x, p) -> (execute_eval_fw!(u, interp_f64, x, p); nothing),
         ),
-        _lazy_df64_interpreted(interp_df64)...,
+        lazy_df64_interpreted(interp_df64)...,
         SysEvalJacFW(
-            (u, U, x, p) -> (_execute_jac_fw!(u, U, interp_jac, x, p); nothing),
+            (u, U, x, p) -> (execute_jac_fw!(u, U, interp_jac, x, p); nothing),
         ),
     )
 end
 
-function _build_system_evaluator(
+function build_system_evaluator(
         interp_f64::Interpreter{Vector{ComplexF64}},
         interp_df64::Interpreter{Vector{ComplexDF64}},
         interp_jac::Interpreter{Vector{ComplexF64}},
@@ -764,19 +764,19 @@ function _build_system_evaluator(
         (u, tx, p) -> (execute_taylor!(u, Val(3), interp_t3, tx, p); nothing),
     )
     param_builder = if iszero(nparams)
-        _build_zero_parameter_taylor_fws
+        build_zero_parameter_taylor_fws
     else
-        _build_parameter_taylor_fws
+        build_parameter_taylor_fws
     end
     param_builder = Base.inferencebarrier(param_builder)
-    param_taylor = _dispatch_parameter_taylor_fws(
+    param_taylor = dispatch_parameter_taylor_fws(
         param_builder, taylor_1, taylor_2, taylor_3, interp_t1, interp_t2, interp_t3,
     )
-    evaluation_fws = _build_interpreted_evaluation_fws(
+    evaluation_fws = build_interpreted_evaluation_fws(
         interp_f64, interp_df64, interp_jac,
     )
     clone = SystemFactory(
-        _InterpretedCloner(
+        InterpretedCloner(
             interp_f64.sequence, interp_jac.sequence, neqs, nvars, nparams,
         ),
     )
@@ -792,7 +792,7 @@ function _build_system_evaluator(
     )
 end
 
-@noinline function _dispatch_parameter_taylor_fws(
+@noinline function dispatch_parameter_taylor_fws(
         builder::Function, taylor_1, taylor_2, taylor_3,
         interp_t1, interp_t2, interp_t3,
     )
@@ -800,7 +800,7 @@ end
     return builder(taylor_1, taylor_2, taylor_3, interp_t1, interp_t2, interp_t3)
 end
 
-function _build_zero_parameter_taylor_fws(
+function build_zero_parameter_taylor_fws(
         taylor_1::SysTaylor1FW,
         taylor_2::SysTaylor2FW,
         taylor_3::SysTaylor3FW,
@@ -809,13 +809,13 @@ function _build_zero_parameter_taylor_fws(
         ::Interpreter{Vector{TruncatedTaylorSeries{4, ComplexF64}}},
     )
     return (
-        SysTaylor1ParamFW((u, tx, ::TaylorVector{2, ComplexF64}) -> (taylor_1(u, tx, _EMPTY_PARAMS); nothing)),
-        SysTaylor2ParamFW((u, tx, ::TaylorVector{3, ComplexF64}) -> (taylor_2(u, tx, _EMPTY_PARAMS); nothing)),
-        SysTaylor3ParamFW((u, tx, ::TaylorVector{4, ComplexF64}) -> (taylor_3(u, tx, _EMPTY_PARAMS); nothing)),
+        SysTaylor1ParamFW((u, tx, ::TaylorVector{2, ComplexF64}) -> (taylor_1(u, tx, EMPTY_PARAMS); nothing)),
+        SysTaylor2ParamFW((u, tx, ::TaylorVector{3, ComplexF64}) -> (taylor_2(u, tx, EMPTY_PARAMS); nothing)),
+        SysTaylor3ParamFW((u, tx, ::TaylorVector{4, ComplexF64}) -> (taylor_3(u, tx, EMPTY_PARAMS); nothing)),
     )
 end
 
-function _build_parameter_taylor_fws(
+function build_parameter_taylor_fws(
         ::SysTaylor1FW, ::SysTaylor2FW, ::SysTaylor3FW,
         interp_t1::Interpreter{Vector{TruncatedTaylorSeries{2, ComplexF64}}},
         interp_t2::Interpreter{Vector{TruncatedTaylorSeries{3, ComplexF64}}},

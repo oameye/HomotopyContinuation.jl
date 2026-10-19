@@ -16,7 +16,7 @@ using HomotopyContinuation:
     UniquePoints,
     DEFAULT_CLUSTER_ATOL,
     DEFAULT_CLUSTER_RTOL,
-    _cluster_solutions,
+    cluster_solutions,
     add!,
     ambient_coordinates!,
     intrinsic_coordinates!,
@@ -343,7 +343,7 @@ function run(::Val{:result_iterator_lazy})
     return first(ri), Result(restrict(ri, selection(is_real, ri)))
 end
 
-function _monodromy_system()
+function monodromy_system()
     @polyvar y[1:2] p[1:2]
     return System(
         [y[1]^2 + y[2]^2 - p[1], y[1] + y[2] - p[2]];
@@ -354,7 +354,7 @@ end
 
 function run(::Val{:monodromy_serial})
     return solve(
-        _monodromy_system(),
+        monodromy_system(),
         Monodromy(;
             target_solutions_count = 2, seed = UInt32(7), show_progress = false,
         ),
@@ -365,7 +365,7 @@ end
 
 function run(::Val{:monodromy_threaded})
     return solve(
-        _monodromy_system(),
+        monodromy_system(),
         Monodromy(;
             target_solutions_count = 2, seed = UInt32(7), show_progress = false,
         ),
@@ -398,7 +398,7 @@ function run(::Val{:monodromy_subspace_trace})
 end
 
 function run(::Val{:verify_completeness})
-    F = _monodromy_system()
+    F = monodromy_system()
     alg = Monodromy(;
         target_solutions_count = 2, seed = UInt32(21), show_progress = false,
     )
@@ -459,7 +459,7 @@ function run(::Val{:result_clustering})
             ),
         )
     end
-    return _cluster_solutions(
+    return cluster_solutions(
         path_results, DEFAULT_CLUSTER_ATOL, DEFAULT_CLUSTER_RTOL, nothing,
     )
 end

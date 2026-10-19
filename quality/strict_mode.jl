@@ -78,11 +78,11 @@ const STATIC_CORE = Set(
 )
 
 const CODEGEN_HELPERS = (
-    HomotopyContinuation._cauchy_product_exprs,
-    HomotopyContinuation._expr_sum,
-    HomotopyContinuation._taylor_hyperbolic_stmts,
-    HomotopyContinuation._taylor_pow_recurrence_expr,
-    HomotopyContinuation._taylor_tangent_stmts,
+    HomotopyContinuation.cauchy_product_exprs,
+    HomotopyContinuation.expr_sum,
+    HomotopyContinuation.taylor_hyperbolic_stmts,
+    HomotopyContinuation.taylor_pow_recurrence_expr,
+    HomotopyContinuation.taylor_tangent_stmts,
 )
 
 function in_static_core(f)

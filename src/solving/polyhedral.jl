@@ -51,7 +51,7 @@ end
 
 Polyhedral(;
     only_torus::Bool = false,
-    early_stop_callback = _never_stop,
+    early_stop_callback = never_stop,
     excess_residual_tol::Float64 = 0.0,
     tracker_options::TrackerOptions = TrackerOptions(),
     endgame_options::EndgameOptions = EndgameOptions(),
@@ -59,35 +59,35 @@ Polyhedral(;
     show_progress::Bool = true,
 ) = Polyhedral(
     CommonOptions(tracker_options, endgame_options, seed, show_progress),
-    _early_stop(early_stop_callback),
+    to_early_stop(early_stop_callback),
     only_torus,
-    _checked_excess_residual_tol(excess_residual_tol),
+    checked_excess_residual_tol(excess_residual_tol),
 )
 
 early_stop_callback(alg::Polyhedral)::EarlyStop = alg.early_stop
 
 excess_residual_tol(alg::Polyhedral)::Float64 = alg.excess_residual_tol
 
-# Every option but `common` survives, so a new field reaches `_reseed`/`_quiet` here.
-_with_common(alg::Polyhedral, common::CommonOptions)::Polyhedral = Polyhedral(
+# Every option but `common` survives, so a new field reaches `reseed`/`without_progress` here.
+with_common(alg::Polyhedral, common::CommonOptions)::Polyhedral = Polyhedral(
     common, alg.early_stop, alg.only_torus, alg.excess_residual_tol,
 )
 
 # A parent derives its children's seeds from its own, so one top-level seed
 # reproduces every stage.
-_reseed(alg::Polyhedral, seed::UInt32)::Polyhedral =
-    _with_common(alg, _with_seed(alg.common, seed))
+reseed(alg::Polyhedral, seed::UInt32)::Polyhedral =
+    with_common(alg, with_seed(alg.common, seed))
 
-_quiet(alg::Polyhedral)::Polyhedral = _with_common(alg, _quiet(alg.common))
+without_progress(alg::Polyhedral)::Polyhedral = with_common(alg, without_progress(alg.common))
 
 """
-    _SupportSystem
+    SupportSystem
 
 Minimal reconstruction data for `Fᵢ(x; p) = Σⱼ pᵢⱼ x^support[i][:,j]`.
 Polyhedral tracking needs only an evaluator and immutable instruction sequences
 for worker-local tapes; no symbolic variables or polynomial objects are needed.
 """
-struct _SupportSystem
+struct SupportSystem
     evaluator::SystemEvaluator
     eval_sequence::InstructionSequence
     jacobian_sequence::InstructionSequence
@@ -108,7 +108,7 @@ struct PolyhedralSolveCache{E <: AbstractExecutor}
     start_solutions::Vector{Tuple{MixedSubdivisions.MixedCell, Vector{ComplexF64}}}
     seed::UInt32
     # GC roots for interpreters — must be kept alive for FunctionWrapper closures
-    _support_system::_SupportSystem
+    build_support_system::SupportSystem
     # One checker when the system was squared up, none when it was already square.
     excess_checkers::ExcessCheckers
     show_progress::Bool
@@ -116,21 +116,21 @@ struct PolyhedralSolveCache{E <: AbstractExecutor}
 end
 
 # This cache pairs every start point with the mixed cell it belongs to.
-_start_points(
+start_points(
     starts::Vector{Tuple{MixedSubdivisions.MixedCell, Vector{ComplexF64}}},
 )::Vector{Vector{ComplexF64}} = [copy(x) for (_, x) in starts]
 
 # ── Helper: randomize support/coefficients for overdetermined systems ───────
 
 """
-    _randomize_support(support, coeffs, A, perm) -> (support, coeffs)
+    randomize_support(support, coeffs, A, perm) -> (support, coeffs)
 
 Support and coefficients of the squared-up system G = [I A]·(F∘perm). Row i of G
 is `F_perm[i] + Σ_j A[i,j]·F_perm[n+j]`, so its support is the union of the
 combined supports with linearly combined coefficients. Duplicate monomials are
 merged; exponent columns are sorted for a deterministic result.
 """
-function _randomize_support(
+function randomize_support(
         support::Vector{Matrix{Int32}},
         coeffs::Vector{Vector{ComplexF64}},
         A::FSMat{ComplexF64},
@@ -169,7 +169,7 @@ end
 # optionally differentiated once wrt `derivative_variable` (0 = no derivative).
 # Shares `MonomialCache` with the symbolic-free polynomial frontend so identical
 # monomials collapse to a single tape slot.
-function _support_monomial_key(
+function support_monomial_key(
         compiler::TapeCompiler, support::Matrix{Int32},
         term::Int, derivative_variable::Int,
     )::MonomialKey
@@ -186,26 +186,26 @@ end
 
 # Returns the (parameter_slot, monomial_slot) pair for one support term, folding
 # an optional integer multiplier (the power-rule factor) into the tape.
-function _support_term_parts!(
+function support_term_parts!(
         cache::MonomialCache, parameter::Int, key::MonomialKey, multiplier::Int = 1,
     )::Tuple{Int32, Int32}
-    monomial_slot = _monomial_slot!(cache, key)
-    monomial_slot = _coeff_mul_slot!(cache.compiler, ComplexF64(multiplier), monomial_slot)
+    monomial_slot = cached_monomial_slot!(cache, key)
+    monomial_slot = coeff_mul_slot!(cache.compiler, ComplexF64(multiplier), monomial_slot)
     return cache.compiler.param_slots[parameter], monomial_slot
 end
 
-function _compile_support_equation!(
+function compile_support_equation!(
         cache::MonomialCache, support::Matrix{Int32}, parameter_offset::Int,
     )::Int32
     terms = Vector{Tuple{Int32, Int32}}(undef, size(support, 2))
     for term in axes(support, 2)
-        key = _support_monomial_key(cache.compiler, support, term, 0)
-        terms[term] = _support_term_parts!(cache, parameter_offset + term, key)
+        key = support_monomial_key(cache.compiler, support, term, 0)
+        terms[term] = support_term_parts!(cache, parameter_offset + term, key)
     end
-    return _compile_sum_products!(cache.compiler, terms)
+    return compile_sum_products!(cache.compiler, terms)
 end
 
-function _compile_support_derivative!(
+function compile_support_derivative!(
         cache::MonomialCache, support::Matrix{Int32},
         parameter_offset::Int, variable::Int,
     )::Int32
@@ -213,17 +213,17 @@ function _compile_support_derivative!(
     for term in axes(support, 2)
         exponent = support[variable, term]
         iszero(exponent) && continue
-        key = _support_monomial_key(cache.compiler, support, term, variable)
+        key = support_monomial_key(cache.compiler, support, term, variable)
         push!(
             terms,
-            _support_term_parts!(cache, parameter_offset + term, key, Int(exponent)),
+            support_term_parts!(cache, parameter_offset + term, key, Int(exponent)),
         )
     end
-    isempty(terms) && return _get_constant_slot!(cache.compiler, zero(ComplexF64))
-    return _compile_sum_products!(cache.compiler, terms)
+    isempty(terms) && return get_constant_slot!(cache.compiler, zero(ComplexF64))
+    return compile_sum_products!(cache.compiler, terms)
 end
 
-function _support_parameter_count(support::Vector{Matrix{Int32}})::Int
+function support_parameter_count(support::Vector{Matrix{Int32}})::Int
     count = 0
     for A in support
         count += size(A, 2)
@@ -231,14 +231,14 @@ function _support_parameter_count(support::Vector{Matrix{Int32}})::Int
     return count
 end
 
-function _build_support_instruction_sequence(
+function build_support_instruction_sequence(
         support::Vector{Matrix{Int32}}, include_jacobian::Bool,
     )::InstructionSequence
     nequations = length(support)
     nvariables = size(first(support), 1)
-    nparams = _support_parameter_count(support)
+    nparams = support_parameter_count(support)
     compiler = TapeCompiler(nvariables, nparams)
-    _initialize_placeholder_slots!(compiler, nvariables, nparams)
+    initialize_placeholder_slots!(compiler, nvariables, nparams)
     cache = MonomialCache(compiler)
 
     parameter_offsets = Vector{Int}(undef, nequations)
@@ -253,7 +253,7 @@ function _build_support_instruction_sequence(
     for equation in eachindex(support)
         push!(
             result_slots,
-            _compile_support_equation!(
+            compile_support_equation!(
                 cache, support[equation], parameter_offsets[equation],
             ),
         )
@@ -263,7 +263,7 @@ function _build_support_instruction_sequence(
             for equation in eachindex(support)
                 push!(
                     result_slots,
-                    _compile_support_derivative!(
+                    compile_support_derivative!(
                         cache, support[equation], parameter_offsets[equation], variable,
                     ),
                 )
@@ -271,13 +271,13 @@ function _build_support_instruction_sequence(
         end
     end
 
-    return _finalize_compiler(
+    return finalize_compiler(
         Val(false), compiler, result_slots,
         nvariables, nparams, nequations,
     )
 end
 
-function _support_evaluator(
+function support_evaluator(
         eval_sequence::InstructionSequence,
         jacobian_sequence::InstructionSequence,
         nequations::Int,
@@ -300,15 +300,15 @@ function _support_evaluator(
     interp_t3 = Interpreter(
         Vector{TruncatedTaylorSeries{4, ComplexF64}}, eval_sequence,
     )
-    evaluation_fws = _build_interpreted_evaluation_fws(
+    evaluation_fws = build_interpreted_evaluation_fws(
         interp_f64, interp_df64, interp_jac,
     )
     return SystemEvaluator(
         evaluation_fws...,
-        SysTaylor1FW(_unsupported_support_taylor!),
-        SysTaylor2FW(_unsupported_support_taylor!),
-        SysTaylor3FW(_unsupported_support_taylor!),
-        SysTaylor1ParamFW(_unsupported_support_taylor!),
+        SysTaylor1FW(unsupported_support_taylor!),
+        SysTaylor2FW(unsupported_support_taylor!),
+        SysTaylor3FW(unsupported_support_taylor!),
+        SysTaylor1ParamFW(unsupported_support_taylor!),
         SysTaylor2ParamFW(
             (u, tx, tp) -> (execute_taylor!(u, Val(2), interp_t2, tx, tp); nothing),
         ),
@@ -318,14 +318,14 @@ function _support_evaluator(
         (nequations, nvariables),
         nparams,
         SystemFactory(
-            _SupportEvaluatorCloner(
+            SupportEvaluatorCloner(
                 eval_sequence, jacobian_sequence, nequations, nvariables, nparams,
             ),
         ),
     )
 end
 
-struct _SupportEvaluatorCloner
+struct SupportEvaluatorCloner
     eval_sequence::InstructionSequence
     jacobian_sequence::InstructionSequence
     nequations::Int
@@ -333,11 +333,11 @@ struct _SupportEvaluatorCloner
     nparams::Int
 end
 
-(c::_SupportEvaluatorCloner)()::SystemEvaluator = _support_evaluator(
+(c::SupportEvaluatorCloner)()::SystemEvaluator = support_evaluator(
     c.eval_sequence, c.jacobian_sequence, c.nequations, c.nvariables, c.nparams,
 )
 
-@noinline function _unsupported_support_taylor!()::Nothing
+@noinline function unsupported_support_taylor!()::Nothing
     throw(
         ArgumentError(
             "the internal polyhedral support evaluator does not provide this Taylor mode",
@@ -345,69 +345,69 @@ end
     )
 end
 
-@inline function _unsupported_support_taylor!(
+@inline function unsupported_support_taylor!(
         ::FSVec{ComplexF64}, ::TaylorVector{2, ComplexF64}, ::FSVec{ComplexF64},
     )::Nothing
-    return _unsupported_support_taylor!()
+    return unsupported_support_taylor!()
 end
-@inline function _unsupported_support_taylor!(
+@inline function unsupported_support_taylor!(
         ::FSVec{ComplexF64}, ::TaylorVector{3, ComplexF64}, ::FSVec{ComplexF64},
     )::Nothing
-    return _unsupported_support_taylor!()
+    return unsupported_support_taylor!()
 end
-@inline function _unsupported_support_taylor!(
+@inline function unsupported_support_taylor!(
         ::FSVec{ComplexF64}, ::TaylorVector{4, ComplexF64}, ::FSVec{ComplexF64},
     )::Nothing
-    return _unsupported_support_taylor!()
+    return unsupported_support_taylor!()
 end
-@inline function _unsupported_support_taylor!(
+@inline function unsupported_support_taylor!(
         ::FSVec{ComplexF64}, ::TaylorVector{2, ComplexF64}, ::TaylorVector{2, ComplexF64},
     )::Nothing
-    return _unsupported_support_taylor!()
+    return unsupported_support_taylor!()
 end
 
-function _support_system(support::Vector{Matrix{Int32}})::_SupportSystem
-    eval_sequence = _build_support_instruction_sequence(support, false)
-    jacobian_sequence = _build_support_instruction_sequence(support, true)
-    evaluator = _support_evaluator(
+function build_support_system(support::Vector{Matrix{Int32}})::SupportSystem
+    eval_sequence = build_support_instruction_sequence(support, false)
+    jacobian_sequence = build_support_instruction_sequence(support, true)
+    evaluator = support_evaluator(
         eval_sequence,
         jacobian_sequence,
         length(support),
         size(first(support), 1),
-        _support_parameter_count(support),
+        support_parameter_count(support),
     )
-    return _SupportSystem(evaluator, eval_sequence, jacobian_sequence)
+    return SupportSystem(evaluator, eval_sequence, jacobian_sequence)
 end
 
-_clone_system_evaluator(system::_SupportSystem)::SystemEvaluator =
-    _clone_system_evaluator(system.evaluator)
+clone_system_evaluator(system::SupportSystem)::SystemEvaluator =
+    clone_system_evaluator(system.evaluator)
 
 # ── CommonSolve.init: polys + Polyhedral ────────────────────────────────────
 
-const _PolyhedralSourceData =
+const PolyhedralSourceData =
     Tuple{Vector{Matrix{Int32}}, Vector{Vector{ComplexF64}}, ExcessCheckers}
 
-function _polyhedral_source_data(
+function polyhedral_source_data(
         ::SquareShape, ::Random.MersenneTwister, F::System, ::Float64,
-    )::_PolyhedralSourceData
+    )::PolyhedralSourceData
     source_support, source_coeffs = support_coefficients(F)
     return source_support, source_coeffs, ExcessCheckers()
 end
 
 # `with_polyhedral_system` rejects an underdetermined system before the support is
 # read, so this arm raises that same error rather than leaving the branch a hole.
-_polyhedral_source_data(
+polyhedral_source_data(
     shape::UnderdeterminedShape, ::Random.MersenneTwister, F::System, ::Float64,
-)::_PolyhedralSourceData = _check_square_or_overdetermined(shape, F)
+)::PolyhedralSourceData = check_square_or_overdetermined(shape, F)
 
-function _polyhedral_source_data(
+function polyhedral_source_data(
         ::OverdeterminedShape, rng::Random.MersenneTwister, F::System,
         excess_residual_tol::Float64,
-    )::_PolyhedralSourceData
+    )::PolyhedralSourceData
     source_support, source_coeffs = support_coefficients(F)
-    A, perm, checker = _square_up(rng, F, excess_residual_tol)
+    A, perm, checker = square_up(rng, F, excess_residual_tol)
     randomized_support, randomized_coeffs =
-        _randomize_support(source_support, source_coeffs, A, perm)
+        randomize_support(source_support, source_coeffs, A, perm)
     return randomized_support, randomized_coeffs, ExcessCheckers([checker])
 end
 
@@ -431,7 +431,7 @@ end
 # compile. Once such an entry point exists upstream, replace this hand-rebuilt
 # iterator (and its six internal-symbol dependencies) with the public call and
 # drop the explicit-imports allowlist entries.
-function _canonical_mixed_cell_iterator(
+function canonical_mixed_cell_iterator(
         support::Vector{Matrix{Int32}},
         lifting::Vector{Vector{Int32}},
     )
@@ -473,7 +473,7 @@ function _canonical_mixed_cell_iterator(
     )
 end
 
-function _fine_mixed_cells_canonical(
+function fine_mixed_cells_canonical(
         support::Vector{Matrix{Int32}},
         lifting_sampler;
         max_tries::Int = 10,
@@ -487,7 +487,7 @@ function _fine_mixed_cells_canonical(
 
             cells = MixedSubdivisions.MixedCell[]
             all_valid = true
-            for cell in _canonical_mixed_cell_iterator(support, lifting)
+            for cell in canonical_mixed_cell_iterator(support, lifting)
                 if !MixedSubdivisions.is_fine(cell)
                     all_valid = false
                     break
@@ -501,22 +501,22 @@ function _fine_mixed_cells_canonical(
             rethrow()
         end
     end
-    _has_zero_mixed_volume(support) && return MixedSubdivisions.MixedCell[], lifting
-    return _fine_mixed_cells_failure()
+    has_zero_mixed_volume(support) && return MixedSubdivisions.MixedCell[], lifting
+    return fine_mixed_cells_failure()
 end
 
 # The mixed cells of `support` sum to this, so it is also the number of paths the
 # polyhedral start system tracks. A one-column support is a point: mixed volume 0 by
 # multilinearity, but MixedSubdivisions cannot process it.
-function _mixed_volume(support::Vector{Matrix{Int32}})::Int
+function support_mixed_volume(support::Vector{Matrix{Int32}})::Int
     any(A -> size(A, 2) < 2, support) && return 0
     return Int(MixedSubdivisions.mixed_volume(support))
 end
 
 # A numeric failure is not zero volume.
-function _has_zero_mixed_volume(support::Vector{Matrix{Int32}})::Bool
+function has_zero_mixed_volume(support::Vector{Matrix{Int32}})::Bool
     try
-        return iszero(_mixed_volume(support))
+        return iszero(support_mixed_volume(support))
     catch err
         if err isa InexactError || err isa LinearAlgebra.SingularException
             return false
@@ -525,13 +525,13 @@ function _has_zero_mixed_volume(support::Vector{Matrix{Int32}})::Bool
     end
 end
 
-@noinline _fine_mixed_cells_failure() =
+@noinline fine_mixed_cells_failure() =
     error("MixedSubdivisions could not compute fine mixed cells")
 
 """
     with_polyhedral_system(f, F, alg)
 
-Run `f` on the system `_init_polyhedral` runs on, with every route's preparation
+Run `f` on the system `init_polyhedral` runs on, with every route's preparation
 applied: a homogeneous system is put on an affine chart, a composition is
 substituted out. Reading the support off this is what keeps `paths_to_track` from
 drifting away from the paths a solve actually tracks.
@@ -541,17 +541,17 @@ equations with expressions, so the branches build differently parameterized
 `System`s.
 """
 function with_polyhedral_system(f::F, S::System, alg::Polyhedral) where {F}
-    _check_parameter_free(S, "`Polyhedral`")
-    _check_polynomial(S, "`Polyhedral`")
+    check_parameter_free(S, "`Polyhedral`")
+    check_polynomial(S, "`Polyhedral`")
     if is_homogeneous(S)
-        _check_single_group(S)
-        _check_projective_determined(S, "`Polyhedral`")
-        G = _polynomial_system(S)
+        check_single_group(S)
+        check_projective_determined(S, "`Polyhedral`")
+        G = as_polynomial_system(S)
         return with_polyhedral_system(
-            f, _sliced_solve_system(G, _full_subspace(nvariables(G)), _seed(alg)), alg,
+            f, sliced_solve_system(G, full_subspace(nvariables(G)), algorithm_seed(alg)), alg,
         )
     end
-    _check_square_or_overdetermined(S)
+    check_square_or_overdetermined(S)
     return f(S)
 end
 
@@ -560,17 +560,17 @@ with_polyhedral_system(f::F, C::CompositionSystem, alg::Polyhedral) where {F} =
 
 # The support the mixed cells are computed from: squared up when the system is
 # overdetermined, then padded unless only the torus solutions are wanted.
-function _polyhedral_support(F::System, alg::Polyhedral)::Vector{Matrix{Int32}}
-    rng = Random.MersenneTwister(_seed(alg))
+function polyhedral_support(F::System, alg::Polyhedral)::Vector{Matrix{Int32}}
+    rng = Random.MersenneTwister(algorithm_seed(alg))
     source_support, _, _ = with_system_shape(F) do shape
-        _polyhedral_source_data(shape, rng, F, alg.excess_residual_tol)
+        polyhedral_source_data(shape, rng, F, alg.excess_residual_tol)
     end
-    return Matrix{Int32}[_padded_support(A, alg.only_torus) for A in source_support]
+    return Matrix{Int32}[padded_support(A, alg.only_torus) for A in source_support]
 end
 
 # `only_torus` divides each equation by its lowest monomial; otherwise the zero exponent
 # vector is added so the solutions on the coordinate hyperplanes are found too.
-_padded_support(A::Matrix{Int32}, only_torus::Bool)::Matrix{Int32} =
+padded_support(A::Matrix{Int32}, only_torus::Bool)::Matrix{Int32} =
     only_torus ? A .- minimum(A; dims = 2) :
     has_zero_column(A) ? A : hcat(A, zeros(Int32, size(A, 1)))
 
@@ -580,17 +580,17 @@ function CommonSolve.init(
     )::PolyhedralSolveCache{E} where {E <: AbstractExecutor}
     # Dynamic call: specializes the body on the concrete `System` so that
     # the shape branch resolves against the concrete system.
-    initializer = Base.inferencebarrier(_init_polyhedral)
+    initializer = Base.inferencebarrier(init_polyhedral)
     return with_polyhedral_system(F, alg) do G
         initializer(G, alg, exec)::PolyhedralSolveCache{E}
     end
 end
 
-function _init_polyhedral(
+function init_polyhedral(
         F::System, alg::Polyhedral, exec::E,
     )::PolyhedralSolveCache{E} where {E <: AbstractExecutor}
-    show_progress = _show_progress(alg)
-    seed = _seed(alg)
+    show_progress = algorithm_show_progress(alg)
+    seed = algorithm_seed(alg)
     n = F.nvars
 
     # Task-local RNG seeded from user seed — deterministic without mutating global state.
@@ -601,7 +601,7 @@ function _init_polyhedral(
     #    (mixed cells, parametric system, both homotopy phases) then operates on
     #    the support of G = [I A]·(F∘perm) and never sees the original system.
     source_support, source_coeffs, excess_checkers = with_system_shape(F) do shape
-        _polyhedral_source_data(shape, rng, F, alg.excess_residual_tol)
+        polyhedral_source_data(shape, rng, F, alg.excess_residual_tol)
     end
 
     # 2. Generate start coefficients for ORIGINAL support FIRST.
@@ -627,7 +627,7 @@ function _init_polyhedral(
     start_coeffs = Vector{Vector{ComplexF64}}(undef, length(source_coeffs))
     for (i, A) in enumerate(source_support)
         pad = !alg.only_torus && !has_zero_column(A)
-        support[i] = _padded_support(A, alg.only_torus)
+        support[i] = padded_support(A, alg.only_torus)
         target_coeffs[i] = pad ?
             push!(copy(source_coeffs[i]), zero(ComplexF64)) : source_coeffs[i]
         start_coeffs[i] = pad ?
@@ -636,9 +636,9 @@ function _init_polyhedral(
 
     # 4. Compute mixed cells via MixedSubdivisions
     # Custom lifting sampler that draws from our local rng for reproducibility.
-    _lifting_sampler(nterms::Int, attempt::Int = 1) =
+    default_lifting_sampler(nterms::Int, attempt::Int = 1) =
         rand(rng, Int32(-2^(10 + attempt)):Int32(2^(10 + attempt)), nterms)
-    mixed_cells, lifting = _fine_mixed_cells_canonical(support, _lifting_sampler)
+    mixed_cells, lifting = fine_mixed_cells_canonical(support, default_lifting_sampler)
 
     # 5. Solve binomial systems for each mixed cell. No cell means mixed volume 0, so
     #    there is no path to track and the cache is built empty.
@@ -657,21 +657,21 @@ function _init_polyhedral(
 
     # 6. Lower the cached support directly to the coefficient-parametric tape.
     #    This avoids a synthetic DynamicPolynomials -> System compiler round trip.
-    support_system = _support_system(support)
+    support_system = build_support_system(support)
 
     # 7. Toric phase (t goes from 0 to 1), on a conservative max_initial_step_size
     toric_opts = TrackerOptions(;
-        max_steps = _tracker_options(alg).max_steps,
-        max_step_size = _tracker_options(alg).max_step_size,
-        max_initial_step_size = min(_tracker_options(alg).max_initial_step_size, 0.2),
-        extended_precision = _tracker_options(alg).extended_precision,
-        min_step_size = _tracker_options(alg).min_step_size,
-        terminate_cond = _tracker_options(alg).terminate_cond,
-        a = _tracker_options(alg).a,
-        β_a = _tracker_options(alg).β_a,
-        β_ω = _tracker_options(alg).β_ω,
-        β_τ = _tracker_options(alg).β_τ,
-        strict_β_τ = _tracker_options(alg).strict_β_τ,
+        max_steps = algorithm_tracker_options(alg).max_steps,
+        max_step_size = algorithm_tracker_options(alg).max_step_size,
+        max_initial_step_size = min(algorithm_tracker_options(alg).max_initial_step_size, 0.2),
+        extended_precision = algorithm_tracker_options(alg).extended_precision,
+        min_step_size = algorithm_tracker_options(alg).min_step_size,
+        terminate_cond = algorithm_tracker_options(alg).terminate_cond,
+        a = algorithm_tracker_options(alg).a,
+        β_a = algorithm_tracker_options(alg).β_a,
+        β_ω = algorithm_tracker_options(alg).β_ω,
+        β_τ = algorithm_tracker_options(alg).β_τ,
+        strict_β_τ = algorithm_tracker_options(alg).strict_β_τ,
     )
 
     # 8. Coefficient phase (t goes from 1 to 0)
@@ -680,7 +680,7 @@ function _init_polyhedral(
 
     builder = PolyhedralBuilder(
         support_system, start_coeffs, flat_start, flat_target,
-        toric_opts, _tracker_options(alg), _endgame_options(alg),
+        toric_opts, algorithm_tracker_options(alg), algorithm_endgame_options(alg),
     )
     worker = builder()
 
@@ -698,12 +698,12 @@ end
 # ── Toric phase tracking with two-stage reparameterization ─────────────────
 
 """
-    _init_toric!(tracker, x₀, t_start, t_end)
+    init_toric!(tracker, x₀, t_start, t_end)
 
 Initialize the toric tracker with ω=20 (optimistic initial Lipschitz),
 μ=1e-12, and max_initial_step_size=0.2.
 """
-function _init_toric!(
+function init_toric!(
         tracker::Tracker,
         x₀::AbstractVector{<:Number},
         t_start::ComplexF64,
@@ -718,13 +718,13 @@ function _init_toric!(
 end
 
 """
-    _track_toric_phase!(tracker, H, x₀, min_weight, max_weight, support, lifting, cell)
+    track_toric_phase!(tracker, H, x₀, min_weight, max_weight, support, lifting, cell)
 
 Track the toric phase with two-stage reparameterization for large weights.
 When max_weight >= 10, the path is split into two stages to avoid numerical
 issues from t^w where w is large and t is near 1.
 """
-function _track_toric_phase!(
+function track_toric_phase!(
         tracker::Tracker,
         H::ToricHomotopy,
         x₀::AbstractVector{ComplexF64},
@@ -737,7 +737,7 @@ function _track_toric_phase!(
 
     if max_weight < 10.0
         # Simple case: track directly from 0 to 1
-        code = _init_toric!(tracker, x₀, complex(0.0), complex(1.0))
+        code = init_toric!(tracker, x₀, complex(0.0), complex(1.0))
         if code != TrackerCode.TRACKING
             return code
         end
@@ -750,7 +750,7 @@ function _track_toric_phase!(
     # Two-stage reparameterization for large weights:
     # Stage 1: track from 0 to t₀
     t₀ = clamp(0.1^(10.0 / max_weight), 0.9, 1.0 - 1.0e-6)
-    code = _init_toric!(tracker, x₀, complex(0.0), complex(t₀))
+    code = init_toric!(tracker, x₀, complex(0.0), complex(t₀))
     if code != TrackerCode.TRACKING
         return code
     end
@@ -786,7 +786,7 @@ function _track_toric_phase!(
 end
 
 # One two-phase path: toric phase from the mixed cell, then the coefficient homotopy.
-function _track_polyhedral_path!(
+function track_polyhedral_path!(
         toric_tracker::Tracker, coeff_tracker::EndgameTracker,
         toric_H::ToricHomotopy, support::Vector{Matrix{Int32}},
         lifting::Vector{Vector{Int32}}, x_buffer::Vector{ComplexF64},
@@ -794,7 +794,7 @@ function _track_polyhedral_path!(
     )::PathResult
     min_w, max_w = update_weights!(toric_H, support, lifting, cell; min_weight = 1.0)
 
-    code = _track_toric_phase!(
+    code = track_toric_phase!(
         toric_tracker, toric_H, x₀, min_w, max_w, support, lifting, cell,
     )
 
@@ -814,7 +814,7 @@ function _track_polyhedral_path!(
         step!(coeff_tracker)
     end
 
-    return _add_steps(
+    return add_steps(
         PathResult(
             coeff_tracker; path_number = k, start_solution = Vector{ComplexF64}(x₀),
         ),
@@ -822,11 +822,11 @@ function _track_polyhedral_path!(
     )
 end
 
-_track_polyhedral_path!(
+track_polyhedral_path!(
     ws::PolyhedralWorkerState, support::Vector{Matrix{Int32}},
     lifting::Vector{Vector{Int32}}, cell::MixedSubdivisions.MixedCell,
     x₀::Vector{ComplexF64}, k::Int,
-)::PathResult = _track_polyhedral_path!(
+)::PathResult = track_polyhedral_path!(
     ws.toric_tracker, ws.coeff_tracker, ws.toric_homotopy, support, lifting,
     ws.x_buffer, cell, x₀, k,
 )

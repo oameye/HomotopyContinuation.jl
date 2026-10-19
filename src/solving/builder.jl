@@ -8,13 +8,13 @@ worker state for one task, built from immutable data the builder stores.
 
 Every subtype must return worker states sharing nothing mutable, so that any number
 of them can track concurrently. A subtype that cannot must say so by defining
-`_builds_independent_workers`; `SharedHomotopyBuilder` is the only one that does.
+`builds_independent_workers`; `SharedHomotopyBuilder` is the only one that does.
 """
 abstract type AbstractPathBuilder end
 
 # Whether repeated calls hand out worker states sharing nothing mutable, which is
 # what lets the same paths be tracked on several tasks at once.
-_builds_independent_workers(::AbstractPathBuilder)::Bool = true
+builds_independent_workers(::AbstractPathBuilder)::Bool = true
 
 """
     StraightLineBuilder
@@ -31,8 +31,8 @@ struct StraightLineBuilder{S <: CloneableSystem} <: AbstractPathBuilder
 end
 
 function (b::StraightLineBuilder)()::TrackingWorkerState
-    start_eval = _total_degree_startevaluator(b.degrees)
-    target_eval = _clone_system_evaluator(b.target_system)
+    start_eval = total_degree_startevaluator(b.degrees)
+    target_eval = clone_system_evaluator(b.target_system)
     H = StraightLineHomotopy(start_eval, target_eval; γ = b.γ)
     eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return TrackingWorkerState(eg)
@@ -57,9 +57,9 @@ struct RandomizedStraightLineBuilder{S <: CloneableSystem} <: AbstractPathBuilde
 end
 
 function (b::RandomizedStraightLineBuilder)()::TrackingWorkerState
-    start_eval = _total_degree_startevaluator(b.degrees)
-    inner_eval = _clone_system_evaluator(b.target_system)
-    target_eval = _randomized_evaluator(inner_eval, b.A, b.perm)
+    start_eval = total_degree_startevaluator(b.degrees)
+    inner_eval = clone_system_evaluator(b.target_system)
+    target_eval = randomized_evaluator(inner_eval, b.A, b.perm)
     H = StraightLineHomotopy(start_eval, target_eval; γ = b.γ)
     eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return TrackingWorkerState(eg)
@@ -85,12 +85,12 @@ struct MultiHomogeneousBuilder{G <: System, S <: System} <: AbstractPathBuilder
 end
 
 function (b::MultiHomogeneousBuilder)()::TrackingWorkerState
-    start_eval = _clone_system_evaluator(b.start_system)
-    target_eval = _clone_system_evaluator(b.target_system)
+    start_eval = clone_system_evaluator(b.start_system)
+    target_eval = clone_system_evaluator(b.target_system)
     codim(b.subspace) == 0 ||
-        (target_eval = _sliced_evaluator(target_eval, b.subspace, ComplexF64[]))
+        (target_eval = sliced_evaluator(target_eval, b.subspace, ComplexF64[]))
     isempty(b.perm) ||
-        (target_eval = _randomized_evaluator(target_eval, b.A, b.perm))
+        (target_eval = randomized_evaluator(target_eval, b.A, b.perm))
     H = StraightLineHomotopy(start_eval, target_eval; γ = b.γ)
     eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return TrackingWorkerState(eg)
@@ -113,8 +113,8 @@ end
 
 function (b::StartTargetBuilder)()::TrackingWorkerState
     H = StraightLineHomotopy(
-        _clone_system_evaluator(b.start_system),
-        _clone_system_evaluator(b.target_system);
+        clone_system_evaluator(b.start_system),
+        clone_system_evaluator(b.target_system);
         γ = b.γ,
     )
     eg = isempty(b.chart) ?
@@ -142,7 +142,7 @@ end
 
 # The one exception to the `AbstractPathBuilder` contract: this builder wraps the
 # caller's homotopy as it stands, so two of its workers hold one evaluator's tapes.
-_builds_independent_workers(::SharedHomotopyBuilder)::Bool = false
+builds_independent_workers(::SharedHomotopyBuilder)::Bool = false
 
 """
     ClonedHomotopyBuilder
@@ -158,7 +158,7 @@ end
 
 (b::ClonedHomotopyBuilder)()::TrackingWorkerState = TrackingWorkerState(
     endgame_tracker(
-        _clone_homotopy(b.homotopy), b.tracker_options, b.endgame_options,
+        clone_homotopy(b.homotopy), b.tracker_options, b.endgame_options,
     ),
 )
 
@@ -192,7 +192,7 @@ struct ParameterBuilder{S <: SystemLike} <: AbstractPathBuilder
 end
 
 function (b::ParameterBuilder)()::TrackingWorkerState
-    sys_eval = _clone_system_evaluator(b.param_system)
+    sys_eval = clone_system_evaluator(b.param_system)
     H = ParameterHomotopy(sys_eval, b.start_parameters, b.target_parameters)
     eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return TrackingWorkerState(eg)
@@ -217,9 +217,9 @@ struct SlicedStraightLineBuilder{S <: System} <: AbstractPathBuilder
 end
 
 function (b::SlicedStraightLineBuilder)()::TrackingWorkerState
-    start_eval = _total_degree_startevaluator(b.degrees)
-    inner_eval = _clone_system_evaluator(b.target_system)
-    target_eval = _sliced_evaluator(inner_eval, b.subspace, b.chart)
+    start_eval = total_degree_startevaluator(b.degrees)
+    inner_eval = clone_system_evaluator(b.target_system)
+    target_eval = sliced_evaluator(inner_eval, b.subspace, b.chart)
     H = StraightLineHomotopy(start_eval, target_eval; γ = b.γ)
     eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return TrackingWorkerState(eg)
@@ -241,7 +241,7 @@ struct ParameterRetargetBuilder{S <: System} <: AbstractPathBuilder
 end
 
 function (b::ParameterRetargetBuilder)()::AmbientWorkerState{ParameterHomotopy}
-    sys_eval = _clone_system_evaluator(b.param_system)
+    sys_eval = clone_system_evaluator(b.param_system)
     H = ParameterHomotopy(sys_eval, b.start_parameters, b.target_parameters)
     eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return AmbientWorkerState(H, eg)
@@ -264,7 +264,7 @@ struct ExtrinsicSubspaceBuilder{S <: System} <: AbstractPathBuilder
 end
 
 function (b::ExtrinsicSubspaceBuilder)()::AmbientWorkerState{ExtrinsicSubspaceHomotopy}
-    ev = _clone_system_evaluator(b.system)
+    ev = clone_system_evaluator(b.system)
     H = ExtrinsicSubspaceHomotopy(ev, b.start, b.target; gamma = b.gamma)
     eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
     return AmbientWorkerState(H, eg)
@@ -290,7 +290,7 @@ end
 function (b::ChartExtrinsicSubspaceBuilder)()::AmbientWorkerState{
         AffineChartHomotopy{ExtrinsicSubspaceHomotopy},
     }
-    ev = _clone_system_evaluator(b.system)
+    ev = clone_system_evaluator(b.system)
     H = AffineChartHomotopy(
         ExtrinsicSubspaceHomotopy(ev, b.start, b.target; gamma = b.gamma), b.chart,
     )
@@ -316,7 +316,7 @@ struct IntrinsicSubspaceBuilder{S <: System} <: AbstractPathBuilder
 end
 
 function (b::IntrinsicSubspaceBuilder)()::IntrinsicWorkerState
-    ev = _clone_system_evaluator(b.system)
+    ev = clone_system_evaluator(b.system)
     inner = isempty(b.chart) ? ev : SystemEvaluator(AffineChartSystem(ev, b.chart))
     H = IntrinsicSubspaceHomotopy(inner, b.start, b.target; gamma = b.gamma)
     eg = endgame_tracker(H, b.tracker_options, b.endgame_options)
@@ -346,12 +346,12 @@ end
 
 function (b::PolyhedralBuilder)()::PolyhedralWorkerState
     # Phase 1: toric — homotopy and tracker are coupled
-    toric_eval = _clone_system_evaluator(b.support_system)
+    toric_eval = clone_system_evaluator(b.support_system)
     toric_H = ToricHomotopy(toric_eval, b.start_coeffs)
     toric_tracker = Tracker(HomotopyEvaluator(toric_H); options = b.toric_options)
 
     # Phase 2: coefficient
-    coeff_eval = _clone_system_evaluator(b.support_system)
+    coeff_eval = clone_system_evaluator(b.support_system)
     coeff_H = CoefficientHomotopy(coeff_eval, b.flat_start, b.flat_target)
     coeff_tracker = endgame_tracker(coeff_H, b.tracker_options, b.endgame_options)
 
@@ -378,13 +378,13 @@ struct PathBuilder{W} <: AbstractPathBuilder
 end
 
 PathBuilder{W}(b::AbstractPathBuilder) where {W} =
-    PathBuilder{W}(BuilderBox(b), _builds_independent_workers(b))
+    PathBuilder{W}(BuilderBox(b), builds_independent_workers(b))
 
 PathBuilder{W}(b::PathBuilder{W}) where {W} = b
 
 (b::PathBuilder{W})() where {W} = (b._inner[])()::W
 
-_builds_independent_workers(b::PathBuilder)::Bool = b._independent
+builds_independent_workers(b::PathBuilder)::Bool = b._independent
 
 const TrackingBuilder = PathBuilder{TrackingWorkerState}
 const PolyhedralPathBuilder = PathBuilder{PolyhedralWorkerState}
@@ -394,12 +394,12 @@ const PolyhedralPathBuilder = PathBuilder{PolyhedralWorkerState}
 const WorkerTrackFW = FunctionWrapper{PathResult, Tuple{Vector{ComplexF64}, Int}}
 const WorkerBox = Base.RefValue{Any}
 
-struct _WorkerTracker{W}
+struct WorkerTracker{W}
     worker::W
 end
 
-(t::_WorkerTracker)(x₀::Vector{ComplexF64}, k::Int)::PathResult =
-    _track_path!(t.worker, x₀, k)
+(t::WorkerTracker)(x₀::Vector{ComplexF64}, k::Int)::PathResult =
+    track_path!(t.worker, x₀, k)
 
 """
     PathWorker
@@ -414,9 +414,9 @@ struct PathWorker
 end
 
 PathWorker(worker)::PathWorker =
-    PathWorker(WorkerTrackFW(_WorkerTracker(worker)), WorkerBox(worker))
+    PathWorker(WorkerTrackFW(WorkerTracker(worker)), WorkerBox(worker))
 
-_track_path!(ws::PathWorker, x₀::Vector{ComplexF64}, k::Int)::PathResult =
+track_path!(ws::PathWorker, x₀::Vector{ComplexF64}, k::Int)::PathResult =
     ws._track!(x₀, k)
 
 # A copied `FunctionWrapper` keeps a raw pointer to the original closure, so a
@@ -440,8 +440,8 @@ struct WorkerPathBuilder <: AbstractPathBuilder
 end
 
 WorkerPathBuilder(b::AbstractPathBuilder)::WorkerPathBuilder =
-    WorkerPathBuilder(BuilderBox(b), _builds_independent_workers(b))
+    WorkerPathBuilder(BuilderBox(b), builds_independent_workers(b))
 
 (b::WorkerPathBuilder)()::PathWorker = PathWorker((b._inner[])())
 
-_builds_independent_workers(b::WorkerPathBuilder)::Bool = b._independent
+builds_independent_workers(b::WorkerPathBuilder)::Bool = b._independent

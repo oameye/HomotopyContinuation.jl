@@ -13,7 +13,7 @@ using HomotopyContinuationCertification: Certification, certify, ncandidates, nc
     # Mimic a successful regular root that the numerical endpoint classifier marked
     # singular because of conditioning. `solutions` intentionally hides it, but the
     # rigorous Krawczyk layer must still get a chance to decide.
-    marked = HCN._with_fields(pr, (singular = true,))
+    marked = HCN.with_fields(pr, (singular = true,))
     result = Result([marked], 1, UInt32(0x51a9))
 
     @test isempty(solutions(result))

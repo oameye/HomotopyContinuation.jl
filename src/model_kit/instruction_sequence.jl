@@ -10,7 +10,7 @@ end
 @inline instruction_input(instr::Instruction) = instr.input
 @inline instruction_output(instr::Instruction) = instr.output
 
-@inline function _instruction(
+@inline function make_instruction(
         input::NTuple{4, <:Integer}, op::OpType.T, output::Integer,
     )::Instruction
     return Instruction(
@@ -42,7 +42,7 @@ Base.iterate(seq::InstructionSequence, state) = iterate(seq.instructions, state)
 
 ## Internal helpers
 
-@inline function _register_vertex!(
+@inline function register_vertex!(
         vertices::Set{Int32},
         vertex_list::Vector{Int32},
         v::Int32,
@@ -54,7 +54,7 @@ Base.iterate(seq::InstructionSequence, state) = iterate(seq.instructions, state)
     return v
 end
 
-@inline function _is_unlisted_vertex(
+@inline function is_unlisted_vertex(
         v::Int32,
         in_degree::Dict{Int32, Int},
         out_degree::Dict{Int32, Int},
@@ -65,7 +65,7 @@ end
         v ∉ roots
 end
 
-function _take_register!(
+function take_register!(
         used_indices::Set{Int32},
         unused_indices::Vector{Int32},
         next_reg::Base.RefValue{Int32},
@@ -84,7 +84,7 @@ function _take_register!(
 end
 
 """Remap a single instruction's inputs/outputs through a Dict, preserving immediate-value inputs."""
-function _remap_instruction(
+function remap_instruction(
         instr::Instruction, remap::Dict{Int32, Int32}; output_fallback::Bool = true,
     )::Instruction
     op = instruction_op(instr)
@@ -95,18 +95,18 @@ function _remap_instruction(
     end
     output = instruction_output(instr)
     new_output = output_fallback ? get(remap, output, output) : Int32(remap[output])
-    return _instruction(new_input, op, new_output)
+    return make_instruction(new_input, op, new_output)
 end
 
 """
-    _optimize_instruction_order(instructions)
+    optimize_instruction_order(instructions)
 
 Reorder instructions using a DAG-based topological sort for better data locality.
 Builds a dependency graph (output → inputs direction), then does a DFS-based
 reverse postorder starting from "root" instructions (those whose output is not
 consumed by other instructions, i.e., assignment targets).
 """
-function _optimize_instruction_order(
+function optimize_instruction_order(
         instructions::Vector{Instruction},
     )::Vector{Instruction}
     isempty(instructions) && return instructions
@@ -123,14 +123,14 @@ function _optimize_instruction_order(
         op = instruction_op(instr)
         input = instruction_input(instr)
         index_to_instr[output] = instr
-        _register_vertex!(vertices, vertex_list, output)
+        register_vertex!(vertices, vertex_list, output)
         get!(children, output, Int32[])
         get!(in_degree, output, 0)
         get!(out_degree, output, 0)
         for k in 1:arity(op)
             should_use_index_not_reference(op, k) && continue
             input_idx = input[k]
-            _register_vertex!(vertices, vertex_list, input_idx)
+            register_vertex!(vertices, vertex_list, input_idx)
             push!(get!(children, output, Int32[]), input_idx)
             in_degree[input_idx] = get(in_degree, input_idx, 0) + 1
             out_degree[output] = get(out_degree, output, 0) + 1
@@ -140,7 +140,7 @@ function _optimize_instruction_order(
     end
 
     listing = Int32[]
-    _stable_sort!(vertex_list, isless)
+    stable_sort!(vertex_list, isless)
     roots = Int32[]
     for v in vertex_list
         get(in_degree, v, 0) == 0 && push!(roots, v)
@@ -175,7 +175,7 @@ function _optimize_instruction_order(
             if isempty(unlisted_nodes_without_parent)
                 for v in vertex_list
                     v in vertices || continue
-                    _is_unlisted_vertex(v, in_degree, out_degree, roots) || continue
+                    is_unlisted_vertex(v, in_degree, out_degree, roots) || continue
                     push!(unlisted_nodes_without_parent, v)
                 end
             end
@@ -192,7 +192,7 @@ function _optimize_instruction_order(
 end
 
 """
-    _reduce_space(instructions, input_block_size, scratch_assignments, direct_assignments)
+    reduce_space(instructions, input_block_size, scratch_assignments, direct_assignments)
 
 Apply register allocation to compact the tape indices used by instructions,
 then remap all instruction inputs/outputs to the compacted indices.
@@ -202,26 +202,26 @@ then remap all instruction inputs/outputs to the compacted indices.
 - `direct_assignments`: `Vector{Tuple{Int, Int32}}` of `(output_index, tape_slot)`
   for assignments pointing directly to input-block slots (no register needed).
 """
-function _reduce_space(
+function reduce_space(
         instructions::Vector{Instruction},
         input_block_size::Int,
         scratch_assignments::UnitRange{Int},
         direct_assignments::Vector{Tuple{Int, Int32}},
     )
     index_map, space_needed, updated_scratch_assignments =
-        _index_compactification_mapping(instructions, input_block_size, scratch_assignments)
+        index_compactification_mapping(instructions, input_block_size, scratch_assignments)
 
     remapped = Vector{Instruction}(undef, length(instructions))
     for i in eachindex(instructions)
         remapped[i] =
-            _remap_instruction(instructions[i], index_map; output_fallback = false)
+            remap_instruction(instructions[i], index_map; output_fallback = false)
     end
 
     return remapped, space_needed, updated_scratch_assignments, direct_assignments
 end
 
 """
-    _index_compactification_mapping(instructions, input_block_size, assignments)
+    index_compactification_mapping(instructions, input_block_size, assignments)
 
 Linear-scan register allocation. Tracks the lifetime (last use) of each
 intermediate register and reuses registers once their lifetime ends.
@@ -229,7 +229,7 @@ Assignment-target registers get dedicated slots at the end and are never reused.
 
 Returns `(index_map, tape_space_needed, updated_assignments_range)`.
 """
-function _index_compactification_mapping(
+function index_compactification_mapping(
         instructions::Vector{Instruction},
         input_block_size::Int,
         assignments::UnitRange{Int},
@@ -265,7 +265,7 @@ function _index_compactification_mapping(
         input = instruction_input(instr)
         # Allocate output register (skip if this is an assignment-target slot)
         if output ∉ assignments
-            index_map[output] = _take_register!(
+            index_map[output] = take_register!(
                 used_indices, unused_indices, next_reg, max_reg,
             )
         end

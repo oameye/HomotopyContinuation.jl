@@ -70,14 +70,14 @@ const PolynomialInput = Union{
 # One normalizer, so no route carries a duplicate method per input form. The
 # identity method is unannotated on purpose: `::System` would assert the UnionAll
 # and lose the concrete parameters that `WitnessSet{S}` return types depend on.
-_as_system(F::System) = F
-_as_system(F::AbstractVector{<:MP.AbstractPolynomialLike}) = System(collect(F))
-_as_system(f::MP.AbstractPolynomialLike) = System([f])
+as_system(F::System) = F
+as_system(F::AbstractVector{<:MP.AbstractPolynomialLike}) = System(collect(F))
+as_system(f::MP.AbstractPolynomialLike) = System([f])
 
-_tracker_options(alg::AbstractAlgorithm)::TrackerOptions = alg.common.tracker_options
-_endgame_options(alg::AbstractAlgorithm)::EndgameOptions = alg.common.endgame_options
-_seed(alg::AbstractAlgorithm)::UInt32 = alg.common.seed
-_show_progress(alg::AbstractAlgorithm)::Bool = alg.common.show_progress
+algorithm_tracker_options(alg::AbstractAlgorithm)::TrackerOptions = alg.common.tracker_options
+algorithm_endgame_options(alg::AbstractAlgorithm)::EndgameOptions = alg.common.endgame_options
+algorithm_seed(alg::AbstractAlgorithm)::UInt32 = alg.common.seed
+algorithm_show_progress(alg::AbstractAlgorithm)::Bool = alg.common.show_progress
 
 """
     seed(alg::AbstractAlgorithm) -> UInt32
@@ -87,13 +87,13 @@ the same run regardless of the state of the global random number generator.
 """
 seed(alg::AbstractAlgorithm)::UInt32 = alg.common.seed
 
-_with_seed(o::CommonOptions, seed::UInt32)::CommonOptions =
+with_seed(o::CommonOptions, seed::UInt32)::CommonOptions =
     CommonOptions(o.tracker_options, o.endgame_options, seed, o.show_progress)
 
 # Routes that track nothing (`paths_to_track`) or track lazily
 # (`result_iterator`) have no progress to report, so they silence the algorithm
 # they were handed rather than rejecting one that asks for a bar.
-_quiet(o::CommonOptions)::CommonOptions =
+without_progress(o::CommonOptions)::CommonOptions =
     CommonOptions(o.tracker_options, o.endgame_options, o.seed, false)
 
 # ── Early stop ──────────────────────────────────────────────────────────────
@@ -106,13 +106,13 @@ the algorithm carrying it stays a single concrete type whatever the callback is.
 """
 const EarlyStop = FunctionWrapper{Bool, Tuple{PathResult}}
 
-_never_stop(::PathResult)::Bool = false
+never_stop(::PathResult)::Bool = false
 
-_early_stop(f::EarlyStop)::EarlyStop = f
-_early_stop(f)::EarlyStop = EarlyStop(f)
+to_early_stop(f::EarlyStop)::EarlyStop = f
+to_early_stop(f)::EarlyStop = EarlyStop(f)
 
 # `false` for every path, so a solve with no callback runs every start solution.
-const NEVER_STOP = EarlyStop(_never_stop)
+const NEVER_STOP = EarlyStop(never_stop)
 
 """
     early_stop_callback(alg) -> EarlyStop
@@ -135,7 +135,7 @@ algorithm that does not square a system up.
 """
 excess_residual_tol(::AbstractAlgorithm)::Float64 = 0.0
 
-function _checked_excess_residual_tol(tol::Float64)::Float64
+function checked_excess_residual_tol(tol::Float64)::Float64
     tol >= 0 || throw(
         ArgumentError("`excess_residual_tol` must be non-negative, got $tol"),
     )
@@ -167,7 +167,7 @@ end
 
 Continuation(;
     coords::SubspaceCoords.T = SubspaceCoords.AUTO,
-    early_stop_callback = _never_stop,
+    early_stop_callback = never_stop,
     tracker_options::TrackerOptions = TrackerOptions(),
     endgame_options::EndgameOptions = EndgameOptions(),
     seed::UInt32 = rand(Random.RandomDevice(), UInt32),
@@ -175,13 +175,13 @@ Continuation(;
 ) = Continuation(
     CommonOptions(tracker_options, endgame_options, seed, show_progress),
     coords,
-    _early_stop(early_stop_callback),
+    to_early_stop(early_stop_callback),
 )
 
 early_stop_callback(alg::Continuation)::EarlyStop = alg.early_stop
 
-_quiet(alg::Continuation)::Continuation =
-    Continuation(_quiet(alg.common), alg.coords, alg.early_stop)
+without_progress(alg::Continuation)::Continuation =
+    Continuation(without_progress(alg.common), alg.coords, alg.early_stop)
 
 # ── Sweep: one homotopy retargeted over many targets ────────────────────────
 

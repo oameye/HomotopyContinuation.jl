@@ -43,20 +43,20 @@ end
 
 # `start_solution` is copied, not aliased: the caller's `starts` vector outlives
 # the result and a sweep reuses it for every target.
-function _track_path!(
+function track_path!(
         ws::AmbientWorkerState, x₀::Vector{ComplexF64}, k::Int,
     )::PathResult
     track!(ws.tracker, x₀)
     return PathResult(ws.tracker; path_number = k, start_solution = copy(x₀))
 end
 
-function _track_path!(
+function track_path!(
         ws::IntrinsicWorkerState, x₀::Vector{ComplexF64}, k::Int,
     )::PathResult
     intrinsic_coordinates!(ws.u, ws.homotopy, x₀, complex(1.0))
     track!(ws.tracker, ws.u)
     pr = PathResult(ws.tracker; path_number = k, start_solution = copy(x₀))
-    return _to_ambient(pr, ws.homotopy)
+    return to_ambient(pr, ws.homotopy)
 end
 
 # ── init: subspace to subspace ─────────────────────────────────────────────
@@ -65,7 +65,7 @@ end
 # dimension: the geodesic connects two points of one Grassmannian. Without this
 # check a mismatch surfaces as a `BoundsError` inside the geodesic (intrinsic) or
 # as a silently different problem (extrinsic).
-function _check_subspace_pair(
+function check_subspace_pair(
         F::System, V::LinearSubspace, W::LinearSubspace,
     )::Nothing
     n = nvariables(F)
@@ -84,7 +84,7 @@ function _check_subspace_pair(
     return nothing
 end
 
-function _check_subspace_square(H::AbstractHomotopy, regime::String)::Nothing
+function check_subspace_square(H::AbstractHomotopy, regime::String)::Nothing
     m, n = size(H)
     m == n || throw(
         ArgumentError(
@@ -96,35 +96,35 @@ function _check_subspace_square(H::AbstractHomotopy, regime::String)::Nothing
     return nothing
 end
 
-function _init_intrinsic_subspace(
+function init_intrinsic_subspace(
         G::System, starts::Vector{Vector{ComplexF64}},
         L_start::LinearSubspace, L_target::LinearSubspace,
         chart::Vector{ComplexF64}, gamma::ComplexF64,
         exec::E, alg::AbstractAlgorithm,
     )::WorkerSolveCache{E} where {E <: AbstractExecutor}
-    tracker_options, endgame_options = _tracker_options(alg), _endgame_options(alg)
+    tracker_options, endgame_options = algorithm_tracker_options(alg), algorithm_endgame_options(alg)
     builder = IntrinsicSubspaceBuilder(
         G, convert(LinearSubspace{ComplexF64}, L_start),
         convert(LinearSubspace{ComplexF64}, L_target),
         chart, gamma, tracker_options, endgame_options,
     )
     worker = builder()
-    _check_subspace_square(worker.homotopy, "intrinsic")
+    check_subspace_square(worker.homotopy, "intrinsic")
     return WorkerSolveCache(
-        exec, builder, worker, starts, _seed(alg), _show_progress(alg),
+        exec, builder, worker, starts, algorithm_seed(alg), algorithm_show_progress(alg),
         early_stop_callback(alg),
     )
 end
 
 # An empty chart means the affine route; a chart wraps the homotopy. The two
 # builders are different concrete types.
-function _init_extrinsic_subspace(
+function init_extrinsic_subspace(
         G::System, starts::Vector{Vector{ComplexF64}},
         L_start::LinearSubspace, L_target::LinearSubspace,
         chart::Vector{ComplexF64}, gamma::ComplexF64,
         exec::E, alg::AbstractAlgorithm,
     )::WorkerSolveCache{E} where {E <: AbstractExecutor}
-    tracker_options, endgame_options = _tracker_options(alg), _endgame_options(alg)
+    tracker_options, endgame_options = algorithm_tracker_options(alg), algorithm_endgame_options(alg)
     V = convert(LinearSubspace{ComplexF64}, L_start)
     W = convert(LinearSubspace{ComplexF64}, L_target)
     if isempty(chart)
@@ -132,9 +132,9 @@ function _init_extrinsic_subspace(
             G, V, W, gamma, tracker_options, endgame_options,
         )
         worker = builder()
-        _check_subspace_square(worker.homotopy, "extrinsic")
+        check_subspace_square(worker.homotopy, "extrinsic")
         return WorkerSolveCache(
-            exec, builder, worker, starts, _seed(alg), _show_progress(alg),
+            exec, builder, worker, starts, algorithm_seed(alg), algorithm_show_progress(alg),
             early_stop_callback(alg),
         )
     end
@@ -142,9 +142,9 @@ function _init_extrinsic_subspace(
         G, V, W, chart, gamma, tracker_options, endgame_options,
     )
     chart_worker = chart_builder()
-    _check_subspace_square(chart_worker.homotopy, "extrinsic")
+    check_subspace_square(chart_worker.homotopy, "extrinsic")
     return WorkerSolveCache(
-        exec, chart_builder, chart_worker, starts, _seed(alg), _show_progress(alg),
+        exec, chart_builder, chart_worker, starts, algorithm_seed(alg), algorithm_show_progress(alg),
         early_stop_callback(alg),
     )
 end
@@ -152,16 +152,16 @@ end
 # Fix parameters, materialize the start points, and place them on `chart` when
 # the problem is projective (the chart row is part of the tracked system, so a
 # projective representative off the chart is not a solution of it).
-function _subspace_solve_setup(
+function subspace_solve_setup(
         F::System, starts::StartsLike, L_start::LinearSubspace, L_target::LinearSubspace,
         seed::UInt32,
     )
-    _check_parameter_free(F, "`solve(F, starts, L_start, L_target)`")
+    check_parameter_free(F, "`solve(F, starts, L_start, L_target)`")
     G = F
-    _check_subspace_pair(G, L_start, L_target)
+    check_subspace_pair(G, L_start, L_target)
     rng = Random.MersenneTwister(seed)
-    gamma = _random_gamma(rng)
-    points = _start_points(starts)
+    gamma = random_gamma(rng)
+    points = start_points(starts)
     projective = is_linear(L_start) && is_linear(L_target) && is_homogeneous(G)
     chart = projective ? randn(rng, ComplexF64, nvariables(G)) : ComplexF64[]
     if projective
@@ -179,15 +179,15 @@ function CommonSolve.init(
         alg::Continuation = Continuation(),
         exec::E = Threaded(),
     )::WorkerSolveCache{E} where {E <: AbstractExecutor}
-    seed = _seed(alg)
-    intrinsic = _use_intrinsic(alg.coords, L_start)
-    G, points, chart, gamma = _subspace_solve_setup(
+    seed = algorithm_seed(alg)
+    intrinsic = use_intrinsic(alg.coords, L_start)
+    G, points, chart, gamma = subspace_solve_setup(
         F, starts, L_start, L_target, seed,
     )
     return if intrinsic
-        _init_intrinsic_subspace(G, points, L_start, L_target, chart, gamma, exec, alg)
+        init_intrinsic_subspace(G, points, L_start, L_target, chart, gamma, exec, alg)
     else
-        _init_extrinsic_subspace(G, points, L_start, L_target, chart, gamma, exec, alg)
+        init_extrinsic_subspace(G, points, L_start, L_target, chart, gamma, exec, alg)
     end
 end
 
@@ -235,10 +235,10 @@ for f in (:(solve), :(CommonSolve.init))
         $f(
             ::System, starts, ::LinearSubspace, ::LinearSubspace,
             ::Continuation = Continuation(), ::AbstractExecutor = Threaded(),
-        ) = _bad_starts(starts)
+        ) = bad_starts(starts)
         $f(
             ::System, starts, ::LinearSubspace, ::LinearSubspace,
             ::AbstractExecutor,
-        ) = _bad_starts(starts)
+        ) = bad_starts(starts)
     end
 end

@@ -44,14 +44,14 @@ struct TotalDegreeStartSystem <: AbstractSystem
     degrees::Vector{Int}
 end
 
-_clone_system(F::TotalDegreeStartSystem)::TotalDegreeStartSystem =
+clone_system(F::TotalDegreeStartSystem)::TotalDegreeStartSystem =
     TotalDegreeStartSystem(copy(F.degrees))
 
 Base.size(F::TotalDegreeStartSystem)::Tuple{Int, Int} =
     (length(F.degrees), length(F.degrees))
 
-@inline _total_degree_value(x, degree::Int) = Base.power_by_squaring(x, degree) - one(x)
-@inline _total_degree_jacobian_entry(x, degree::Int) =
+@inline total_degree_value(x, degree::Int) = Base.power_by_squaring(x, degree) - one(x)
+@inline total_degree_jacobian_entry(x, degree::Int) =
     degree == 1 ? one(x) : degree * Base.power_by_squaring(x, degree - 1)
 
 function evaluate!(
@@ -59,7 +59,7 @@ function evaluate!(
         x::FSVec{ComplexF64}, p::FSVec{ComplexF64},
     )::Nothing
     @inbounds for i in eachindex(u)
-        u[i] = _total_degree_value(x[i], F.degrees[i])
+        u[i] = total_degree_value(x[i], F.degrees[i])
     end
     return nothing
 end
@@ -69,7 +69,7 @@ function evaluate!(
         x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
     )::Nothing
     @inbounds for i in eachindex(u)
-        u[i] = ComplexF64(_total_degree_value(x[i], F.degrees[i]))
+        u[i] = ComplexF64(total_degree_value(x[i], F.degrees[i]))
     end
     return nothing
 end
@@ -79,7 +79,7 @@ function evaluate!(
         x::FSVec{ComplexDF64}, p::FSVec{ComplexF64},
     )::Nothing
     @inbounds for i in eachindex(u)
-        u[i] = _total_degree_value(x[i], F.degrees[i])
+        u[i] = total_degree_value(x[i], F.degrees[i])
     end
     return nothing
 end
@@ -92,8 +92,8 @@ function evaluate_and_jacobian!(
     @inbounds for i in eachindex(u)
         degree = F.degrees[i]
         x_i = x[i]
-        u[i] = _total_degree_value(x_i, degree)
-        U[i, i] = _total_degree_jacobian_entry(x_i, degree)
+        u[i] = total_degree_value(x_i, degree)
+        U[i, i] = total_degree_jacobian_entry(x_i, degree)
     end
     return nothing
 end
@@ -110,7 +110,7 @@ function taylor!(
 end
 
 TotalDegree(;
-    early_stop_callback = _never_stop,
+    early_stop_callback = never_stop,
     excess_residual_tol::Float64 = 0.0,
     tracker_options::TrackerOptions = TrackerOptions(),
     endgame_options::EndgameOptions = EndgameOptions(),
@@ -118,31 +118,31 @@ TotalDegree(;
     show_progress::Bool = true,
 ) = TotalDegree(
     CommonOptions(tracker_options, endgame_options, seed, show_progress),
-    _early_stop(early_stop_callback),
-    _checked_excess_residual_tol(excess_residual_tol),
+    to_early_stop(early_stop_callback),
+    checked_excess_residual_tol(excess_residual_tol),
 )
 
 early_stop_callback(alg::TotalDegree)::EarlyStop = alg.early_stop
 
 excess_residual_tol(alg::TotalDegree)::Float64 = alg.excess_residual_tol
 
-# Every option but `common` survives, so a new field reaches `_reseed`/`_quiet` here.
-_with_common(alg::TotalDegree, common::CommonOptions)::TotalDegree =
+# Every option but `common` survives, so a new field reaches `reseed`/`without_progress` here.
+with_common(alg::TotalDegree, common::CommonOptions)::TotalDegree =
     TotalDegree(common, alg.early_stop, alg.excess_residual_tol)
 
 # A parent derives its children's seeds from its own, so one top-level seed
 # reproduces every stage.
-_reseed(alg::TotalDegree, seed::UInt32)::TotalDegree =
-    _with_common(alg, _with_seed(alg.common, seed))
+reseed(alg::TotalDegree, seed::UInt32)::TotalDegree =
+    with_common(alg, with_seed(alg.common, seed))
 
-_quiet(alg::TotalDegree)::TotalDegree = _with_common(alg, _quiet(alg.common))
+without_progress(alg::TotalDegree)::TotalDegree = with_common(alg, without_progress(alg.common))
 
-function _total_degree_startsystem(degrees::Vector{Int})::TotalDegreeStartSystem
+function total_degree_startsystem(degrees::Vector{Int})::TotalDegreeStartSystem
     return TotalDegreeStartSystem(copy(degrees))
 end
 
-function _total_degree_startevaluator(degrees::Vector{Int})::SystemEvaluator
-    return SystemEvaluator(_total_degree_startsystem(degrees))
+function total_degree_startevaluator(degrees::Vector{Int})::SystemEvaluator
+    return SystemEvaluator(total_degree_startsystem(degrees))
 end
 
 """

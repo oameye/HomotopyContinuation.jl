@@ -49,7 +49,7 @@ end
 
 const NEWTON_MAX_ITERS = 11
 
-@inline function _mixed_refine!(
+@inline function mixed_refine!(
         Δx::FSVec{ComplexF64},
         J::Jacobian,
         r::FSVec{ComplexF64},
@@ -72,7 +72,7 @@ const NEWTON_MAX_ITERS = 11
     return δ
 end
 
-@inline function _copy_df64!(
+@inline function copy_df64!(
         dst::FSVec{ComplexDF64},
         src::FSVec{ComplexF64},
     )::Nothing
@@ -95,17 +95,17 @@ function extended_prec_refinement_step!(
     evaluate_and_jacobian!(NC.r, J.workspace.A, H, x, t)
     updated!(J)
 
-    _copy_df64!(NC.x_ext, x)
+    copy_df64!(NC.x_ext, x)
     evaluate!(NC.r, H, NC.x_ext, t)
     LA.ldiv!(NC.Δx, J, NC.r, norm)
-    _mixed_refine!(NC.Δx, J, NC.r, norm, 1.0e-8)
+    mixed_refine!(NC.Δx, J, NC.r, norm, 1.0e-8)
 
     @inbounds for i in eachindex(x̄, x, NC.Δx)
         x̄[i] = x[i] - NC.Δx[i]
     end
 
     if simple_newton_step
-        _copy_df64!(NC.x_ext, x̄)
+        copy_df64!(NC.x_ext, x̄)
         evaluate!(NC.r, H, NC.x_ext, t)
         LA.ldiv!(NC.Δx, J, NC.r, norm)
     end
@@ -160,14 +160,14 @@ function newton!(
         updated!(J)
 
         if extended_precision
-            _copy_df64!(NC.x_ext, x̄)
+            copy_df64!(NC.x_ext, x̄)
             evaluate!(r, H, NC.x_ext, t)
         end
 
         # Solve J * Δx = r
         LA.ldiv!(Δx, J, r, norm)
         if extended_precision
-            _mixed_refine!(Δx, J, r, norm, ā^2)
+            mixed_refine!(Δx, J, r, norm, ā^2)
         end
 
         norm_Δx = weighted_norm(Δx, norm)
@@ -225,12 +225,12 @@ function newton!(
             if extended_precision
                 LA.ldiv!(Δx, J, r, norm)
                 μ_low = weighted_norm(Δx, norm)
-                _copy_df64!(NC.x_ext, x̄)
+                copy_df64!(NC.x_ext, x̄)
                 evaluate!(r, H, NC.x_ext, t)
             end
             LA.ldiv!(Δx, J, r)
             if extended_precision
-                _mixed_refine!(Δx, J, r, norm, ā^2)
+                mixed_refine!(Δx, J, r, norm, ā^2)
             end
             norm_Δx_next = weighted_norm(Δx, norm)
 
@@ -260,7 +260,7 @@ function newton!(
 
             # Update μ
             if norm_Δx_next > 2.0 * μ && extended_precision
-                _copy_df64!(NC.x_ext, x̄)
+                copy_df64!(NC.x_ext, x̄)
                 evaluate!(r, H, NC.x_ext, t)
                 LA.ldiv!(Δx, J, r, norm)
                 μ = weighted_norm(Δx, norm)
@@ -330,7 +330,7 @@ function init_newton!(
     evaluate_and_jacobian!(r, J.workspace.A, H, x₀, t)
     updated!(J)
     if extended_precision
-        _copy_df64!(NC.x_ext, x₀)
+        copy_df64!(NC.x_ext, x₀)
         evaluate!(r, H, NC.x_ext, t)
     end
     LA.ldiv!(Δx, J, r, norm)
@@ -356,7 +356,7 @@ function init_newton!(
         evaluate_and_jacobian!(r, J.workspace.A, H, x̄, t)
         updated!(J)
         if extended_precision
-            _copy_df64!(NC.x_ext, x̄)
+            copy_df64!(NC.x_ext, x̄)
             evaluate!(r, H, NC.x_ext, t)
         end
         LA.ldiv!(Δx, J, r, norm)
@@ -375,7 +375,7 @@ function init_newton!(
         # Second step: evaluate residual only at x̄, reuse Jacobian from first step
         # (the Jacobian changes slowly for small corrections)
         if extended_precision
-            _copy_df64!(NC.x_ext, x̄)
+            copy_df64!(NC.x_ext, x̄)
             evaluate!(r, H, NC.x_ext, t)
         else
             evaluate!(r, H, x̄, t)

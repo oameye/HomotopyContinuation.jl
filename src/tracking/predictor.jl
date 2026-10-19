@@ -160,17 +160,17 @@ function update!(
 
     pred.tx_norm = (n0, n1, n2, n3)
 
-    _compute_trust_region!(pred)
+    compute_trust_region!(pred)
     return nothing
 end
 
 """
-    _compute_trust_region!(pred)
+    compute_trust_region!(pred)
 
 Estimate the trust region radius from the Taylor coefficient magnitudes.
 Uses component-wise ratio of successive coefficients.
 """
-function _compute_trust_region!(pred::Predictor)::Nothing
+function compute_trust_region!(pred::Predictor)::Nothing
     n = size(pred.tx3.data, 2)
     tau = Inf
     tol = 1.0e-14
@@ -251,14 +251,14 @@ function predict!(
         dt::ComplexF64,
     )::Nothing
     if pred.method == PredictionMethod.HERMITE
-        _predict_hermite!(x_hat, pred, dt)
+        predict_hermite!(x_hat, pred, dt)
     else
-        _predict_pade21!(x_hat, pred, dt)
+        predict_pade21!(x_hat, pred, dt)
     end
     return nothing
 end
 
-function _predict_pade21!(
+function predict_pade21!(
         x_hat::FSVec{ComplexF64},
         pred::Predictor,
         dt::ComplexF64,
@@ -300,7 +300,7 @@ end
 
 # Cubic Hermite prediction in s-plane for singular paths (winding_number > 1).
 # Converts t-plane Taylor data to s-plane (s = t^{1/m}) and interpolates.
-function _predict_hermite!(
+function predict_hermite!(
         x_hat::FSVec{ComplexF64},
         pred::Predictor,
         dt::ComplexF64,
@@ -311,9 +311,9 @@ function _predict_hermite!(
     prev_t = pred.prev_t
     t_target = t + dt
 
-    prev_s = _t_to_s(prev_t, m)
-    s = _t_to_s(t, m)
-    s_target = _t_to_s(t_target, m)
+    prev_s = t_to_s(prev_t, m)
+    s = t_to_s(t, m)
+    s_target = t_to_s(t_target, m)
 
     prev_μ = m > 2 ? m * prev_s^(m - 1) : (m == 2 ? 2 * prev_s : 1.0 + 0.0im)
     μ = m > 2 ? m * s^(m - 1) : (m == 2 ? 2 * s : 1.0 + 0.0im)
@@ -338,7 +338,7 @@ function _predict_hermite!(
 end
 
 # Convert t to s-plane: s = t^{1/m} (positive real root for real positive t)
-@inline function _t_to_s(t::ComplexF64, m::Int)::ComplexF64
+@inline function t_to_s(t::ComplexF64, m::Int)::ComplexF64
     r = fast_abs(t)
     if isreal(t) && real(t) > 0
         return complex(nthroot(r, m))

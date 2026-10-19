@@ -11,9 +11,9 @@
 
 # Distance callable indirection: InfNorm is a marker struct, custom distances
 # are callables d(x, y).
-@inline _vt_distance(::InfNorm, x, y) = inf_distance(x, y)
-@inline _vt_distance(::EuclideanNorm, x, y) = euclidean_distance(x, y)
-@inline _vt_distance(d, x, y) = d(x, y)
+@inline vt_distance(::InfNorm, x, y) = inf_distance(x, y)
+@inline vt_distance(::EuclideanNorm, x, y) = euclidean_distance(x, y)
+@inline vt_distance(d, x, y) = d(x, y)
 
 mutable struct VTNode{T}
     # Mutable: nentries grows as points are inserted; children slots fill in lazily.
@@ -103,18 +103,18 @@ function Base.empty!(tree::VoronoiTree{T, M}) where {T, M}
 end
 
 # One distances buffer per recursion depth (1-based), grown on demand.
-@inline function _scratch_at(tree::VoronoiTree, depth::Int)::Vector{Tuple{Float64, Int}}
+@inline function scratch_at(tree::VoronoiTree, depth::Int)::Vector{Tuple{Float64, Int}}
     while length(tree.scratch) < depth
         push!(tree.scratch, Vector{Tuple{Float64, Int}}(undef, capacity(tree.root)))
     end
     return @inbounds tree.scratch[depth]
 end
 
-function _compute_distances!(
+function compute_distances!(
         distances::Vector{Tuple{Float64, Int}}, tree::VoronoiTree, node::VTNode, x,
     )::Nothing
     for j in 1:length(node)
-        distances[j] = (_vt_distance(tree.distance, x, view(node.values, :, j)), j)
+        distances[j] = (vt_distance(tree.distance, x, view(node.values, :, j)), j)
     end
     return nothing
 end
@@ -129,10 +129,10 @@ Returns its identifier, or `0` if no such point exists. Identifiers are
 function search_in_radius(
         tree::VoronoiTree{T, M}, v::AbstractVector, tol::Real,
     )::Int where {T, M}
-    return _search_in_radius!(tree, tree.root, v, Float64(tol), 1)
+    return tree_search_in_radius!(tree, tree.root, v, Float64(tol), 1)
 end
 
-function _search_in_radius!(
+function tree_search_in_radius!(
         tree::VoronoiTree{T, M}, node::VTNode{T}, v, tol::Float64, depth::Int,
     )::Int where {T, M}
     !isempty(node) || return 0
@@ -145,8 +145,8 @@ function _search_in_radius!(
     # dᵢ - d_min < 2 tol (triangle inequality); without a triangle inequality
     # all children are checked. Track the three smallest along the way.
     m₁ = m₂ = m₃ = (Inf, 1)
-    distances = _scratch_at(tree, depth)
-    _compute_distances!(distances, tree, node, v)
+    distances = scratch_at(tree, depth)
+    compute_distances!(distances, tree, node, v)
     for i in 1:n
         dᵢ = first(distances[i])
         if dᵢ < tol
@@ -170,7 +170,7 @@ function _search_in_radius!(
     # 3) otherwise: sort all distances and sweep until the bound cuts off.
 
     if isassigned(node.children, last(m₁))
-        retid = _search_in_radius!(tree, node.children[last(m₁)], v, tol, depth + 1)
+        retid = tree_search_in_radius!(tree, node.children[last(m₁)], v, tol, depth + 1)
         iszero(retid) || return retid
     end
 
@@ -179,7 +179,7 @@ function _search_in_radius!(
     end
 
     if isassigned(node.children, last(m₂))
-        retid = _search_in_radius!(tree, node.children[last(m₂)], v, tol, depth + 1)
+        retid = tree_search_in_radius!(tree, node.children[last(m₂)], v, tol, depth + 1)
         iszero(retid) || return retid
     end
 
@@ -188,7 +188,7 @@ function _search_in_radius!(
     end
 
     if isassigned(node.children, last(m₃))
-        retid = _search_in_radius!(tree, node.children[last(m₃)], v, tol, depth + 1)
+        retid = tree_search_in_radius!(tree, node.children[last(m₃)], v, tol, depth + 1)
         iszero(retid) || return retid
     end
 
@@ -201,7 +201,7 @@ function _search_in_radius!(
         dᵢ, i = distances[k]
         if dᵢ - m₁[1] < 2tol || !triangle_inequality
             if isassigned(node.children, i)
-                retid = _search_in_radius!(tree, node.children[i], v, tol, depth + 1)
+                retid = tree_search_in_radius!(tree, node.children[i], v, tol, depth + 1)
                 iszero(retid) || return retid
             end
         else
@@ -218,12 +218,12 @@ end
 Insert the point `v` with identifier `id` into the tree.
 """
 function Base.insert!(tree::VoronoiTree{T, M}, v::AbstractVector, id::Int) where {T, M}
-    _insert!(tree, tree.root, v, id, 1)
+    insert_point!(tree, tree.root, v, id, 1)
     tree.nentries += 1
     return tree
 end
 
-function _insert!(
+function insert_point!(
         tree::VoronoiTree{T, M}, node::VTNode{T}, v, id::Int, depth::Int,
     )::Nothing where {T, M}
     # If not filled so far, just add to the current node.
@@ -234,8 +234,8 @@ function _insert!(
         return nothing
     end
 
-    distances = _scratch_at(tree, depth)
-    _compute_distances!(distances, tree, node, v)
+    distances = scratch_at(tree, depth)
+    compute_distances!(distances, tree, node, v)
     dmin, minᵢ = distances[1]
     for j in 2:length(node)
         dⱼ = first(distances[j])
@@ -247,7 +247,7 @@ function _insert!(
     if !isassigned(node.children, minᵢ)
         node.children[minᵢ] = VTNode{T}(v, id, capacity(node))
     else
-        _insert!(tree, node.children[minᵢ], v, id, depth + 1)
+        insert_point!(tree, node.children[minᵢ], v, id, depth + 1)
     end
 
     return nothing
@@ -270,14 +270,14 @@ function add!(tree::VoronoiTree{T, M}, v::AbstractVector, id::Int, tol::Real) wh
     end
 end
 
-function _identifiers!(ids::Vector{Int}, node::VTNode)::Vector{Int}
+function identifiers!(ids::Vector{Int}, node::VTNode)::Vector{Int}
     for i in 1:length(node)
         push!(ids, node.ids[i])
         if isassigned(node.children, i)
-            _identifiers!(ids, node.children[i])
+            identifiers!(ids, node.children[i])
         end
     end
     return ids
 end
 
-Base.collect(tree::VoronoiTree) = _identifiers!(Int[], tree.root)
+Base.collect(tree::VoronoiTree) = identifiers!(Int[], tree.root)

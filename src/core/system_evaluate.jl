@@ -6,11 +6,11 @@ const EvaluableSystem = Union{SystemEvaluator, CloneableSystem, AbstractSystem}
 # A system carrying a cached evaluator is evaluated through it. A bare `AbstractSystem`
 # already implements the same interface, and wrapping one in a `SystemEvaluator` per call
 # would cost more than the evaluation it is meant to serve.
-_evaluation_target(S::SystemEvaluator)::SystemEvaluator = S
-_evaluation_target(F::CloneableSystem)::SystemEvaluator = F.evaluator
-_evaluation_target(F::AbstractSystem) = F
+evaluation_target(S::SystemEvaluator)::SystemEvaluator = S
+evaluation_target(F::CloneableSystem)::SystemEvaluator = F.evaluator
+evaluation_target(F::AbstractSystem) = F
 
-function _evaluation_arguments(
+function evaluation_arguments(
         S::EvaluableSystem, x::AbstractVector{<:Number}, p::AbstractVector{<:Number},
     )::Tuple{FSVec{ComplexF64}, FSVec{ComplexF64}}
     n = size(S)[2]
@@ -52,8 +52,8 @@ function evaluate(
         F::EvaluableSystem, x::AbstractVector{<:Number},
         p::AbstractVector{<:Number} = ComplexF64[],
     )::Vector{ComplexF64}
-    xs, ps = _evaluation_arguments(F, x, p)
-    S = _evaluation_target(F)
+    xs, ps = evaluation_arguments(F, x, p)
+    S = evaluation_target(F)
     u = FSVec{ComplexF64}(undef, size(F)[1])
     evaluate!(u, S, xs, ps)
     return collect(u)
@@ -69,8 +69,8 @@ function jacobian(
         F::EvaluableSystem, x::AbstractVector{<:Number},
         p::AbstractVector{<:Number} = ComplexF64[],
     )::Matrix{ComplexF64}
-    xs, ps = _evaluation_arguments(F, x, p)
-    S = _evaluation_target(F)
+    xs, ps = evaluation_arguments(F, x, p)
+    S = evaluation_target(F)
     m, n = size(F)
     u = FSVec{ComplexF64}(undef, m)
     U = FSMat{ComplexF64}(undef, m, n)
@@ -94,9 +94,9 @@ Exact for a [`System`](@ref), decided from the coefficients themselves. Any othe
 system is decided by evaluating at one random real point, and so is correct with
 probability one.
 """
-is_real(F::System)::Bool = _has_real_coefficients(polynomials(F))
+is_real(F::System)::Bool = all_real_coefficients(polynomials(F))
 
-function _has_real_coefficients(
+function all_real_coefficients(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
     )::Bool
     for p in polys, c in MP.coefficients(p)
@@ -105,7 +105,7 @@ function _has_real_coefficients(
     return true
 end
 
-function _has_real_coefficients(exprs::AbstractVector{Expression})::Bool
+function all_real_coefficients(exprs::AbstractVector{Expression})::Bool
     for e in exprs
         has_real_coefficients(e) || return false
     end
@@ -116,7 +116,7 @@ function is_real(
         F::Union{SystemEvaluator, CompositionSystem, FixedParameterSystem, AbstractSystem};
         rng::Random.AbstractRNG = Random.default_rng(),
     )::Bool
-    S = _evaluation_target(F)
+    S = evaluation_target(F)
     m, n = size(F)
     u = FSVec{ComplexF64}(undef, m)
     x = FSVec{ComplexF64}(randn(rng, n))

@@ -587,7 +587,7 @@ end
 # `floor(::Type{I}, ::DoubleF64) where I <: Integer` shape has the same
 # invalidation problem as broad `convert` methods, and the current code only
 # needs a concrete integer target.
-@inline function _floor_int64(a::DoubleF64)::Int64
+@inline function floor_int64(a::DoubleF64)::Int64
     hi = floor(Int64, a.hi)
     lo = zero(Int64)
     if hi == a.hi
@@ -608,7 +608,7 @@ end
     return DoubleF64(hi, lo)
 end
 
-@inline function _ceil_int64(a::DoubleF64)::Int64
+@inline function ceil_int64(a::DoubleF64)::Int64
     hi = ceil(Int64, a.hi)
     lo = zero(Int64)
     if hi == a.hi
@@ -618,8 +618,8 @@ end
 end
 
 Base.trunc(a::DoubleF64) = a.hi >= 0.0 ? floor(a) : ceil(a)
-_trunc_int64(a::DoubleF64)::Int64 = a.hi >= 0.0 ? _floor_int64(a) : _ceil_int64(a)
-Base.trunc(::Type{Int64}, a::DoubleF64)::Int64 = _trunc_int64(a)
+trunc_int64(a::DoubleF64)::Int64 = a.hi >= 0.0 ? floor_int64(a) : ceil_int64(a)
+Base.trunc(::Type{Int64}, a::DoubleF64)::Int64 = trunc_int64(a)
 Base.isinteger(x::DoubleF64)::Bool = iszero(x - trunc(x))
 
 # ---------------------------------------------------------------------------
@@ -659,14 +659,14 @@ mul_pwr2(a::DoubleF64, b::Float64) = DoubleF64(a.hi * b, a.lo * b)
 # ---------------------------------------------------------------------------
 
 # 1/n! for n = 1, …, 32, accurate to double-double precision.
-const _INV_FACTORIAL = ntuple(
+const INV_FACTORIAL = ntuple(
     n -> DoubleF64(one(BigFloat) / BigFloat(factorial(big(n)))), 32,
 )
 const double_log2 = DoubleF64(log(BigFloat(2)))
-const _LOG2_F64 = 0.6931471805599453
+const LOG2_F64 = 0.6931471805599453
 # exp overflows above log(prevfloat(Inf)) and flushes to zero below log(nextfloat(0)).
-const _EXP_MAX = 709.79
-const _EXP_MIN = -745.2
+const EXP_MAX = 709.79
+const EXP_MIN = -745.2
 
 """
     exp(a::DoubleF64)
@@ -677,18 +677,18 @@ result is squared back up nine times.
 """
 function Base.exp(a::DoubleF64)::DoubleF64
     isnan(a) && return double_nan
-    a.hi >= _EXP_MAX && return double_inf
-    a.hi <= _EXP_MIN && return zero(DoubleF64)
+    a.hi >= EXP_MAX && return double_inf
+    a.hi <= EXP_MIN && return zero(DoubleF64)
     iszero(a) && return one(DoubleF64)
 
-    m = round(a.hi / _LOG2_F64)
+    m = round(a.hi / LOG2_F64)
     r = mul_pwr2(a - double_log2 * m, 1 / 512)
 
     r2 = r * r
     s = r + mul_pwr2(r2, 0.5)
     p = r2 * r
     for n in 3:11
-        s += p * _INV_FACTORIAL[n]
+        s += p * INV_FACTORIAL[n]
         p = p * r
     end
     # Undo the 1/512 scaling: exp(2r) - 1 = 2(exp(r) - 1) + (exp(r) - 1)².
@@ -699,25 +699,25 @@ function Base.exp(a::DoubleF64)::DoubleF64
 end
 
 # Taylor series on |x| <= π/4. The last retained term is below 2^-106 there.
-function _sin_taylor(x::DoubleF64)::DoubleF64
+function sin_taylor(x::DoubleF64)::DoubleF64
     x2 = x * x
     s = x
     p = x
     for n in 3:2:31
         p = p * x2
-        t = p * _INV_FACTORIAL[n]
+        t = p * INV_FACTORIAL[n]
         s = isodd((n - 1) ÷ 2) ? s - t : s + t
     end
     return s
 end
 
-function _cos_taylor(x::DoubleF64)::DoubleF64
+function cos_taylor(x::DoubleF64)::DoubleF64
     x2 = x * x
     s = one(DoubleF64)
     p = one(DoubleF64)
     for n in 2:2:30
         p = p * x2
-        t = p * _INV_FACTORIAL[n]
+        t = p * INV_FACTORIAL[n]
         s = isodd(n ÷ 2) ? s - t : s + t
     end
     return s
@@ -743,10 +743,10 @@ function Base.sincos(a::DoubleF64)::Tuple{DoubleF64, DoubleF64}
     t = a - double_2pi * round(a / double_2pi)
     q = round(t / double_pi2)
     t = t - double_pi2 * q
-    s = _sin_taylor(t)
-    c = _cos_taylor(t)
+    s = sin_taylor(t)
+    c = cos_taylor(t)
 
-    j = mod(Int(_trunc_int64(q)), 4)
+    j = mod(Int(trunc_int64(q)), 4)
     j == 0 && return (s, c)
     j == 1 && return (c, -s)
     j == 2 && return (-s, -c)
@@ -758,13 +758,13 @@ Base.cos(a::DoubleF64)::DoubleF64 = sincos(a)[2]
 
 # Past this magnitude e^-|a| sits below the double-double ulp of e^|a|, so both
 # functions equal e^|a|/2 and forming `e ± 1/e` would yield NaN.
-const _SINH_LARGE = 40.0
+const SINH_LARGE = 40.0
 
 function Base.cosh(a::DoubleF64)::DoubleF64
     isnan(a) && return double_nan
     isinf(a) && return double_inf
     iszero(a) && return one(DoubleF64)
-    abs(a.hi) > _SINH_LARGE && return exp(abs(a) - double_log2)
+    abs(a.hi) > SINH_LARGE && return exp(abs(a) - double_log2)
     e = exp(a)
     return mul_pwr2(e + inv(e), 0.5)
 end
@@ -773,7 +773,7 @@ function Base.sinh(a::DoubleF64)::DoubleF64
     isnan(a) && return double_nan
     isinf(a) && return a.hi > 0.0 ? double_inf : -double_inf
     iszero(a) && return zero(DoubleF64)
-    if abs(a.hi) > _SINH_LARGE
+    if abs(a.hi) > SINH_LARGE
         s = exp(abs(a) - double_log2)
         return a.hi > 0.0 ? s : -s
     end
@@ -787,19 +787,19 @@ function Base.sinh(a::DoubleF64)::DoubleF64
     p = a
     for n in 3:2:17
         p = p * x2
-        s += p * _INV_FACTORIAL[n]
+        s += p * INV_FACTORIAL[n]
     end
     return s
 end
 
 # Past this magnitude `1 - |tanh a| = 2e^(-2|a|)` sits below the double-double ulp
 # of 1, so tanh saturates.
-const _TANH_SATURATE = 40.0
+const TANH_SATURATE = 40.0
 
 function Base.tanh(a::DoubleF64)::DoubleF64
     isnan(a) && return double_nan
     iszero(a) && return zero(a)
-    if abs(a.hi) > _TANH_SATURATE
+    if abs(a.hi) > TANH_SATURATE
         return a.hi > 0.0 ? one(DoubleF64) : -one(DoubleF64)
     end
     if abs(a.hi) > 0.05
@@ -926,7 +926,7 @@ function Base.tan(z::ComplexDF64)::ComplexDF64
     x = real(z)
     y = imag(z)
     # cosh 2y dominates every other term, leaving ±i.
-    abs(y.hi) > _TANH_SATURATE &&
+    abs(y.hi) > TANH_SATURATE &&
         return ComplexDF64(zero(DoubleF64), DoubleF64(sign(y.hi)))
     y2 = mul_pwr2(y, 2.0)
     s, c = sincos(mul_pwr2(x, 2.0))
@@ -938,7 +938,7 @@ end
 function Base.tanh(z::ComplexDF64)::ComplexDF64
     x = real(z)
     y = imag(z)
-    abs(x.hi) > _TANH_SATURATE &&
+    abs(x.hi) > TANH_SATURATE &&
         return ComplexDF64(DoubleF64(sign(x.hi)), zero(DoubleF64))
     x2 = mul_pwr2(x, 2.0)
     s, c = sincos(mul_pwr2(y, 2.0))

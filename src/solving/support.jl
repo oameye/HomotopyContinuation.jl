@@ -37,7 +37,7 @@ function support_coefficients(
         end
         # Sort columns by descending total degree, then descending lexicographic.
         # This canonical ordering ensures coefficient indices match the support.
-        perm = _td_order_perm(S)
+        perm = td_order_perm(S)
         supports[k] = S[:, perm]
         coeffs[k] = c[perm]
     end
@@ -46,7 +46,7 @@ function support_coefficients(
 end
 
 # `exponents_coefficients` already expands an `Expression` into one term per monomial,
-# in the same column order `_td_order_perm` produces for the polynomial front end.
+# in the same column order `td_order_perm` produces for the polynomial front end.
 function support_coefficients(
         polys::AbstractVector{Expression},
         variables::AbstractVector{Expression},
@@ -60,12 +60,12 @@ function support_coefficients(
 end
 
 """
-    _td_order_perm(S::Matrix{Int32}) → Vector{Int}
+    td_order_perm(S::Matrix{Int32}) → Vector{Int}
 
 Compute permutation that sorts support columns by descending total degree,
 with ties broken by descending lexicographic order of exponent vectors.
 """
-function _td_order_perm(S::Matrix{Int32})::Vector{Int}
+function td_order_perm(S::Matrix{Int32})::Vector{Int}
     ncols = size(S, 2)
     nrows = size(S, 1)
     return sortperm(

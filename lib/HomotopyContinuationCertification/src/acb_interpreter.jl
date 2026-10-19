@@ -130,7 +130,7 @@ end
 
 function _generate_acb_execute_arms()
     arms = Expr[]
-    for (variant, op_name) in _EXEC_INSTRUCTION_SPECS
+    for (variant, op_name) in EXEC_INSTRUCTION_SPECS
         op = getfield(OpType, op_name)
         binds = op == OpType.OP_STOP ? Any[] : Any[Symbol(:arg_, k) for k in 1:arity(op)]
         push!(binds, :output)
@@ -180,7 +180,7 @@ function Base.show(io::IO, I::AcbInterpreter)
 end
 
 function AcbInterpreter(seq::InstructionSequence; prec::Int = 128)
-    instructions = _compile_exec_instructions(seq.instructions)
+    instructions = compile_exec_instructions(seq.instructions)
     tape = AcbRefVector(seq.tape_space_needed; prec = prec)
     @inbounds for (i, k) in enumerate(seq.constants_range)
         Arblib.set!(tape[k], seq.constants[i])

@@ -24,7 +24,7 @@ mutable struct TapeCompiler
     two_slot::Int32
 end
 
-const _SLOT_NONE = Int32(0)
+const SLOT_NONE = Int32(0)
 
 function TapeCompiler(nvars::Int, nparams::Int)
     return TapeCompiler(
@@ -36,18 +36,18 @@ function TapeCompiler(nvars::Int, nparams::Int)
         Dict{Int, SExprT}(),
         Dict{Int, Int32}(),
         Int32(0),
-        _SLOT_NONE,
-        _SLOT_NONE,
-        _SLOT_NONE,
+        SLOT_NONE,
+        SLOT_NONE,
+        SLOT_NONE,
     )
 end
 
 ## ── Core helpers ────────────────────────────────────────────────────────────
 
 """Register a constant and return its tape slot (1-based, relative to constants block)."""
-function _get_constant_slot!(c::TapeCompiler, val::ComplexF64)::Int32
-    slot = get(c.constants_map, val, _SLOT_NONE)
-    slot != _SLOT_NONE && return slot
+function get_constant_slot!(c::TapeCompiler, val::ComplexF64)::Int32
+    slot = get(c.constants_map, val, SLOT_NONE)
+    slot != SLOT_NONE && return slot
     push!(c.constants, val)
     slot = Int32(length(c.constants))
     c.constants_map[val] = slot
@@ -62,64 +62,64 @@ function _get_constant_slot!(c::TapeCompiler, val::ComplexF64)::Int32
 end
 
 """Emit an instruction and return the output tape slot. Unused input slots are filled with the last provided arg."""
-function _emit!(c::TapeCompiler, op::OpType.T, a1::Int32, a2::Int32 = a1, a3::Int32 = a2, a4::Int32 = a3)::Int32
+function emit!(c::TapeCompiler, op::OpType.T, a1::Int32, a2::Int32 = a1, a3::Int32 = a2, a4::Int32 = a3)::Int32
     c.next_slot -= Int32(1)
-    push!(c.instructions, _instruction((a1, a2, a3, a4), op, c.next_slot))
+    push!(c.instructions, make_instruction((a1, a2, a3, a4), op, c.next_slot))
     return c.next_slot
 end
 
 ## ── Slot-based predicates ───────────────────────────────────────────────────
 
-_is_one_slot(c::TapeCompiler, s::Int32)::Bool =
-    c.one_slot != _SLOT_NONE && s == c.one_slot
-_is_minus_one_slot(c::TapeCompiler, s::Int32)::Bool =
-    c.minus_one_slot != _SLOT_NONE && s == c.minus_one_slot
-_is_two_slot(c::TapeCompiler, s::Int32)::Bool =
-    c.two_slot != _SLOT_NONE && s == c.two_slot
+is_one_slot(c::TapeCompiler, s::Int32)::Bool =
+    c.one_slot != SLOT_NONE && s == c.one_slot
+is_minus_one_slot(c::TapeCompiler, s::Int32)::Bool =
+    c.minus_one_slot != SLOT_NONE && s == c.minus_one_slot
+is_two_slot(c::TapeCompiler, s::Int32)::Bool =
+    c.two_slot != SLOT_NONE && s == c.two_slot
 
 ## ── Arithmetic helpers ──────────────────────────────────────────────────────
 
-_tape_add!(c::TapeCompiler, a::Int32, b::Int32)::Int32 = _emit!(c, OpType.OP_ADD, a, b)
-_tape_neg!(c::TapeCompiler, a::Int32)::Int32 = _emit!(c, OpType.OP_NEG, a)
-_tape_sub!(c::TapeCompiler, a::Int32, b::Int32)::Int32 = _emit!(c, OpType.OP_SUB, a, b)
-_tape_div!(c::TapeCompiler, a::Int32, b::Int32)::Int32 =
-    _is_one_slot(c, b) ? a : _emit!(c, OpType.OP_DIV, a, b)
+tape_add!(c::TapeCompiler, a::Int32, b::Int32)::Int32 = emit!(c, OpType.OP_ADD, a, b)
+tape_neg!(c::TapeCompiler, a::Int32)::Int32 = emit!(c, OpType.OP_NEG, a)
+tape_sub!(c::TapeCompiler, a::Int32, b::Int32)::Int32 = emit!(c, OpType.OP_SUB, a, b)
+tape_div!(c::TapeCompiler, a::Int32, b::Int32)::Int32 =
+    is_one_slot(c, b) ? a : emit!(c, OpType.OP_DIV, a, b)
 
-function _tape_mul!(c::TapeCompiler, a::Int32, b::Int32)::Int32
-    _is_one_slot(c, a) && return b
-    _is_one_slot(c, b) && return a
-    _is_minus_one_slot(c, a) && return _emit!(c, OpType.OP_NEG, b)
-    _is_minus_one_slot(c, b) && return _emit!(c, OpType.OP_NEG, a)
-    _is_two_slot(c, a) && return _emit!(c, OpType.OP_ADD, b, b)
-    return _emit!(c, OpType.OP_MUL, a, b)
+function tape_mul!(c::TapeCompiler, a::Int32, b::Int32)::Int32
+    is_one_slot(c, a) && return b
+    is_one_slot(c, b) && return a
+    is_minus_one_slot(c, a) && return emit!(c, OpType.OP_NEG, b)
+    is_minus_one_slot(c, b) && return emit!(c, OpType.OP_NEG, a)
+    is_two_slot(c, a) && return emit!(c, OpType.OP_ADD, b, b)
+    return emit!(c, OpType.OP_MUL, a, b)
 end
 
-function _tape_muladd!(c::TapeCompiler, a::Int32, b::Int32, d::Int32)::Int32
-    _is_one_slot(c, a) && return _tape_add!(c, b, d)
-    _is_one_slot(c, b) && return _tape_add!(c, a, d)
-    return _emit!(c, OpType.OP_MULADD, a, b, d)
+function tape_muladd!(c::TapeCompiler, a::Int32, b::Int32, d::Int32)::Int32
+    is_one_slot(c, a) && return tape_add!(c, b, d)
+    is_one_slot(c, b) && return tape_add!(c, a, d)
+    return emit!(c, OpType.OP_MULADD, a, b, d)
 end
 
-function _tape_pow!(c::TapeCompiler, a::Int32, k::Int)::Int32
+function tape_pow!(c::TapeCompiler, a::Int32, k::Int)::Int32
     if k == 0
-        return _get_constant_slot!(c, one(ComplexF64))
+        return get_constant_slot!(c, one(ComplexF64))
     elseif k == 1
         return a
     elseif k == 2
-        return _emit!(c, OpType.OP_SQR, a)
+        return emit!(c, OpType.OP_SQR, a)
     elseif k == 3
-        return _emit!(c, OpType.OP_CB, a)
+        return emit!(c, OpType.OP_CB, a)
     elseif k == -1
-        return _emit!(c, OpType.OP_INV, a)
+        return emit!(c, OpType.OP_INV, a)
     elseif k == -2
-        return _emit!(c, OpType.OP_INVSQR, a)
+        return emit!(c, OpType.OP_INVSQR, a)
     else
         # OP_POW_INT: second arg is the integer exponent stored directly
         c.next_slot -= Int32(1)
         slot = c.next_slot
         push!(
             c.instructions,
-            _instruction((a, Int32(k), Int32(k), Int32(k)), OpType.OP_POW_INT, slot),
+            make_instruction((a, Int32(k), Int32(k), Int32(k)), OpType.OP_POW_INT, slot),
         )
         return slot
     end
@@ -127,43 +127,43 @@ end
 
 ## ── Main dispatcher ─────────────────────────────────────────────────────────
 
-function _compile_tmp!(c::TapeCompiler, id::Int)::Int32
-    cached = get(c.cse_slots, id, _SLOT_NONE)
-    cached != _SLOT_NONE && return cached
-    slot = _compile!(c, c.cse_defs[id])
+function compile_tmp!(c::TapeCompiler, id::Int)::Int32
+    cached = get(c.cse_slots, id, SLOT_NONE)
+    cached != SLOT_NONE && return cached
+    slot = compile_node!(c, c.cse_defs[id])
     c.cse_slots[id] = slot
     return slot
 end
 
-function _compile_funcsym!(c::TapeCompiler, kind::SFuncKind.T, args::Vector{SExprT})::Int32
-    kind == SFuncKind.SFUNC_ADD && return _compile_sum!(c, args)
-    kind == SFuncKind.SFUNC_MUL && return _compile_mul!(c, args)
+function compile_funcsym!(c::TapeCompiler, kind::SFuncKind.T, args::Vector{SExprT})::Int32
+    kind == SFuncKind.SFUNC_ADD && return compile_sum!(c, args)
+    kind == SFuncKind.SFUNC_MUL && return compile_mul!(c, args)
     error("Unknown SFuncSym kind: $(kind)")
 end
 
 """Compile an SExpr to a tape slot, returning the Int32 slot index."""
-function _compile!(c::TapeCompiler, expr::SExprT)::Int32
+function compile_node!(c::TapeCompiler, expr::SExprT)::Int32
     return @match expr begin
-        SExpr.SConst(val) => _get_constant_slot!(c, val)
+        SExpr.SConst(val) => get_constant_slot!(c, val)
         SExpr.SVar(idx) => c.var_slots[idx]
         SExpr.SParam(idx) => c.param_slots[idx]
-        SExpr.STmp(id) => _compile_tmp!(c, id)
-        SExpr.SPow(base, exp) => _tape_pow!(c, _compile!(c, base), exp)
-        SExpr.SRPow(base, exp) => _emit!(
-            c, OpType.OP_POW, _compile!(c, base), _get_constant_slot!(c, exp),
+        SExpr.STmp(id) => compile_tmp!(c, id)
+        SExpr.SPow(base, exp) => tape_pow!(c, compile_node!(c, base), exp)
+        SExpr.SRPow(base, exp) => emit!(
+            c, OpType.OP_POW, compile_node!(c, base), get_constant_slot!(c, exp),
         )
-        SExpr.SMul(args) => _compile_mul!(c, args)
-        SExpr.SAdd(args) => _compile_sum!(c, args)
-        SExpr.SNeg(arg) => _tape_neg!(c, _compile!(c, arg))
+        SExpr.SMul(args) => compile_mul!(c, args)
+        SExpr.SAdd(args) => compile_sum!(c, args)
+        SExpr.SNeg(arg) => tape_neg!(c, compile_node!(c, arg))
         SExpr.SUnary(kind, arg) =>
-            _emit!(c, unary_op_type(kind), _compile!(c, arg))
-        SExpr.SFuncSym(kind, args) => _compile_funcsym!(c, kind, args)
+            emit!(c, unary_op_type(kind), compile_node!(c, arg))
+        SExpr.SFuncSym(kind, args) => compile_funcsym!(c, kind, args)
     end
 end
 
 ## ── Mul processing ──────────────────────────────────────────────────────────
 
-function _split_off_minus_one(args::Vector{SExprT})::Tuple{Int, Vector{SExprT}}
+function split_off_minus_one(args::Vector{SExprT})::Tuple{Int, Vector{SExprT}}
     if !isempty(args)
         @match args[1] begin
             SExpr.SConst(val) =>
@@ -174,31 +174,31 @@ function _split_off_minus_one(args::Vector{SExprT})::Tuple{Int, Vector{SExprT}}
     return 1, args
 end
 
-function _compile_split_into_num_denom!(c::TapeCompiler, args::Vector{SExprT})
+function compile_split_into_num_denom!(c::TapeCompiler, args::Vector{SExprT})
     nums = Int32[]
     denoms = Int32[]
     for arg in args
         @match arg begin
             SExpr.SPow(base, exp) => if exp < 0
-                push!(denoms, _tape_pow!(c, _compile!(c, base), -exp))
+                push!(denoms, tape_pow!(c, compile_node!(c, base), -exp))
             else
-                push!(nums, _tape_pow!(c, _compile!(c, base), exp))
+                push!(nums, tape_pow!(c, compile_node!(c, base), exp))
             end
-            _ => push!(nums, _compile!(c, arg))
+            _ => push!(nums, compile_node!(c, arg))
         end
     end
     return nums, denoms
 end
 
 """Reduce a stack of slots by consuming 4/3/2 at a time with the given ops."""
-function _tree_reduce!(c::TapeCompiler, parts::Vector{Int32}, op4::OpType.T, op3::OpType.T, op2::F)::Int32 where {F}
+function tree_reduce!(c::TapeCompiler, parts::Vector{Int32}, op4::OpType.T, op3::OpType.T, op2::F)::Int32 where {F}
     while length(parts) > 1
         if length(parts) >= 4
             a = pop!(parts); b = pop!(parts); d = pop!(parts); e = pop!(parts)
-            push!(parts, _emit!(c, op4, a, b, d, e))
+            push!(parts, emit!(c, op4, a, b, d, e))
         elseif length(parts) == 3
             a = pop!(parts); b = pop!(parts); d = pop!(parts)
-            push!(parts, _emit!(c, op3, a, b, d))
+            push!(parts, emit!(c, op3, a, b, d))
         else
             a = pop!(parts); b = pop!(parts)
             push!(parts, op2(c, a, b))
@@ -207,42 +207,42 @@ function _tree_reduce!(c::TapeCompiler, parts::Vector{Int32}, op4::OpType.T, op3
     return parts[1]
 end
 
-function _compile_prod_parts!(c::TapeCompiler, exs::Vector{Int32})::Int32
-    isempty(exs) && return _SLOT_NONE
-    return _tree_reduce!(c, reverse(exs), OpType.OP_MUL4, OpType.OP_MUL3, _tape_mul!)
+function compile_prod_parts!(c::TapeCompiler, exs::Vector{Int32})::Int32
+    isempty(exs) && return SLOT_NONE
+    return tree_reduce!(c, reverse(exs), OpType.OP_MUL4, OpType.OP_MUL3, tape_mul!)
 end
 
-function _compile_mul!(c::TapeCompiler, args::Vector{SExprT})::Int32
-    (m, args2) = _split_off_minus_one(args)
-    m_slot = _get_constant_slot!(c, ComplexF64(m))
+function compile_mul!(c::TapeCompiler, args::Vector{SExprT})::Int32
+    (m, args2) = split_off_minus_one(args)
+    m_slot = get_constant_slot!(c, ComplexF64(m))
     if isempty(args2)
         return m_slot
     elseif length(args2) == 1
-        return _tape_mul!(c, m_slot, _compile!(c, args2[1]))
+        return tape_mul!(c, m_slot, compile_node!(c, args2[1]))
     end
-    nums, denoms = _compile_split_into_num_denom!(c, args2)
-    num_prod = _compile_prod_parts!(c, nums)
-    denom_prod = _compile_prod_parts!(c, denoms)
+    nums, denoms = compile_split_into_num_denom!(c, args2)
+    num_prod = compile_prod_parts!(c, nums)
+    denom_prod = compile_prod_parts!(c, denoms)
     local ref::Int32
-    if num_prod == _SLOT_NONE
-        ref = _emit!(c, OpType.OP_INV, denom_prod)
-    elseif denom_prod == _SLOT_NONE
+    if num_prod == SLOT_NONE
+        ref = emit!(c, OpType.OP_INV, denom_prod)
+    elseif denom_prod == SLOT_NONE
         ref = num_prod
     else
-        ref = _tape_div!(c, num_prod, denom_prod)
+        ref = tape_div!(c, num_prod, denom_prod)
     end
-    return _tape_mul!(c, m_slot, ref)
+    return tape_mul!(c, m_slot, ref)
 end
 
 ## ── Add processing ──────────────────────────────────────────────────────────
 
-function _split_into_positives_negatives(args::Vector{SExprT})
+function split_into_positives_negatives(args::Vector{SExprT})
     positives = SExprT[]
     negatives = SExprT[]
     for arg in args
         sign, val = @match arg begin
             SExpr.SMul(margs) => begin
-                s, values = _split_off_minus_one(margs)
+                s, values = split_off_minus_one(margs)
                 (s, length(values) == 1 ? values[1] : SExpr.SMul(values))
             end
             _ => (1, arg)
@@ -256,36 +256,36 @@ function _split_into_positives_negatives(args::Vector{SExprT})
     return positives, negatives
 end
 
-function _compile_reduce_to_at_most_two!(
+function compile_reduce_to_at_most_two!(
         c::TapeCompiler, expr::SExprT,
     )::Tuple{Int32, Int32}
     @match expr begin
         SExpr.SMul(margs) => begin
             args = margs
             if length(args) == 2
-                return (_compile!(c, args[1]), _compile!(c, args[2]))
+                return (compile_node!(c, args[1]), compile_node!(c, args[2]))
             elseif length(args) == 1
-                return (_compile!(c, args[1]), _SLOT_NONE)
+                return (compile_node!(c, args[1]), SLOT_NONE)
             elseif length(args) > 2
                 prefix = SExpr.SMul(args[1:(end - 1)])
-                v2 = _compile!(c, prefix)
-                return (_compile!(c, args[end]), v2)
+                v2 = compile_node!(c, prefix)
+                return (compile_node!(c, args[end]), v2)
             end
         end
         _ => nothing
     end
-    return (_compile!(c, expr), _SLOT_NONE)
+    return (compile_node!(c, expr), SLOT_NONE)
 end
 
-function _compile_sum_products!(
+function compile_sum_products!(
         c::TapeCompiler, tuples::Vector{Tuple{Int32, Int32}},
     )::Int32
-    isempty(tuples) && return _SLOT_NONE
+    isempty(tuples) && return SLOT_NONE
 
     singles = Int32[]
     pairs = Tuple{Int32, Int32}[]
     for tuple in tuples
-        if tuple[2] == _SLOT_NONE
+        if tuple[2] == SLOT_NONE
             push!(singles, first(tuple))
         else
             push!(pairs, tuple)
@@ -296,73 +296,73 @@ function _compile_sum_products!(
     for k in 1:2:(n - 1)
         (a, b) = pairs[k]
         (d, e) = pairs[k + 1]
-        push!(singles, _emit!(c, OpType.OP_MULMULADD, a, b, d, e))
+        push!(singles, emit!(c, OpType.OP_MULMULADD, a, b, d, e))
     end
 
     if isodd(n)
         if isempty(singles)
-            return _tape_mul!(c, pairs[n][1], pairs[n][2])
+            return tape_mul!(c, pairs[n][1], pairs[n][2])
         end
         (a, b) = pairs[n]
         d = pop!(singles)
-        push!(singles, _tape_muladd!(c, a, b, d))
+        push!(singles, tape_muladd!(c, a, b, d))
     end
 
-    isempty(singles) && return _SLOT_NONE
-    return _tree_reduce!(c, singles, OpType.OP_ADD4, OpType.OP_ADD3, _tape_add!)
+    isempty(singles) && return SLOT_NONE
+    return tree_reduce!(c, singles, OpType.OP_ADD4, OpType.OP_ADD3, tape_add!)
 end
 
 """Reduce a vector of slots by addition."""
-function _sum_slots!(c::TapeCompiler, slots::Vector{Int32})::Int32
-    isempty(slots) && return _SLOT_NONE
-    return _tree_reduce!(c, slots, OpType.OP_ADD4, OpType.OP_ADD3, _tape_add!)
+function sum_slots!(c::TapeCompiler, slots::Vector{Int32})::Int32
+    isempty(slots) && return SLOT_NONE
+    return tree_reduce!(c, slots, OpType.OP_ADD4, OpType.OP_ADD3, tape_add!)
 end
 
-function _compile_sum!(c::TapeCompiler, args::Vector{SExprT})::Int32
-    pos, neg = _split_into_positives_negatives(args)
+function compile_sum!(c::TapeCompiler, args::Vector{SExprT})::Int32
+    pos, neg = split_into_positives_negatives(args)
     pos_reduced = Vector{Tuple{Int32, Int32}}(undef, length(pos))
     for i in eachindex(pos)
-        pos_reduced[i] = _compile_reduce_to_at_most_two!(c, pos[i])
+        pos_reduced[i] = compile_reduce_to_at_most_two!(c, pos[i])
     end
     neg_reduced = Vector{Tuple{Int32, Int32}}(undef, length(neg))
     for i in eachindex(neg)
-        neg_reduced[i] = _compile_reduce_to_at_most_two!(c, neg[i])
+        neg_reduced[i] = compile_reduce_to_at_most_two!(c, neg[i])
     end
 
     # Case 1: single positive, single negative — try maximal fusion
     if length(pos_reduced) == 1 && length(neg_reduced) == 1
         (a, b) = pos_reduced[1]
         (d, e) = neg_reduced[1]
-        if b != _SLOT_NONE && e != _SLOT_NONE
-            return _emit!(c, OpType.OP_MULMULSUB, a, b, d, e)
-        elseif b != _SLOT_NONE
-            return _emit!(c, OpType.OP_MULSUB, a, b, d)
-        elseif e != _SLOT_NONE
-            return _emit!(c, OpType.OP_SUBMUL, d, e, a)
+        if b != SLOT_NONE && e != SLOT_NONE
+            return emit!(c, OpType.OP_MULMULSUB, a, b, d, e)
+        elseif b != SLOT_NONE
+            return emit!(c, OpType.OP_MULSUB, a, b, d)
+        elseif e != SLOT_NONE
+            return emit!(c, OpType.OP_SUBMUL, d, e, a)
         else
-            return _emit!(c, OpType.OP_SUB, a, d)
+            return emit!(c, OpType.OP_SUB, a, d)
         end
     end
 
     # Case 2: multiple positives, single negative
     if length(neg_reduced) == 1
-        a = _compile_sum_products!(c, pos_reduced)
+        a = compile_sum_products!(c, pos_reduced)
         (d, e) = neg_reduced[1]
-        if e != _SLOT_NONE
-            return _emit!(c, OpType.OP_SUBMUL, d, e, a)
+        if e != SLOT_NONE
+            return emit!(c, OpType.OP_SUBMUL, d, e, a)
         else
-            return _emit!(c, OpType.OP_SUB, a, d)
+            return emit!(c, OpType.OP_SUB, a, d)
         end
     end
 
     # Case 3: single positive, multiple negatives
     if length(pos_reduced) == 1
-        neg_sum = _compile_sum_products!(c, neg_reduced)
+        neg_sum = compile_sum_products!(c, neg_reduced)
         (a, b) = pos_reduced[1]
-        if b != _SLOT_NONE
-            return _emit!(c, OpType.OP_MULSUB, a, b, neg_sum)
+        if b != SLOT_NONE
+            return emit!(c, OpType.OP_MULSUB, a, b, neg_sum)
         else
-            return _emit!(c, OpType.OP_SUB, a, neg_sum)
+            return emit!(c, OpType.OP_SUB, a, neg_sum)
         end
     end
 
@@ -372,15 +372,15 @@ function _compile_sum!(c::TapeCompiler, args::Vector{SExprT})::Int32
     pos_singles = Tuple{Int32, Int32}[]
     neg_singles = Tuple{Int32, Int32}[]
     for tuple in pos_reduced
-        if tuple[2] == _SLOT_NONE
-            push!(pos_singles, (tuple[1], _SLOT_NONE))
+        if tuple[2] == SLOT_NONE
+            push!(pos_singles, (tuple[1], SLOT_NONE))
         else
             push!(pos_pairs, tuple)
         end
     end
     for tuple in neg_reduced
-        if tuple[2] == _SLOT_NONE
-            push!(neg_singles, (tuple[1], _SLOT_NONE))
+        if tuple[2] == SLOT_NONE
+            push!(neg_singles, (tuple[1], SLOT_NONE))
         else
             push!(neg_pairs, tuple)
         end
@@ -390,7 +390,7 @@ function _compile_sum!(c::TapeCompiler, args::Vector{SExprT})::Int32
     # Fuse matching pos/neg product pairs into MULMULSUB
     fused = Int32[]
     for i in 1:n_fused
-        push!(fused, _emit!(c, OpType.OP_MULMULSUB, pos_pairs[i]..., neg_pairs[i]...))
+        push!(fused, emit!(c, OpType.OP_MULMULSUB, pos_pairs[i]..., neg_pairs[i]...))
     end
 
     # Collect leftover pairs + singles for each side
@@ -407,29 +407,29 @@ function _compile_sum!(c::TapeCompiler, args::Vector{SExprT})::Int32
 
     # Sum: fused results + leftover positives
     if !isempty(leftover_pos)
-        s = _compile_sum_products!(c, leftover_pos)
-        s != _SLOT_NONE && push!(fused, s)
+        s = compile_sum_products!(c, leftover_pos)
+        s != SLOT_NONE && push!(fused, s)
     end
-    pos_total = _sum_slots!(c, fused)
+    pos_total = sum_slots!(c, fused)
 
     # Sum leftover negatives
-    neg_total = isempty(leftover_neg) ? _SLOT_NONE : _compile_sum_products!(c, leftover_neg)
+    neg_total = isempty(leftover_neg) ? SLOT_NONE : compile_sum_products!(c, leftover_neg)
 
     # Final subtraction
-    if pos_total == _SLOT_NONE
-        return neg_total == _SLOT_NONE ? _SLOT_NONE : _tape_neg!(c, neg_total)
-    elseif neg_total == _SLOT_NONE
+    if pos_total == SLOT_NONE
+        return neg_total == SLOT_NONE ? SLOT_NONE : tape_neg!(c, neg_total)
+    elseif neg_total == SLOT_NONE
         return pos_total
     else
-        return _tape_sub!(c, pos_total, neg_total)
+        return tape_sub!(c, pos_total, neg_total)
     end
 end
 
 ## ── Entry point ─────────────────────────────────────────────────────────────
 
-_scratch_base(nvars::Int, nparams::Int) = Int32(-(nparams + nvars))
+scratch_slot_base(nvars::Int, nparams::Int) = Int32(-(nparams + nvars))
 
-function _initialize_placeholder_slots!(
+function initialize_placeholder_slots!(
         compiler::TapeCompiler,
         nvars::Int,
         nparams::Int,
@@ -440,13 +440,13 @@ function _initialize_placeholder_slots!(
     for i in 1:nvars
         compiler.var_slots[i] = Int32(-(nparams + i))
     end
-    compiler.next_slot = _scratch_base(nvars, nparams)
+    compiler.next_slot = scratch_slot_base(nvars, nparams)
     return nothing
 end
 
-function _build_slot_remap(nconstants::Int, nparams::Int, nvars::Int, nscratch::Int)
+function build_slot_remap(nconstants::Int, nparams::Int, nvars::Int, nscratch::Int)
     input_block_size = nconstants + nparams + nvars
-    scratch_base = _scratch_base(nvars, nparams)
+    scratch_base = scratch_slot_base(nvars, nparams)
     remap = Dict{Int32, Int32}()
 
     # Constants: identity mapping (k → k)
@@ -476,7 +476,7 @@ function _build_slot_remap(nconstants::Int, nparams::Int, nvars::Int, nscratch::
     )
 end
 
-function _plan_assignment_slots!(
+function plan_assignment_slots!(
         remap::Dict{Int32, Int32},
         result_slots::Vector{Int32},
         instructions::Vector{Instruction},
@@ -518,7 +518,7 @@ function _plan_assignment_slots!(
             src = get(remap, raw_slot, raw_slot)
             push!(
                 identity_instructions,
-                _instruction((src, src, src, src), OpType.OP_IDENTITY, target_slot),
+                make_instruction((src, src, src, src), OpType.OP_IDENTITY, target_slot),
             )
         end
     end
@@ -532,20 +532,20 @@ function _plan_assignment_slots!(
     )
 end
 
-function _remap_instructions(
+function remap_instructions(
         instructions::Vector{Instruction},
         remap::Dict{Int32, Int32},
         identity_instructions::Vector{Instruction},
     )::Vector{Instruction}
     remapped = Vector{Instruction}(undef, length(instructions))
     for i in eachindex(instructions)
-        remapped[i] = _remap_instruction(instructions[i], remap)
+        remapped[i] = remap_instruction(instructions[i], remap)
     end
     append!(remapped, identity_instructions)
     return remapped
 end
 
-function _build_assignments(
+function build_assignments(
         nassignments::Int,
         updated_scratch_range,
         scratch_assignment_indices::Vector{Int},
@@ -565,19 +565,19 @@ function _build_assignments(
     return updated_assignments
 end
 
-function _finalize_compiler(
+function finalize_compiler(
         compiler::TapeCompiler,
         result_slots::Vector{Int32},
         nvars::Int,
         nparams::Int,
         output_dim::Int,
     )::InstructionSequence
-    return _finalize_compiler(
+    return finalize_compiler(
         Val(true), compiler, result_slots, nvars, nparams, output_dim,
     )
 end
 
-function _finalize_compiler(
+function finalize_compiler(
         ::Val{OPTIMIZE_ORDER},
         compiler::TapeCompiler,
         result_slots::Vector{Int32},
@@ -586,32 +586,32 @@ function _finalize_compiler(
         output_dim::Int,
     )::InstructionSequence where {OPTIMIZE_ORDER}
     nconstants = length(compiler.constants)
-    nscratch = Int(_scratch_base(nvars, nparams) - compiler.next_slot)
-    layout = _build_slot_remap(nconstants, nparams, nvars, nscratch)
+    nscratch = Int(scratch_slot_base(nvars, nparams) - compiler.next_slot)
+    layout = build_slot_remap(nconstants, nparams, nvars, nscratch)
     remap = layout.remap
-    assignment_plan = _plan_assignment_slots!(
+    assignment_plan = plan_assignment_slots!(
         remap, result_slots, compiler.instructions, layout.input_block_size, nscratch,
     )
-    core_instructions = _remap_instructions(
+    core_instructions = remap_instructions(
         compiler.instructions,
         remap,
         assignment_plan.identity_instructions,
     )
 
     instructions_opt = if OPTIMIZE_ORDER
-        _optimize_instruction_order(core_instructions)
+        optimize_instruction_order(core_instructions)
     else
         core_instructions
     end
     instructions_final, space_needed, updated_scratch_range, updated_direct =
-        _reduce_space(
+        reduce_space(
         instructions_opt,
         layout.input_block_size,
         assignment_plan.scratch_assignments_range,
         assignment_plan.direct_assignments,
     )
 
-    updated_assignments = _build_assignments(
+    updated_assignments = build_assignments(
         assignment_plan.nassignments,
         updated_scratch_range,
         assignment_plan.scratch_assignment_indices,
@@ -619,7 +619,7 @@ function _finalize_compiler(
     )
 
     n = Int32(space_needed)
-    push!(instructions_final, _instruction((n, n, n, n), OpType.OP_STOP, n))
+    push!(instructions_final, make_instruction((n, n, n, n), OpType.OP_STOP, n))
 
     u_assignments = Tuple{Int, Int}[]
     U_assignments = Tuple{Int, Int}[]
@@ -677,12 +677,12 @@ function compile_to_instructions(
     # negative range below the var/param block.
     # After compilation, we remap everything to the final tape layout.
 
-    _initialize_placeholder_slots!(compiler, nvars, nparams)
+    initialize_placeholder_slots!(compiler, nvars, nparams)
 
     # Compile all reduced expressions
     result_slots = Vector{Int32}(undef, length(reduced_exprs))
     for i in eachindex(reduced_exprs)
-        result_slots[i] = _compile!(compiler, reduced_exprs[i])
+        result_slots[i] = compile_node!(compiler, reduced_exprs[i])
     end
-    return _finalize_compiler(compiler, result_slots, nvars, nparams, output_dim)
+    return finalize_compiler(compiler, result_slots, nvars, nparams, output_dim)
 end

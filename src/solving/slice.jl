@@ -8,12 +8,12 @@
 # The full ambient space as a codim-0 subspace (`A` is `0 × n`): witness sets
 # of zero-dimensional varieties slice with the whole space, so the sliced
 # system is `F` itself (plus a chart row in the projective case).
-_full_subspace(n::Int)::LinearSubspace{ComplexF64} =
+full_subspace(n::Int)::LinearSubspace{ComplexF64} =
     LinearSubspace(zeros(ComplexF64, 0, n), ComplexF64[])
 
 # Build the degree-1 polynomials `A[i,:]·vars - b[i]` describing the extrinsic
 # subspace `L = {x | A x = b}`.
-function _linear_equations(L::LinearSubspace, vars)
+function linear_equations(L::LinearSubspace, vars)
     E = extrinsic(L)
     A, b = E.A, E.b
     n = length(vars)
@@ -25,7 +25,7 @@ end
 # Build the chart equation `c·x − 1` fixing the projective scaling on the chart
 # `c`. Homogeneous systems are positive-dimensional in ambient coordinates; the
 # chart row makes the sliced system square.
-function _chart_equation(chart::AbstractVector, vars::AbstractVector)
+function chart_equation(chart::AbstractVector, vars::AbstractVector)
     n = length(vars)
     return sum(chart[j] * vars[j] for j in 1:n) - 1
 end
@@ -33,15 +33,15 @@ end
 # Build the sliced system `[polys; A x − b]` in ambient coordinates, i.e. the
 # zero set `V(polys) ∩ L`. For a projective (homogeneous) problem a chart
 # equation `c·x − 1` is appended so the system is square.
-function _sliced_system(
+function sliced_system(
         polys::AbstractVector, vars::AbstractVector, L::LinearSubspace;
         chart::AbstractVector = [],
         params::AbstractVector = empty(vars),
         compile::CompileMode.T = CompileMode.INTERPRETED,
     )::System
-    lin = _linear_equations(L, vars)
+    lin = linear_equations(L, vars)
     eqs = vcat(collect(polys), lin)
-    isempty(chart) || push!(eqs, _chart_equation(chart, vars))
+    isempty(chart) || push!(eqs, chart_equation(chart, vars))
     return System(eqs; parameters = params, variables = vars, compile = compile)
 end
 
@@ -74,7 +74,7 @@ function slice(
                 "has $(nvariables(F)) variables.",
         ),
     )
-    return _sliced_system(
+    return sliced_system(
         polynomials(F), collect(variables(F)), L;
         chart = chart, params = collect(parameters(F)), compile = F.compile_mode,
     )
@@ -83,32 +83,32 @@ end
 # ── solve(F, L) ──────────────────────────────────────────────────────────────
 
 # Every route that charts a projective system draws it here, so one guard covers all.
-function _affine_chart(
+function random_affine_chart(
         rng::Random.MersenneTwister, F::CloneableSystem,
     )::Vector{ComplexF64}
-    _check_single_group(F)
+    check_single_group(F)
     return randn(rng, ComplexF64, nvariables(F))
 end
 
 # Draw the affine chart for a projective problem. `seed` makes it reproducible.
-function _sliced_solve_setup(F::System, L::LinearSubspace, seed::UInt32)
-    _check_parameter_free(F, "`solve(F, L)`")
+function sliced_solve_setup(F::System, L::LinearSubspace, seed::UInt32)
+    check_parameter_free(F, "`solve(F, L)`")
     chart = if is_linear(L) && is_homogeneous(F)
-        _affine_chart(Random.MersenneTwister(seed), F)
+        random_affine_chart(Random.MersenneTwister(seed), F)
     else
         ComplexF64[]
     end
     return F, chart
 end
 
-_rebuild_sliced(G::System, L::LinearSubspace, chart::Vector{ComplexF64})::System =
+rebuild_sliced(G::System, L::LinearSubspace, chart::Vector{ComplexF64})::System =
     isempty(chart) ? slice(G, L) : slice(G, L; chart = chart)
 
 # The polynomial sliced system a solve route would track, with the projective
 # chart row appended.
-function _sliced_solve_system(F::System, L::LinearSubspace, seed::UInt32)::System
-    G, chart = _sliced_solve_setup(F, L, seed)
-    return _rebuild_sliced(G, L, chart)
+function sliced_solve_system(F::System, L::LinearSubspace, seed::UInt32)::System
+    G, chart = sliced_solve_setup(F, L, seed)
+    return rebuild_sliced(G, L, chart)
 end
 
 # Total degree over `[G; A x − b]`. When the sliced system is square the linear
@@ -116,28 +116,28 @@ end
 # and tape construction entirely. An under- or overdetermined slice falls back to
 # rebuilding the polynomial system, so the shape check and the square-up
 # machinery (excess-solution checker) apply unchanged.
-function _init_sliced_total_degree(
+function init_sliced_total_degree(
         G::System, L::LinearSubspace, chart::Vector{ComplexF64},
         alg::TotalDegree, exec::E,
     )::SolveCache{E} where {E <: AbstractExecutor}
     # The square branch below reads `G.degrees` directly, so guard first: a
     # degree of -1 would size the start-solution array negatively.
-    _check_polynomial(G, "`TotalDegree`")
+    check_polynomial(G, "`TotalDegree`")
     m = size(G)[1]
     nrows = m + codim(L) + (isempty(chart) ? 0 : 1)
     nrows == nvariables(G) || return CommonSolve.init(
-        _rebuild_sliced(G, L, chart), alg, exec,
+        rebuild_sliced(G, L, chart), alg, exec,
     )
 
     degs = [G.degrees; ones(Int, nrows - m)]
     subspace = convert(LinearSubspace{ComplexF64}, L)
-    γ = _random_gamma(_seed(alg))
+    γ = random_gamma(algorithm_seed(alg))
     builder = SlicedStraightLineBuilder(
-        degs, G, subspace, chart, γ, _tracker_options(alg), _endgame_options(alg),
+        degs, G, subspace, chart, γ, algorithm_tracker_options(alg), algorithm_endgame_options(alg),
     )
-    return _solve_cache(
-        exec, builder, total_degree_start_solutions(degs), _seed(alg),
-        ExcessCheckers(), _show_progress(alg), early_stop_callback(alg),
+    return solve_cache(
+        exec, builder, total_degree_start_solutions(degs), algorithm_seed(alg),
+        ExcessCheckers(), algorithm_show_progress(alg), early_stop_callback(alg),
     )
 end
 
@@ -145,15 +145,15 @@ function CommonSolve.init(
         F::System, L::LinearSubspace, alg::TotalDegree,
         exec::E = Threaded(),
     )::SolveCache{E} where {E <: AbstractExecutor}
-    G, chart = _sliced_solve_setup(F, L, _seed(alg))
-    return _init_sliced_total_degree(G, L, chart, alg, exec)
+    G, chart = sliced_solve_setup(F, L, algorithm_seed(alg))
+    return init_sliced_total_degree(G, L, chart, alg, exec)
 end
 
 function CommonSolve.init(
         F::System, L::LinearSubspace, alg::Polyhedral,
         exec::E = Threaded(),
     )::PolyhedralSolveCache{E} where {E <: AbstractExecutor}
-    return CommonSolve.init(_sliced_solve_system(F, L, _seed(alg)), alg, exec)
+    return CommonSolve.init(sliced_solve_system(F, L, algorithm_seed(alg)), alg, exec)
 end
 
 """

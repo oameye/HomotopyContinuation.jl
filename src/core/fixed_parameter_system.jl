@@ -17,27 +17,27 @@ equations (polyhedral, witness sets) need. A composition has no equations to
 substitute into and binds them instead.
 """
 function fix_parameters(F::System, p::AbstractVector{<:Number})
-    values = _parameter_values(F, p)
+    values = parameter_values(F, p)
     # Not named `variables`: the local would shadow the getter on its own rhs.
     vars = collect(variables(F))
     groups = variable_groups(F)
     return System(
-        _substitute(polynomials(F), collect(parameters(F)), values);
+        substitute_parameters(polynomials(F), collect(parameters(F)), values);
         variables = vars, compile = F.compile_mode,
         variable_groups = isempty(groups) ? nothing : [vars[g] for g in groups],
     )
 end
 
 # Substitution runs through whichever front-end built the system.
-_substitute(
+substitute_parameters(
     polys::FSVec{<:MP.AbstractPolynomialLike}, params::Vector, pc::Vector{ComplexF64},
 ) = [MP.polynomial(MP.subs(f, params => pc)) for f in polys]
 
-_substitute(
+substitute_parameters(
     polys::FSVec{Expression}, params::Vector{Expression}, pc::Vector{ComplexF64},
 )::Vector{Expression} = [subs(f, params => pc) for f in polys]
 
-function _parameter_values(
+function parameter_values(
         F, p::AbstractVector{<:Number},
     )::Vector{ComplexF64}
     np = nparameters(F)
@@ -71,16 +71,16 @@ end
 function FixedParameterSystem(
         F::SystemLike, p::AbstractVector{<:Number},
     )::FixedParameterSystem
-    values = _parameter_values(F, p)
-    return FixedParameterSystem(F, values, _bound_evaluator(F.evaluator, values))
+    values = parameter_values(F, p)
+    return FixedParameterSystem(F, values, bound_evaluator(F.evaluator, values))
 end
 
 fix_parameters(C::CompositionSystem, p::AbstractVector{<:Number})::FixedParameterSystem =
     FixedParameterSystem(C, p)
 
 # Rebuilt per worker: the bound evaluator owns mutable tapes that must not be shared.
-_clone_system_evaluator(F::FixedParameterSystem)::SystemEvaluator =
-    _bound_evaluator(_clone_system_evaluator(F.system), F.parameters)
+clone_system_evaluator(F::FixedParameterSystem)::SystemEvaluator =
+    bound_evaluator(clone_system_evaluator(F.system), F.parameters)
 
 # Parameter values change neither the degrees in the variables nor the shape.
 degrees(F::FixedParameterSystem)::Vector{Int} = degrees(F.system)
@@ -99,28 +99,28 @@ Input a solve route can clone a fresh parameter-free `SystemEvaluator` from.
 """
 const CloneableSystem = Union{System, CompositionSystem, FixedParameterSystem}
 
-_bound_evaluator(
+bound_evaluator(
     inner::SystemEvaluator, p::AbstractVector{<:Number},
-)::SystemEvaluator = SystemEvaluator(_BoundParameterSystem(inner, p))
+)::SystemEvaluator = SystemEvaluator(BoundParameterSystem(inner, p))
 
 # `F(x; p)` with `p` frozen, as a parameter-free `AbstractSystem`.
-struct _BoundParameterSystem <: AbstractSystem
+struct BoundParameterSystem <: AbstractSystem
     system::SystemEvaluator
     p::FSVec{ComplexF64}
 end
 
-_BoundParameterSystem(system::SystemEvaluator, p::AbstractVector{<:Number}) =
-    _BoundParameterSystem(system, FSVec{ComplexF64}(Vector{ComplexF64}(p)))
+BoundParameterSystem(system::SystemEvaluator, p::AbstractVector{<:Number}) =
+    BoundParameterSystem(system, FSVec{ComplexF64}(Vector{ComplexF64}(p)))
 
-_clone_system(F::_BoundParameterSystem)::_BoundParameterSystem =
-    _BoundParameterSystem(_clone_system_evaluator(F.system), F.p)
+clone_system(F::BoundParameterSystem)::BoundParameterSystem =
+    BoundParameterSystem(clone_system_evaluator(F.system), F.p)
 
-Base.size(F::_BoundParameterSystem)::Tuple{Int, Int} = size(F.system)
-nparameters(::_BoundParameterSystem)::Int = 0
+Base.size(F::BoundParameterSystem)::Tuple{Int, Int} = size(F.system)
+nparameters(::BoundParameterSystem)::Int = 0
 
 # The ignored argument below is the wrapper's own (empty) parameter vector.
 function evaluate!(
-        u::FSVec{T}, F::_BoundParameterSystem,
+        u::FSVec{T}, F::BoundParameterSystem,
         x::FSVec{S}, ::FSVec{ComplexF64},
     )::Nothing where {T <: Union{ComplexF64, ComplexDF64}, S <: Union{T, ComplexDF64}}
     evaluate!(u, F.system, x, F.p)
@@ -128,7 +128,7 @@ function evaluate!(
 end
 
 function evaluate_and_jacobian!(
-        u::FSVec{ComplexF64}, U::FSMat{ComplexF64}, F::_BoundParameterSystem,
+        u::FSVec{ComplexF64}, U::FSMat{ComplexF64}, F::BoundParameterSystem,
         x::FSVec{ComplexF64}, ::FSVec{ComplexF64},
     )::Nothing
     evaluate_and_jacobian!(u, U, F.system, x, F.p)
@@ -139,7 +139,7 @@ end
 # constant call on the wrapped system.
 for (K, N) in ((1, 2), (2, 3), (3, 4))
     @eval function taylor!(
-            u::FSVec{ComplexF64}, v::Val{$K}, F::_BoundParameterSystem,
+            u::FSVec{ComplexF64}, v::Val{$K}, F::BoundParameterSystem,
             tx::TaylorVector{$N, ComplexF64}, ::FSVec{ComplexF64},
         )::Nothing
         taylor!(u, v, F.system, tx, F.p)
@@ -147,7 +147,7 @@ for (K, N) in ((1, 2), (2, 3), (3, 4))
     end
 
     @eval function taylor!(
-            u::FSVec{ComplexF64}, v::Val{$K}, F::_BoundParameterSystem,
+            u::FSVec{ComplexF64}, v::Val{$K}, F::BoundParameterSystem,
             tx::TaylorVector{$N, ComplexF64}, ::TaylorVector{$N, ComplexF64},
         )::Nothing
         taylor!(u, v, F.system, tx, F.p)

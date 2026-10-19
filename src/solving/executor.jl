@@ -45,15 +45,15 @@ Threaded() = Threaded(Threads.nthreads())
 
 # Whether an executor asks for more than one task. Used where a route chooses
 # between a task fan-out and a plain loop, so `Threaded(1)` takes the plain one.
-_wants_tasks(::Serial)::Bool = false
-_wants_tasks(exec::Threaded)::Bool = exec.ntasks > 1
-_wants_tasks(::AbstractExecutor)::Bool = true
+wants_tasks(::Serial)::Bool = false
+wants_tasks(exec::Threaded)::Bool = exec.ntasks > 1
+wants_tasks(::AbstractExecutor)::Bool = true
 
 # Tasks a fan-out inside the calling process should use. Only `Threaded` states a
 # count; any other executor distributes elsewhere and leaves the local pool.
-_local_ntasks(::Serial)::Int = 1
-_local_ntasks(exec::Threaded)::Int = exec.ntasks
-_local_ntasks(::AbstractExecutor)::Int = Threads.nthreads()
+local_ntasks(::Serial)::Int = 1
+local_ntasks(exec::Threaded)::Int = exec.ntasks
+local_ntasks(::AbstractExecutor)::Int = Threads.nthreads()
 
 """
     DistributedExecutor(; pids = Int[], tasks_per_process = 0, batch_size = 0)
@@ -120,7 +120,7 @@ DistributedExecutor(;
 # Hooks the Distributed extension fills in. A method the extension overwrites
 # cannot be precompiled, while these untyped fallbacks are strictly less specific
 # than the extension's, so both coexist.
-@noinline function _distributed_ext_missing()
+@noinline function distributed_ext_missing()
     throw(
         ArgumentError(
             "`DistributedExecutor` needs the Distributed extension. Run " *
@@ -130,16 +130,16 @@ DistributedExecutor(;
     )
 end
 
-function _distributed_monodromy_solve!(executor, MS, results, seed, progress)
+function distributed_monodromy_solve!(executor, MS, results, seed, progress)
     Base.@nospecialize executor MS results seed progress
-    return _distributed_ext_missing()
+    return distributed_ext_missing()
 end
 
-function _distributed_sweep_entries(
+function distributed_sweep_entries(
         cache, targets, idxs, first_q, transform_result, transform_parameters,
         progress,
     )
     Base.@nospecialize cache targets idxs first_q transform_result
     Base.@nospecialize transform_parameters progress
-    return _distributed_ext_missing()
+    return distributed_ext_missing()
 end

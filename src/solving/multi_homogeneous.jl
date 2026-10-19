@@ -4,18 +4,18 @@
 # Group j of nⱼ variables contributes kⱼ affine coordinates: nⱼ - 1 when the system
 # is multi-homogeneous (its last variable homogenizes the group), nⱼ otherwise.
 
-_group_dims(groups::Vector{Vector{Int}}, homogeneous::Bool)::Vector{Int} =
+group_dims(groups::Vector{Vector{Int}}, homogeneous::Bool)::Vector{Int} =
     [length(group) - homogeneous for group in groups]
 
 # Every map from equations to groups giving group j exactly k[j] equations and a
 # positive degree at every equation; a zero degree contributes no paths.
-function _bezout_assignments(D::Matrix{Int}, k::Vector{Int})::Vector{Vector{Int}}
+function bezout_assignments(D::Matrix{Int}, k::Vector{Int})::Vector{Vector{Int}}
     out = Vector{Vector{Int}}()
-    _collect_assignments!(out, Vector{Int}(undef, size(D, 2)), copy(k), D, 1)
+    collect_assignments!(out, Vector{Int}(undef, size(D, 2)), copy(k), D, 1)
     return out
 end
 
-function _collect_assignments!(
+function collect_assignments!(
         out::Vector{Vector{Int}}, assignment::Vector{Int},
         remaining::Vector{Int}, D::Matrix{Int}, i::Int,
     )::Nothing
@@ -27,18 +27,18 @@ function _collect_assignments!(
         (remaining[j] > 0 && D[j, i] > 0) || continue
         remaining[j] -= 1
         assignment[i] = j
-        _collect_assignments!(out, assignment, remaining, D, i + 1)
+        collect_assignments!(out, assignment, remaining, D, i + 1)
         remaining[j] += 1
     end
     return nothing
 end
 
-_assignment_paths(D::Matrix{Int}, assignment::Vector{Int})::Int =
+assignment_paths(D::Matrix{Int}, assignment::Vector{Int})::Int =
     prod(i -> D[assignment[i], i], eachindex(assignment); init = 1)
 
 # `C[j][l, i]` multiplies the l-th affine coordinate of group j in the linear form
 # equation i uses. The leading identity block makes a single group reproduce xᵢ^dᵢ - 1.
-function _multi_start_coefficients(
+function multi_start_coefficients(
         rng::Random.MersenneTwister, k::Vector{Int}, N::Int,
     )::Vector{Matrix{ComplexF64}}
     return map(k) do kⱼ
@@ -50,7 +50,7 @@ function _multi_start_coefficients(
     end
 end
 
-function _multi_linear_form(
+function multi_linear_form(
         C::Matrix{ComplexF64}, i::Int, group::Vector{Int},
         kⱼ::Int, z::Vector{Expression},
     )::Expression
@@ -67,7 +67,7 @@ end
 # `bᵢⱼ^dᵢⱼ - wⱼ^dᵢⱼ`, with `bᵢⱼ` a linear form in the affine coordinates of group j
 # and `wⱼ` its homogenizing coordinate (`1` when not homogeneous). Homogeneous input
 # gets one row `wⱼ - 1` per group, matching the target's chart rows.
-function _multi_start_system(
+function multi_start_system(
         D::Matrix{Int}, k::Vector{Int}, groups::Vector{Vector{Int}},
         C::Vector{Matrix{ComplexF64}}, homogeneous::Bool, n::Int,
     )::System
@@ -79,7 +79,7 @@ function _multi_start_system(
         for j in eachindex(groups)
             d = D[j, i]
             d == 0 && continue
-            b = _multi_linear_form(C[j], i, groups[j], k[j], z)
+            b = multi_linear_form(C[j], i, groups[j], k[j], z)
             gᵢ *= homogeneous ? b^d - z[last(groups[j])]^d : b^d - 1
         end
         eqs[i] = gᵢ
@@ -92,10 +92,10 @@ function _multi_start_system(
     return System(eqs; variables = z)
 end
 
-# The solutions of `_multi_start_system`. Each of group j's k[j] equations fixes its
+# The solutions of `multi_start_system`. Each of group j's k[j] equations fixes its
 # linear form to a root of unity, and the k[j] × k[j] system this poses is the same
 # for every choice of roots, so it is factorized once per assignment.
-function _multi_start_solutions(
+function multi_start_solutions(
         D::Matrix{Int}, k::Vector{Int}, groups::Vector{Vector{Int}},
         C::Vector{Matrix{ComplexF64}}, homogeneous::Bool, n::Int,
         assignments::Vector{Vector{Int}},
@@ -119,7 +119,7 @@ function _multi_start_solutions(
             end
             LA.lu!(A)
         end
-        for path in 0:(_assignment_paths(D, assignment) - 1)
+        for path in 0:(assignment_paths(D, assignment) - 1)
             q = path
             for i in 1:N
                 d = D[assignment[i], i]
@@ -143,7 +143,7 @@ end
 
 # One chart row `cⱼ·x_Gⱼ = 1` per group, meeting the cone of every multi-projective
 # solution in a single point. A slice, so the sliced machinery appends the rows.
-function _multi_chart_subspace(
+function multi_chart_subspace(
         rng::Random.MersenneTwister, groups::Vector{Vector{Int}}, n::Int,
     )::LinearSubspace{ComplexF64}
     A = zeros(ComplexF64, length(groups), n)
@@ -157,10 +157,10 @@ end
 # chart rows. The chart rows stay identity rows (their block of `A` is zero), so they
 # still cut a representative out of every solution cone. Returns the fold, the
 # permutation of the charted system, and that of `F` alone.
-function _multi_square_up(
+function multi_square_up(
         rng::Random.MersenneTwister, degs::Vector{Int}, m::Int, N::Int, nchart::Int,
     )::Tuple{FSMat{ComplexF64}, Vector{Int}, Vector{Int}}
-    perm_equations = _randomization_permutation(degs)
+    perm_equations = randomization_permutation(degs)
     perm = [
         perm_equations[1:N]; (m + 1):(m + nchart); perm_equations[(N + 1):m]
     ]
@@ -171,7 +171,7 @@ end
 
 # Degrees of `[I A]·(F∘perm)`: equation i folds in every equation past the first
 # `N`, so its degree in a group is the largest of theirs.
-function _folded_group_degrees(D::Matrix{Int}, perm::Vector{Int}, N::Int)::Matrix{Int}
+function folded_group_degrees(D::Matrix{Int}, perm::Vector{Int}, N::Int)::Matrix{Int}
     out = Matrix{Int}(undef, size(D, 1), N)
     for j in axes(D, 1)
         excess = 0
@@ -185,7 +185,7 @@ function _folded_group_degrees(D::Matrix{Int}, perm::Vector{Int}, N::Int)::Matri
     return out
 end
 
-function _check_multi_determined(F::System, N::Int, M::Int)::Nothing
+function check_multi_determined(F::System, N::Int, M::Int)::Nothing
     m, n = size(F)
     m >= N || throw(
         ArgumentError(
@@ -198,53 +198,53 @@ function _check_multi_determined(F::System, N::Int, M::Int)::Nothing
     return nothing
 end
 
-function _init_multi_homogeneous(
+function init_multi_homogeneous(
         F::System, alg::TotalDegree, exec::E,
     )::SolveCache{E} where {E <: AbstractExecutor}
-    show_progress = _show_progress(alg)
+    show_progress = algorithm_show_progress(alg)
     groups = variable_groups(F)
     homogeneous = is_homogeneous(F)
-    k = _group_dims(groups, homogeneous)
+    k = group_dims(groups, homogeneous)
     M = length(groups)
     m, n = size(F)
     N = sum(k)
     if homogeneous
-        _check_multi_determined(F, N, M)
+        check_multi_determined(F, N, M)
     else
-        _check_square_or_overdetermined(F)
+        check_square_or_overdetermined(F)
     end
 
-    rng = Random.MersenneTwister(_seed(alg))
-    γ = _random_gamma(rng)
+    rng = Random.MersenneTwister(algorithm_seed(alg))
+    γ = random_gamma(rng)
 
     D = multi_degrees(F)
-    L = homogeneous ? _multi_chart_subspace(rng, groups, n) : _full_subspace(n)
+    L = homogeneous ? multi_chart_subspace(rng, groups, n) : full_subspace(n)
 
     A = FSMat{ComplexF64}(zeros(ComplexF64, 0, 0))
     perm = Int[]
     checkers = ExcessCheckers()
     if m > N
-        A, perm, perm_equations = _multi_square_up(
+        A, perm, perm_equations = multi_square_up(
             rng, degrees(F), m, N, homogeneous ? M : 0,
         )
         # The excess check runs Newton on the charted but unfolded system, which
         # the folded homotopy does not expose.
         charted = homogeneous ?
-            _sliced_evaluator(F.evaluator, L, ComplexF64[]) : F.evaluator
+            sliced_evaluator(F.evaluator, L, ComplexF64[]) : F.evaluator
         push!(checkers, ExcessSolutionChecker(charted, A, perm, alg.excess_residual_tol))
-        D = _folded_group_degrees(D, perm_equations, N)
+        D = folded_group_degrees(D, perm_equations, N)
     end
 
-    C = _multi_start_coefficients(rng, k, N)
-    start = _multi_start_system(D, k, groups, C, homogeneous, n)
-    starts = _multi_start_solutions(
-        D, k, groups, C, homogeneous, n, _bezout_assignments(D, k),
+    C = multi_start_coefficients(rng, k, N)
+    start = multi_start_system(D, k, groups, C, homogeneous, n)
+    starts = multi_start_solutions(
+        D, k, groups, C, homogeneous, n, bezout_assignments(D, k),
     )
     builder = MultiHomogeneousBuilder(
-        start, F, A, perm, L, γ, _tracker_options(alg), _endgame_options(alg),
+        start, F, A, perm, L, γ, algorithm_tracker_options(alg), algorithm_endgame_options(alg),
     )
-    return _solve_cache(
-        exec, builder, starts, _seed(alg), checkers, show_progress,
+    return solve_cache(
+        exec, builder, starts, algorithm_seed(alg), checkers, show_progress,
         early_stop_callback(alg),
     )
 end

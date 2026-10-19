@@ -126,7 +126,7 @@ solve(fix_parameters(H, [3]), [[2.0 + 0im, 1]])
 ```
 """
 function fix_parameters(H::Homotopy, p::AbstractVector{<:Number})::Homotopy
-    values = _parameter_values(H, p)
+    values = parameter_values(H, p)
     G = Homotopy(
         [subs(e, H.parameters => values) for e in H.expressions],
         H.variables, H.t; compile = H.compile_mode,
@@ -138,7 +138,7 @@ function fix_parameters(H::Homotopy, p::AbstractVector{<:Number})::Homotopy
 end
 
 # `[t; p]` in the layout the compiled system takes its parameters in.
-function _path_parameters(
+function path_parameters(
         H::Homotopy, t::Number, p::AbstractVector{<:Number},
     )::Vector{ComplexF64}
     np = length(H.parameters)
@@ -167,7 +167,7 @@ Value of `H` at the point `x` and path parameter `t`, on the normalized equation
 evaluate(
     H::Homotopy, x::AbstractVector{<:Number}, t::Number,
     p::AbstractVector{<:Number} = ComplexF64[],
-) = evaluate(H.evaluator, x, _path_parameters(H, t, p))
+) = evaluate(H.evaluator, x, path_parameters(H, t, p))
 
 """
     jacobian(H::Homotopy, x, t, p = ComplexF64[])
@@ -178,18 +178,18 @@ complex; call `real.` on the result when a real answer is wanted.
 jacobian(
     H::Homotopy, x::AbstractVector{<:Number}, t::Number,
     p::AbstractVector{<:Number} = ComplexF64[],
-) = jacobian(H.evaluator, x, _path_parameters(H, t, p))
+) = jacobian(H.evaluator, x, path_parameters(H, t, p))
 
 (H::Homotopy)(x::AbstractVector{<:Number}, t::Number) = evaluate(H, x, t)
 (H::Homotopy)(x::AbstractVector{<:Number}, t::Number, p::AbstractVector{<:Number}) =
     evaluate(H, x, t, p)
 
-_as_homotopy(H::AbstractHomotopy) = H
+as_homotopy(H::AbstractHomotopy) = H
 
 # Every route that tracks a homotopy accepts both spellings and converts once.
 const HomotopyLike = Union{AbstractHomotopy, Homotopy}
 
-function _as_homotopy(H::Homotopy)::ParameterHomotopy
+function as_homotopy(H::Homotopy)::ParameterHomotopy
     np = length(H.parameters)
     np == 0 || throw(
         ArgumentError(

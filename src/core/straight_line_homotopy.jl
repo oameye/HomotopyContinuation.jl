@@ -7,7 +7,7 @@
 # `u`: a wrapper (AffineChartHomotopy) passes a `u` with rows of its own past
 # this homotopy's, and `eachindex(u)` would read the scratch out of bounds.
 
-const _EMPTY_PARAMS = FSVec{ComplexF64}(ComplexF64[])
+const EMPTY_PARAMS = FSVec{ComplexF64}(ComplexF64[])
 
 struct StraightLineHomotopy <: AbstractHomotopy
     start::SystemEvaluator
@@ -58,9 +58,9 @@ end
 
 Base.size(H::StraightLineHomotopy) = size(H.target)
 
-_clone_homotopy(H::StraightLineHomotopy)::StraightLineHomotopy =
+clone_homotopy(H::StraightLineHomotopy)::StraightLineHomotopy =
     StraightLineHomotopy(
-    _clone_system_evaluator(H.start), _clone_system_evaluator(H.target); γ = H.γ,
+    clone_system_evaluator(H.start), clone_system_evaluator(H.target); γ = H.γ,
 )
 
 ## evaluate! — H(x,t) = γ·t·G(x) + (1-t)·F(x)
@@ -69,8 +69,8 @@ function evaluate!(
         u::FSVec{ComplexF64}, H::StraightLineHomotopy,
         x::FSVec{ComplexF64}, t::ComplexF64,
     )::Nothing
-    evaluate!(H.u_start, H.start, x, _EMPTY_PARAMS)
-    evaluate!(H.u_target, H.target, x, _EMPTY_PARAMS)
+    evaluate!(H.u_start, H.start, x, EMPTY_PARAMS)
+    evaluate!(H.u_target, H.target, x, EMPTY_PARAMS)
     γt = H.γ * t
     t1 = one(ComplexF64) - t
     @inbounds for i in eachindex(H.u_start)
@@ -88,8 +88,8 @@ function evaluate!(
         u::FSVec{ComplexF64}, H::StraightLineHomotopy,
         x::FSVec{ComplexDF64}, t::ComplexF64,
     )::Nothing
-    evaluate!(H.ū_start, H.start, x, _EMPTY_PARAMS)
-    evaluate!(H.ū_target, H.target, x, _EMPTY_PARAMS)
+    evaluate!(H.ū_start, H.start, x, EMPTY_PARAMS)
+    evaluate!(H.ū_target, H.target, x, EMPTY_PARAMS)
     γt = H.γ * t
     t1 = one(ComplexF64) - t
     @inbounds for i in eachindex(H.ū_start)
@@ -104,8 +104,8 @@ function evaluate_and_jacobian!(
         u::FSVec{ComplexF64}, U::FSMat{ComplexF64},
         H::StraightLineHomotopy, x::FSVec{ComplexF64}, t::ComplexF64,
     )::Nothing
-    evaluate_and_jacobian!(H.u_start, H.U_start, H.start, x, _EMPTY_PARAMS)
-    evaluate_and_jacobian!(H.u_target, H.U_target, H.target, x, _EMPTY_PARAMS)
+    evaluate_and_jacobian!(H.u_start, H.U_start, H.start, x, EMPTY_PARAMS)
+    evaluate_and_jacobian!(H.u_target, H.U_target, H.target, x, EMPTY_PARAMS)
     γt = H.γ * t
     t1 = one(ComplexF64) - t
     @inbounds for i in eachindex(H.u_start)
@@ -123,8 +123,8 @@ function taylor!(
         u::FSVec{ComplexF64}, ::Val{1}, H::StraightLineHomotopy,
         x::FSVec{ComplexF64}, t::ComplexF64,
     )::Nothing
-    evaluate!(H.u_start, H.start, x, _EMPTY_PARAMS)
-    evaluate!(H.u_target, H.target, x, _EMPTY_PARAMS)
+    evaluate!(H.u_start, H.start, x, EMPTY_PARAMS)
+    evaluate!(H.u_target, H.target, x, EMPTY_PARAMS)
     @inbounds for i in eachindex(H.u_start)
         u[i] = H.γ * H.u_start[i] - H.u_target[i]
     end
@@ -133,7 +133,7 @@ end
 
 ## taylor! order 2
 
-@inline function _copy_prefix!(
+@inline function copy_prefix!(
         dst::TaylorVector{K, T},
         src::TaylorVector{N, T},
     )::Nothing where {K, N, T}
@@ -147,11 +147,11 @@ function taylor!(
         u::FSVec{ComplexF64}, ::Val{2}, H::StraightLineHomotopy,
         tx::TaylorVector{3, ComplexF64}, t::ComplexF64,
     )::Nothing
-    _copy_prefix!(H.tx1, tx)
-    taylor!(H.u_cross_start, Val(1), H.start, H.tx1, _EMPTY_PARAMS)
-    taylor!(H.u_cross_target, Val(1), H.target, H.tx1, _EMPTY_PARAMS)
-    taylor!(H.u_start, Val(2), H.start, tx, _EMPTY_PARAMS)
-    taylor!(H.u_target, Val(2), H.target, tx, _EMPTY_PARAMS)
+    copy_prefix!(H.tx1, tx)
+    taylor!(H.u_cross_start, Val(1), H.start, H.tx1, EMPTY_PARAMS)
+    taylor!(H.u_cross_target, Val(1), H.target, H.tx1, EMPTY_PARAMS)
+    taylor!(H.u_start, Val(2), H.start, tx, EMPTY_PARAMS)
+    taylor!(H.u_target, Val(2), H.target, tx, EMPTY_PARAMS)
     t1 = one(ComplexF64) - t
     @inbounds for i in eachindex(H.u_start)
         u[i] = H.γ * (H.u_cross_start[i] + t * H.u_start[i]) +
@@ -166,11 +166,11 @@ function taylor!(
         u::FSVec{ComplexF64}, ::Val{3}, H::StraightLineHomotopy,
         tx::TaylorVector{4, ComplexF64}, t::ComplexF64,
     )::Nothing
-    _copy_prefix!(H.tx2, tx)
-    taylor!(H.u_cross_start, Val(2), H.start, H.tx2, _EMPTY_PARAMS)
-    taylor!(H.u_cross_target, Val(2), H.target, H.tx2, _EMPTY_PARAMS)
-    taylor!(H.u_start, Val(3), H.start, tx, _EMPTY_PARAMS)
-    taylor!(H.u_target, Val(3), H.target, tx, _EMPTY_PARAMS)
+    copy_prefix!(H.tx2, tx)
+    taylor!(H.u_cross_start, Val(2), H.start, H.tx2, EMPTY_PARAMS)
+    taylor!(H.u_cross_target, Val(2), H.target, H.tx2, EMPTY_PARAMS)
+    taylor!(H.u_start, Val(3), H.start, tx, EMPTY_PARAMS)
+    taylor!(H.u_target, Val(3), H.target, tx, EMPTY_PARAMS)
     t1 = one(ComplexF64) - t
     @inbounds for i in eachindex(H.u_start)
         u[i] = H.γ * (H.u_cross_start[i] + t * H.u_start[i]) +

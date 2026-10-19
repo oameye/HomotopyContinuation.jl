@@ -67,7 +67,7 @@ end
     OP_POW # a ^ b where b is a non-integer number
 end
 
-const _OP_ARITY = (
+const OP_ARITY = (
     0,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     2, 2, 2, 2, 2,
@@ -77,7 +77,7 @@ const _OP_ARITY = (
     2,
 )
 
-const _OP_CALL = (
+const OP_CALL = (
     :op_stop,
     :op_cb, :op_cos, :op_inv, :op_inv_not_zero, :op_invsqr, :op_neg, :op_sin, :op_sqr,
     :op_sqrt, :op_identity,
@@ -90,7 +90,7 @@ const _OP_CALL = (
 
 # `OP_POW` takes its exponent from the tape rather than the instruction, since an
 # `Instruction` input is an `Int32` slot and a real exponent does not fit one.
-const _OP_IMMEDIATE_INPUT = (
+const OP_IMMEDIATE_INPUT = (
     0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 2,
@@ -100,13 +100,13 @@ const _OP_IMMEDIATE_INPUT = (
     0,
 )
 
-@inline _op_index(op::OpType.T) = Int(op) + 1
+@inline op_index(op::OpType.T) = Int(op) + 1
 
-@inline arity(op::OpType.T)::Int = @inbounds _OP_ARITY[_op_index(op)]
-@inline op_call(op::OpType.T)::Symbol = @inbounds _OP_CALL[_op_index(op)]
+@inline arity(op::OpType.T)::Int = @inbounds OP_ARITY[op_index(op)]
+@inline op_call(op::OpType.T)::Symbol = @inbounds OP_CALL[op_index(op)]
 
 @inline function should_use_index_not_reference(op::OpType.T, index::Int)::Bool
-    return @inbounds _OP_IMMEDIATE_INPUT[_op_index(op)] == index
+    return @inbounds OP_IMMEDIATE_INPUT[op_index(op)] == index
 end
 
 # arity 0

@@ -11,7 +11,7 @@ ProgressStats() = ProgressStats(0, 0, 0, 0)
 function record!(stats::ProgressStats, r::PathResult)::Nothing
     if is_success(r)
         rl = is_real(r)
-        if _singular(r)
+        if counts_as_singular(r)
             stats.singular += 1
             rl && (stats.singular_real += 1)
         else
@@ -22,7 +22,7 @@ function record!(stats::ProgressStats, r::PathResult)::Nothing
     return nothing
 end
 
-function _showvalues(stats::ProgressStats, ntracked::Int)
+function progress_showvalues(stats::ProgressStats, ntracked::Int)
     total = stats.nonsingular + stats.singular
     total_real = stats.nonsingular_real + stats.singular_real
     return (
@@ -67,7 +67,7 @@ function update_progress!(
         progress::ProgressMeter.Progress, ntracked::Int, stats::ProgressStats, r::PathResult,
     )::Nothing
     record!(stats, r)
-    ProgressMeter.update!(progress, ntracked; showvalues = _showvalues(stats, ntracked))
+    ProgressMeter.update!(progress, ntracked; showvalues = progress_showvalues(stats, ntracked))
     return nothing
 end
 

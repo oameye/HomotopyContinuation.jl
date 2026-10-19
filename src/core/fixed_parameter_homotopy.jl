@@ -50,8 +50,8 @@ parameters(::FixedParameterHomotopy)::Vector{Expression} = Expression[]
 variable_groups(H::FixedParameterHomotopy)::Vector{Vector{Int}} =
     variable_groups(H.homotopy)
 
-_clone_homotopy(H::FixedParameterHomotopy)::FixedParameterHomotopy =
-    FixedParameterHomotopy(_clone_homotopy(H.homotopy), copy(H.parameters))
+clone_homotopy(H::FixedParameterHomotopy)::FixedParameterHomotopy =
+    FixedParameterHomotopy(clone_homotopy(H.homotopy), copy(H.parameters))
 
 function evaluate!(
         u::AbstractVector, H::FixedParameterHomotopy,

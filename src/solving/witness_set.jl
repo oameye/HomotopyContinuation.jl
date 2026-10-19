@@ -192,8 +192,8 @@ function Witness(;
     )
 end
 
-_reseed(alg::Witness, seed::UInt32) =
-    Witness(_with_seed(alg.common, seed), alg.dim, alg.codim, alg.solver)
+reseed(alg::Witness, seed::UInt32) =
+    Witness(with_seed(alg.common, seed), alg.dim, alg.codim, alg.solver)
 
 """
     Membership(; options...)
@@ -223,13 +223,13 @@ Membership(;
 
 # ── Internal primitives ──────────────────────────────────────────────────────
 
-@noinline _solve_witness_cache(cache::PathSolveCache)::Result = CommonSolve.solve!(cache)
+@noinline solve_witness_cache(cache::PathSolveCache)::Result = CommonSolve.solve!(cache)
 
 # Initialize witness points: solve `V(F) ∩ L` by appending the linear equations
 # of `L` to `F` and running the ordinary total-degree solve. Returns the
 # nonsingular witness points. For projective problems a random affine chart is
 # appended so the combined system is square.
-function _witness_init(
+function witness_init(
         F::System,
         L::LinearSubspace,
         rng::Random.MersenneTwister,
@@ -237,23 +237,23 @@ function _witness_init(
         exec::AbstractExecutor;
         projective::Bool = is_linear(L) && is_homogeneous(F),
     )::Vector{Vector{ComplexF64}}
-    chart = projective ? _affine_chart(rng, F) : ComplexF64[]
+    chart = projective ? random_affine_chart(rng, F) : ComplexF64[]
     # The inner seed descends from `rng`, so one `Witness` seed reproduces the
     # subspace and the solve together.
-    reseeded = _reseed(alg.solver, rand(rng, UInt32))
-    solver = _show_progress(alg) ? reseeded : _quiet(reseeded)
-    res = _solve_witness_cache(_init_witness_slice(F, L, chart, solver, exec))
+    reseeded = reseed(alg.solver, rand(rng, UInt32))
+    solver = algorithm_show_progress(alg) ? reseeded : without_progress(reseeded)
+    res = solve_witness_cache(init_witness_slice(F, L, chart, solver, exec))
     return [solution(pr) for pr in results(res; only_nonsingular = true)]
 end
 
-_init_witness_slice(
+init_witness_slice(
     F::System, L::LinearSubspace, chart::Vector{ComplexF64},
     solver::TotalDegree, exec::AbstractExecutor,
-) = _init_sliced_total_degree(F, L, chart, solver, exec)
+) = init_sliced_total_degree(F, L, chart, solver, exec)
 
 # The polyhedral route rebuilds the sliced system and redraws its own chart, so
 # the chart above is unused there.
-_init_witness_slice(
+init_witness_slice(
     F::System, L::LinearSubspace, ::Vector{ComplexF64},
     solver::Polyhedral, exec::AbstractExecutor,
 ) = CommonSolve.init(F, L, solver, exec)
@@ -262,7 +262,7 @@ _init_witness_slice(
 # ambient coordinates, via `ExtrinsicSubspaceHomotopy`. Returns the nonsingular
 # endpoints. The gamma perturbation only rescales the linear equations by a unit
 # complex, which preserves the start solution set (the start points stay exact).
-function _move_witness_points(
+function move_witness_points(
         F::System,
         starts::AbstractVector{<:AbstractVector},
         L_start::LinearSubspace,
@@ -274,7 +274,7 @@ function _move_witness_points(
         endgame_options::EndgameOptions = EndgameOptions(),
     )::Vector{Vector{ComplexF64}}
     base = ExtrinsicSubspaceHomotopy(
-        F.evaluator, L_start, L_target; gamma = _random_gamma(rng),
+        F.evaluator, L_start, L_target; gamma = random_gamma(rng),
     )
     # In the projective setting the ambient system is positive-dimensional, so
     # wrap it in an affine chart `c·x = 1`. Start points are re-scaled onto the
@@ -341,10 +341,10 @@ function solve(
         alg::Witness,
         exec::AbstractExecutor = Threaded(),
     )::WitnessSet
-    F = _as_system(F)
-    _check_parameter_free(F, "`Witness`")
+    F = as_system(F)
+    check_parameter_free(F, "`Witness`")
     dim, codim = alg.dim, alg.codim
-    rng = Random.MersenneTwister(_seed(alg))
+    rng = Random.MersenneTwister(algorithm_seed(alg))
     n = nvariables(F)
     projective = is_homogeneous(F)
     if dim < 0 && codim < 0
@@ -361,11 +361,11 @@ function solve(
     )
     # dim(L) = n - variety_dim, i.e. codim(L) = variety_dim. A zero-dimensional
     # variety is sliced with the whole space (codim-0 subspace).
-    L = variety_dim == 0 ? _full_subspace(n) :
+    L = variety_dim == 0 ? full_subspace(n) :
         rand_subspace(rng, n; codim = variety_dim, affine = !projective)
     # `rng` and not a fresh one from `seed`: the chart drawn downstream must be
     # independent of the `L` just drawn from the same stream.
-    return _witness_set(F, L, rng, alg, exec)
+    return witness_set(F, L, rng, alg, exec)
 end
 
 function solve(
@@ -374,16 +374,16 @@ function solve(
         alg::Witness,
         exec::AbstractExecutor = Threaded(),
     )::WitnessSet
-    F = _as_system(F)
-    _check_parameter_free(F, "`Witness`")
-    return _witness_set(F, L, Random.MersenneTwister(_seed(alg)), alg, exec)
+    F = as_system(F)
+    check_parameter_free(F, "`Witness`")
+    return witness_set(F, L, Random.MersenneTwister(algorithm_seed(alg)), alg, exec)
 end
 
-function _witness_set(
+function witness_set(
         F::System, L::LinearSubspace, rng::Random.MersenneTwister,
         alg::Witness, exec::AbstractExecutor,
     )::WitnessSet
-    return WitnessSet(F, L, _witness_init(F, L, rng, alg, exec))
+    return WitnessSet(F, L, witness_init(F, L, rng, alg, exec))
 end
 
 function solve(
@@ -398,11 +398,11 @@ function solve(
                 "linear subspace since the given witness set is projective.",
         )
     end
-    R = _move_witness_points(
-        W.F, W.R, W.L, L, Random.MersenneTwister(_seed(alg));
+    R = move_witness_points(
+        W.F, W.R, W.L, L, Random.MersenneTwister(algorithm_seed(alg));
         projective = W.projective,
-        tracker_options = _tracker_options(alg),
-        endgame_options = _endgame_options(alg),
+        tracker_options = algorithm_tracker_options(alg),
+        endgame_options = algorithm_endgame_options(alg),
     )
     return WitnessSet(
         W.F, convert(LinearSubspace{ComplexF64}, L), R;
@@ -458,13 +458,13 @@ function trace_test(
     L₁ = translate(L₀, v)
     L₋₁ = translate(L₀, -v)
 
-    R₁ = _move_witness_points(
+    R₁ = move_witness_points(
         F, S₀, L₀, L₁, rng;
         projective = W.projective, chart = chart,
         tracker_options = tracker_options, endgame_options = endgame_options,
     )
     length(R₁) == degree(W) || return NaN
-    R₋₁ = _move_witness_points(
+    R₋₁ = move_witness_points(
         F, S₀, L₀, L₋₁, rng;
         projective = W.projective, chart = chart,
         tracker_options = tracker_options, endgame_options = endgame_options,
@@ -545,7 +545,7 @@ function MembershipState(
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
     )
     m, n = size(F)
-    ev = _clone_system_evaluator(F)
+    ev = clone_system_evaluator(F)
     hom_ev = projective ? SystemEvaluator(AffineChartSystem(ev, chart)) : ev
     homotopy = IntrinsicSubspaceHomotopy(hom_ev, L, L; gamma = gamma)
     tracker = endgame_tracker(homotopy, tracker_options, endgame_options)
@@ -572,7 +572,7 @@ end
 # (mutated) here. `A`/`b` are allocated fresh per query on purpose:
 # `LinearSubspace` keeps them by reference and the homotopy reads the stored
 # subspace during tracking, so they must not be buffer-reused.
-function _membership_query(
+function membership_query(
         st::MembershipState, W::WitnessSet, chart::Vector{ComplexF64},
         x0::Vector{ComplexF64}, x::AbstractVector{<:Number},
         R::Matrix{ComplexF64}, atol::Float64, rtol::Float64,
@@ -596,10 +596,10 @@ function _membership_query(
     LA.norm(st.y, Inf) > 1.0e-2 * LA.norm(st.y0, Inf) && return false
 
     if W.projective
-        A = _orthonormal_rows_through!(R, st.xc)
+        A = orthonormal_rows_through!(R, st.xc)
         b = zeros(ComplexF64, k)
     else
-        A = _orthonormal_rows(R)
+        A = orthonormal_rows(R)
         b = A * st.xc
     end
     L_x = LinearSubspace(ExtrinsicDescription(A, b; orthonormal = true))
@@ -623,7 +623,7 @@ function _membership_query(
         pr = PathResult(st.tracker; path_number = 0, start_solution = q)
         is_success(pr) || continue
         ambient_coordinates!(st.amb_buf, st.homotopy, solution(pr), complex(0.0))
-        _vt_distance(InfNorm(), st.amb_buf, st.xc) < rad && return true
+        vt_distance(InfNorm(), st.amb_buf, st.xc) < rad && return true
     end
     return false
 end
@@ -636,10 +636,10 @@ function membership(
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
     )::Vector{Bool} where {S <: System}
-    tracker_options = _tracker_options(alg)
-    endgame_options = _endgame_options(alg)
-    show_progress = _show_progress(alg)
-    rng = Random.MersenneTwister(_seed(alg))
+    tracker_options = algorithm_tracker_options(alg)
+    endgame_options = algorithm_endgame_options(alg)
+    show_progress = algorithm_show_progress(alg)
+    rng = Random.MersenneTwister(algorithm_seed(alg))
     F = W.F
     n = size(F)[2]
     # A single chart shared by all queries so the compared representatives are
@@ -651,7 +651,7 @@ function membership(
     # pre-drawn random matrix per query (the only per-query randomness). Both
     # are drawn here in the driver, off `rng`, so threaded and serial runs
     # consume the same stream and produce bit-identical results.
-    gamma = _random_gamma(rng)
+    gamma = random_gamma(rng)
     k = codim(W.L)
     Rs = [randn(rng, ComplexF64, k, n) for _ in eachindex(P)]
 
@@ -659,20 +659,20 @@ function membership(
     # The progress branch is taken once, so each call compiles against one
     # concrete progress type instead of a union.
     return if show_progress
-        _membership_run!(
+        membership_run!(
             out, P, W, exec, F, chart, x0, Rs, gamma, tracker_options,
             endgame_options, atol, rtol,
             make_progress(length(P); desc = "Testing membership: "),
         )
     else
-        _membership_run!(
+        membership_run!(
             out, P, W, exec, F, chart, x0, Rs, gamma, tracker_options,
             endgame_options, atol, rtol, nothing,
         )
     end
 end
 
-function _membership_run!(
+function membership_run!(
         out::Vector{Bool}, P::AbstractVector{<:AbstractVector}, W::WitnessSet,
         exec::AbstractExecutor, F, chart::Vector{ComplexF64},
         x0::Vector{ComplexF64}, Rs::Vector{Matrix{ComplexF64}},
@@ -689,7 +689,7 @@ function _membership_run!(
                 F, W.L, W.projective, chart, gamma,
                 tracker_options, endgame_options,
             )
-            out[i] = _membership_query(st, W, chart, x0, P[i], Rs[i], atol, rtol)
+            out[i] = membership_query(st, W, chart, x0, P[i], Rs[i], atol, rtol)
             @lock plock next_progress!(progress)
         end
     else
@@ -697,7 +697,7 @@ function _membership_run!(
             F, W.L, W.projective, chart, gamma, tracker_options, endgame_options,
         )
         for (i, x) in enumerate(P)
-            out[i] = _membership_query(st, W, chart, x0, x, Rs[i], atol, rtol)
+            out[i] = membership_query(st, W, chart, x0, x, Rs[i], atol, rtol)
             next_progress!(progress)
         end
     end
@@ -706,7 +706,7 @@ end
 
 # Orthonormalize the rows of `R` in place of a fresh matrix (the rowspace is
 # preserved by the SVD).
-function _orthonormal_rows(R::Matrix{ComplexF64})::Matrix{ComplexF64}
+function orthonormal_rows(R::Matrix{ComplexF64})::Matrix{ComplexF64}
     size(R, 1) == 0 && return R
     return Matrix(LA.svd(R).Vt)
 end
@@ -716,7 +716,7 @@ end
 # `{y | A y = 0}` passes through the ray of `x`. Requires `k < n`: the
 # complement of `x` has dimension `n - 1`, so `k = n` rows would be rank
 # deficient and the orthonormalized rows would no longer annihilate `x`.
-function _orthonormal_rows_through!(
+function orthonormal_rows_through!(
         R::Matrix{ComplexF64}, x::Vector{ComplexF64},
     )::Matrix{ComplexF64}
     k, n = size(R)

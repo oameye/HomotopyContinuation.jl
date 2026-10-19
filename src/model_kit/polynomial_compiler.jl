@@ -32,26 +32,26 @@ function MonomialCache(compiler::TapeCompiler)::MonomialCache
     )
 end
 
-function _power_slot!(cache::MonomialCache, base_slot::Int32, exp::Int)::Int32
+function power_slot!(cache::MonomialCache, base_slot::Int32, exp::Int)::Int32
     exp == 1 && return base_slot
     key = (base_slot, exp)
-    slot = get(cache.power_slots, key, _SLOT_NONE)
-    slot != _SLOT_NONE && return slot
-    slot = _tape_pow!(cache.compiler, base_slot, exp)
+    slot = get(cache.power_slots, key, SLOT_NONE)
+    slot != SLOT_NONE && return slot
+    slot = tape_pow!(cache.compiler, base_slot, exp)
     cache.power_slots[key] = slot
     return slot
 end
 
-function _monomial_slot!(cache::MonomialCache, key::MonomialKey)::Int32
-    isempty(key.data) && return _get_constant_slot!(cache.compiler, one(ComplexF64))
-    slot = get(cache.monomial_slots, key, _SLOT_NONE)
-    slot != _SLOT_NONE && return slot
+function cached_monomial_slot!(cache::MonomialCache, key::MonomialKey)::Int32
+    isempty(key.data) && return get_constant_slot!(cache.compiler, one(ComplexF64))
+    slot = get(cache.monomial_slots, key, SLOT_NONE)
+    slot != SLOT_NONE && return slot
 
     factors = Int32[]
     for i in 1:2:length(key.data)
-        push!(factors, _power_slot!(cache, key.data[i], Int(key.data[i + 1])))
+        push!(factors, power_slot!(cache, key.data[i], Int(key.data[i + 1])))
     end
-    slot = _compile_prod_parts!(cache.compiler, factors)
+    slot = compile_prod_parts!(cache.compiler, factors)
     cache.monomial_slots[key] = slot
     return slot
 end
@@ -61,12 +61,12 @@ struct PolynomialInstructionCompiler
     slot_by_symbol::Dict{Symbol, Int32}
 end
 
-function _polynomial_instruction_compiler(
+function polynomial_instruction_compiler(
         variables::AbstractVector,
         parameters::AbstractVector,
     )::PolynomialInstructionCompiler
     compiler = TapeCompiler(length(variables), length(parameters))
-    _initialize_placeholder_slots!(compiler, length(variables), length(parameters))
+    initialize_placeholder_slots!(compiler, length(variables), length(parameters))
     slot_by_symbol = Dict{Symbol, Int32}()
     for i in eachindex(parameters)
         slot_by_symbol[Symbol(parameters[i])] = compiler.param_slots[i]
@@ -79,7 +79,7 @@ end
 
 # Insertion-sorted in place: keys have a handful of pairs, and avoiding the
 # generic sort keeps its specialization out of construction-time compilation.
-function _monomial_key(
+function monomial_key(
         mono,
         slot_by_symbol::Dict{Symbol, Int32},
     )::MonomialKey
@@ -87,8 +87,8 @@ function _monomial_key(
     for (var, exp) in zip(MP.variables(mono), MP.exponents(mono))
         exp == 0 && continue
         sym = Symbol(var)
-        slot = get(slot_by_symbol, sym, _SLOT_NONE)
-        slot == _SLOT_NONE && throw(_unknown_symbol_error(sym))
+        slot = get(slot_by_symbol, sym, SLOT_NONE)
+        slot == SLOT_NONE && throw(unknown_symbol_error(sym))
         push!(data, slot)
         push!(data, Int32(exp))
         k = length(data) >> 1
@@ -103,15 +103,15 @@ end
 
 # Multiply `slot` by a literal coefficient. Coefficients that rewrite to a
 # cheaper instruction never register a constant, leaving no dead tape slot.
-function _coeff_mul_slot!(c::TapeCompiler, coeff::ComplexF64, slot::Int32)::Int32
+function coeff_mul_slot!(c::TapeCompiler, coeff::ComplexF64, slot::Int32)::Int32
     coeff == one(ComplexF64) && return slot
-    _is_one_slot(c, slot) && return _get_constant_slot!(c, coeff)
-    coeff == -one(ComplexF64) && return _tape_neg!(c, slot)
-    coeff == ComplexF64(2) && return _tape_add!(c, slot, slot)
-    return _tape_mul!(c, _get_constant_slot!(c, coeff), slot)
+    is_one_slot(c, slot) && return get_constant_slot!(c, coeff)
+    coeff == -one(ComplexF64) && return tape_neg!(c, slot)
+    coeff == ComplexF64(2) && return tape_add!(c, slot, slot)
+    return tape_mul!(c, get_constant_slot!(c, coeff), slot)
 end
 
-function _compile_polynomial!(
+function compile_polynomial!(
         state::PolynomialInstructionCompiler,
         poly::MP.AbstractPolynomialLike,
     )::Int32
@@ -121,19 +121,19 @@ function _compile_polynomial!(
     for term in MP.terms(poly)
         coeff = ComplexF64(MP.coefficient(term))
         iszero(coeff) && continue
-        key = _monomial_key(MP.monomial(term), state.slot_by_symbol)
+        key = monomial_key(MP.monomial(term), state.slot_by_symbol)
         if isempty(key.data)
-            push!(term_slots, _get_constant_slot!(compiler, coeff))
+            push!(term_slots, get_constant_slot!(compiler, coeff))
         else
-            mono_slot = _monomial_slot!(state.cache, key)
-            push!(term_slots, _coeff_mul_slot!(compiler, coeff, mono_slot))
+            mono_slot = cached_monomial_slot!(state.cache, key)
+            push!(term_slots, coeff_mul_slot!(compiler, coeff, mono_slot))
         end
     end
-    isempty(term_slots) && return _get_constant_slot!(compiler, zero(ComplexF64))
-    return _sum_slots!(compiler, term_slots)
+    isempty(term_slots) && return get_constant_slot!(compiler, zero(ComplexF64))
+    return sum_slots!(compiler, term_slots)
 end
 
-function _build_instruction_sequence_direct(
+function build_instruction_sequence_direct(
         polys::AbstractVector{<:MP.AbstractPolynomialLike},
         variables::AbstractVector,
         parameters::AbstractVector,
@@ -144,18 +144,18 @@ function _build_instruction_sequence_direct(
     nparams = length(parameters)
     output_dim = length(polys)
 
-    state = _polynomial_instruction_compiler(variables, parameters)
+    state = polynomial_instruction_compiler(variables, parameters)
     result_slots = Int32[]
     sizehint!(result_slots, output_dim * (include_jacobian ? (nvars + 1) : 1))
 
     for poly in polys
-        push!(result_slots, _compile_polynomial!(state, poly))
+        push!(result_slots, compile_polynomial!(state, poly))
     end
 
     if include_jacobian
         for v in variables
             for poly in polys
-                push!(result_slots, _compile_polynomial!(state, MP.differentiate(poly, v)))
+                push!(result_slots, compile_polynomial!(state, MP.differentiate(poly, v)))
             end
         end
     end
@@ -163,7 +163,7 @@ function _build_instruction_sequence_direct(
     # The direct compiler emits every dependency before its consumer. Running
     # the generic DAG reorder here only rebuilds that ordering and adds cold
     # compiler work; the symbolic frontend retains the reorder.
-    return _finalize_compiler(
+    return finalize_compiler(
         Val(false), state.cache.compiler, result_slots, nvars, nparams, output_dim,
     )
 end

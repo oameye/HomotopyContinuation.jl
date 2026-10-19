@@ -174,7 +174,7 @@ end
 # Convergence helper
 # ---------------------------------------------------------------------------
 
-@inline function _h(a::Float64)::Float64
+@inline function newton_convergence_h(a::Float64)::Float64
     return 2a * (sqrt(4a^2 + 1) - 2a)
 end
 
@@ -182,7 +182,7 @@ end
 # Step size control
 # ---------------------------------------------------------------------------
 
-function _compute_initial_stepsize(
+function compute_initial_stepsize(
         state::TrackerState, pred::Predictor, opts::TrackerOptions,
         consts::TrackerConstants,
     )::Float64
@@ -203,7 +203,7 @@ function _compute_initial_stepsize(
     return max(Δs, opts.min_step_size)
 end
 
-function _update_stepsize!(
+function update_stepsize!(
         state::TrackerState,
         result::NewtonCorrectorResult,
         pred::Predictor,
@@ -251,8 +251,8 @@ function _update_stepsize!(
         # estimate how much to reduce step size
         j = result.iters - 2
         Θ_j = j > 0 ? nthroot(result.θ, 1 << j) : result.θ
-        h_Θ_j = _h(Θ_j)
-        h_half_a = _h(0.5 * opts.β_a * opts.a)
+        h_Θ_j = newton_convergence_h(Θ_j)
+        h_half_a = newton_convergence_h(0.5 * opts.β_a * opts.a)
 
         if isnan(Θ_j) ||
                 result.return_code == NewtonCode.NEWT_SINGULARITY ||
@@ -277,7 +277,7 @@ end
 # Termination check
 # ---------------------------------------------------------------------------
 
-function _check_terminated!(
+function check_terminated!(
         state::TrackerState, opts::TrackerOptions, consts::TrackerConstants,
     )::Nothing
     if is_done(state.segment)
@@ -337,11 +337,11 @@ function update_precision!(tracker::Tracker, μ_low::Float64)::Bool
 
     a = opts.a
     if state.extended_prec && !state.keep_extended_prec && isfinite(μ_low) && μ_low > state.μ
-        if μ_low * state.ω < a^7 * _h(a)
+        if μ_low * state.ω < a^7 * newton_convergence_h(a)
             state.extended_prec = false
             state.μ = μ_low
         end
-    elseif state.μ * state.ω > a^5 * _h(a)
+    elseif state.μ * state.ω > a^5 * newton_convergence_h(a)
         use_extended_precision!(tracker)
     end
 
@@ -453,8 +453,8 @@ function step!(tracker::Tracker)::Bool
     end
 
     state.norm_Δx₀ = result.norm_Δx₀
-    _update_stepsize!(state, result, pred, opts, consts)
-    _check_terminated!(state, opts, consts)
+    update_stepsize!(state, result, pred, opts, consts)
+    check_terminated!(state, opts, consts)
 
     return accepted
 end
@@ -464,13 +464,13 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    _start_jacobian_corank(A) -> Int
+    start_jacobian_corank(A) -> Int
 
 Corank of the start-point Jacobian, used to distinguish a rank-deficient start
 Jacobian from a generic invalid start value. Returns 0 (generic) when the
 matrix contains non-finite entries and cannot be classified.
 """
-function _start_jacobian_corank(A::FSMat{ComplexF64})::Int
+function start_jacobian_corank(A::FSMat{ComplexF64})::Int
     M = Matrix{ComplexF64}(A)
     all(isfinite, M) || return 0
     return size(M, 2) - LA.rank(M; rtol = 1.0e-14)
@@ -558,7 +558,7 @@ function init!(
                 tracker.corrector.r, state.jacobian.workspace.A,
                 tracker.homotopy, state.x, t₁,
             )
-            corank = _start_jacobian_corank(state.jacobian.workspace.A)
+            corank = start_jacobian_corank(state.jacobian.workspace.A)
             state.code = if corank > 0
                 TrackerCode.TERMINATED_INVALID_STARTVALUE_SINGULAR_JACOBIAN
             else
@@ -590,7 +590,7 @@ function init!(
     state.τ = pred.trust_region
     state.cond_J_ẋ = pred.cond_H_x
 
-    Δs = _compute_initial_stepsize(state, pred, opts, tracker.constants)
+    Δs = compute_initial_stepsize(state, pred, opts, tracker.constants)
     Δs = min(Δs, max_initial_step_size)
     propose_step!(state.segment, Δs)
 
@@ -616,7 +616,7 @@ function resume_from!(tracker::Tracker, t₀::ComplexF64)::TrackerCode.T
     state.code = TrackerCode.TRACKING
     state.Δs_prev = 0.0
 
-    Δs = _compute_initial_stepsize(state, pred, opts, tracker.constants)
+    Δs = compute_initial_stepsize(state, pred, opts, tracker.constants)
     propose_step!(state.segment, Δs)
 
     return state.code

@@ -62,8 +62,8 @@ function solve_binomial!(
         coeffs::Vector{Vector{ComplexF64}},
         cell::MixedSubdivisions.MixedCell,
     )::Int
-    _init_binomial!(BSS, support, coeffs, cell)
-    return _solve_binomial_core!(X, BSS)
+    init_binomial!(BSS, support, coeffs, cell)
+    return solve_binomial_core!(X, BSS)
 end
 
 """
@@ -80,56 +80,56 @@ function solve_binomial!(
     )::Int
     copyto!(BSS.A, A)
     copyto!(BSS.b, b)
-    return _solve_binomial_core!(X, BSS)
+    return solve_binomial_core!(X, BSS)
 end
 
 # Fast path in Int64; on overflow (checked arithmetic throws) or a residual
 # validation failure, redo the HNF and the angular solve in BigInt/BigFloat.
-function _solve_binomial_core!(X::Matrix{ComplexF64}, BSS::BinomialSystemSolver)::Int
+function solve_binomial_core!(X::Matrix{ComplexF64}, BSS::BinomialSystemSolver)::Int
     d_hat = try
-        _hnf!(BSS.H, BSS.U, BSS.A)
-        d = _solve_from_hnf!(X, BSS, BSS.H, BSS.U)
-        if !_validate_result(X, BSS, d)
-            _hnf_big!(BSS.H_big, BSS.U_big, BSS.A)
-            d = _solve_from_hnf!(X, BSS, BSS.H_big, BSS.U_big)
+        hnf!(BSS.H, BSS.U, BSS.A)
+        d = solve_from_hnf!(X, BSS, BSS.H, BSS.U)
+        if !validate_result(X, BSS, d)
+            hnf_big!(BSS.H_big, BSS.U_big, BSS.A)
+            d = solve_from_hnf!(X, BSS, BSS.H_big, BSS.U_big)
         end
         d
     catch e
         e isa OverflowError || rethrow(e)
-        _hnf_big!(BSS.H_big, BSS.U_big, BSS.A)
-        _solve_from_hnf!(X, BSS, BSS.H_big, BSS.U_big)
+        hnf_big!(BSS.H_big, BSS.U_big, BSS.A)
+        solve_from_hnf!(X, BSS, BSS.H_big, BSS.U_big)
     end
     return d_hat
 end
 
-function _solve_from_hnf!(
+function solve_from_hnf!(
         X::Matrix{ComplexF64},
         BSS::BinomialSystemSolver,
         H::Matrix{Int64},
         U::Matrix{Int64},
     )::Int
-    d_hat = _d_hat_from_diagonal(H)
-    _fill_unit_roots_table!(BSS, H, d_hat)
-    _compute_angular_part!(X, BSS, H, U, d_hat)
-    _compute_magnitude!(X, BSS, d_hat)
+    d_hat = d_hat_from_diagonal(H)
+    fill_unit_roots_table!(BSS, H, d_hat)
+    compute_angular_part!(X, BSS, H, U, d_hat)
+    compute_magnitude!(X, BSS, d_hat)
     return d_hat
 end
 
-function _solve_from_hnf!(
+function solve_from_hnf!(
         X::Matrix{ComplexF64},
         BSS::BinomialSystemSolver,
         H::Matrix{BigInt},
         U::Matrix{BigInt},
     )::Int
-    d_hat = _d_hat_from_diagonal(H)
-    _fill_unit_roots_table!(BSS, H, d_hat)
-    _compute_angular_part!(X, BSS, H, U, d_hat)
-    _compute_magnitude!(X, BSS, d_hat)
+    d_hat = d_hat_from_diagonal(H)
+    fill_unit_roots_table!(BSS, H, d_hat)
+    compute_angular_part!(X, BSS, H, U, d_hat)
+    compute_magnitude!(X, BSS, d_hat)
     return d_hat
 end
 
 # d_hat = product of the (positive) diagonal of H
-function _d_hat_from_diagonal(H::Union{Matrix{Int64}, Matrix{BigInt}})::Int
+function d_hat_from_diagonal(H::Union{Matrix{Int64}, Matrix{BigInt}})::Int
     d_hat = 1
     @inbounds for i in 1:size(H, 1)
         d_hat *= Int(H[i, i])
@@ -138,13 +138,13 @@ function _d_hat_from_diagonal(H::Union{Matrix{Int64}, Matrix{BigInt}})::Int
 end
 
 """
-    _validate_result(X, BSS, d_hat) -> Bool
+    validate_result(X, BSS, d_hat) -> Bool
 
 Check that every computed solution actually satisfies `x^A = b` up to a relative
 residual of `1e-8`. A failure signals that the Int64 HNF lost precision and the
 BigInt path should be taken.
 """
-function _validate_result(
+function validate_result(
         X::Matrix{ComplexF64}, BSS::BinomialSystemSolver, d_hat::Int,
     )::Bool
     A = BSS.A
@@ -172,7 +172,7 @@ end
 # init! — extract A, b from mixed cell
 # --------------------------------------------------------------------------
 
-function _init_binomial!(
+function init_binomial!(
         BSS::BinomialSystemSolver,
         support::Vector{Matrix{Int32}},
         coeffs::Vector{Vector{ComplexF64}},
@@ -193,17 +193,17 @@ end
 # --------------------------------------------------------------------------
 
 # Checked arithmetic operators for overflow detection
-_checked_mul(x::Int64, y::Int64)::Int64 = Base.checked_mul(x, y)
-_checked_add(x::Int64, y::Int64)::Int64 = Base.checked_add(x, y)
+checked_mul_int(x::Int64, y::Int64)::Int64 = Base.checked_mul(x, y)
+checked_add_int(x::Int64, y::Int64)::Int64 = Base.checked_add(x, y)
 
 """
-    _hnf!(H, U, A)
+    hnf!(H, U, A)
 
 Compute the Hermite Normal Form of `A` such that `A·U = H` where `H` is lower
 triangular with positive diagonal entries. Uses checked arithmetic for overflow
 detection.
 """
-function _hnf!(H::Matrix{Int64}, U::Matrix{Int64}, A::Matrix{Int32})::Nothing
+function hnf!(H::Matrix{Int64}, U::Matrix{Int64}, A::Matrix{Int32})::Nothing
     n = size(A, 1)
     copyto!(H, A)
 
@@ -224,23 +224,23 @@ function _hnf!(H::Matrix{Int64}, U::Matrix{Int64}, A::Matrix{Int32})::Nothing
                 d_ii = H[j, j] ÷ r
                 for k in 1:n
                     h_kj, h_kii = H[k, j], H[k, ii]
-                    H[k, j] = _checked_add(_checked_mul(h_kj, p), _checked_mul(h_kii, q))
+                    H[k, j] = checked_add_int(checked_mul_int(h_kj, p), checked_mul_int(h_kii, q))
                     H[k, ii] =
-                        _checked_add(_checked_mul(h_kj, d_j), _checked_mul(h_kii, d_ii))
+                        checked_add_int(checked_mul_int(h_kj, d_j), checked_mul_int(h_kii, d_ii))
 
                     u_kj, u_kii = U[k, j], U[k, ii]
-                    U[k, j] = _checked_add(_checked_mul(u_kj, p), _checked_mul(u_kii, q))
+                    U[k, j] = checked_add_int(checked_mul_int(u_kj, p), checked_mul_int(u_kii, q))
                     U[k, ii] =
-                        _checked_add(_checked_mul(u_kj, d_j), _checked_mul(u_kii, d_ii))
+                        checked_add_int(checked_mul_int(u_kj, d_j), checked_mul_int(u_kii, d_ii))
                 end
             end
             # Step 4.3
             if j > 1
-                _reduce_off_diagonal!(H, U, j)
+                reduce_off_diagonal!(H, U, j)
             end
         end
         # Step 5
-        _reduce_off_diagonal!(H, U, ii)
+        reduce_off_diagonal!(H, U, ii)
     end
 
     # Special case: 1×1 matrix — ensure positive diagonal
@@ -255,13 +255,13 @@ function _hnf!(H::Matrix{Int64}, U::Matrix{Int64}, A::Matrix{Int32})::Nothing
 end
 
 """
-    _hnf_big!(H, U, A)
+    hnf_big!(H, U, A)
 
-BigInt version of [`_hnf!`](@ref) for the overflow fallback. Same Kannan-Bachem
+BigInt version of [`hnf!`](@ref) for the overflow fallback. Same Kannan-Bachem
 algorithm without checked arithmetic (BigInt cannot overflow). Allocates freely;
 only runs when the Int64 path failed, so performance is irrelevant.
 """
-function _hnf_big!(H::Matrix{BigInt}, U::Matrix{BigInt}, A::Matrix{Int32})::Nothing
+function hnf_big!(H::Matrix{BigInt}, U::Matrix{BigInt}, A::Matrix{Int32})::Nothing
     n = size(A, 1)
     @inbounds for j in 1:n, i in 1:n
         H[i, j] = big(A[i, j])
@@ -286,10 +286,10 @@ function _hnf_big!(H::Matrix{BigInt}, U::Matrix{BigInt}, A::Matrix{Int32})::Noth
                 end
             end
             if j > 1
-                _reduce_off_diagonal_big!(H, U, j)
+                reduce_off_diagonal_big!(H, U, j)
             end
         end
-        _reduce_off_diagonal_big!(H, U, ii)
+        reduce_off_diagonal_big!(H, U, ii)
     end
 
     if n == 1
@@ -302,7 +302,7 @@ function _hnf_big!(H::Matrix{BigInt}, U::Matrix{BigInt}, A::Matrix{Int32})::Noth
     return nothing
 end
 
-@inline function _reduce_off_diagonal_big!(
+@inline function reduce_off_diagonal_big!(
         H::Matrix{BigInt}, U::Matrix{BigInt}, k::Int,
     )::Nothing
     n = size(H, 1)
@@ -325,13 +325,13 @@ end
 end
 
 """
-    _cdiv(x, y)
+    ceil_div(x, y)
 
 Ceiling division: smallest integer d such that d * y >= x (for positive y).
 """
-_cdiv(x::Int64, y::Int64)::Int64 = cld(x, y)
+ceil_div(x::Int64, y::Int64)::Int64 = cld(x, y)
 
-@inline function _reduce_off_diagonal!(H::Matrix{Int64}, U::Matrix{Int64}, k::Int)::Nothing
+@inline function reduce_off_diagonal!(H::Matrix{Int64}, U::Matrix{Int64}, k::Int)::Nothing
     n = size(H, 1)
     @inbounds if H[k, k] < 0
         for i in 1:n
@@ -341,10 +341,10 @@ _cdiv(x::Int64, y::Int64)::Int64 = cld(x, y)
     end
     @inbounds for z in 1:(k - 1)
         if !iszero(H[z, z])
-            r = -_cdiv(H[k, z], H[z, z])
+            r = -ceil_div(H[k, z], H[z, z])
             for i in 1:n
-                U[i, z] = _checked_add(U[i, z], _checked_mul(r, U[i, k]))
-                H[i, z] = _checked_add(H[i, z], _checked_mul(r, H[i, k]))
+                U[i, z] = checked_add_int(U[i, z], checked_mul_int(r, U[i, k]))
+                H[i, z] = checked_add_int(H[i, z], checked_mul_int(r, H[i, k]))
             end
         end
     end
@@ -355,7 +355,7 @@ end
 # Fill unit roots combinations table
 # --------------------------------------------------------------------------
 
-function _fill_unit_roots_table!(
+function fill_unit_roots_table!(
         BSS::BinomialSystemSolver,
         H::Union{Matrix{Int64}, Matrix{BigInt}},
         d_hat::Int,
@@ -390,7 +390,7 @@ end
 # Angular part — roots of unity + triangular solve in DoubleF64 precision
 # --------------------------------------------------------------------------
 
-function _compute_angular_part!(
+function compute_angular_part!(
         X::Matrix{ComplexF64},
         BSS::BinomialSystemSolver,
         H::Matrix{Int64},
@@ -445,7 +445,7 @@ end
 
 # BigInt/BigFloat variant for the overflow fallback. Working precision scales
 # with the bit size of the HNF entries. Cold path: allocates BigFloats freely.
-function _compute_angular_part!(
+function compute_angular_part!(
         X::Matrix{ComplexF64},
         BSS::BinomialSystemSolver,
         H::Matrix{BigInt},
@@ -506,7 +506,7 @@ end
 # Magnitude part — solve A^T · log|x| = log|b| via LU
 # --------------------------------------------------------------------------
 
-function _compute_magnitude!(
+function compute_magnitude!(
         X::Matrix{ComplexF64},
         BSS::BinomialSystemSolver,
         d_hat::Int,

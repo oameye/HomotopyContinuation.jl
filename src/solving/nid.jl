@@ -4,14 +4,14 @@
 # irreducible components using monodromy permutations plus the trace test, and
 # collects them in a `NumericalIrreducibleDecomposition`.
 
-# A tighter singular-accuracy threshold than `_REGENERATION_ENDGAME`, so the
+# A tighter singular-accuracy threshold than `REGENERATION_ENDGAME`, so the
 # regeneration u-homotopy rejects points on higher-dimensional components as
 # singular rather than over-collecting them.
-const _DECOMPOSITION_ENDGAME = EndgameOptions(;
+const DECOMPOSITION_ENDGAME = EndgameOptions(;
     max_endgame_steps = 100, max_endgame_extended_steps = 100, sing_accuracy = 1.0e-10,
 )
 
-_decompose_stage_monodromy() =
+decompose_stage_monodromy() =
     MonodromyOptions(; trace_test_tol = 1.0e-10, parameter_sampler = weighted_normal)
 
 """
@@ -42,7 +42,7 @@ struct Decomposition{R <: Regeneration, MO <: MonodromyOptions} <: AbstractAlgor
 end
 
 function Decomposition(;
-        monodromy::MonodromyOptions = _decompose_stage_monodromy(),
+        monodromy::MonodromyOptions = decompose_stage_monodromy(),
         max_iters::Int = 50,
         warning::Bool = true,
         sorted::EquationSorting.T = EquationSorting.BY_DEGREE,
@@ -50,7 +50,7 @@ function Decomposition(;
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
         tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = _DECOMPOSITION_ENDGAME,
+        endgame_options::EndgameOptions = DECOMPOSITION_ENDGAME,
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         show_progress::Bool = true,
         show_monodromy_progress::Bool = false,
@@ -72,13 +72,13 @@ end
 # so none of them reach `Regeneration`.
 function Decomposition(
         regeneration::Regeneration;
-        monodromy::MonodromyOptions = _decompose_stage_monodromy(),
+        monodromy::MonodromyOptions = decompose_stage_monodromy(),
         max_iters::Int = 50,
         warning::Bool = true,
         atol::Float64 = 1.0e-14,
         rtol::Float64 = sqrt(eps()),
         tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = _DECOMPOSITION_ENDGAME,
+        endgame_options::EndgameOptions = DECOMPOSITION_ENDGAME,
         seed::UInt32 = rand(Random.RandomDevice(), UInt32),
         show_progress::Bool = true,
         show_monodromy_progress::Bool = false,
@@ -90,8 +90,8 @@ function Decomposition(
     )
 end
 
-_reseed(alg::Decomposition, seed::UInt32) = Decomposition(
-    _with_seed(alg.common, seed), alg.regeneration, alg.monodromy,
+reseed(alg::Decomposition, seed::UInt32) = Decomposition(
+    with_seed(alg.common, seed), alg.regeneration, alg.monodromy,
     alg.show_monodromy_progress, alg.max_iters, alg.warning, alg.atol, alg.rtol,
 )
 
@@ -113,19 +113,19 @@ function solve(
     max_iters = alg.max_iters
     warning = alg.warning
     show_monodromy_progress = alg.show_monodromy_progress
-    tracker_options = _tracker_options(alg)
+    tracker_options = algorithm_tracker_options(alg)
     atol = alg.atol
     rtol = alg.rtol
-    rng = Random.MersenneTwister(_seed(alg))
+    rng = Random.MersenneTwister(algorithm_seed(alg))
 
     Ws = sort(Ws; by = dim, rev = true)
-    options = _decompose_monodromy_options(monodromy_options, atol, rtol)
+    options = decompose_monodromy_options(monodromy_options, atol, rtol)
     out = WT[]
     isempty(Ws) && return out
 
     for witness in Ws
         if degree(witness) > 0
-            dec = _decompose_with_monodromy(
+            dec = decompose_with_monodromy(
                 witness, options, max_iters, warning, rng, exec,
                 show_monodromy_progress, tracker_options, atol, rtol,
             )
@@ -142,7 +142,7 @@ solve(
 
 solve(
     F::PolynomialInput, alg::Decomposition, exec::AbstractExecutor = Threaded(),
-) = solve(_as_system(F), alg, exec)
+) = solve(as_system(F), alg, exec)
 
 # Persistent point identities across repeated monodromy calls. The index owns a
 # separate `UniquePoints` with the solver's distance and triangle-inequality
@@ -169,7 +169,7 @@ function DecompositionPointIdentity(MS::MonodromySolver, n::Int)
     )
 end
 
-function _identity_root!(identity::DecompositionPointIdentity, i::Int)::Int
+function identity_root!(identity::DecompositionPointIdentity, i::Int)::Int
     parent = identity.parent
     root = i
     while parent[root] != root
@@ -181,16 +181,16 @@ function _identity_root!(identity::DecompositionPointIdentity, i::Int)::Int
     return root
 end
 
-function _union_identities!(
+function union_identities!(
         identity::DecompositionPointIdentity, a::Int, b::Int,
     )::Nothing
-    root_a = _identity_root!(identity, a)
-    root_b = _identity_root!(identity, b)
+    root_a = identity_root!(identity, a)
+    root_b = identity_root!(identity, b)
     root_a != root_b && (identity.parent[root_a] = root_b)
     return nothing
 end
 
-function _point_identity!(
+function point_identity!(
         identity::DecompositionPointIdentity,
         point::Vector{ComplexF64},
         atol::Float64,
@@ -209,27 +209,27 @@ function _point_identity!(
     return id
 end
 
-function _point_identity!(
+function point_identity!(
         identity::DecompositionPointIdentity,
         path_result::PathResult,
         atol::Float64,
         rtol::Float64,
     )::Int
-    return _point_identity!(identity, solution(path_result), atol, rtol)
+    return point_identity!(identity, solution(path_result), atol, rtol)
 end
 
-function _absorb_monodromy_result!(
+function absorb_monodromy_result!(
         identity::DecompositionPointIdentity,
         result::MonodromyResult,
         atol::Float64,
         rtol::Float64,
     )::Nothing
     path_results = results(result)
-    indices = Int[_point_identity!(identity, r, atol, rtol) for r in path_results]
+    indices = Int[point_identity!(identity, r, atol, rtol) for r in path_results]
     Π = permutations(result)
     for column in eachcol(Π), (i, j) in enumerate(column)
         (j == 0 || i > length(indices) || j > length(indices)) && continue
-        _union_identities!(identity, indices[i], indices[j])
+        union_identities!(identity, indices[i], indices[j])
     end
     return nothing
 end
@@ -239,13 +239,13 @@ end
 # an untouched trace reads as `0`, a short one is missing whatever the lost paths
 # would have contributed, and a parameter run has no trace and reports `NaN`,
 # which compares false against everything.
-function _trace_gate(MS::MonodromySolver, res::MonodromyResult)::Float64
+function trace_gate(MS::MonodromySolver, res::MonodromyResult)::Float64
     trace_conclusive(MS) || return Inf
     t = trace(res)
     return isnan(t) ? Inf : t
 end
 
-function _decompose_with_monodromy(
+function decompose_with_monodromy(
         W::WT, options::MonodromyOptions, max_iters::Int,
         warning::Bool, rng::Random.MersenneTwister, exec::AbstractExecutor,
         show_monodromy_progress::Bool, tracker_options::TrackerOptions,
@@ -270,24 +270,24 @@ function _decompose_with_monodromy(
         G, cp; options = options, tracker_options = tracker_options, rng = rng,
         start_solutions = P,
     ) do MS
-        _decompose_with_solver(
+        decompose_with_solver(
             MS, decomposition, G, L, cp, P, n, options, max_iters, warning, rng,
             exec, show_monodromy_progress, atol, rtol,
         )
     end
 end
 
-function _decompose_with_solver(
+function decompose_with_solver(
         MS::MonodromySolver, decomposition::Vector{WT}, G, L, cp, P, n::Int,
         options::MonodromyOptions, max_iters::Int, warning::Bool,
         rng::Random.MersenneTwister, exec::AbstractExecutor,
         show_monodromy_progress::Bool, atol::Float64, rtol::Float64,
     )::Vector{WT} where {WT <: WitnessSet}
-    res = _monodromy_solve!(
+    res = monodromy_solve!(
         MS, P, cp, rand(rng, UInt32), show_monodromy_progress, exec,
     )
 
-    if warning && _trace_gate(MS, res) > options.trace_test_tol
+    if warning && trace_gate(MS, res) > options.trace_test_tol
         if trace_conclusive(MS)
             @warn "Trying to decompose a non-complete set of witness points for " *
                 "codimension $(dim(L)) (trace test failed). Output contains all " *
@@ -308,11 +308,11 @@ function _decompose_with_solver(
 
     # Accumulate orbit connectivity across iterations: a single loop fragments a
     # degree-d component into partial orbits (often singletons), only merging
-    # permutations across loops assembles the full orbit. Since `_monodromy_solve!`
+    # permutations across loops assembles the full orbit. Since `monodromy_solve!`
     # can grow the set and drop start points (shifting indices), connectivity is
     # tracked by POINT IDENTITY over a growing master list plus a union-find.
     identity = DecompositionPointIdentity(MS, n)
-    _absorb_monodromy_result!(identity, res, atol, rtol)
+    absorb_monodromy_result!(identity, res, atol, rtol)
     master = identity.master
     done = identity.done
     d = length(master)                            # running total degree
@@ -328,10 +328,10 @@ function _decompose_with_solver(
         if iter > 1
             active = [master[k] for k in eachindex(master) if !done[k]]
             n_before = length(master)
-            res = _monodromy_solve!(
+            res = monodromy_solve!(
                 MS, active, cp, rand(rng, UInt32), show_monodromy_progress, exec,
             )
-            _absorb_monodromy_result!(identity, res, atol, rtol)
+            absorb_monodromy_result!(identity, res, atol, rtol)
             d += length(master) - n_before      # new points grow the total degree
         end
 
@@ -339,7 +339,7 @@ function _decompose_with_solver(
         orbit_of = Dict{Int, Vector{Int}}()
         for k in eachindex(master)
             done[k] && continue
-            push!(get!(orbit_of, _identity_root!(identity, k), Int[]), k)
+            push!(get!(orbit_of, identity_root!(identity, k), Int[]), k)
         end
 
         for orbit in values(orbit_of)
@@ -350,22 +350,22 @@ function _decompose_with_solver(
 
             P_orbit = master[live_orbit]
             n_before = length(master)
-            res_orbit = _monodromy_solve!(
+            res_orbit = monodromy_solve!(
                 MS, P_orbit, cp, rand(rng, UInt32), show_monodromy_progress, exec,
             )
 
             # Trace-test monodromy is itself allowed to discover points and orbit
             # connections. Fold those into the persistent identity before deciding
             # what the certified orbit actually contains.
-            _absorb_monodromy_result!(identity, res_orbit, atol, rtol)
+            absorb_monodromy_result!(identity, res_orbit, atol, rtol)
             d += length(master) - n_before
-            root = _identity_root!(identity, first(live_orbit))
+            root = identity_root!(identity, first(live_orbit))
             grown_orbit = [
                 k for k in eachindex(master)
-                    if !done[k] && _identity_root!(identity, k) == root
+                    if !done[k] && identity_root!(identity, k) == root
             ]
 
-            if _trace_gate(MS, res_orbit) >= options.trace_test_tol
+            if trace_gate(MS, res_orbit) >= options.trace_test_tol
                 trace_conclusive(MS) || (inconclusive += 1)
                 continue
             end
@@ -394,7 +394,7 @@ function _decompose_with_solver(
     unresolved = Dict{Int, Vector{Int}}()
     for k in eachindex(master)
         done[k] && continue
-        push!(get!(unresolved, _identity_root!(identity, k), Int[]), k)
+        push!(get!(unresolved, identity_root!(identity, k), Int[]), k)
     end
     unresolved_degree = sum(length, values(unresolved); init = 0)
     for orbit in values(unresolved)
@@ -420,9 +420,9 @@ end
 
 # Decomposition needs the permutations of a trace-tested single loop; every other
 # option is the caller's.
-_decompose_monodromy_options(
+decompose_monodromy_options(
     M::MonodromyOptions, atol::Float64, rtol::Float64,
-) = _with_fields(
+) = with_fields(
     M,
     (
         permutations = true, trace_test = true,
@@ -546,7 +546,7 @@ function degrees(
     return Dict(k => [degree(W) for W in Ws] for (k, Ws) in D)
 end
 
-function _max_dim(N::NumericalIrreducibleDecomposition)::Int
+function max_dim(N::NumericalIrreducibleDecomposition)::Int
     ks = keys(irreducible_components(N))
     return isempty(ks) ? -1 : maximum(ks)
 end
@@ -564,7 +564,7 @@ function Base.show(io::IO, N::NumericalIrreducibleDecomposition)
     if unresolved_sets > 0
         println(io, "• $unresolved_sets unresolved witness set(s), total degree $unresolved_deg.")
     end
-    mdim = _max_dim(N)
+    mdim = max_dim(N)
     if mdim >= 0
         for d in mdim:-1:0
             if haskey(D, d)
@@ -573,13 +573,13 @@ function Base.show(io::IO, N::NumericalIrreducibleDecomposition)
             end
         end
         println(io, "\n degree table of proven components:")
-        _degree_table(io, N)
+        degree_table(io, N)
     end
     return
 end
 
 # Hand-rolled unicode degree table (avoids a PrettyTables dependency).
-function _degree_table(io::IO, N::NumericalIrreducibleDecomposition)
+function degree_table(io::IO, N::NumericalIrreducibleDecomposition)
     D = irreducible_components(N)
     ks = sort(collect(keys(D)); rev = true)
 
@@ -638,12 +638,12 @@ function solve(
         alg::Decomposition,
         exec::AbstractExecutor = Threaded(),
     )::NumericalIrreducibleDecomposition{WitnessSet{S}} where {S <: System}
-    seed = _seed(alg)
+    seed = algorithm_seed(alg)
     rng = Random.MersenneTwister(seed)
 
     # Each stage gets a seed derived from this one, so a single `seed` reproduces
     # the whole decomposition.
-    Ws = solve(F, _reseed(alg.regeneration, rand(rng, UInt32)), exec)
-    dec = solve(Ws, _reseed(alg, rand(rng, UInt32)), exec)
+    Ws = solve(F, reseed(alg.regeneration, rand(rng, UInt32)), exec)
+    dec = solve(Ws, reseed(alg, rand(rng, UInt32)), exec)
     return NumericalIrreducibleDecomposition(dec, seed)
 end
