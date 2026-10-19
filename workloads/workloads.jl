@@ -47,6 +47,7 @@ include("continuation.jl")
 include("geometry.jl")
 include("monodromy.jl")
 include("results.jl")
+include("evaluation.jl")
 
 const CATEGORIES = (
     solve = SOLVE,
@@ -54,6 +55,7 @@ const CATEGORIES = (
     geometry = GEOMETRY,
     monodromy = MONODROMY,
     results = RESULTS,
+    evaluation = EVALUATION,
 )
 
 workloads() = Tuple(Iterators.flatten(values(CATEGORIES)))

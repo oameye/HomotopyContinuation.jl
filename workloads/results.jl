@@ -4,6 +4,7 @@ const RESULTS = (
     :recluster,
     :unique_points_group_action,
     :solution_files,
+    :result_queries,
 )
 
 function run(::Val{:recluster})
@@ -37,4 +38,15 @@ function run(::Val{:solution_files})
         write_parameters(parameters_path, ComplexF64[1.0, 2.0])
         return read_solutions(solutions_path), read_parameters(parameters_path)
     end
+end
+
+function run(::Val{:result_queries})
+    r = solve_total_degree(CompileMode.INTERPRETED, Serial())
+    p = first(path_results(r))
+    return (
+        statistics(r), nsolutions(r), nreal(r), real_solutions(r), nonsingular(r),
+        singular(r), at_infinity(r), failed(r), ntracked(r), nresults(r),
+        solution(p), accuracy(p), residual(p), steps(p), winding_number(p),
+        condition_jacobian(p), start_solution(p), path_number(p), multiplicity(p),
+    )
 end

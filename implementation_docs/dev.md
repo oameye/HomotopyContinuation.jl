@@ -57,12 +57,12 @@ The deeper current architecture and deliberate boundaries are in `implementation
 
 Normal tests and instrumented/static analysis are separate measurements:
 
-- the normal suite checks package semantics, allocation contracts, JET, Aqua, imports, and concrete layouts;
-- the strict test environment enables the package-wide DispatchDoctor `@stable` contract;
-- `quality/strict_mode.jl` proves compiled guarantees for classified code;
+- the normal suite checks package semantics;
+- `test/quality/` checks allocation contracts, JET, Aqua, imports, inference and concrete layouts;
+- `test/quality/strict_mode/strict_mode.jl` proves every compiled specialization typestable and the static kernels allocation-free;
 - benchmarks and fresh-process TTFX workloads guard runtime and first-use behavior.
 
-DispatchDoctor instrumentation changes allocation behavior, so allocation assertions are measured in the production configuration rather than treated as meaningful under instrumentation.
+JET and StrictMode accept runtime dispatch only at the call sites listed, each with its reason, in `test/quality/exemptions.jl`.
 
 The long-term rule is stronger than "type stable": hot static kernels should be concrete, directly dispatched, unboxed, and allocation-free where their contract requires it. Dynamic compatibility boundaries must be narrow and explicit.
 

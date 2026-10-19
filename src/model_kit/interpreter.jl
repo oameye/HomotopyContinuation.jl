@@ -205,40 +205,40 @@ const ExecInstructionT = typeof(ExecInstruction.Stop(Int32(0)))
 # order costs the emitted switch (cyclic-7 Jacobian 387ns -> 710ns when reordered
 # by op frequency).
 const EXEC_INSTRUCTION_SPECS = (
-    (:Stop, :OP_STOP),
-    (:Cb, :OP_CB),
-    (:Cos, :OP_COS),
-    (:Inv, :OP_INV),
-    (:InvNotZero, :OP_INV_NOT_ZERO),
-    (:InvSqr, :OP_INVSQR),
-    (:Neg, :OP_NEG),
-    (:Sin, :OP_SIN),
-    (:Sqr, :OP_SQR),
-    (:Sqrt, :OP_SQRT),
-    (:Identity, :OP_IDENTITY),
-    (:Add, :OP_ADD),
-    (:Div, :OP_DIV),
-    (:Mul, :OP_MUL),
-    (:Sub, :OP_SUB),
-    (:PowInt, :OP_POW_INT),
-    (:Add3, :OP_ADD3),
-    (:Mul3, :OP_MUL3),
-    (:MulAdd, :OP_MULADD),
-    (:MulSub, :OP_MULSUB),
-    (:SubMul, :OP_SUBMUL),
-    (:Add4, :OP_ADD4),
-    (:Mul4, :OP_MUL4),
-    (:MulMulAdd, :OP_MULMULADD),
-    (:MulMulSub, :OP_MULMULSUB),
-    (:Acos, :OP_ACOS),
-    (:Asin, :OP_ASIN),
-    (:Cosh, :OP_COSH),
-    (:Exp, :OP_EXP),
-    (:Log, :OP_LOG),
-    (:Sinh, :OP_SINH),
-    (:Tan, :OP_TAN),
-    (:Tanh, :OP_TANH),
-    (:Pow, :OP_POW),
+    (:Stop, OpType.OP_STOP),
+    (:Cb, OpType.OP_CB),
+    (:Cos, OpType.OP_COS),
+    (:Inv, OpType.OP_INV),
+    (:InvNotZero, OpType.OP_INV_NOT_ZERO),
+    (:InvSqr, OpType.OP_INVSQR),
+    (:Neg, OpType.OP_NEG),
+    (:Sin, OpType.OP_SIN),
+    (:Sqr, OpType.OP_SQR),
+    (:Sqrt, OpType.OP_SQRT),
+    (:Identity, OpType.OP_IDENTITY),
+    (:Add, OpType.OP_ADD),
+    (:Div, OpType.OP_DIV),
+    (:Mul, OpType.OP_MUL),
+    (:Sub, OpType.OP_SUB),
+    (:PowInt, OpType.OP_POW_INT),
+    (:Add3, OpType.OP_ADD3),
+    (:Mul3, OpType.OP_MUL3),
+    (:MulAdd, OpType.OP_MULADD),
+    (:MulSub, OpType.OP_MULSUB),
+    (:SubMul, OpType.OP_SUBMUL),
+    (:Add4, OpType.OP_ADD4),
+    (:Mul4, OpType.OP_MUL4),
+    (:MulMulAdd, OpType.OP_MULMULADD),
+    (:MulMulSub, OpType.OP_MULMULSUB),
+    (:Acos, OpType.OP_ACOS),
+    (:Asin, OpType.OP_ASIN),
+    (:Cosh, OpType.OP_COSH),
+    (:Exp, OpType.OP_EXP),
+    (:Log, OpType.OP_LOG),
+    (:Sinh, OpType.OP_SINH),
+    (:Tan, OpType.OP_TAN),
+    (:Tanh, OpType.OP_TANH),
+    (:Pow, OpType.OP_POW),
 )
 
 struct Interpreter{V <: AbstractVector}
@@ -293,8 +293,7 @@ function compile_exec_instruction_branches()::Vector{Tuple{Expr, Expr}}
         (
             :(op == $op),
             :(return $(compile_exec_instruction_call(variant, op))),
-        ) for (variant, op_name) in EXEC_INSTRUCTION_SPECS
-            for op in (getfield(OpType, op_name),)
+        ) for (variant, op) in EXEC_INSTRUCTION_SPECS
     ]
 end
 
@@ -333,8 +332,7 @@ end
 
 function generate_execute_arms(fn_mapper::Function)
     arms = Expr[]
-    for (variant, op_name) in EXEC_INSTRUCTION_SPECS
-        op = getfield(OpType, op_name)
+    for (variant, op) in EXEC_INSTRUCTION_SPECS
         binds = op == OpType.OP_STOP ? Any[] : Any[Symbol(:arg_, k) for k in 1:arity(op)]
         push!(binds, :output)
         pattern = Expr(:call, Expr(:., :ExecInstruction, QuoteNode(variant)), binds...)

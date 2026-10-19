@@ -62,7 +62,7 @@ function read_solutions(filename::AbstractString)::Vector{Vector{ComplexF64}}
             isempty(current) || push!(out, current)
             current = ComplexF64[]
         elseif n < 0
-            n = parse(Int, stripped)
+            n = parse_record_count(stripped, filename)
         else
             push!(current, parse_complex(stripped, filename))
         end
@@ -123,7 +123,7 @@ function read_parameters(filename::AbstractString)::Vector{ComplexF64}
         if isempty(stripped)
             continue
         elseif n < 0
-            n = parse(Int, stripped)
+            n = parse_record_count(stripped, filename)
         else
             push!(out, parse_complex(stripped, filename))
         end
@@ -145,6 +145,14 @@ function parse_complex(line::AbstractString, filename::AbstractString)::ComplexF
     re = parse(Float64, fields[1])
     im = length(fields) == 2 ? parse(Float64, fields[2]) : 0.0
     return complex(re, im)
+end
+
+function parse_record_count(line::AbstractString, filename::AbstractString)::Int
+    n = tryparse(Int, line)
+    n === nothing && throw(
+        ArgumentError(string(filename, ": expected the number of records, got \"", line, "\"")),
+    )
+    return n
 end
 
 function check_record_count(

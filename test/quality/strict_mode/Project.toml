@@ -1,12 +1,15 @@
 [deps]
 HomotopyContinuation = "f213a82b-91d6-5c5d-acf7-10f1c761b327"
+JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 StrictMode = "0e98b4f4-d0e6-42ac-af0a-707c24852f32"
 StrictModeTest = "a64655d1-1e86-453c-b761-1219f9f51c2b"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 HomotopyContinuation = {path = "../../.."}
 
 [compat]
+JET = "0.12"
 StrictMode = "0.4.5"
 StrictModeTest = "0.4.5"
 julia = "1.13"

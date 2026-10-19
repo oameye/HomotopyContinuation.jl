@@ -12,6 +12,8 @@ const SOLVE = (
     :expression_frontend,
     :overdetermined_total_degree,
     :overdetermined_polyhedral,
+    :mixed_volume,
+    :multi_homogeneous,
     :singular_endgame,
     :progress_enabled,
     :large_symbolic_interpreted_build,
@@ -102,4 +104,12 @@ function run(::Val{:fixed_parameters_solve})
         fix_parameters(F, [2.0]), TotalDegree(; seed = SEED, show_progress = false),
         Serial(),
     )
+end
+
+run(::Val{:mixed_volume}) = mixed_volume(square_system(CompileMode.INTERPRETED))
+
+function run(::Val{:multi_homogeneous})
+    @polyvar x y
+    F = System([x * y - 2, x^2 * y + y - 3]; variable_groups = [[x], [y]])
+    return solve(F, TotalDegree(; seed = SEED, show_progress = false), Serial())
 end

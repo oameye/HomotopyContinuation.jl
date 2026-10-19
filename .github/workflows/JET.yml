@@ -10,6 +10,8 @@ on:
       - 'ext/**'
       - 'test/Project.toml'
       - 'test/quality/jet.jl'
+      - 'test/helpers/jet_analysis.jl'
+      - 'test/quality/exemptions.jl'
       - 'workloads/**'
       - 'Project.toml'
   pull_request:
@@ -21,6 +23,8 @@ on:
       - 'ext/**'
       - 'test/Project.toml'
       - 'test/quality/jet.jl'
+      - 'test/helpers/jet_analysis.jl'
+      - 'test/quality/exemptions.jl'
       - 'workloads/**'
       - 'Project.toml'
     types:

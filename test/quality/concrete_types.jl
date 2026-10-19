@@ -2,11 +2,47 @@ using Test
 using CheckConcreteStructs: all_concrete
 using HomotopyContinuation
 using DynamicPolynomials: @polyvar
-using HomotopyContinuation: Interpreter, TaylorVector, TruncatedTaylorSeries,
-    DoubleF64, ComplexDF64
+
+include(joinpath(dirname(dirname(@__DIR__)), "workloads", "workloads.jl"))
 
 # Types from other packages (e.g. FunctionWrapper aliases) are filtered by parentmodule.
 const _CONCRETE_SKIP = Set{Symbol}()
+
+# Concrete instantiations of package parametric structs reachable from a type:
+# its parameters, union members and, for package types, its field types.
+function parametric_instantiations!(found, T, seen)
+    T in seen && return found
+    push!(seen, T)
+    if T isa Union
+        parametric_instantiations!(found, T.a, seen)
+        parametric_instantiations!(found, T.b, seen)
+    elseif T isa DataType
+        own = T.name.module === HomotopyContinuation
+        own && !isempty(T.parameters) && isconcretetype(T) && isstructtype(T) &&
+            !(T <: Function) && push!(found, T)
+        foreach(p -> parametric_instantiations!(found, p, seen), T.parameters)
+        own && isconcretetype(T) &&
+            foreach(F -> parametric_instantiations!(found, F, seen), fieldtypes(T))
+    end
+    return found
+end
+
+# Instantiations in the signatures the workloads compiled and in the values they return.
+function workload_instantiations()
+    outputs = map(name -> Workloads.run(Val(name)), Workloads.workloads())
+    found, seen = Set{DataType}(), Set{Any}()
+    for name in names(HomotopyContinuation; all = true)
+        isdefined(HomotopyContinuation, name) || continue
+        for method in methods(getfield(HomotopyContinuation, name))
+            method.module === HomotopyContinuation || continue
+            for mi in Base.specializations(method)
+                mi isa Core.MethodInstance && parametric_instantiations!(found, mi.specTypes, seen)
+            end
+        end
+    end
+    foreach(output -> parametric_instantiations!(found, typeof(output), seen), outputs)
+    return found
+end
 
 @testset "CheckConcreteStructs" begin
     # Non-parametric structs
@@ -25,33 +61,9 @@ const _CONCRETE_SKIP = Set{Symbol}()
         end
     end
 
-    # Parametric structs — check concrete instantiations
-    @testset "Interpreter{Vector{ComplexF64}}" begin
-        @test all_concrete(Interpreter{Vector{ComplexF64}}; verbose = false)
-    end
-    @testset "Interpreter{Vector{ComplexDF64}}" begin
-        @test all_concrete(Interpreter{Vector{ComplexDF64}}; verbose = false)
-    end
-    @testset "TaylorVector{ComplexF64}" begin
-        @test all_concrete(TaylorVector{ComplexF64}; verbose = false)
-    end
-    @testset "TruncatedTaylorSeries{2,ComplexF64}" begin
-        @test all_concrete(TruncatedTaylorSeries{2, ComplexF64}; verbose = false)
-    end
-    @testset "TruncatedTaylorSeries{4,ComplexF64}" begin
-        @test all_concrete(TruncatedTaylorSeries{4, ComplexF64}; verbose = false)
-    end
-    @testset "RegenerationState concrete phase" begin
-        system_type = System{Int, Int}
-        state_type = HomotopyContinuation.RegenerationState{Int, Int, system_type}
-        @test all_concrete(state_type; verbose = false)
-    end
-    @testset "NumericalIrreducibleDecomposition concrete result" begin
-        system_type = System{Int, Int}
-        witness_type = WitnessSet{system_type}
-        @test all_concrete(
-            NumericalIrreducibleDecomposition{witness_type}; verbose = false,
-        )
+    # Parametric structs, at every concrete instantiation the workloads produce.
+    @testset "$T" for T in sort!(collect(workload_instantiations()); by = string)
+        @test all_concrete(T; verbose = false)
     end
 end
 

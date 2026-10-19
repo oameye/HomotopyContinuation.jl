@@ -11,6 +11,7 @@ const GEOMETRY = (
     :regeneration_unsorted,
     :intersection,
     :decomposition,
+    :subspace_geometry,
 )
 
 function run(::Val{:slice_solve})
@@ -79,3 +80,16 @@ end
 
 run(::Val{:decomposition}) =
     solve(sphere_and_plane(), Decomposition(; seed = SEED, show_progress = false), Serial())
+
+function run(::Val{:subspace_geometry})
+    Random.seed!(15)
+    A = rand_subspace(4; dim = 2)
+    B = rand_subspace(4; dim = 2)
+    u = randn(ComplexF64, dim(A))
+    x = coord_change(A, Intrinsic, Extrinsic, u)
+    path = geodesic(A, B)
+    return (
+        coord_change(A, Extrinsic, Intrinsic, x), translate(A, ones(ComplexF64, codim(A))), path(0.5),
+        geodesic_distance(A, B), intrinsic(A), extrinsic(B), codim(A), ambient_dim(B),
+    )
+end

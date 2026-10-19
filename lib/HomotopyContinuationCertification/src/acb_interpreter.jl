@@ -130,8 +130,7 @@ end
 
 function _generate_acb_execute_arms()
     arms = Expr[]
-    for (variant, op_name) in EXEC_INSTRUCTION_SPECS
-        op = getfield(OpType, op_name)
+    for (variant, op) in EXEC_INSTRUCTION_SPECS
         binds = op == OpType.OP_STOP ? Any[] : Any[Symbol(:arg_, k) for k in 1:arity(op)]
         push!(binds, :output)
         pattern = Expr(:call, Expr(:., :ExecInstruction, QuoteNode(variant)), binds...)

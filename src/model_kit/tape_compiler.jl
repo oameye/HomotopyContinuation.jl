@@ -138,7 +138,7 @@ end
 function compile_funcsym!(c::TapeCompiler, kind::SFuncKind.T, args::Vector{SExprT})::Int32
     kind == SFuncKind.SFUNC_ADD && return compile_sum!(c, args)
     kind == SFuncKind.SFUNC_MUL && return compile_mul!(c, args)
-    error("Unknown SFuncSym kind: $(kind)")
+    throw(ArgumentError("the tape compiler has no lowering for an `SFuncSym` power"))
 end
 
 """Compile an SExpr to a tape slot, returning the Int32 slot index."""
