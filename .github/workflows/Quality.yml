@@ -58,7 +58,7 @@ jobs:
           version: '1'
       - uses: julia-actions/cache@v3
       - name: Set up test environment
-        run: julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+        run: julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=".")); Pkg.instantiate()'
       - name: Run package and compiler contracts
         run: |
           julia --project=test test/quality/aqua_test.jl
