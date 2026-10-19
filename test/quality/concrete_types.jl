@@ -1,0 +1,78 @@
+using Test
+using CheckConcreteStructs: all_concrete
+using HomotopyContinuation
+using DynamicPolynomials: @polyvar
+using HomotopyContinuation: Interpreter, TaylorVector, TruncatedTaylorSeries,
+    DoubleF64, ComplexDF64
+
+# Types from other packages (e.g. FunctionWrapper aliases) are filtered by parentmodule.
+const _CONCRETE_SKIP = Set{Symbol}()
+
+@testset "CheckConcreteStructs" begin
+    # Non-parametric structs
+    for name in names(HomotopyContinuation; all = true)
+        name in _CONCRETE_SKIP && continue
+        isdefined(HomotopyContinuation, name) || continue
+        T = getfield(HomotopyContinuation, name)
+        T isa Type || continue
+        isabstracttype(T) && continue
+        T isa UnionAll && continue
+        isstructtype(T) || continue
+        # Skip types defined in other packages (e.g. FunctionWrapper aliases)
+        parentmodule(T) === HomotopyContinuation || continue
+        @testset "$name" begin
+            @test all_concrete(T; verbose = false)
+        end
+    end
+
+    # Parametric structs — check concrete instantiations
+    @testset "Interpreter{Vector{ComplexF64}}" begin
+        @test all_concrete(Interpreter{Vector{ComplexF64}}; verbose = false)
+    end
+    @testset "Interpreter{Vector{ComplexDF64}}" begin
+        @test all_concrete(Interpreter{Vector{ComplexDF64}}; verbose = false)
+    end
+    @testset "TaylorVector{ComplexF64}" begin
+        @test all_concrete(TaylorVector{ComplexF64}; verbose = false)
+    end
+    @testset "TruncatedTaylorSeries{2,ComplexF64}" begin
+        @test all_concrete(TruncatedTaylorSeries{2, ComplexF64}; verbose = false)
+    end
+    @testset "TruncatedTaylorSeries{4,ComplexF64}" begin
+        @test all_concrete(TruncatedTaylorSeries{4, ComplexF64}; verbose = false)
+    end
+    @testset "RegenerationState concrete phase" begin
+        system_type = System{Int, Int}
+        state_type = HomotopyContinuation.RegenerationState{Int, Int, system_type}
+        @test all_concrete(state_type; verbose = false)
+    end
+    @testset "NumericalIrreducibleDecomposition concrete result" begin
+        system_type = System{Int, Int}
+        witness_type = WitnessSet{system_type}
+        @test all_concrete(
+            NumericalIrreducibleDecomposition{witness_type}; verbose = false,
+        )
+    end
+end
+
+@testset "concrete public result and option types" begin
+    base = Monodromy(; show_progress = false)
+    @test isconcretetype(typeof(base))
+    @test isconcretetype(typeof(Monodromy(; dim = 1, show_progress = false)))
+    @test isconcretetype(typeof(Monodromy(; codim = 1, show_progress = false)))
+    @test isconcretetype(eltype(base.variables))
+    @test isconcretetype(eltype(base.parameters))
+
+    @polyvar x y
+    F = System([x * y]; variables = [x, y])
+    seed = UInt32(0x1234)
+    witness_superset = solve(F, Regeneration(; seed, show_progress = false), Serial())
+    @test isconcretetype(eltype(witness_superset))
+    decomposition = solve(
+        witness_superset, Decomposition(; seed, show_progress = false), Serial(),
+    )
+    @test isconcretetype(eltype(decomposition))
+    @test eltype(decomposition) === eltype(witness_superset)
+    nid = solve(F, Decomposition(; seed, show_progress = false), Serial())
+    @test isconcretetype(typeof(nid))
+end

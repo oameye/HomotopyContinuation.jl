@@ -70,7 +70,7 @@ jobs:
             using Pkg
             Pkg.develop(PackageSpec(path=joinpath(pwd(), "..")))
             Pkg.instantiate()
-            include("runbenchmarks.jl")'
+            include("runtime/runbenchmarks.jl")'
       - name: Prepare benchmark history directory
         run: mkdir -p .benchmark-history
       - name: Compare benchmark results on PR

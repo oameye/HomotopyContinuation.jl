@@ -6,6 +6,7 @@ using ParallelTestRunner: ParallelTestRunner, find_tests
 
 testsuite = find_tests(@__DIR__)
 filter!(entry -> !startswith(first(entry), "extensive/"), testsuite)
+filter!(entry -> !startswith(first(entry), "helpers/"), testsuite)
 filter!(entry -> !startswith(first(entry), "strict/"), testsuite)
 filter!(entry -> !startswith(first(entry), "quality/"), testsuite)
 ParallelTestRunner.runtests(HomotopyContinuation, ARGS; testsuite = testsuite)

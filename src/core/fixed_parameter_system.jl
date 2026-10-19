@@ -21,10 +21,11 @@ function fix_parameters(F::System, p::AbstractVector{<:Number})
     # Not named `variables`: the local would shadow the getter on its own rhs.
     vars = collect(variables(F))
     groups = variable_groups(F)
+    polys = substitute_parameters(polynomials(F), collect(parameters(F)), values)
+    isempty(groups) && return System(polys; variables = vars, compile = F.compile_mode)
     return System(
-        substitute_parameters(polynomials(F), collect(parameters(F)), values);
-        variables = vars, compile = F.compile_mode,
-        variable_groups = isempty(groups) ? nothing : [vars[g] for g in groups],
+        polys; variables = vars, compile = F.compile_mode,
+        variable_groups = [vars[g] for g in groups],
     )
 end
 

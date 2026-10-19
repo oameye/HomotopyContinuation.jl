@@ -6,3 +6,6 @@ HomotopyContinuation = "f213a82b-91d6-5c5d-acf7-10f1c761b327"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MultivariatePolynomials = "102ac46a-7ee4-5c85-9060-abc95bfdeaa3"
 SymEngine = "123dc426-2d89-5057-bbad-38513e3affd8"
+
+[sources]
+HomotopyContinuation = {path = ".."}

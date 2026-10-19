@@ -44,11 +44,13 @@ Solver routes use explicit local RNGs derived from a `UInt32` seed rather than m
 
 Rigorous certification depends on Arblib and defines certificate types containing Arb/Acb values. Keeping it in `lib/HomotopyContinuationCertification` prevents ordinary solving from loading that dependency and gives certification its own precision/memory contracts. It cannot be reduced to a lightweight extension while those public certificate types own Arblib values.
 
-## Instrumentation and allocation measurement are separate contracts
+## Type stability is proven statically
 
-DispatchDoctor's `@stable` instrumentation introduces wrappers/closures and changes allocation behavior. The strict environment therefore uses instrumentation to prove return/type-stability behavior, while production allocation assertions are measured without that instrumentation. A test may still execute the instrumented operation; it should not interpret instrumentation allocations as package allocations.
+StrictMode proves compiled-code guarantees for the classified files, and the inference and concrete-layout contracts in `test/quality/` cover public constructors and result types. The package carries no runtime instrumentation such as DispatchDoctor's `@stable`: rerunning the whole suite instrumented multiplied its runtime several times over. No single analyzer is treated as the definition of quality: JET, StrictMode, concrete-layout checks, allocation checks, numerical tests, and performance/TTFX measurements cover different failure modes.
 
-StrictMode provides a complementary compiled-code proof. No single analyzer is treated as the definition of quality: JET, DispatchDoctor, StrictMode, concrete-layout checks, allocation checks, numerical tests, and performance/TTFX measurements cover different failure modes.
+## Setup dispatches through named erased boundaries
+
+Setup code may call dynamically, but only through a short list of deliberate boundaries: `FunctionWrapper` construction around generated evaluators, `Base.inferencebarrier` route selection, `@nospecialize` dispatchers, and `RefValue{Any}` factory boxes. Each keeps first-use compilation bounded by not inferring every system shape and route from the public entry point. The tracking path behind them is concrete, which StrictMode and AllocCheck prove. `test/quality/jet.jl` runs `report_opt` on every public workload and fails on runtime dispatch outside its `BOUNDARIES` table, which lists each boundary with its reason; an entry that is no longer reached also fails, so the table cannot go stale.
 
 ## CSE and tape compilation are shared compiler infrastructure
 

@@ -20,11 +20,10 @@ Use the Makefile:
 
 ```sh
 make test           # core + certification
-make test-strict    # DispatchDoctor instrumentation
 make test-cert      # certification only
-make jet            # JET package analysis
+make jet            # JET package and workload analysis
 make test-extensive # long reference solves
-make benchmark      # steady-state benchmarks
+make benchmark      # runtime benchmarks
 make ttfx           # fresh-process first-use workloads
 make format         # Runic
 make deps           # instantiate development environments
@@ -56,13 +55,10 @@ Before a PR is considered ready:
 
 1. relevant numerical/API tests pass, then the complete core/certification suites pass;
 2. JET reports no unexpected package issues;
-3. DispatchDoctor's strict suite and first-call workload sweep pass;
-4. StrictMode guarantees for classified code pass;
-5. concrete-layout and allocation contracts remain satisfied;
-6. Runic/ExplicitImports/Aqua remain clean;
-7. steady-state benchmarks and representative TTFX show no material regression.
-
-DispatchDoctor instrumentation changes allocations. Allocation assertions belong to the normal production configuration; instrumented tests should still exercise the operation without treating instrumentation overhead as a package allocation.
+3. StrictMode guarantees for classified code pass;
+4. concrete-layout, inference and allocation contracts remain satisfied;
+5. Runic/ExplicitImports/Aqua remain clean;
+6. runtime benchmarks and representative TTFX show no material regression.
 
 ## Coding rules
 
@@ -103,8 +99,8 @@ DispatchDoctor instrumentation changes allocations. Allocation assertions belong
 
 ## Tests
 
-Tests run via ParallelTestRunner and each test file must be self-contained. Shared systems live in `test/test_systems.jl` / `test/minors_polys.jl`; extensive reference solves live under `test/extensive/`.
+Tests run via ParallelTestRunner and each test file must be self-contained. Test files are grouped in folders that mirror `src/` (`model_kit/`, `primitives/`, `core/`, `tracking/`, `solving/`, `monodromy/`, `geometry/`), plus `scenarios/` and `extensions/`. Shared systems live in `test/helpers/`, which the runners skip; extensive reference solves live under `test/extensive/`.
 
-`make test` runs the ordinary suite and the certification suite. The ordinary suite is the one test suite: every numerical and behavioural test lives there and uses public API alone, meaning exported names plus the names declared with `@public`. A primitive worth testing directly gets a sensible `@public` declaration rather than a private test. The static contracts live in `test/quality/` and are excluded from it: Aqua, JET, ExplicitImports, concrete layout, AllocCheck, instruction counts, and the `*_compiler.jl` inference checks. Run one as `julia --project=test test/quality/<file>`, as `.github/workflows/Quality.yml` and `JET.yml` do (`make jet` covers JET), and `quality/strict_mode.jl` with `--project=quality`. `@allocated` assertions in the ordinary suite skip themselves when DispatchDoctor instrumentation is set.
+`make test` runs the ordinary suite and the certification suite. The ordinary suite is the one test suite: every numerical and behavioural test lives there and uses public API alone, meaning exported names plus the names declared with `@public`. A primitive worth testing directly gets a sensible `@public` declaration rather than a private test. The static contracts live in `test/quality/`, one file per kind of check, and are excluded from it: `aqua`, `jet`, `explicit_imports`, `concrete_types`, `inference`, `allocations` (AllocCheck plus the measured zero-allocation checks) and `instruction_count`. Run one as `julia --project=test test/quality/<file>.jl`, as `.github/workflows/Quality.yml` and `JET.yml` do (`make jet` covers JET), and `test/quality/strict_mode/strict_mode.jl` with `--project=test/quality/strict_mode`. Test files carry no `_test` suffix, and a slow file is split along its testsets so ParallelTestRunner can balance the workers.
 
-`test/strict/` is an environment that enables DispatchDoctor hard errors while reusing the normal test files. `quality/strict_mode.jl` provides the compiled-code proof layer. Do not weaken one analyzer merely because another analyzer already covers a nearby property.
+`test/quality/strict_mode/strict_mode.jl` provides the compiled-code proof layer for type stability. Do not weaken one analyzer merely because another analyzer already covers a nearby property.
