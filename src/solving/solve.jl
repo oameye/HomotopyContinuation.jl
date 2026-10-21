@@ -185,31 +185,20 @@ function solve_cache(
     )
 end
 
-# The route is selected behind `Base.inferencebarrier` so a `solve` call compiles
-# one of them, not every shape and start-system combination.
 function CommonSolve.init(
         F::CloneableSystem, alg::TotalDegree,
         exec::E = Threaded(),
     )::SolveCache{E} where {E <: AbstractExecutor}
     check_parameter_free(F, "`TotalDegree`")
     check_polynomial(F, "`TotalDegree`")
-    if is_grouped(F)
-        # First: for a grouped system homogeneity is per group. Dynamic call, as below.
-        return Base.inferencebarrier(init_multi_homogeneous)(F, alg, exec)
-    end
-    if is_homogeneous(F)
-        # Dynamic call: inferring the projective wrapper stack from here costs the
-        # common path ~3s.
-        return Base.inferencebarrier(init_projective)(F, alg, exec, "`TotalDegree`")
-    end
+    # A grouped system is homogeneous per group, so grouping is decided first.
+    is_grouped(F) && return init_multi_homogeneous(F, alg, exec)
+    is_homogeneous(F) && return init_projective(F, alg, exec, "`TotalDegree`")
     check_square_or_overdetermined(F)
 
     rng = Random.MersenneTwister(algorithm_seed(alg))
     γ = random_gamma(rng)
-    # Dynamic call: specializes the body on the concrete `System` so that
-    # the shape branch resolves against the concrete system.
-    initializer = Base.inferencebarrier(init_total_degree_shaped)
-    return initializer(F, alg, exec, rng, γ)
+    return init_total_degree_shaped(F, alg, exec, rng, γ)
 end
 
 function init_total_degree_shaped(

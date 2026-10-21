@@ -632,7 +632,7 @@ geodesic_distance(A::LinearSubspace, B::LinearSubspace) =
 function geodesic_distance(A::IntrinsicDescription, B::IntrinsicDescription)
     # The principal angles of `grassmannian_svd` keep small angles accurate,
     # so equal or nearly equal subspaces have a distance near eps, not sqrt(eps).
-    _, Θ, _ = grassmannian_svd(A, B; embedded_projective = true)
+    _, Θ, _ = grassmannian_svd(A.Y, B.Y)
     return LA.norm(Θ)
 end
 
@@ -650,17 +650,8 @@ grassmannian_svd(A::LinearSubspace, B::LinearSubspace) =
     grassmannian_svd(extrinsic(A), extrinsic(B))
 grassmannian_svd(A::E1, B::E2) where {E1 <: ExtrinsicDescription, E2 <: ExtrinsicDescription} =
     grassmannian_svd(transpose(A.A), transpose(B.A))
-function grassmannian_svd(
-        A::I1,
-        B::I2;
-        embedded_projective::Bool = false,
-    ) where {I1 <: IntrinsicDescription, I2 <: IntrinsicDescription}
-    return if !embedded_projective
-        grassmannian_svd(A.X, B.X)
-    else
-        grassmannian_svd(A.Y, B.Y)
-    end
-end
+grassmannian_svd(A::I1, B::I2) where {I1 <: IntrinsicDescription, I2 <: IntrinsicDescription} =
+    grassmannian_svd(A.X, B.X)
 
 function grassmannian_svd(A::AbstractMatrix, B::AbstractMatrix)
     # Here A and B are assumed to be Stiefel matrices representing linear spaces.

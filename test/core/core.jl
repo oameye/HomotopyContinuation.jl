@@ -25,7 +25,7 @@ end
         @test size(F) == (2, 2)
         @test nvariables(F) == 2
         @test nparameters(F) == 0
-        @test collect(variables(F)) == [x, y]
+        @test collect(variables(F)) == Expression.([x, y])
         @test isempty(parameters(F))
         @test degrees(F) == [2, 2]
 
@@ -37,8 +37,8 @@ end
         @test size(P) == (3, 2)
         @test nvariables(P) == 2
         @test nparameters(P) == 2
-        @test collect(variables(P)) == [x, y]
-        @test collect(parameters(P)) == [a, b]
+        @test collect(variables(P)) == Expression.([x, y])
+        @test collect(parameters(P)) == Expression.([a, b])
         @test degrees(P) == [2, 2, 1]
 
         # `a * y^2` has total degree 3 but degree 2 in the variables.

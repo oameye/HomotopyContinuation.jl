@@ -1065,7 +1065,7 @@ function _certify_impl(
     certs = Vector{CertT}(undef, N)
 
     progress = show_progress ?
-        make_progress(N; desc = "Certifying $N solutions... ") : nothing
+        make_progress(N, "Certifying $N solutions... ") : nothing
 
     if exec isa Threaded && exec.ntasks > 1 && N > 1
         plock = ReentrantLock()
@@ -1546,7 +1546,7 @@ function distinct_certified_solutions!(
     max_precision = alg.max_precision
     refine_solution = alg.refine_solution
     progress = show_progress ?
-        make_progress(length(S); desc = "Certifying $(length(S)) solutions... ") :
+        make_progress(length(S), "Certifying $(length(S)) solutions... ") :
         nothing
     if exec isa Threaded && exec.ntasks > 1
         plock = ReentrantLock()

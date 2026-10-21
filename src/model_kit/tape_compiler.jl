@@ -7,7 +7,7 @@
 ## ── SExpr → Instruction compilation (TapeCompiler) ──────────────────────────
 
 """
-State for compiling SExpr trees directly to `Instruction` values with tape indices.
+State for compiling SExpr graphs directly to `Instruction` values with tape indices.
 """
 mutable struct TapeCompiler
     const instructions::Vector{Instruction}
@@ -15,8 +15,8 @@ mutable struct TapeCompiler
     const constants_map::Dict{ComplexF64, Int32}  # value → tape slot
     const var_slots::Vector{Int32}                 # var index → tape slot
     const param_slots::Vector{Int32}               # param index → tape slot
-    const cse_defs::Dict{Int, SExprT}               # STmp id → definition
-    const cse_slots::Dict{Int, Int32}              # STmp id → tape slot (memoized)
+    const cse_defs::Dict{Int32, Int32}               # STmp id → definition node
+    const cse_slots::Dict{Int32, Int32}              # STmp id → tape slot (memoized)
     next_slot::Int32
     # Known constant slots for optimization
     one_slot::Int32
@@ -33,8 +33,8 @@ function TapeCompiler(nvars::Int, nparams::Int)
         Dict{ComplexF64, Int32}(),
         Vector{Int32}(undef, nvars),
         Vector{Int32}(undef, nparams),
-        Dict{Int, SExprT}(),
-        Dict{Int, Int32}(),
+        Dict{Int32, Int32}(),
+        Dict{Int32, Int32}(),
         Int32(0),
         SLOT_NONE,
         SLOT_NONE,
@@ -127,64 +127,69 @@ end
 
 ## ── Main dispatcher ─────────────────────────────────────────────────────────
 
-function compile_tmp!(c::TapeCompiler, id::Int)::Int32
-    cached = get(c.cse_slots, id, SLOT_NONE)
+function compile_tmp!(c::TapeCompiler, g::SGraph, id::Int)::Int32
+    key = Int32(id)
+    cached = get(c.cse_slots, key, SLOT_NONE)
     cached != SLOT_NONE && return cached
-    slot = compile_node!(c, c.cse_defs[id])
-    c.cse_slots[id] = slot
+    slot = compile_node!(c, g, c.cse_defs[key])
+    c.cse_slots[key] = slot
     return slot
 end
 
-function compile_funcsym!(c::TapeCompiler, kind::SFuncKind.T, args::Vector{SExprT})::Int32
-    kind == SFuncKind.SFUNC_ADD && return compile_sum!(c, args)
-    kind == SFuncKind.SFUNC_MUL && return compile_mul!(c, args)
+function compile_funcsym!(
+        c::TapeCompiler, g::SGraph, kind::SFuncKind.T, args::Vector{Int32},
+    )::Int32
+    kind == SFuncKind.SFUNC_ADD && return compile_sum!(c, g, args)
+    kind == SFuncKind.SFUNC_MUL && return compile_mul!(c, g, args)
     throw(ArgumentError("the tape compiler has no lowering for an `SFuncSym` power"))
 end
 
-"""Compile an SExpr to a tape slot, returning the Int32 slot index."""
-function compile_node!(c::TapeCompiler, expr::SExprT)::Int32
-    return @match expr begin
-        SExpr.SConst(val) => get_constant_slot!(c, val)
-        SExpr.SVar(idx) => c.var_slots[idx]
-        SExpr.SParam(idx) => c.param_slots[idx]
-        SExpr.STmp(id) => compile_tmp!(c, id)
-        SExpr.SPow(base, exp) => tape_pow!(c, compile_node!(c, base), exp)
-        SExpr.SRPow(base, exp) => emit!(
-            c, OpType.OP_POW, compile_node!(c, base), get_constant_slot!(c, exp),
-        )
-        SExpr.SMul(args) => compile_mul!(c, args)
-        SExpr.SAdd(args) => compile_sum!(c, args)
-        SExpr.SNeg(arg) => tape_neg!(c, compile_node!(c, arg))
-        SExpr.SUnary(kind, arg) =>
-            emit!(c, unary_op_type(kind), compile_node!(c, arg))
-        SExpr.SFuncSym(kind, args) => compile_funcsym!(c, kind, args)
-    end
+"""Compile an SExpr node to a tape slot, returning the Int32 slot index."""
+function compile_node!(c::TapeCompiler, g::SGraph, expr::Int32)::Int32
+    k = node_kind(g, expr)
+    k == SKind.S_CONST && return get_constant_slot!(c, node_val(g, expr))
+    k == SKind.S_VAR && return c.var_slots[node_int(g, expr)]
+    k == SKind.S_PARAM && return c.param_slots[node_int(g, expr)]
+    k == SKind.S_TMP && return compile_tmp!(c, g, node_int(g, expr))
+    k == SKind.S_POW &&
+        return tape_pow!(c, compile_node!(c, g, node_arg(g, expr, 1)), node_int(g, expr))
+    k == SKind.S_RPOW && return emit!(
+        c, OpType.OP_POW, compile_node!(c, g, node_arg(g, expr, 1)),
+        get_constant_slot!(c, node_val(g, expr)),
+    )
+    k == SKind.S_MUL && return compile_mul!(c, g, get_args(g, expr))
+    k == SKind.S_ADD && return compile_sum!(c, g, get_args(g, expr))
+    k == SKind.S_NEG && return tape_neg!(c, compile_node!(c, g, node_arg(g, expr, 1)))
+    k == SKind.S_UNARY && return emit!(
+        c, unary_op_type(node_unary_kind(g, expr)), compile_node!(c, g, node_arg(g, expr, 1)),
+    )
+    return compile_funcsym!(c, g, node_func_kind(g, expr), get_args(g, expr))
 end
 
 ## ── Mul processing ──────────────────────────────────────────────────────────
 
-function split_off_minus_one(args::Vector{SExprT})::Tuple{Int, Vector{SExprT}}
-    if !isempty(args)
-        @match args[1] begin
-            SExpr.SConst(val) =>
-                val == -one(ComplexF64) && return -1, args[2:end]
-            _ => nothing
-        end
+function split_off_minus_one(g::SGraph, args::Vector{Int32})::Tuple{Int, Vector{Int32}}
+    if !isempty(args) && is_kind(g, args[1], SKind.S_CONST) &&
+            node_val(g, args[1]) == -one(ComplexF64)
+        return -1, args[2:end]
     end
     return 1, args
 end
 
-function compile_split_into_num_denom!(c::TapeCompiler, args::Vector{SExprT})
+function compile_split_into_num_denom!(c::TapeCompiler, g::SGraph, args::Vector{Int32})
     nums = Int32[]
     denoms = Int32[]
     for arg in args
-        @match arg begin
-            SExpr.SPow(base, exp) => if exp < 0
-                push!(denoms, tape_pow!(c, compile_node!(c, base), -exp))
+        if is_kind(g, arg, SKind.S_POW)
+            exp = node_int(g, arg)
+            base = compile_node!(c, g, node_arg(g, arg, 1))
+            if exp < 0
+                push!(denoms, tape_pow!(c, base, -exp))
             else
-                push!(nums, tape_pow!(c, compile_node!(c, base), exp))
+                push!(nums, tape_pow!(c, base, exp))
             end
-            _ => push!(nums, compile_node!(c, arg))
+        else
+            push!(nums, compile_node!(c, g, arg))
         end
     end
     return nums, denoms
@@ -212,15 +217,15 @@ function compile_prod_parts!(c::TapeCompiler, exs::Vector{Int32})::Int32
     return tree_reduce!(c, reverse(exs), OpType.OP_MUL4, OpType.OP_MUL3, tape_mul!)
 end
 
-function compile_mul!(c::TapeCompiler, args::Vector{SExprT})::Int32
-    (m, args2) = split_off_minus_one(args)
+function compile_mul!(c::TapeCompiler, g::SGraph, args::Vector{Int32})::Int32
+    (m, args2) = split_off_minus_one(g, args)
     m_slot = get_constant_slot!(c, ComplexF64(m))
     if isempty(args2)
         return m_slot
     elseif length(args2) == 1
-        return tape_mul!(c, m_slot, compile_node!(c, args2[1]))
+        return tape_mul!(c, m_slot, compile_node!(c, g, args2[1]))
     end
-    nums, denoms = compile_split_into_num_denom!(c, args2)
+    nums, denoms = compile_split_into_num_denom!(c, g, args2)
     num_prod = compile_prod_parts!(c, nums)
     denom_prod = compile_prod_parts!(c, denoms)
     local ref::Int32
@@ -236,16 +241,15 @@ end
 
 ## ── Add processing ──────────────────────────────────────────────────────────
 
-function split_into_positives_negatives(args::Vector{SExprT})
-    positives = SExprT[]
-    negatives = SExprT[]
+function split_into_positives_negatives(g::SGraph, args::Vector{Int32})
+    positives = Int32[]
+    negatives = Int32[]
     for arg in args
-        sign, val = @match arg begin
-            SExpr.SMul(margs) => begin
-                s, values = split_off_minus_one(margs)
-                (s, length(values) == 1 ? values[1] : SExpr.SMul(values))
-            end
-            _ => (1, arg)
+        sign, val = if is_kind(g, arg, SKind.S_MUL)
+            s, values = split_off_minus_one(g, get_args(g, arg))
+            (s, length(values) == 1 ? values[1] : smul!(g, values))
+        else
+            (1, arg)
         end
         if sign == -1
             push!(negatives, val)
@@ -257,24 +261,21 @@ function split_into_positives_negatives(args::Vector{SExprT})
 end
 
 function compile_reduce_to_at_most_two!(
-        c::TapeCompiler, expr::SExprT,
+        c::TapeCompiler, g::SGraph, expr::Int32,
     )::Tuple{Int32, Int32}
-    @match expr begin
-        SExpr.SMul(margs) => begin
-            args = margs
-            if length(args) == 2
-                return (compile_node!(c, args[1]), compile_node!(c, args[2]))
-            elseif length(args) == 1
-                return (compile_node!(c, args[1]), SLOT_NONE)
-            elseif length(args) > 2
-                prefix = SExpr.SMul(args[1:(end - 1)])
-                v2 = compile_node!(c, prefix)
-                return (compile_node!(c, args[end]), v2)
-            end
+    if is_kind(g, expr, SKind.S_MUL)
+        args = get_args(g, expr)
+        if length(args) == 2
+            return (compile_node!(c, g, args[1]), compile_node!(c, g, args[2]))
+        elseif length(args) == 1
+            return (compile_node!(c, g, args[1]), SLOT_NONE)
+        elseif length(args) > 2
+            prefix = smul!(g, args[1:(end - 1)])
+            v2 = compile_node!(c, g, prefix)
+            return (compile_node!(c, g, args[end]), v2)
         end
-        _ => nothing
     end
-    return (compile_node!(c, expr), SLOT_NONE)
+    return (compile_node!(c, g, expr), SLOT_NONE)
 end
 
 function compile_sum_products!(
@@ -318,15 +319,15 @@ function sum_slots!(c::TapeCompiler, slots::Vector{Int32})::Int32
     return tree_reduce!(c, slots, OpType.OP_ADD4, OpType.OP_ADD3, tape_add!)
 end
 
-function compile_sum!(c::TapeCompiler, args::Vector{SExprT})::Int32
-    pos, neg = split_into_positives_negatives(args)
+function compile_sum!(c::TapeCompiler, g::SGraph, args::Vector{Int32})::Int32
+    pos, neg = split_into_positives_negatives(g, args)
     pos_reduced = Vector{Tuple{Int32, Int32}}(undef, length(pos))
     for i in eachindex(pos)
-        pos_reduced[i] = compile_reduce_to_at_most_two!(c, pos[i])
+        pos_reduced[i] = compile_reduce_to_at_most_two!(c, g, pos[i])
     end
     neg_reduced = Vector{Tuple{Int32, Int32}}(undef, length(neg))
     for i in eachindex(neg)
-        neg_reduced[i] = compile_reduce_to_at_most_two!(c, neg[i])
+        neg_reduced[i] = compile_reduce_to_at_most_two!(c, g, neg[i])
     end
 
     # Case 1: single positive, single negative — try maximal fusion
@@ -487,12 +488,12 @@ function plan_assignment_slots!(
     for instr in instructions
         push!(scratch_output_set, instruction_output(instr))
     end
-    claimed_slots = Dict{Int32, Int}()
+    claimed_slots = Dict{Int32, Int32}()
     direct_assignments = Tuple{Int, Int32}[]
     scratch_assignment_indices = Int[]
 
     for (k, raw_slot) in enumerate(result_slots)
-        claimed_slots[raw_slot] = get(claimed_slots, raw_slot, 0) + 1
+        claimed_slots[raw_slot] = get(claimed_slots, raw_slot, Int32(0)) + Int32(1)
         if raw_slot ∈ scratch_output_set
             push!(scratch_assignment_indices, k)
         else
@@ -508,8 +509,8 @@ function plan_assignment_slots!(
 
     for (scratch_assign_k, output_k) in enumerate(scratch_assignment_indices)
         raw_slot = result_slots[output_k]
-        seen = get(claimed_slots, raw_slot, 0)
-        claimed_slots[raw_slot] = seen + 1
+        seen = get(claimed_slots, raw_slot, Int32(0))
+        claimed_slots[raw_slot] = seen + Int32(1)
         target_slot = Int32(assignments_start + scratch_assign_k - 1)
 
         if seen == 0
@@ -539,7 +540,7 @@ function remap_instructions(
     )::Vector{Instruction}
     remapped = Vector{Instruction}(undef, length(instructions))
     for i in eachindex(instructions)
-        remapped[i] = remap_instruction(instructions[i], remap)
+        remapped[i] = remap_instruction(instructions[i], remap, true)
     end
     append!(remapped, identity_instructions)
     return remapped
@@ -654,8 +655,9 @@ Compile CSE output directly to an optimized `InstructionSequence`.
 Tape layout: constants | params | variables | scratch | assignments
 """
 function compile_to_instructions(
-        replacements::Vector{Pair{SExprT, SExprT}},
-        reduced_exprs::Vector{SExprT},
+        g::SGraph,
+        replacements::Vector{Pair{Int32, Int32}},
+        reduced_exprs::Vector{Int32},
         nvars::Int,
         nparams::Int,
         output_dim::Int,
@@ -664,11 +666,8 @@ function compile_to_instructions(
 
     # Register CSE definitions (compiled lazily on first use)
     for (tmp, definition) in replacements
-        id = @match tmp begin
-            SExpr.STmp(id) => id
-            _ => error("CSE replacement key is not an `STmp`")
-        end
-        compiler.cse_defs[id] = definition
+        is_kind(g, tmp, SKind.S_TMP) || error("CSE replacement key is not an `STmp`")
+        compiler.cse_defs[Int32(node_int(g, tmp))] = definition
     end
 
     # Use a two-pass approach with placeholder slots.
@@ -682,7 +681,7 @@ function compile_to_instructions(
     # Compile all reduced expressions
     result_slots = Vector{Int32}(undef, length(reduced_exprs))
     for i in eachindex(reduced_exprs)
-        result_slots[i] = compile_node!(compiler, reduced_exprs[i])
+        result_slots[i] = compile_node!(compiler, g, reduced_exprs[i])
     end
     return finalize_compiler(compiler, result_slots, nvars, nparams, output_dim)
 end

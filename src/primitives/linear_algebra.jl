@@ -71,8 +71,7 @@ function make_matrix_workspace(
         copyto!(Matrix{ComplexF64}(undef, m, n), A)
     qr = LA.QR(qr_factors, Vector{ComplexF64}(undef, size(qr_factors, 2)))
     qr_x = FSVec{ComplexF64}(Vector{ComplexF64}(undef, m == n ? 0 : n))
-    qr_factorize, qr_solve = m == n ? square_qr_ops() :
-        Base.inferencebarrier(tall_qr_ops)()::Tuple{QRFactorizeFW, QRSolveFW}
+    qr_factorize, qr_solve = m == n ? square_qr_ops() : tall_qr_ops()
 
     r = FSVec{ComplexF64}(zeros(ComplexF64, m))
     r̄ = FSVec{ComplexDF64}(zeros(ComplexDF64, m))
@@ -442,7 +441,7 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    skeel_row_scaling!(d, A, c; scaling_threshold = -30.0)
+    skeel_row_scaling!(d, A, c, scaling_threshold = -30.0)
 
 Compute optimal scaling factors `d` for the matrix `A` following Skeel (1979)
 if `c` is approximately of the order of the solution of the linear system
@@ -455,7 +454,7 @@ the row sums, not on the overall magnitude of `A`.
 function skeel_row_scaling!(
         d::AbstractVector{Float64},
         A::AbstractMatrix{ComplexF64},
-        c::AbstractVector{Float64};
+        c::AbstractVector{Float64},
         scaling_threshold::Float64 = -30.0,
     )
     n = length(c)

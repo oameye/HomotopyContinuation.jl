@@ -3,10 +3,12 @@ module Workloads
 # One workload per public feature, written through the exported and `@public`
 # API only, with one file per category. Each workload builds its own problem, so
 # a cold run measures the whole first execution: problem construction plus the
-# first solve.
+# first solve. The package runs every workload while it precompiles, so the code
+# they reach is cached native code; included from elsewhere, the file needs
+# `HomotopyContinuation` bound in the including module.
 
-using HomotopyContinuation
-using Random: MersenneTwister, Random, randn
+using ..HomotopyContinuation
+using Random: MersenneTwister, Random
 
 const SEED = UInt32(0x1234)
 

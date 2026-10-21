@@ -71,9 +71,9 @@ function update_weights!(
         H::ToricHomotopy,
         support::Vector{Matrix{Int32}},
         lifting::Vector{Vector{Int32}},
-        cell::MixedSubdivisions.MixedCell;
-        min_weight::Float64 = NaN,
-        max_weight::Float64 = NaN,
+        cell::MixedSubdivisions.MixedCell,
+        min_weight::Float64,
+        max_weight::Float64,
     )::Tuple{Float64, Float64}
     l = 1
     s_max = 0.0

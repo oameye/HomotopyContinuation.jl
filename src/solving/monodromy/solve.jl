@@ -1,17 +1,16 @@
 update_progress!(
-    progress::Nothing, stats::MonodromyStatistics;
-    queued::Int = 0, solutions::Int = 0, finish::Bool = false,
+    progress::Nothing, stats::MonodromyStatistics, queued::Int, solutions::Int, finish::Bool,
 ) = nothing
 function update_progress!(
         progress::ProgressMeter.ProgressUnknown,
-        stats::MonodromyStatistics;
+        stats::MonodromyStatistics,
         queued::Int,
         solutions::Int,
-        finish::Bool = false,
+        finish::Bool,
     )
     if finish
         ProgressMeter.update!(progress, solutions)
-        showvalues = make_showvalues(stats; queued = queued, solutions = solutions)
+        showvalues = make_showvalues(stats, queued, solutions)
         ProgressMeter.finish!(progress; showvalues = showvalues)
     else
         # ProgressMeter exposes these forwarded properties as `Float64` at
@@ -21,7 +20,7 @@ function update_progress!(
         tlast = progress.tlast::Float64
         dt = progress.dt::Float64
         time() > tlast + dt || return nothing
-        showvalues = make_showvalues(stats; queued = queued, solutions = solutions)
+        showvalues = make_showvalues(stats, queued, solutions)
         ProgressMeter.update!(progress, solutions, showvalues = showvalues)
     end
     return nothing
@@ -134,8 +133,7 @@ function serial_monodromy_solve!(
             end
 
             update_progress!(
-                progress, stats;
-                solutions = length(results), queued = length(queue),
+                progress, stats, length(queue), length(results), false,
             )
 
             if length(results) == opts.target_solutions_count &&
@@ -152,8 +150,7 @@ function serial_monodromy_solve!(
     end
 
     update_progress!(
-        progress, stats;
-        finish = true, solutions = length(results), queued = length(queue),
+        progress, stats, length(queue), length(results), true,
     )
 
     return retcode
@@ -166,7 +163,7 @@ end
 # The last two default to what monodromy-as-a-subroutine wants; `Monodromy`
 # passes both, since there they are the user's to set.
 function monodromy_solve!(
-        MS::MonodromySolver{H, P},
+        MS::MonodromySolver{P},
         X::AbstractVector{<:AbstractVector},
         p::P,
         seed::UInt32,
@@ -174,25 +171,13 @@ function monodromy_solve!(
         executor::E,
         catch_interrupt::Bool = true,
         warning::Bool = false,
-    )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
-    runner = show_progress ?
-        monodromy_with_progress! : monodromy_without_progress!
-    # Keeping the two bodies out of one inferred union means a quiet solve does
-    # not compile ProgressMeter. The executor splits the same way one level down,
-    # where `monodromy_solve_body!` specializes on it.
-    runner = Base.inferencebarrier(runner)
-    return dispatch_monodromy_policy(
-        runner, MS, X, p, seed, executor, catch_interrupt, warning,
+    )::MonodromyResult{P, P} where {P, E <: AbstractExecutor}
+    show_progress && return monodromy_with_progress!(
+        MS, X, p, seed, executor, catch_interrupt, warning,
     )
-end
-
-@noinline function dispatch_monodromy_policy(
-        runner::Function, MS::MonodromySolver{H, P},
-        X::AbstractVector{<:AbstractVector}, p::P, seed::UInt32,
-        executor::E, catch_interrupt::Bool, warning::Bool,
-    )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
-    Base.@nospecialize runner MS X p executor
-    return runner(MS, X, p, seed, executor, catch_interrupt, warning)
+    return monodromy_without_progress!(
+        MS, X, p, seed, executor, catch_interrupt, warning,
+    )
 end
 
 
@@ -208,18 +193,18 @@ function make_monodromy_progress(MS::MonodromySolver)::ProgressMeter.ProgressUnk
 end
 
 @noinline function monodromy_without_progress!(
-        MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
+        MS::MonodromySolver{P}, X, p::P, seed::UInt32,
         executor::E, catch_interrupt::Bool, warning::Bool,
-    )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
+    )::MonodromyResult{P, P} where {P, E <: AbstractExecutor}
     return monodromy_solve_body!(
         MS, X, p, seed, nothing, executor, catch_interrupt, warning,
     )
 end
 
 @noinline function monodromy_with_progress!(
-        MS::MonodromySolver{H, P}, X, p::P, seed::UInt32,
+        MS::MonodromySolver{P}, X, p::P, seed::UInt32,
         executor::E, catch_interrupt::Bool, warning::Bool,
-    )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
+    )::MonodromyResult{P, P} where {P, E <: AbstractExecutor}
     return monodromy_solve_body!(
         MS, X, p, seed, make_monodromy_progress(MS), executor,
         catch_interrupt, warning,
@@ -368,9 +353,8 @@ function threaded_monodromy_solve!(
                             end
 
                             update_progress!(
-                                progress, stats;
-                                solutions = n_results[],
-                                queued = max(queued_count[], 0),
+                                progress, stats, max(queued_count[], 0), n_results[],
+                                false,
                             )
 
                             # mark worker as idle
@@ -473,8 +457,7 @@ function threaded_monodromy_solve!(
     end
 
     update_progress!(
-        progress, stats;
-        finish = true, solutions = length(results), queued = queued[],
+        progress, stats, queued[], length(results), true,
     )
 
     return retcode[]
@@ -502,7 +485,7 @@ function run_monodromy_loop!(
 end
 
 function monodromy_solve_body!(
-        MS::MonodromySolver{H, P},
+        MS::MonodromySolver{P},
         X::AbstractVector{<:AbstractVector},
         p::P,
         seed::UInt32,
@@ -510,7 +493,7 @@ function monodromy_solve_body!(
         executor::E,
         catch_interrupt::Bool,
         warning::Bool,
-    )::MonodromyResult{P, P} where {H, P, E <: AbstractExecutor}
+    )::MonodromyResult{P, P} where {P, E <: AbstractExecutor}
     MS.statistics = MonodromyStatistics()
     empty!(MS.unique_points)
     reset_certified!(MS)
@@ -741,15 +724,20 @@ function monodromy_parameters(
     )::ParameterMonodromyResult where {E <: AbstractExecutor}
     cp = convert(Vector{ComplexF64}, p)
     return with_monodromy_solver(
-        F, cp;
-        options = alg.options, tracker_options = algorithm_tracker_options(alg), rng = rng,
-        start_solutions = S,
+        F, cp, alg.options, algorithm_tracker_options(alg), rng, S,
     ) do MS
-        monodromy_solve!(
-            MS, S, cp, algorithm_seed(alg), algorithm_show_progress(alg), exec,
-            alg.catch_interrupt, alg.warning,
-        )
+        parameter_monodromy_solve!(MS, S, cp, alg, exec)
     end
+end
+
+function parameter_monodromy_solve!(
+        MS::MonodromySolver{Vector{ComplexF64}}, S::AbstractVector{<:AbstractVector},
+        p::Vector{ComplexF64}, alg::Monodromy, exec::E,
+    )::ParameterMonodromyResult where {E <: AbstractExecutor}
+    return monodromy_solve!(
+        MS, S, p, algorithm_seed(alg), algorithm_show_progress(alg), exec,
+        alg.catch_interrupt, alg.warning,
+    )
 end
 
 function monodromy_subspace(
@@ -758,12 +746,10 @@ function monodromy_subspace(
     )::SubspaceMonodromyResult where {E <: AbstractExecutor}
     cp = convert(LinearSubspace{ComplexF64}, L)
     return with_monodromy_solver(
-        F, cp;
-        options = alg.options, tracker_options = algorithm_tracker_options(alg),
-        intrinsic = use_intrinsic(alg.coords, cp),
-        rng = rng, start_solutions = S,
+        F, cp, alg.options, algorithm_tracker_options(alg),
+        use_intrinsic(alg.coords, cp), rng, S,
     ) do MS
-        mH, nH = size(MS.workers[1].homotopy)
+        mH, nH = MS.workers[1].homotopy_size
         mH < nH && throw(
             ArgumentError(
                 "The homotopy for the subspace intersection is underdetermined " *

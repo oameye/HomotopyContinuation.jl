@@ -108,8 +108,8 @@ end
         F = System(polys; variables = vars, parameters = params)
         @test nvariables(F) == 3
         @test nparameters(F) == 2
-        @test variables(F) == vars
-        @test parameters(F) == params
+        @test variables(F) == Expression.(vars)
+        @test parameters(F) == Expression.(params)
         @test size(jacobian(F, ComplexF64[1, 2, 3], ComplexF64[4, 5])) == (3, 3)
     end
 

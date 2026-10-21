@@ -361,7 +361,7 @@ let arms = generate_execute_arms(op -> op_call(op))
 end
 
 let arms = generate_execute_arms(op -> Symbol(:taylor_, op_call(op)))
-    @eval Base.@propagate_inbounds function execute_taylor_instructions!(
+    @eval @noinline function execute_taylor_instructions!(
             tape::AbstractVector,
             instructions::Vector{ExecInstructionT},
         )::Nothing
@@ -500,7 +500,7 @@ via the tape's element type conversion.
     @inbounds for (i, k) in enumerate(vars_range)
         I.tape[k] = tx[i]
     end
-    @inbounds execute_taylor_instructions!(I.tape, I.instructions)
+    execute_taylor_instructions!(I.tape, I.instructions)
 
     # Extract order-K coefficients into u (skip the zero-fill when every
     # output index is assigned, mirroring extract_u!)

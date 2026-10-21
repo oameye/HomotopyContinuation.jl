@@ -91,7 +91,7 @@ function Base.hash(e::Expression, h::UInt)::UInt
             hash(fold_expr_hash(:EMul, args), h)
         SymExpr.EPow(base, exp) => hash(exp, hash(base, hash(:EPow, h)))
         SymExpr.ERPow(base, exp) => hash(exp, hash(base, hash(:ERPow, h)))
-        SymExpr.EFn(kind, arg) => hash(arg, hash(kind, hash(:EFn, h)))
+        SymExpr.EFn(kind, arg) => hash(arg, hash(Int8(kind), hash(:EFn, h)))
     end
 end
 
@@ -260,7 +260,7 @@ function eadd(args::Vector{Expression})::Expression
         return eadd(collected)
     end
 
-    sort!(collected; lt = expr_lt)
+    stable_sort!(collected, expr_lt)
     !iszero(const_sum) && pushfirst!(collected, SymExpr.ENum(const_sum))
     isempty(collected) && return zero(Expression)
     length(collected) == 1 && return @inbounds collected[1]
@@ -317,7 +317,7 @@ function emul(args::Vector{Expression})::Expression
     end
     iszero(coeff) && return zero(Expression)
 
-    sort!(kept; lt = expr_lt)
+    stable_sort!(kept, expr_lt)
     isone(coeff) || pushfirst!(kept, SymExpr.ENum(coeff))
     isempty(kept) && return one(Expression)
     length(kept) == 1 && return @inbounds kept[1]
@@ -612,7 +612,7 @@ function variables(
         param_names = Set{Symbol}(Symbol(p) for p in parameters)
         filter!(v -> !(Symbol(v) in param_names), acc)
     end
-    sort!(acc; lt = variable_lt)
+    stable_sort!(acc, variable_lt)
     return acc
 end
 
@@ -1103,46 +1103,38 @@ Base.show(io::IO, ::Type{Expression}) = print(io, "Expression")
 ## ── Lowering to SExpr ───────────────────────────────────────────────────────
 
 """
-    expression_to_sexpr(e, var_to_idx, param_to_idx) -> SExprT
+    expression_to_sexpr(g, e, var_to_idx, param_to_idx) -> Int32
 
-Lower an `Expression` to the tape compiler's `SExpr` IR. Every free symbol must
-appear in `var_to_idx` or `param_to_idx`.
+Lower an `Expression` to a node of the tape compiler's `SExpr` graph `g`. Every
+free symbol must appear in `var_to_idx` or `param_to_idx`.
 """
 function expression_to_sexpr(
+        g::SGraph,
         e::Expression,
         var_to_idx::Dict{Symbol, Int},
         param_to_idx::Dict{Symbol, Int},
-    )::SExprT
+    )::Int32
     return @match e begin
-        SymExpr.ENum(val) => SExpr.SConst(val)
+        SymExpr.ENum(val) => sconst!(g, val)
         SymExpr.EVar(name) => begin
             idx = get(var_to_idx, name, 0)
-            idx > 0 && return SExpr.SVar(idx)
+            idx > 0 && return svar!(g, idx)
             idx = get(param_to_idx, name, 0)
-            idx > 0 && return SExpr.SParam(idx)
+            idx > 0 && return sparam!(g, idx)
             throw(unknown_symbol_error(name))
         end
         SymExpr.EAdd(args) => canonical_add(
-            SExprT[
-                expression_to_sexpr(a, var_to_idx, param_to_idx)
-                    for a in args
-            ],
+            g, Int32[expression_to_sexpr(g, a, var_to_idx, param_to_idx) for a in args],
         )
         SymExpr.EMul(args) => canonical_mul(
-            SExprT[
-                expression_to_sexpr(a, var_to_idx, param_to_idx)
-                    for a in args
-            ],
+            g, Int32[expression_to_sexpr(g, a, var_to_idx, param_to_idx) for a in args],
         )
-        SymExpr.EPow(base, exp) => SExpr.SPow(
-            expression_to_sexpr(base, var_to_idx, param_to_idx), exp,
-        )
-        SymExpr.ERPow(base, exp) => canonical_rpow(
-            expression_to_sexpr(base, var_to_idx, param_to_idx), exp,
-        )
-        SymExpr.EFn(kind, arg) => canonical_unary(
-            kind, expression_to_sexpr(arg, var_to_idx, param_to_idx),
-        )
+        SymExpr.EPow(base, exp) =>
+            spow!(g, expression_to_sexpr(g, base, var_to_idx, param_to_idx), exp)
+        SymExpr.ERPow(base, exp) =>
+            canonical_rpow(g, expression_to_sexpr(g, base, var_to_idx, param_to_idx), exp)
+        SymExpr.EFn(kind, arg) =>
+            canonical_unary(g, kind, expression_to_sexpr(g, arg, var_to_idx, param_to_idx))
     end
 end
 
@@ -1158,14 +1150,17 @@ function Expression(poly::MP.AbstractPolynomialLike)::Expression
         mono = MP.monomial(term)
         for (var, exp) in zip(MP.variables(mono), MP.exponents(mono))
             exp == 0 && continue
-            push!(factors, epow(variable(Symbol(var)), exp))
+            push!(factors, epow(polynomial_variable(var), exp))
         end
         push!(terms, emul(factors))
     end
     return eadd(terms)
 end
 
-Expression(v::MP.AbstractVariable)::Expression = variable(Symbol(v))
+Expression(v::MP.AbstractVariable)::Expression = polynomial_variable(v)
+
+# A user variable, such as a MultivariatePolynomials one, becomes the `Expression` variable of its name.
+polynomial_variable(v)::Expression = variable(Symbol(v))
 
 function Expression(r::MP.RationalPoly)::Expression
     Base.@nospecialize r

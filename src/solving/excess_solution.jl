@@ -43,7 +43,7 @@ end
 # Descending-degree equation permutation, so the identity block of the
 # randomization keeps the highest-degree equations and deg(G_i) = degrees[perm[i]].
 randomization_permutation(degrees::Vector{Int})::Vector{Int} =
-    sortperm(degrees; rev = true)
+    stable_sortperm(degrees, isgreater_than)
 
 """
     square_up(rng, F, residual_tol) -> (A, perm, checker)

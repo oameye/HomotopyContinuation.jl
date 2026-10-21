@@ -18,6 +18,7 @@ import FunctionWrappers: FunctionWrapper
 using CommonSolve: CommonSolve
 using MixedSubdivisions: MixedSubdivisions
 using OhMyThreads: @tasks, @set, @local
+using PrecompileTools: @compile_workload
 using RuntimeGeneratedFunctions: RuntimeGeneratedFunctions, @RuntimeGeneratedFunction
 RuntimeGeneratedFunctions.init(@__MODULE__)
 
@@ -117,7 +118,6 @@ include("model_kit/cse.jl")
 include("model_kit/tape_compiler.jl")
 
 include("model_kit/polynomial_compiler.jl")
-include("model_kit/symbolic_polynomial_compiler.jl")
 include("model_kit/expression_compiler.jl")
 include("model_kit/interpreter.jl")
 include("model_kit/codegen.jl")
@@ -179,5 +179,13 @@ include("solving/monodromy.jl")
 include("solving/witness_set.jl")
 include("solving/regeneration.jl")
 include("solving/nid.jl")
+
+include("../workloads/workloads.jl")
+
+@compile_workload begin
+    for name in Workloads.workloads()
+        Workloads.run(name)
+    end
+end
 
 end # module

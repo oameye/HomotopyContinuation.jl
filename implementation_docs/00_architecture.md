@@ -10,20 +10,22 @@ The corresponding hot-path goals are concrete layouts, predictable dispatch, no 
 
 ## Frontends and lowering
 
-Two user-facing symbolic frontends converge on the same compiler IR:
+Two user-facing symbolic frontends feed one `System`. `System` stores `Expression`s, so DynamicPolynomials input is converted once at construction and everything after it, from slicing and regeneration to the compiled code, is the same for both frontends:
 
 ```text
-DynamicPolynomials             Expression
-       │                           │
-       ├─ polynomial lowering      ├─ expression lowering
-       │                           │
-       └──────────────┬────────────┘
-                      ↓
-                    SExpr
-                      ↓
-             canonicalization + CSE
-                      ↓
-              InstructionSequence
+DynamicPolynomials ──→ Expression
+                           │
+         ┌─────────────────┴─────────────────┐
+  sum of monomials                    any other expression
+  (lowered term by term,              (lowered structurally,
+   Jacobian from exponents)            Jacobian by differentiation)
+         └─────────────────┬─────────────────┘
+                           ↓
+                         SExpr
+                           ↓
+                 canonicalization + CSE
+                           ↓
+                   InstructionSequence
 ```
 
 `SExpr` and execution instructions are Moshi tagged unions with concrete storage. Jacobians are differentiated symbolically before lowering. The tape compiler performs instruction selection/fusion, ordering, and register allocation once during setup.
