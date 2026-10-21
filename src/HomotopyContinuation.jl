@@ -10,13 +10,16 @@ using EnumX: @enumx
 using Moshi.Data: @data, isa_variant
 using Moshi.Derive: @derive
 using Moshi.Match: @match
+
 using MultivariatePolynomials: MultivariatePolynomials
 import MultivariatePolynomials: coefficients, degree, differentiate, monomials
 using DynamicPolynomials: @polyvar
+using MixedSubdivisions: MixedSubdivisions
+
 using FixedSizeArrays: FixedSizeArrays
 import FunctionWrappers: FunctionWrapper
 using CommonSolve: CommonSolve
-using MixedSubdivisions: MixedSubdivisions
+
 using OhMyThreads: @tasks, @set, @local
 using PrecompileTools: @compile_workload
 using RuntimeGeneratedFunctions: RuntimeGeneratedFunctions, @RuntimeGeneratedFunction
@@ -180,12 +183,6 @@ include("solving/witness_set.jl")
 include("solving/regeneration.jl")
 include("solving/nid.jl")
 
-include("../workloads/workloads.jl")
-
-@compile_workload begin
-    for name in Workloads.workloads()
-        Workloads.run(name)
-    end
-end
+include("precompile.jl")
 
 end # module

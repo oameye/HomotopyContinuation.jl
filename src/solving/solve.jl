@@ -180,7 +180,7 @@ function solve_cache(
     )::SolveCache{E} where {E <: AbstractExecutor}
     erased = TrackingBuilder(builder)
     return SolveCache(
-        exec, erased, erased(), starts, seed, excess_checkers, show_progress,
+        exec, erased, builder(), starts, seed, excess_checkers, show_progress,
         early_stop,
     )
 end
