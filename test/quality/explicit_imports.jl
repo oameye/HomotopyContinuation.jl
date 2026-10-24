@@ -30,6 +30,7 @@ const QUALIFIED_ACCESS_IGNORE = (
     :PkgId, :root_module_exists, :serialize_type,
     :AbstractAlgebraicSolver, :NoAlgorithm, :promote_for,
     Symbol("default_gröbner_basis_algorithm"),
+    :ProgressCore,
 )
 
 @testset "ExplicitImports" begin
