@@ -20,54 +20,45 @@ end
 """
     MonodromyWorkerState
 
-Per-worker state for the monodromy solver: the concrete homotopy instance (the
-EXACT instance captured in the tracker's evaluator closures, so retargeting it
-retargets the tracker), the endgame tracker built around it, the base
-parameters, and ambient/intrinsic scratch buffers.
+Per-worker state for the monodromy solver: the endgame tracker, the base
+parameters, ambient/tracker scratch buffers and the homotopy the worker
+retargets. That homotopy is the exact instance captured in the tracker's
+evaluator closures, so retargeting it retargets the tracker. It sits in exactly
+one of `parameter`, `intrinsic` and `extrinsic`, the route the builder chose;
+`chart` is empty unless the solutions are projective.
 """
-struct MonodromyWorkerState{H, P}
-    homotopy::H
+struct MonodromyWorkerState{P}
     tracker::EndgameTracker
-    base::P                        # base parameters (Vector or LinearSubspace)
-    x_buffer::Vector{ComplexF64}   # ambient scratch for subspace conversion
-    u_buffer::Vector{ComplexF64}   # tracker-coordinate scratch
-    # Chart vector for projective problems where the chart row lives INSIDE the
-    # wrapped system (intrinsic subspace homotopy over an AffineChartSystem) and
-    # is therefore not reachable through the homotopy handle. Empty otherwise.
+    base::P
+    x_buffer::Vector{ComplexF64}
+    u_buffer::Vector{ComplexF64}
     chart::Vector{ComplexF64}
+    parameter::Vector{ParameterHomotopy}
+    intrinsic::Vector{IntrinsicSubspaceHomotopy}
+    extrinsic::Vector{ExtrinsicSubspaceHomotopy}
+    homotopy_size::Tuple{Int, Int}
 end
-
-MonodromyWorkerState(
-    homotopy::H, tracker::EndgameTracker, base::P,
-    x_buffer::Vector{ComplexF64}, u_buffer::Vector{ComplexF64},
-) where {H, P} =
-    MonodromyWorkerState{H, P}(homotopy, tracker, base, x_buffer, u_buffer, ComplexF64[])
 
 ## Retargeting through the concrete handle
 
 function retarget!(
-        ws::MonodromyWorkerState{ParameterHomotopy}, p::Vector{ComplexF64},
+        ws::MonodromyWorkerState{Vector{ComplexF64}}, p::Vector{ComplexF64},
         q::Vector{ComplexF64},
     )::Nothing
-    parameters!(ws.homotopy, p, q)
+    parameters!(ws.parameter[1], p, q)
     return nothing
 end
 function retarget!(
-        ws::MonodromyWorkerState{AffineChartHomotopy{ParameterHomotopy}},
-        p::Vector{ComplexF64}, q::Vector{ComplexF64},
+        ws::MonodromyWorkerState{LinearSubspace{ComplexF64}},
+        p::LinearSubspace{ComplexF64}, q::LinearSubspace{ComplexF64},
     )::Nothing
-    parameters!(ws.homotopy, p, q)
+    if isempty(ws.intrinsic)
+        set_subspaces!(ws.extrinsic[1], p, q)
+    else
+        set_subspaces!(ws.intrinsic[1], p, q)
+    end
     return nothing
 end
-function retarget!(
-        ws::MonodromyWorkerState, p::LinearSubspace{ComplexF64},
-        q::LinearSubspace{ComplexF64},
-    )::Nothing
-    set_subspaces!(ws.homotopy, p, q)
-    return nothing
-end
-
-parameters!(ws::MonodromyWorkerState{ParameterHomotopy}, p, q) = retarget!(ws, p, q)
 
 """
     set_loop_segment!(ws, loop::MonodromyLoop, segment::Int)
@@ -97,47 +88,39 @@ end
 ## Coordinate transfer between the solver's ambient state and the tracker
 
 # Write the tracker-side start coordinates for the current segment (t = 1)
-# from ws.x_buffer into ws.u_buffer and return it.
-function tracker_input!(ws::MonodromyWorkerState{IntrinsicSubspaceHomotopy})
-    # Projective case: the wrapped system carries a chart row v'x = 1, so the
-    # ambient representative must be rescaled onto the chart first (the
-    # subspace is linear, so rescaling stays on it).
-    isempty(ws.chart) || on_chart!(ws.x_buffer, ws.chart)
-    intrinsic_coordinates!(ws.u_buffer, ws.homotopy, ws.x_buffer, complex(1.0))
-    return ws.u_buffer
-end
-function tracker_input!(ws::MonodromyWorkerState)
-    copyto!(ws.u_buffer, ws.x_buffer)
-    return ws.u_buffer
-end
-function tracker_input!(ws::MonodromyWorkerState{<:AffineChartHomotopy})
-    copyto!(ws.u_buffer, ws.x_buffer)
-    # The chart row v'x = 1 must hold at the start point.
-    on_chart!(ws.u_buffer, ws.homotopy)
+# from ws.x_buffer into ws.u_buffer and return it. A projective point is moved
+# onto the chart first: the intrinsic homotopy carries the chart row inside its
+# wrapped system, the others as the extra row of an affine chart homotopy.
+function tracker_input!(ws::MonodromyWorkerState)::Vector{ComplexF64}
+    if isempty(ws.intrinsic)
+        copyto!(ws.u_buffer, ws.x_buffer)
+        isempty(ws.chart) || on_chart!(ws.u_buffer, ws.chart)
+    else
+        isempty(ws.chart) || on_chart!(ws.x_buffer, ws.chart)
+        intrinsic_coordinates!(ws.u_buffer, ws.intrinsic[1], ws.x_buffer, complex(1.0))
+    end
     return ws.u_buffer
 end
 
 # Convert the tracker's endpoint (t = 0) back into ws.x_buffer (ambient).
 function tracker_output!(
-        ws::MonodromyWorkerState{IntrinsicSubspaceHomotopy}, u::AbstractVector{ComplexF64},
-    )::Nothing
-    ambient_coordinates!(ws.x_buffer, ws.homotopy, u, complex(0.0))
-    return nothing
-end
-function tracker_output!(
         ws::MonodromyWorkerState, u::AbstractVector{ComplexF64},
     )::Nothing
-    copyto!(ws.x_buffer, u)
+    if isempty(ws.intrinsic)
+        copyto!(ws.x_buffer, u)
+    else
+        ambient_coordinates!(ws.x_buffer, ws.intrinsic[1], u, complex(0.0))
+    end
     return nothing
 end
 
-# Renormalize a finished ambient solution for dedup (chart case only).
-normalize_solution!(::MonodromyWorkerState, x::AbstractVector{ComplexF64})::Nothing =
-    nothing
+# Renormalize a finished ambient solution for dedup. The intrinsic route's
+# ambient points already satisfy the chart row of its wrapped system.
 function normalize_solution!(
-        ws::MonodromyWorkerState{<:AffineChartHomotopy}, x::AbstractVector{ComplexF64},
+        ws::MonodromyWorkerState, x::AbstractVector{ComplexF64},
     )::Nothing
-    on_chart!(x, ws.homotopy)
+    (isempty(ws.chart) || !isempty(ws.intrinsic)) && return nothing
+    on_chart!(x, ws.chart)
     return nothing
 end
 
@@ -167,7 +150,7 @@ function track_middle_segment!(
     )::Bool
     tr = ws.tracker.tracker
     u = tracker_input!(ws)
-    code = track!(tr, u; ω = ω, μ = μ, extended_precision = extended_precision)
+    code = track!(tr, u, complex(1.0), complex(0.0), ω, μ, extended_precision)
     code == TrackerCode.TRACKER_SUCCESS || return false
     tracker_output!(ws, tr.state.x)
     return true
@@ -200,13 +183,13 @@ list, the deduplication structure with its lock, options, statistics and the
 trace matrix for the trace test.
 """
 mutable struct MonodromySolver{
-        H, P, B, UP <: UniquePoints, MO <: MonodromyOptions,
+        P, B, UP <: UniquePoints, MO <: MonodromyOptions,
         CS <: Union{Nothing, AbstractCertifiedSolutions},
     }
     # Mutable: `loops`, `statistics` and the two trace counters are reset
     # between solves; all other fields are const.
-    const workers::Vector{MonodromyWorkerState{H, P}}
-    const builder::B                                  # callable () -> MonodromyWorkerState{H, P}
+    const workers::Vector{MonodromyWorkerState{P}}
+    const builder::B                                  # callable () -> MonodromyWorkerState{P}
     loops::Vector{MonodromyLoop{P}}
     const unique_points::UP
     const unique_points_lock::ReentrantLock
@@ -233,12 +216,12 @@ end
 # cover the `CS` bound, which is what keeps the dedup path free of a half that has
 # no method.
 const HeuristicMonodromySolver = MonodromySolver{
-    H, P, B, UP, MO, Nothing,
-} where {H, P, B, UP <: UniquePoints, MO <: MonodromyOptions}
+    P, B, UP, MO, Nothing,
+} where {P, B, UP <: UniquePoints, MO <: MonodromyOptions}
 const CertifiedMonodromySolver = MonodromySolver{
-    H, P, B, UP, MO, CS,
+    P, B, UP, MO, CS,
 } where {
-    H, P, B, UP <: UniquePoints, MO <: MonodromyOptions,
+    P, B, UP <: UniquePoints, MO <: MonodromyOptions,
     CS <: AbstractCertifiedSolutions,
 }
 
@@ -261,12 +244,12 @@ function with_chart_actions(
 end
 
 function with_monodromy_solver_from_builder(
-        f::Fn, worker::MonodromyWorkerState{H, P}, builder::B, n::Int,
+        f::Fn, worker::MonodromyWorkerState{P}, builder::B, n::Int,
         options::MO, chart::Vector{ComplexF64}, use_chart::Bool,
         # Required, so a new route cannot silently downgrade to the heuristic check.
         certified_solutions::CS,
     ) where {
-        Fn, H, P, B, MO <: MonodromyOptions,
+        Fn, P, B, MO <: MonodromyOptions,
         CS <: Union{Nothing, AbstractCertifiedSolutions},
     }
     return with_chart_actions(options, chart, use_chart) do group_actions
@@ -279,10 +262,10 @@ function with_monodromy_solver_from_builder(
 end
 
 function monodromy_solver_from_builder(
-        worker::MonodromyWorkerState{H, P}, builder::B, n::Int, options::MO,
+        worker::MonodromyWorkerState{P}, builder::B, n::Int, options::MO,
         group_actions::GA, certified_solutions::CS,
     ) where {
-        H, P, B, GA, MO <: MonodromyOptions,
+        P, B, GA, MO <: MonodromyOptions,
         CS <: Union{Nothing, AbstractCertifiedSolutions},
     }
     unique_points = UniquePoints(
@@ -308,60 +291,77 @@ function monodromy_solver_from_builder(
     )
 end
 
-function parameter_monodromy_worker(
-        sys_eval::SystemEvaluator, p::Vector{ComplexF64}, n::Int,
-        tracker_options::TrackerOptions,
-    )::MonodromyWorkerState{ParameterHomotopy, Vector{ComplexF64}}
-    H = ParameterHomotopy(sys_eval, p, p)
-    eg = endgame_tracker(
-        H, tracker_options, EndgameOptions(; endgame_start = 0.0),
-    )
-    return MonodromyWorkerState(
-        H, eg, copy(p), zeros(ComplexF64, n), zeros(ComplexF64, n),
-    )
-end
+"""
+    MonodromyBuilder
 
-function chart_parameter_monodromy_worker(
-        sys_eval::SystemEvaluator, p::Vector{ComplexF64},
-        chart::Vector{ComplexF64}, n::Int, tracker_options::TrackerOptions,
-    )::MonodromyWorkerState{
-        AffineChartHomotopy{ParameterHomotopy}, Vector{ComplexF64},
-    }
-    H = AffineChartHomotopy(ParameterHomotopy(sys_eval, p, p), chart)
-    eg = endgame_tracker(
-        H, tracker_options, EndgameOptions(; endgame_start = 0.0),
-    )
-    return MonodromyWorkerState(
-        H, eg, copy(p), zeros(ComplexF64, n), zeros(ComplexF64, n),
-    )
-end
-
-struct ParameterMonodromyBuilder{S <: SystemLike} <: AbstractPathBuilder
+Data-only recipe for a monodromy worker: the system, the base parameters or
+subspace, the chart (empty unless the solutions are projective), and for a
+subspace whether to track in intrinsic coordinates. Every worker tracks the same
+homotopy, so the perturbation `gamma` is drawn once here rather than per worker.
+"""
+struct MonodromyBuilder{S <: SystemLike, P} <: AbstractPathBuilder
     system::S
-    parameters::Vector{ComplexF64}
-    nvariables::Int
-    tracker_options::TrackerOptions
-end
-
-function (builder::ParameterMonodromyBuilder)()
-    return parameter_monodromy_worker(
-        clone_system_evaluator(builder.system), builder.parameters,
-        builder.nvariables, builder.tracker_options,
-    )
-end
-
-struct ChartParameterMonodromyBuilder{S <: SystemLike} <: AbstractPathBuilder
-    system::S
-    parameters::Vector{ComplexF64}
+    base::P
     chart::Vector{ComplexF64}
     nvariables::Int
     tracker_options::TrackerOptions
+    gamma::ComplexF64
+    intrinsic::Bool
 end
 
-function (builder::ChartParameterMonodromyBuilder)()
-    return chart_parameter_monodromy_worker(
-        clone_system_evaluator(builder.system), builder.parameters,
-        builder.chart, builder.nvariables, builder.tracker_options,
+(builder::MonodromyBuilder)() =
+    monodromy_worker(clone_system_evaluator(builder.system), builder)
+
+function monodromy_worker(
+        sys_eval::SystemEvaluator, b::MonodromyBuilder{S, Vector{ComplexF64}},
+    )::MonodromyWorkerState{Vector{ComplexF64}} where {S}
+    H = ParameterHomotopy(sys_eval, b.base, b.base)
+    parameter = ParameterHomotopy[H]
+    intrinsic = IntrinsicSubspaceHomotopy[]
+    extrinsic = ExtrinsicSubspaceHomotopy[]
+    isempty(b.chart) &&
+        return monodromy_worker_state(H, b, parameter, intrinsic, extrinsic)
+    return monodromy_worker_state(
+        AffineChartHomotopy(H, b.chart), b, parameter, intrinsic, extrinsic,
+    )
+end
+
+function monodromy_worker(
+        sys_eval::SystemEvaluator, b::MonodromyBuilder{S, LinearSubspace{ComplexF64}},
+    )::MonodromyWorkerState{LinearSubspace{ComplexF64}} where {S}
+    L = b.base
+    parameter = ParameterHomotopy[]
+    if b.intrinsic
+        base_eval = isempty(b.chart) ? sys_eval :
+            SystemEvaluator(AffineChartSystem(sys_eval, b.chart))
+        Hi = IntrinsicSubspaceHomotopy(base_eval, L, L; gamma = b.gamma)
+        return monodromy_worker_state(
+            Hi, b, parameter, IntrinsicSubspaceHomotopy[Hi], ExtrinsicSubspaceHomotopy[],
+        )
+    end
+    He = ExtrinsicSubspaceHomotopy(sys_eval, L, L; gamma = b.gamma)
+    intrinsic = IntrinsicSubspaceHomotopy[]
+    extrinsic = ExtrinsicSubspaceHomotopy[He]
+    isempty(b.chart) &&
+        return monodromy_worker_state(He, b, parameter, intrinsic, extrinsic)
+    return monodromy_worker_state(
+        AffineChartHomotopy(He, b.chart), b, parameter, intrinsic, extrinsic,
+    )
+end
+
+function monodromy_worker_state(
+        H::AbstractHomotopy, b::MonodromyBuilder{S, P},
+        parameter::Vector{ParameterHomotopy},
+        intrinsic::Vector{IntrinsicSubspaceHomotopy},
+        extrinsic::Vector{ExtrinsicSubspaceHomotopy},
+    )::MonodromyWorkerState{P} where {S, P}
+    eg = endgame_tracker(
+        H, b.tracker_options, EndgameOptions(; endgame_start = 0.0),
+    )
+    m, n_u = size(H)
+    return MonodromyWorkerState{P}(
+        eg, copy(b.base), zeros(ComplexF64, b.nvariables), zeros(ComplexF64, n_u),
+        b.chart, parameter, intrinsic, extrinsic, (m, n_u),
     )
 end
 
@@ -464,167 +464,64 @@ function with_certified_accumulator(
 end
 
 """
-    with_monodromy_solver(f, F, p; options, tracker_options, rng, start_solutions)
-    with_monodromy_solver(f, F, L; options, tracker_options, intrinsic, rng,
+    with_monodromy_solver(f, F, p, options, tracker_options, rng, start_solutions)
+    with_monodromy_solver(f, F, L, options, tracker_options, intrinsic, rng,
                           start_solutions)
 
 Run `f` on the monodromy solver for `F` at the parameters `p`, or for the
 parameter-free `F` intersected with the linear subspace `L`.
 
-The solver is handed to `f` rather than returned: its homotopy, builder,
-deduplication structure and duplicate-check accumulator are all chosen from the
-system and the options, so each branch builds a differently parameterized solver.
+The solver is handed to `f` rather than returned: its deduplication structure
+and duplicate-check accumulator are chosen from the options, so each branch
+builds a differently parameterized solver. A homogeneous system has projective
+solutions and is tracked on a random affine chart, which all workers share so
+that deduplication is consistent.
 """
 function with_monodromy_solver(
-        f::Fn, F::SystemLike, p::Vector{ComplexF64};
-        options::MonodromyOptions = MonodromyOptions(),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        rng::Random.AbstractRNG = Random.default_rng(),
-        start_solutions::AbstractVector{<:AbstractVector} = Vector{ComplexF64}[],
-    ) where {Fn}
-    return is_homogeneous(F) ?
-        with_chart_parameter_solver(
-            f, F, p, options, tracker_options, rng, start_solutions,
-        ) :
-        with_affine_parameter_solver(f, F, p, options, tracker_options)
-end
-
-# Homogeneous system: solutions are projective, put the problem on a random
-# affine chart. All workers must share the SAME chart so deduplication is
-# consistent.
-function with_chart_parameter_solver(
         f::Fn, F::SystemLike, p::Vector{ComplexF64}, options::MonodromyOptions,
         tracker_options::TrackerOptions, rng::Random.AbstractRNG,
         start_solutions::AbstractVector{<:AbstractVector},
     ) where {Fn}
     n = nvariables(F)
-    chart = conditioned_chart(rng, n, start_solutions)
-    builder = ChartParameterMonodromyBuilder(F, p, chart, n, tracker_options)
-    worker = chart_parameter_monodromy_worker(
-        F.evaluator, p, chart, n, tracker_options,
+    projective = is_homogeneous(F)
+    chart = projective ? conditioned_chart(rng, n, start_solutions) : ComplexF64[]
+    builder = MonodromyBuilder(
+        F, copy(p), chart, n, tracker_options, complex(1.0), false,
     )
+    worker = monodromy_worker(F.evaluator, builder)
     return with_certified_accumulator(F, options, copy(p), chart) do cs
         with_monodromy_solver_from_builder(
-            f, worker, builder, n, options, chart, true, cs,
+            f, worker, builder, n, options, chart, projective, cs,
         )
     end
-end
-
-function with_affine_parameter_solver(
-        f::Fn, F::SystemLike, p::Vector{ComplexF64}, options::MonodromyOptions,
-        tracker_options::TrackerOptions,
-    ) where {Fn}
-    n = nvariables(F)
-    builder = ParameterMonodromyBuilder(F, p, n, tracker_options)
-    worker = parameter_monodromy_worker(F.evaluator, p, n, tracker_options)
-    return with_certified_accumulator(F, options, copy(p), ComplexF64[]) do cs
-        with_monodromy_solver_from_builder(
-            f, worker, builder, n, options, ComplexF64[], false, cs,
-        )
-    end
-end
-
-function subspace_monodromy_worker(
-        H::AbstractHomotopy, tracker_options::TrackerOptions,
-        L::LinearSubspace{ComplexF64}, n::Int, worker_chart::Vector{ComplexF64},
-    )
-    eg = endgame_tracker(
-        H, tracker_options, EndgameOptions(; endgame_start = 0.0),
-    )
-    n_u = size(H)[2]
-    return MonodromyWorkerState{typeof(H), LinearSubspace{ComplexF64}}(
-        H, eg, copy(L), zeros(ComplexF64, n), zeros(ComplexF64, n_u),
-        worker_chart,
-    )
-end
-
-# `INTRINSIC` and `PROJECTIVE` select which of three homotopies every worker gets.
-# They are decided once, when the solver is built.
-struct SubspaceMonodromyBuilder{S <: SystemLike, INTRINSIC, PROJECTIVE} <:
-    AbstractPathBuilder
-    system::S
-    subspace::LinearSubspace{ComplexF64}
-    chart::Vector{ComplexF64}
-    nvariables::Int
-    tracker_options::TrackerOptions
-    # Every worker tracks the SAME homotopy, so the perturbation is drawn once
-    # here rather than per worker.
-    gamma::ComplexF64
-end
-
-function (builder::SubspaceMonodromyBuilder{S, INTRINSIC, PROJECTIVE})() where {
-        S, INTRINSIC, PROJECTIVE,
-    }
-    L = builder.subspace
-    sys_eval = clone_system_evaluator(builder.system)
-    H = if INTRINSIC
-        base_eval = PROJECTIVE ?
-            SystemEvaluator(AffineChartSystem(sys_eval, builder.chart)) : sys_eval
-        IntrinsicSubspaceHomotopy(base_eval, L, L; gamma = builder.gamma)
-    else
-        He = ExtrinsicSubspaceHomotopy(sys_eval, L, L; gamma = builder.gamma)
-        PROJECTIVE ? AffineChartHomotopy(He, builder.chart) : He
-    end
-    # For the intrinsic projective case the chart row is buried inside the
-    # wrapped AffineChartSystem, so the worker keeps its own reference for
-    # normalizing start points (extrinsic reaches it via the homotopy).
-    worker_chart = INTRINSIC && PROJECTIVE ? builder.chart : ComplexF64[]
-    return subspace_monodromy_worker(
-        H, builder.tracker_options, L, builder.nvariables, worker_chart,
-    )
 end
 
 function with_monodromy_solver(
-        f::Fn, F::SystemLike, L::LinearSubspace{ComplexF64};
-        options::MonodromyOptions = MonodromyOptions(),
-        tracker_options::TrackerOptions = TrackerOptions(),
-        intrinsic::Bool = default_intrinsic(L),
-        rng::Random.AbstractRNG = Random.default_rng(),
-        start_solutions::AbstractVector{<:AbstractVector} = Vector{ComplexF64}[],
+        f::Fn, F::SystemLike, L::LinearSubspace{ComplexF64}, options::MonodromyOptions,
+        tracker_options::TrackerOptions, intrinsic::Bool, rng::Random.AbstractRNG,
+        start_solutions::AbstractVector{<:AbstractVector},
     ) where {Fn}
     n = nvariables(F)
     projective = is_linear(L) && is_homogeneous(F)
-    # All workers must share the SAME chart so deduplication is consistent. It
-    # is unused affinely, where the draw only keeps the random stream in step.
-    chart = projective ? conditioned_chart(rng, n, start_solutions) :
+    # It is unused affinely, where the draw only keeps the random stream in step.
+    drawn = projective ? conditioned_chart(rng, n, start_solutions) :
         randn(rng, ComplexF64, n)
+    chart = projective ? drawn : ComplexF64[]
     gamma = random_gamma(rng)
-    return with_subspace_builder(
-        F, L, chart, n, tracker_options, intrinsic, projective, gamma,
-    ) do builder
-        with_certified_accumulator(
-            F, options, L, projective ? chart : ComplexF64[],
-        ) do cs
-            with_monodromy_solver_from_builder(
-                f, builder(), builder, n, options, chart, projective, cs,
-            )
-        end
+    builder = MonodromyBuilder(
+        F, copy(L), chart, n, tracker_options, gamma, intrinsic,
+    )
+    return with_certified_accumulator(F, options, L, chart) do cs
+        with_monodromy_solver_from_builder(
+            f, builder(), builder, n, options, drawn, projective, cs,
+        )
     end
 end
 
-# `intrinsic` and `projective` decide which of three homotopies every worker gets.
-function with_subspace_builder(
-        f::Fn, F::SystemLike, L::LinearSubspace{ComplexF64},
-        chart::Vector{ComplexF64}, n::Int, tracker_options::TrackerOptions,
-        intrinsic::Bool, projective::Bool, gamma::ComplexF64,
-    ) where {Fn}
-    S = typeof(F)
-    args = (F, L, chart, n, tracker_options, gamma)
-    return intrinsic ?
-        (
-            projective ? f(SubspaceMonodromyBuilder{S, true, true}(args...)) :
-            f(SubspaceMonodromyBuilder{S, true, false}(args...))
-        ) :
-        (
-            projective ? f(SubspaceMonodromyBuilder{S, false, true}(args...)) :
-            f(SubspaceMonodromyBuilder{S, false, false}(args...))
-        )
-end
-
 function add_loop!(
-        MS::MonodromySolver{H, P}, rng::Random.AbstractRNG,
+        MS::MonodromySolver, rng::Random.AbstractRNG,
         results::Vector{PathResult},
-    ) where {H, P}
+    )
     base = MS.workers[1].base
     push!(
         MS.loops,
@@ -815,8 +712,8 @@ function track_loop!(
     retarget!(ws, loop.p₂, loop.p)
     u = tracker_input!(ws)
     track!(
-        ws.tracker, u;
-        ω = tr.state.ω, μ = tr.state.μ, extended_precision = tr.state.extended_prec,
+        ws.tracker, u, complex(1.0), complex(0.0), tr.state.ω, tr.state.μ,
+        tr.state.extended_prec,
     )
     return finalize_result(ws, PathResult(ws.tracker))
 end

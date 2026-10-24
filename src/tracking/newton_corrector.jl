@@ -89,8 +89,8 @@ function extended_prec_refinement_step!(
         x::FSVec{ComplexF64},
         t::ComplexF64,
         J::Jacobian,
-        norm::WeightedNorm;
-        simple_newton_step::Bool = true,
+        norm::WeightedNorm,
+        simple_newton_step::Bool,
     )::Float64
     evaluate_and_jacobian!(NC.r, J.workspace.A, H, x, t)
     updated!(J)

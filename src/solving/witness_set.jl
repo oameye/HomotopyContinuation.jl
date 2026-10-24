@@ -105,6 +105,8 @@ The dimension of the algebraic set encoded by the witness set.
 """
 dim(W::WitnessSet)::Int = codim(W.L)
 
+dim_greater(a, b)::Bool = dim(a) > dim(b)
+
 """
     codim(W::WitnessSet)
 
@@ -145,12 +147,12 @@ function LA.rank(F::System; rng::Random.AbstractRNG = Random.default_rng())::Int
 end
 
 """
-    corank(F::System; rng = Random.default_rng())
+    corank(F::System, rng = Random.default_rng())
 
 Numerically estimate the corank `nvariables(F) - rank(F)` of `F`, an upper
 bound on the dimension of `V(F)`.
 """
-corank(F::System; rng::Random.AbstractRNG = Random.default_rng())::Int =
+corank(F::System, rng::Random.AbstractRNG = Random.default_rng())::Int =
     nvariables(F) - LA.rank(F; rng = rng)
 
 """
@@ -234,9 +236,9 @@ function witness_init(
         L::LinearSubspace,
         rng::Random.MersenneTwister,
         alg::Witness,
-        exec::AbstractExecutor;
-        projective::Bool = is_linear(L) && is_homogeneous(F),
+        exec::AbstractExecutor,
     )::Vector{Vector{ComplexF64}}
+    projective = is_linear(L) && is_homogeneous(F)
     chart = projective ? random_affine_chart(rng, F) : ComplexF64[]
     # The inner seed descends from `rng`, so one `Witness` seed reproduces the
     # subspace and the solve together.
@@ -267,11 +269,11 @@ function move_witness_points(
         starts::AbstractVector{<:AbstractVector},
         L_start::LinearSubspace,
         L_target::LinearSubspace,
-        rng::Random.MersenneTwister;
-        projective::Bool = false,
-        chart::Vector{ComplexF64} = ComplexF64[],
-        tracker_options::TrackerOptions = TrackerOptions(),
-        endgame_options::EndgameOptions = EndgameOptions(),
+        rng::Random.MersenneTwister,
+        projective::Bool,
+        chart::Vector{ComplexF64},
+        tracker_options::TrackerOptions,
+        endgame_options::EndgameOptions,
     )::Vector{Vector{ComplexF64}}
     base = ExtrinsicSubspaceHomotopy(
         F.evaluator, L_start, L_target; gamma = random_gamma(rng),
@@ -348,7 +350,7 @@ function solve(
     n = nvariables(F)
     projective = is_homogeneous(F)
     if dim < 0 && codim < 0
-        variety_dim = corank(F; rng = rng) - (projective ? 1 : 0)
+        variety_dim = corank(F, rng) - (projective ? 1 : 0)
     elseif codim >= 0
         variety_dim = n - codim - (projective ? 1 : 0)
     else
@@ -399,10 +401,8 @@ function solve(
         )
     end
     R = move_witness_points(
-        W.F, W.R, W.L, L, Random.MersenneTwister(algorithm_seed(alg));
-        projective = W.projective,
-        tracker_options = algorithm_tracker_options(alg),
-        endgame_options = algorithm_endgame_options(alg),
+        W.F, W.R, W.L, L, Random.MersenneTwister(algorithm_seed(alg)), W.projective,
+        ComplexF64[], algorithm_tracker_options(alg), algorithm_endgame_options(alg),
     )
     return WitnessSet(
         W.F, convert(LinearSubspace{ComplexF64}, L), R;
@@ -459,15 +459,11 @@ function trace_test(
     L₋₁ = translate(L₀, -v)
 
     R₁ = move_witness_points(
-        F, S₀, L₀, L₁, rng;
-        projective = W.projective, chart = chart,
-        tracker_options = tracker_options, endgame_options = endgame_options,
+        F, S₀, L₀, L₁, rng, W.projective, chart, tracker_options, endgame_options,
     )
     length(R₁) == degree(W) || return NaN
     R₋₁ = move_witness_points(
-        F, S₀, L₀, L₋₁, rng;
-        projective = W.projective, chart = chart,
-        tracker_options = tracker_options, endgame_options = endgame_options,
+        F, S₀, L₀, L₋₁, rng, W.projective, chart, tracker_options, endgame_options,
     )
     length(R₋₁) == degree(W) || return NaN
 
@@ -662,7 +658,7 @@ function membership(
         membership_run!(
             out, P, W, exec, F, chart, x0, Rs, gamma, tracker_options,
             endgame_options, atol, rtol,
-            make_progress(length(P); desc = "Testing membership: "),
+            make_progress(length(P), "Testing membership: "),
         )
     else
         membership_run!(

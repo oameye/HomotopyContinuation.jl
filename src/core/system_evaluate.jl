@@ -96,15 +96,6 @@ probability one.
 """
 is_real(F::System)::Bool = all_real_coefficients(polynomials(F))
 
-function all_real_coefficients(
-        polys::AbstractVector{<:MP.AbstractPolynomialLike},
-    )::Bool
-    for p in polys, c in MP.coefficients(p)
-        iszero(imag(ComplexF64(c))) || return false
-    end
-    return true
-end
-
 function all_real_coefficients(exprs::AbstractVector{Expression})::Bool
     for e in exprs
         has_real_coefficients(e) || return false

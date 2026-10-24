@@ -29,11 +29,6 @@ function fix_parameters(F::System, p::AbstractVector{<:Number})
     )
 end
 
-# Substitution runs through whichever front-end built the system.
-substitute_parameters(
-    polys::FSVec{<:MP.AbstractPolynomialLike}, params::Vector, pc::Vector{ComplexF64},
-) = [MP.polynomial(MP.subs(f, params => pc)) for f in polys]
-
 substitute_parameters(
     polys::FSVec{Expression}, params::Vector{Expression}, pc::Vector{ComplexF64},
 )::Vector{Expression} = [subs(f, params => pc) for f in polys]

@@ -90,7 +90,7 @@ function get_flag(
 end
 
 function initialize_witness_sets(
-        codim::Int, n::Int, rng::Random.MersenneTwister; affine::Bool = true,
+        codim::Int, n::Int, rng::Random.MersenneTwister, affine::Bool,
     )::Vector{WitnessPoints}
     # A projective slice needs one more ambient dimension than an affine one to
     # cut out the same projective dimension.
@@ -108,10 +108,10 @@ end
 # Witness set of each hypersurface `f_i = 0` on the seed subspace `L`. A rational
 # equation goes through its numerator, minus the zeros that are poles of it.
 function initialize_hypersurfaces(
-        F::System{P, V}, vars::Vector{V}, L::LinearSubspace,
+        F::System, vars::Vector{Expression}, L::LinearSubspace,
         rng::Random.MersenneTwister, exec::AbstractExecutor,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
-    ) where {P, V}
+    )::Vector{WitnessSet{System}}
     fs = polynomials(F)
     hyper_alg = Witness(;
         solver = TotalDegree(;
@@ -119,8 +119,7 @@ function initialize_hypersurfaces(
         ),
         show_progress = false,
     )
-    HS = System{P, V}
-    out = Vector{WitnessSet{HS}}(undef, length(fs))
+    out = Vector{WitnessSet{System}}(undef, length(fs))
     for i in eachindex(fs)
         h = System([fs[i]]; parameters = empty(vars), variables = vars)
         out[i] = with_numerator_system(fs[i], h, vars) do G, Q
@@ -171,7 +170,7 @@ end
         eqs, vars, u, i, codim, F_prev, projective, ℓ, ℓ_coeffs,
         tracker_options, endgame_options, rng,
     )
-    intersect_all!(out, H, state, exec; atol = atol, rtol = rtol)
+    intersect_all!(out, H, state, exec, atol, rtol)
     return nothing
 end
 
@@ -189,7 +188,7 @@ end
         eqs, vars, u, i, codim, Fᵢ, projective, ℓ, ℓ_coeffs,
         tracker_options, endgame_options, rng,
     )
-    fill_up!(out, monodromy_options, state, show_monodromy_progress, exec; atol = atol, rtol = rtol)
+    fill_up!(out, monodromy_options, state, show_monodromy_progress, exec, atol, rtol)
     return nothing
 end
 
@@ -219,9 +218,9 @@ end
 
 function regeneration_sortperm(H, sorted::EquationSorting.T)::Vector{Int}
     if sorted === EquationSorting.BY_DEGREE
-        return sortperm(H; by = degree)
+        return stable_sortperm(Int[degree(h) for h in H], isless)
     elseif sorted === EquationSorting.RANDOMIZED
-        return sortperm(H; by = degree, rev = true)
+        return stable_sortperm(Int[degree(h) for h in H], isgreater_than)
     else
         return collect(eachindex(H))
     end
@@ -378,7 +377,7 @@ function solve(
     push!(vars, u)
 
     # witness supersets, out[k] for codimension k
-    out = initialize_witness_sets(codim, n, rng; affine = !projective)
+    out = initialize_witness_sets(codim, n, rng, !projective)
 
     # witness sets for each hypersurface f_i = 0 on the seed subspace
     H = initialize_hypersurfaces(
@@ -456,7 +455,7 @@ function solve(
     # Junk removal: a codim-k witness superset can pick up points where its
     # slice crosses a higher-dimensional component; those points lie on that
     # higher-dimensional witness set and are removed here.
-    remove_contained_points!(result, rng, exec; atol = atol, rtol = rtol)
+    remove_contained_points!(result, rng, exec, atol, rtol)
     filter!(W -> degree(W) > 0, result)
     return result
 end
@@ -467,19 +466,10 @@ end
 # front-end supplies the equations, the degree that sets the number of roots of
 # unity, the deformation start equation and the hypersurface to seed from.
 
-regeneration_equations(
-    F::System{<:MP.AbstractPolynomialLike},
-)::Vector{<:MP.AbstractPolynomialLike} = [MP.polynomial(p) for p in polynomials(F)]
-
-regeneration_equations(F::System{Expression})::Vector{Expression} =
-    collect(polynomials(F))
+regeneration_equations(F::System)::Vector{Expression} = collect(polynomials(F))
 
 # Every equation must be a polynomial or a ratio of polynomials in the variables.
-check_regeneration_input(
-    ::System{<:MP.AbstractPolynomialLike}, ::String,
-)::Nothing = nothing
-
-function check_regeneration_input(F::System{Expression}, route::String)::Nothing
+function check_regeneration_input(F::System, route::String)::Nothing
     vars = collect(variables(F))
     for f in polynomials(F)
         (p, q) = num_den(f)
@@ -494,19 +484,6 @@ function check_regeneration_input(F::System{Expression}, route::String)::Nothing
     return nothing
 end
 
-# `intersect` rebuilds all its input into a single system, so everything has to
-# come from the same front-end.
-is_expression_front_end(::System{Expression})::Bool = true
-is_expression_front_end(::System)::Bool = false
-
-check_front_end(F::System, expression::Bool)::Nothing =
-    is_expression_front_end(F) == expression ? nothing : throw(
-        ArgumentError(
-            "the input mixes the polynomial and `Expression` front-ends; build the " *
-            "witness sets and the hypersurface from the same kind of input.",
-        ),
-    )
-
 # Witness points and linear subspaces are stored in ordered ambient coordinates.
 # Equal dimension is therefore insufficient: positional renaming would silently
 # reinterpret a witness set built in a different coordinate system.
@@ -518,15 +495,12 @@ check_same_ambient_variables(F::System, G::System)::Nothing =
     )
 
 # Number of roots of unity the u-homotopy starts from.
-u_degree(h::MP.AbstractPolynomialLike, ::AbstractVector)::Int = MP.maxdegree(h)
 u_degree(h::Expression, vars::AbstractVector{Expression})::Int =
     degree(first(num_den(h)), vars)
 
 # Start equation of the u-homotopy: `u^d − 1` affinely, `u^d − ℓ^d` projectively,
 # where `ℓ` keeps it homogeneous. Carrying the denominator of the equation it
 # deforms into makes both endpoint systems singular on the same set.
-u_start_equation(::MP.AbstractPolynomialLike, d::Int, u, one_or_ℓ) =
-    u^d - one_or_ℓ^d
 u_start_equation(h::Expression, d::Int, u::Expression, one_or_ℓ)::Expression =
     (u^d - one_or_ℓ^d) / last(num_den(h))
 
@@ -534,18 +508,6 @@ u_start_equation(h::Expression, d::Int, u::Expression, one_or_ℓ)::Expression =
 # joins: the linear form `Σ coeffs[j] xvars[j]` projectively, and `1` affinely,
 # which is the plain `u^d − 1`. Real coefficients: the locus they must avoid is a
 # proper subvariety, which meets `ℝⁿ` in measure zero.
-function linear_form(
-        eqs::Vector{P}, xvars::Vector{V}, coeffs::Vector{Float64},
-    )::P where {P <: MP.AbstractPolynomialLike, V}
-    isempty(coeffs) && return one(P)
-    first_index = firstindex(coeffs)
-    form = convert(P, coeffs[first_index] * xvars[first_index])
-    for j in (first_index + 1):lastindex(coeffs)
-        form = form + coeffs[j] * xvars[j]
-    end
-    return form
-end
-
 function linear_form(
         ::Vector{Expression}, xvars::Vector{Expression}, coeffs::Vector{Float64},
     )::Expression
@@ -603,9 +565,6 @@ drop_poles(::NoDenominator, R::Vector{Vector{ComplexF64}})::Vector{Vector{Comple
 # Runs `fn(numerator, denominator)` on the hypersurface whose witness set gives the
 # witness set of `f = 0`. Whether there is a denominator is a property of `f`, not of
 # its type.
-with_numerator_system(fn::F, ::MP.AbstractPolynomialLike, h::System, ::Vector) where {F} =
-    fn(h, NoDenominator())
-
 function with_numerator_system(
         fn::F, f::Expression, h::System, vars::Vector{Expression},
     ) where {F}
@@ -650,9 +609,6 @@ function drop_poles(
 end
 
 # Express `eqs`, given in the variables `from`, in the variables `to`.
-rename_variables(eqs::Vector{<:MP.AbstractPolynomialLike}, from, to) =
-    [MP.polynomial(MP.subs(f, from => to)) for f in eqs]
-
 rename_variables(eqs::Vector{Expression}, from, to)::Vector{Expression} =
     [subs(f, from => to) for f in eqs]
 
@@ -681,7 +637,7 @@ solve(
 # ── Intersection with a hypersurface ─────────────────────────────────────────
 
 function intersect_all!(
-        out, H, state::RegenerationState, exec::AbstractExecutor;
+        out, H, state::RegenerationState, exec::AbstractExecutor,
         atol::Float64, rtol::Float64,
     )
     i = state.i
@@ -694,7 +650,7 @@ function intersect_all!(
         if k < i
             Wₖ₊₁ = k < codim ? out[k + 1] : nothing
             intersect_with_hypersurface!(
-                Wₖ, Hᵢ, Wₖ₊₁, state, exec; atol = atol, rtol = rtol,
+                Wₖ, Hᵢ, Wₖ₊₁, state, exec, atol, rtol,
             )
         end
     end
@@ -703,7 +659,7 @@ end
 
 function intersect_with_hypersurface!(
         W::WitnessPoints, H::WitnessSet, X, state::RegenerationState,
-        exec::AbstractExecutor; atol::Float64, rtol::Float64,
+        exec::AbstractExecutor, atol::Float64, rtol::Float64,
     )
     F = state.Fᵢ
     h = state.eqs[state.i]
@@ -719,10 +675,8 @@ function intersect_with_hypersurface!(
     # whole component.
     m = .!(
         is_contained(
-            W, H, system(H), state.rng, state.projective;
-            atol = atol, rtol = rtol,
-            tracker_options = state.tracker_options,
-            endgame_options = state.endgame_options,
+            W, H, system(H), state.rng, state.projective, atol, rtol,
+            state.tracker_options, state.endgame_options,
         )
     )
     P_next = manage_initial_points!(P, m)
@@ -792,8 +746,7 @@ function track_u_root(
         q = solution(pr)
         # sanity: q must be trackable slightly back from t = 0
         code = track!(
-            eg.tracker, FSVec{ComplexF64}(q);
-            t₁ = complex(0.0), t₀ = complex(0.1),
+            eg.tracker, FSVec{ComplexF64}(q), complex(0.0), complex(0.1),
         )
         code == TrackerCode.TRACKER_SUCCESS && return q
     end
@@ -872,8 +825,8 @@ function u_homotopy_systems(
     L = linear_subspace_u(W)      # start: u free
     K = linear_subspace(X)        # target: u = c
 
-    F₀ = sliced_system([eqs; h0], collect(vars), L)
-    G₀ = sliced_system([eqs; h], collect(vars), K)
+    F₀ = sliced_system([eqs; h0], collect(vars), L, ComplexF64[], empty(vars), CompileMode.INTERPRETED)
+    G₀ = sliced_system([eqs; h], collect(vars), K, ComplexF64[], empty(vars), CompileMode.INTERPRETED)
     return F₀, G₀, d
 end
 
@@ -897,8 +850,7 @@ u_homotopy(
 # moves Y's witness points there and checks proximity.
 function is_contained(
         X::WitnessPoints, Y::WitnessSet, F::System, rng::Random.MersenneTwister,
-        projective::Bool;
-        atol::Float64, rtol::Float64,
+        projective::Bool, atol::Float64, rtol::Float64,
         tracker_options::TrackerOptions, endgame_options::EndgameOptions,
     )::BitVector
     LX = linear_subspace(X)
@@ -1006,18 +958,14 @@ end
 # accepts explicit kwargs, so go through MonodromySolver + monodromy_solve!).
 function monodromy_with_options(
         F::System, X::AbstractVector{<:AbstractVector}, L::LinearSubspace,
-        opts::MonodromyOptions;
-        exec::AbstractExecutor, tracker_options::TrackerOptions = TrackerOptions(),
-        show_progress::Bool = false,
-        seed::UInt32 = rand(Random.RandomDevice(), UInt32),
+        opts::MonodromyOptions, exec::AbstractExecutor, tracker_options::TrackerOptions,
+        show_progress::Bool, seed::UInt32,
     )::MonodromyResult
     cp = convert(LinearSubspace{ComplexF64}, L)
     # `monodromy_solve!` seeds its loops from `seed`; the solver's chart takes a
     # tagged stream off the same seed so the two do not share draws.
     return with_monodromy_solver(
-        F, cp;
-        options = opts, tracker_options = tracker_options,
-        rng = tagged_rng(seed, 0x0000_0001), start_solutions = X,
+        F, cp, opts, tracker_options, default_intrinsic(cp), tagged_rng(seed, 0x0000_0001), X,
     ) do MS
         monodromy_solve!(MS, X, cp, seed, show_progress, exec)
     end
@@ -1025,7 +973,7 @@ end
 
 function fill_up!(
         out, monodromy_options::MonodromyOptions, state::RegenerationState,
-        show_monodromy_progress::Bool, exec::AbstractExecutor;
+        show_monodromy_progress::Bool, exec::AbstractExecutor,
         atol::Float64, rtol::Float64,
     )
     Fᵢ = state.Fᵢ
@@ -1033,10 +981,8 @@ function fill_up!(
         if W !== nothing && dim(W) > 0 && degree(W) > 0
             opts = regeneration_monodromy_options(monodromy_options, W, atol, rtol)
             res = monodromy_with_options(
-                Fᵢ, W.R, linear_subspace(W), opts;
-                exec = exec, tracker_options = state.tracker_options,
-                show_progress = show_monodromy_progress,
-                seed = rand(state.rng, UInt32),
+                Fᵢ, W.R, linear_subspace(W), opts, exec, state.tracker_options,
+                show_monodromy_progress, rand(state.rng, UInt32),
             )
             W.R = nsolutions(res) == 0 ? Vector{Vector{ComplexF64}}() :
                 unique_points(
@@ -1088,7 +1034,6 @@ function Base.intersect(
         throw(ArgumentError("The second argument must be defined by a single equation."))
     size(system(W))[2] == size(system(H))[2] ||
         throw(ArgumentError("Witness sets must be in the same ambient space."))
-    check_front_end(system(H), is_expression_front_end(system(W)))
     check_same_ambient_variables(system(W), system(H))
     check_regeneration_input(system(W), "`intersect`")
     check_regeneration_input(system(H), "`intersect`")
@@ -1137,7 +1082,7 @@ function Base.intersect(
     )
 
     intersect_with_hypersurface!(
-        W₁, Hᵤ, W₂, intersect_state, exec; atol = atol, rtol = rtol,
+        W₁, Hᵤ, W₂, intersect_state, exec, atol, rtol,
     )
     fill_state = RegenerationState(
         [eqs; h], vars_u, u, length(eqs) + 1, 2,
@@ -1152,8 +1097,7 @@ function Base.intersect(
         isempty(Wi.R) || (Wi.R = unique_points(Wi.R; atol = atol, rtol = rtol))
     end
     fill_up!(
-        Ws, monodromy_options, fill_state, show_monodromy_progress, exec;
-        atol = atol, rtol = rtol,
+        Ws, monodromy_options, fill_state, show_monodromy_progress, exec, atol, rtol,
     )
 
     G = System([eqs; h]; parameters = empty(vars), variables = vars)
@@ -1164,7 +1108,7 @@ function Base.intersect(
     end
     # Remove spurious witness points of a lower-dimensional set that actually
     # lie on a higher-dimensional component (they are junk from the u-homotopy).
-    remove_contained_points!(out, rng, exec; atol = atol, rtol = rtol)
+    remove_contained_points!(out, rng, exec, atol, rtol)
     filter!(X -> degree(X) > 0, out)
     return out
 end
@@ -1173,9 +1117,9 @@ end
 # that are contained in any higher-dimensional set (junk points).
 function remove_contained_points!(
         out::Vector{<:WitnessSet}, rng::Random.MersenneTwister,
-        exec::AbstractExecutor; atol::Float64, rtol::Float64,
+        exec::AbstractExecutor, atol::Float64, rtol::Float64,
     )
-    sort!(out; by = dim, rev = true)
+    stable_sort!(out, dim_greater)
     for i in eachindex(out)
         Wi = out[i]
         isempty(Wi.R) && continue
@@ -1198,21 +1142,10 @@ function remove_contained_points!(
     return nothing
 end
 
-function Base.intersect(
-        W::WitnessSet,
-        f::MP.AbstractPolynomialLike,
-        alg::Intersection = Intersection(),
-        exec::AbstractExecutor = Threaded(),
-    )
-    check_front_end(system(W), false)
-    rng = Random.MersenneTwister(algorithm_seed(alg))
-    H = hypersurface_witness_set(
-        f, collect(variables(system(W))), rng, alg, exec, W.projective,
-    )
-    # A derived seed, so the regeneration step does not replay the stream that
-    # produced H's slice.
-    return intersect(W, H, reseed(alg, rand(rng, UInt32)), exec)
-end
+Base.intersect(
+    W::WitnessSet, f::MP.AbstractPolynomialLike, alg::Intersection = Intersection(),
+    exec::AbstractExecutor = Threaded(),
+) = intersect(W, Expression(f), alg, exec)
 
 function Base.intersect(
         W::WitnessSet,
@@ -1220,7 +1153,6 @@ function Base.intersect(
         alg::Intersection = Intersection(),
         exec::AbstractExecutor = Threaded(),
     )
-    check_front_end(system(W), true)
     rng = Random.MersenneTwister(algorithm_seed(alg))
     H = hypersurface_witness_set(
         f, as_variables(collect(variables(system(W)))), rng, alg, exec, W.projective,
@@ -1241,25 +1173,6 @@ hypersurface_witness(alg::Intersection, seed::UInt32)::Witness{TotalDegree} =
     ),
 )
 
-function hypersurface_witness_set(
-        f::MP.AbstractPolynomialLike, vars::Vector, rng::Random.MersenneTwister,
-        alg::Intersection, exec::AbstractExecutor, projective::Bool,
-    )::WitnessSet
-    extra = setdiff(MP.effective_variables(f), vars)
-    isempty(extra) || throw(
-        ArgumentError(
-            "the hypersurface must be given in the variables of the witness set, " *
-                "but `$(f)` also uses $(join(extra, ", ")).",
-        ),
-    )
-    return solve(
-        System([f]; parameters = empty(vars), variables = vars),
-        hypersurface_slice(rng, length(vars), projective),
-        hypersurface_witness(alg, rand(rng, UInt32)),
-        exec,
-    )
-end
-
 hypersurface_slice(rng::Random.MersenneTwister, n::Int, projective::Bool) =
     projective ? rand_subspace(rng, n; dim = 2, affine = false) :
     rand_subspace(rng, n; dim = 1)
@@ -1269,6 +1182,13 @@ function hypersurface_witness_set(
         f::Expression, vars::Vector{Expression}, rng::Random.MersenneTwister,
         alg::Intersection, exec::AbstractExecutor, projective::Bool,
     )::WitnessSet
+    extra = variables(f; parameters = vars)
+    isempty(extra) || throw(
+        ArgumentError(
+            "the hypersurface must be given in the variables of the witness set, " *
+                "but `$(f)` also uses $(join(extra, ", ")).",
+        ),
+    )
     (p, q) = num_den(f)
     (degree(p, vars) < 0 || degree(q, vars) < 0) && throw(
         ArgumentError(

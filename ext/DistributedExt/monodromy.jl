@@ -209,8 +209,7 @@ function drive_monodromy!(
                 handle_monodromy_result!(MS, results, queue, r, undecided, rng)
 
                 HCN.update_progress!(
-                    progress, stats;
-                    solutions = length(results), queued = length(queue) + inflight,
+                    progress, stats, length(queue) + inflight, length(results), false,
                 )
 
                 undecided || continue
@@ -229,8 +228,7 @@ function drive_monodromy!(
     end
 
     HCN.update_progress!(
-        progress, stats;
-        finish = true, solutions = length(results), queued = length(queue),
+        progress, stats, length(queue), length(results), true,
     )
     return retcode
 end

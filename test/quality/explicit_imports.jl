@@ -24,13 +24,13 @@ const QUALIFIED_ACCESS_IGNORE = (
     :deepcopy_internal,
     :SizeUnknown,
     :Condition, :filter,
-    :inferencebarrier,
     :RegenerationTraverser, :CayleyIndexing, :cayley,
     :MixedCellTable, :MixedCellTableTraverser,
     :LexicographicOrdering,
     :PkgId, :root_module_exists, :serialize_type,
     :AbstractAlgebraicSolver, :NoAlgorithm, :promote_for,
     Symbol("default_gröbner_basis_algorithm"),
+    :ProgressCore,
 )
 
 @testset "ExplicitImports" begin
@@ -43,7 +43,7 @@ const QUALIFIED_ACCESS_IGNORE = (
         HomotopyContinuation.TrackerCode,
         HomotopyContinuation.PathResultCode,
         HomotopyContinuation.CompileMode,
-        HomotopyContinuation.SExpr,
+        HomotopyContinuation.SKind,
         HomotopyContinuation.SUnaryKind,
         HomotopyContinuation.SymExpr,
         HomotopyContinuation.ExecInstruction,

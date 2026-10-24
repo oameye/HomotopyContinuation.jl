@@ -208,5 +208,8 @@ include("../helpers/solution_sets.jl")
         W = first(regeneration)
         @test_throws ArgumentError intersect(W, 1 / sqrt(x), Intersection(; show_progress = false))
         @test_throws ArgumentError intersect(W, x / (1 + sqrt(y)), Intersection(; show_progress = false))
+        @var w
+        foreign = @test_throws ArgumentError intersect(W, x^2 + w, Intersection(; show_progress = false))
+        @test occursin("also uses w", sprint(showerror, foreign.value))
     end
 end

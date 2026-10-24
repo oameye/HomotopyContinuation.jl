@@ -34,10 +34,8 @@ end
 # zero set `V(polys) ∩ L`. For a projective (homogeneous) problem a chart
 # equation `c·x − 1` is appended so the system is square.
 function sliced_system(
-        polys::AbstractVector, vars::AbstractVector, L::LinearSubspace;
-        chart::AbstractVector = ComplexF64[],
-        params::AbstractVector = empty(vars),
-        compile::CompileMode.T = CompileMode.INTERPRETED,
+        polys::AbstractVector, vars::AbstractVector, L::LinearSubspace,
+        chart::AbstractVector, params::AbstractVector, compile::CompileMode.T,
     )::System
     lin = linear_equations(L, vars)
     eqs = vcat(collect(polys), lin)
@@ -75,8 +73,8 @@ function slice(
         ),
     )
     return sliced_system(
-        polynomials(F), collect(variables(F)), L;
-        chart = chart, params = collect(parameters(F)), compile = F.compile_mode,
+        polynomials(F), collect(variables(F)), L, chart, collect(parameters(F)),
+        F.compile_mode,
     )
 end
 

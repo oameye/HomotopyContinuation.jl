@@ -40,45 +40,83 @@ tagged_rng(seed::UInt32, tag::UInt32)::Random.MersenneTwister =
 nanmin(a, b) = isnan(a) ? b : (isnan(b) ? a : min(a, b))
 nanmax(a, b) = isnan(a) ? b : (isnan(b) ? a : max(a, b))
 
-# Insertion sort is O(n²); beyond this cutoff a stable MergeSort wins. The
-# vertex lists sorted during System construction can reach thousands of entries.
-const STABLE_SORT_CUTOFF = 32
+# A stable sort owned by the package. Base's `sort!` compiles its algorithm
+# selection for every comparator, a cost System construction would pay on first
+# use for each of its orderings. Runs of `STABLE_SORT_RUN` elements are
+# insertion-sorted, then merged bottom-up.
+const STABLE_SORT_RUN = 32
 
 function stable_sort!(values::Vector{T}, lt::F)::Vector{T} where {T, F}
     n = length(values)
-    if n > STABLE_SORT_CUTOFF
-        sort!(values; alg = MergeSort, lt = lt)
-        return values
+    for lo in 1:STABLE_SORT_RUN:n
+        insertion_sort!(values, lo, min(lo + STABLE_SORT_RUN - 1, n), lt)
     end
-    for i in 2:n
-        value = values[i]
-        j = i - 1
-        while j >= 1 && lt(value, values[j])
-            values[j + 1] = values[j]
-            j -= 1
+    n <= STABLE_SORT_RUN && return values
+    src = values
+    dst = similar(values)
+    width = STABLE_SORT_RUN
+    while width < n
+        for lo in 1:(2 * width):n
+            merge_runs!(dst, src, lo, min(lo + width - 1, n), min(lo + 2 * width - 1, n), lt)
         end
-        values[j + 1] = value
+        src, dst = dst, src
+        width *= 2
     end
+    src === values || copyto!(values, src)
     return values
 end
 
-function stable_sort_by!(values::Vector{T}, by::F)::Vector{T} where {T, F}
-    n = length(values)
-    if n > STABLE_SORT_CUTOFF
-        sort!(values; alg = MergeSort, by = by)
-        return values
-    end
-    for i in 2:n
+stable_sort_by!(values::Vector{T}, by::F) where {T, F} =
+    stable_sort!(values, (a, b) -> isless(by(a), by(b)))
+
+isgreater_than(a, b)::Bool = isless(b, a)
+
+function stable_sortperm(keys::Vector{T}, lt::F)::Vector{Int} where {T, F}
+    perm = collect(1:length(keys))
+    stable_sort!(perm, (i, j) -> lt(keys[i], keys[j]))
+    return perm
+end
+
+function insertion_sort!(values::Vector, lo::Int, hi::Int, lt::F)::Nothing where {F}
+    for i in (lo + 1):hi
         value = values[i]
-        value_key = by(value)
         j = i - 1
-        while j >= 1 && isless(value_key, by(values[j]))
+        while j >= lo && lt(value, values[j])
             values[j + 1] = values[j]
             j -= 1
         end
         values[j + 1] = value
     end
-    return values
+    return nothing
+end
+
+# Merge the sorted runs `src[lo:mid]` and `src[mid+1:hi]` into `dst[lo:hi]`, taking
+# from the left run on ties.
+function merge_runs!(
+        dst::Vector{T}, src::Vector{T}, lo::Int, mid::Int, hi::Int, lt::F,
+    )::Nothing where {T, F}
+    i, j, k = lo, mid + 1, lo
+    while i <= mid && j <= hi
+        if lt(src[j], src[i])
+            dst[k] = src[j]
+            j += 1
+        else
+            dst[k] = src[i]
+            i += 1
+        end
+        k += 1
+    end
+    while i <= mid
+        dst[k] = src[i]
+        i += 1
+        k += 1
+    end
+    while j <= hi
+        dst[k] = src[j]
+        j += 1
+        k += 1
+    end
+    return nothing
 end
 
 function nthroot(x::Real, N::Integer)

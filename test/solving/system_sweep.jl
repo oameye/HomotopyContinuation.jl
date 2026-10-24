@@ -83,8 +83,8 @@ const TEST_SYSTEMS = [(name, build()...) for (name, build) in TEST_SYSTEM_COLLEC
         @test size(F) == (m, n)
         @test nvariables(F) == n
         @test nparameters(F) == r
-        @test collect(variables(F)) == collect(vars)
-        @test collect(parameters(F)) == collect(params)
+        @test collect(variables(F)) == Expression.(vars)
+        @test collect(parameters(F)) == Expression.(params)
         scales = equation_scales(F)
         @test _public_evaluate(F, xvals, pvals) .* scales ≈ truth_u rtol = 1.0e-10
         @test _public_jacobian(F, xvals, pvals) .* scales ≈ truth_J rtol = 1.0e-10

@@ -118,7 +118,7 @@ function solve(
     rtol = alg.rtol
     rng = Random.MersenneTwister(algorithm_seed(alg))
 
-    Ws = sort(Ws; by = dim, rev = true)
+    Ws = stable_sort!(copy(Ws), dim_greater)
     options = decompose_monodromy_options(monodromy_options, atol, rtol)
     out = WT[]
     isempty(Ws) && return out
@@ -267,8 +267,7 @@ function decompose_with_monodromy(
 
     cp = convert(LinearSubspace{ComplexF64}, L)
     return with_monodromy_solver(
-        G, cp; options = options, tracker_options = tracker_options, rng = rng,
-        start_solutions = P,
+        G, cp, options, tracker_options, default_intrinsic(cp), rng, P,
     ) do MS
         decompose_with_solver(
             MS, decomposition, G, L, cp, P, n, options, max_iters, warning, rng,
@@ -581,11 +580,11 @@ end
 # Hand-rolled unicode degree table (avoids a PrettyTables dependency).
 function degree_table(io::IO, N::NumericalIrreducibleDecomposition)
     D = irreducible_components(N)
-    ks = sort(collect(keys(D)); rev = true)
+    ks = stable_sort!(collect(Int, keys(D)), isgreater_than)
 
     rows = Vector{Tuple{String, String}}()
     for k in ks
-        comps = sort([degree(W) for W in D[k]]; rev = true)
+        comps = stable_sort!(Int[degree(W) for W in D[k]], isgreater_than)
         deg_str = if length(comps) == 1
             string(first(comps))
         elseif length(comps) <= 10

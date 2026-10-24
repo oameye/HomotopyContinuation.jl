@@ -23,12 +23,6 @@ function Serialization.deserialize(
     return Serialization.deserialize(s)()::HCN.SystemEvaluator
 end
 
-function compile_strategy(mode::HCN.CompileMode.T)
-    mode === HCN.CompileMode.INTERPRETED && return HCN.InterpretedCompile()
-    mode === HCN.CompileMode.COMPILED && return HCN.CompiledCompile()
-    return HCN.CompiledAllCompile()
-end
-
 # ── System ──────────────────────────────────────────────────────────────────
 
 function Serialization.serialize(s::AbstractSer, sys::HCN.System)
@@ -41,19 +35,17 @@ function Serialization.serialize(s::AbstractSer, sys::HCN.System)
     return nothing
 end
 
-function Serialization.deserialize(
-        s::AbstractSer, ::Type{HCN.System{P, V}},
-    )::HCN.System{P, V} where {P, V}
-    polys = Serialization.deserialize(s)::Vector{P}
-    parameters = Serialization.deserialize(s)::Vector{V}
-    variables = Serialization.deserialize(s)::Vector{V}
+function Serialization.deserialize(s::AbstractSer, ::Type{HCN.System})::HCN.System
+    polys = Serialization.deserialize(s)::Vector{HCN.Expression}
+    parameters = Serialization.deserialize(s)::Vector{HCN.Expression}
+    variables = Serialization.deserialize(s)::Vector{HCN.Expression}
     lowered = Serialization.deserialize(s)::HCN.LoweredInput
     compile_mode = Serialization.deserialize(s)::HCN.CompileMode.T
 
-    return HCN.build_compiled_system(
-        compile_strategy(compile_mode), polys, variables, parameters, lowered,
+    return HCN.build_system(
+        compile_mode, polys, variables, parameters, lowered,
         length(polys), length(variables), length(parameters),
-    )::HCN.System{P, V}
+    )
 end
 
 # ── SupportSystem ──────────────────────────────────────────────────────────

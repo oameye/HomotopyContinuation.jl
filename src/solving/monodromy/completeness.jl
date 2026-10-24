@@ -2,37 +2,12 @@
 # Cold diagnostic path.
 
 # Augmented system `[F(x, p + λv); (Σᵢ aᵢxᵢ - 1)λ + t]` used by the trace test.
-# DynamicPolynomials variables are identity distinct, so the fresh variables
-# below cannot collide with user variables of the same name.
-function build_verification_system(
-        polys::AbstractVector{<:MP.AbstractPolynomialLike},
-        x::AbstractVector, p::AbstractVector, n::Int, m::Int,
-    )
-    @polyvar t v[1:m] a[1:n] λ
-    # `@polyvar v[1:m]` hands back a `Vector` with no element type on Julia 1.11,
-    # which loses it for everything built from the array variables.
-    VT = typeof(λ)
-    vs = Vector{VT}(v)
-    as = Vector{VT}(a)
-    # `MP.subs` does not say what it returns, and `System` reads its first
-    # parameter off the element type it is given, so the equations go into a
-    # vector of one declared polynomial type, filled in place: a comprehension
-    # would take its element type from `subs` and lose it.
-    PT = MP.polynomial_type(eltype(polys), Float64)
-    eqs = Vector{PT}(undef, length(polys) + 1)
-    for (i, f) in enumerate(polys)
-        eqs[i] = MP.subs(f, p => p .+ λ .* vs)
-    end
-    eqs[end] = (sum(as .* x) - 1) * λ + t
-    return System(eqs; variables = [x; λ], parameters = [t; p; vs; as])
-end
-
 # `Expression` variables are keyed by name, so the fresh ones are renamed until
-# they no longer clash.
+# they no longer clash with the variables and parameters of `F`.
 function build_verification_system(
         polys::AbstractVector{Expression},
-        x::AbstractVector, p::AbstractVector, n::Int, m::Int,
-    )::System{Expression, Expression}
+        x::AbstractVector{Expression}, p::AbstractVector{Expression}, n::Int, m::Int,
+    )::System
     taken = Expression[x; p]
     fresh(name)::Expression = (w = unique_variable(name, taken, Expression[]); push!(taken, w); w)
 

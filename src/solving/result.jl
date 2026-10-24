@@ -88,7 +88,7 @@ function cluster_solutions(
     end
     # Largest tolerance any pair can have; window in key space is twice that.
     window = 2.0 * max(atol, rtol * max_norm)
-    order = sortperm(keys)
+    order = stable_sortperm(keys, isless)
 
     # Build edges: sorted sweep, comparing only pairs within the key window
     mergeable = BitVector(path_results[i].singular for i in success_idx)
