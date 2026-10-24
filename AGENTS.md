@@ -4,8 +4,6 @@ HomotopyContinuation.jl is a numerical homotopy-continuation package. Optimize f
 
 ## Architecture
 
-Read `implementation_docs/00_architecture.md` for the current implementation and `implementation_docs/01_decisions.md` for non-obvious constraints. Future architecture belongs in roadmap issues rather than current-state docs.
-
 Core rule: **problem data stays data.** User-system identity, dimensions, path counts, coefficients, tolerances, and seeds must not become unbounded type parameters. Bounded package-owned algorithmic choices may be specialized when measurement justifies it.
 
 The numerical tracking path should be concrete, unboxed, directly dispatched, and allocation-free where its contract requires it. Dynamic compatibility/extension boundaries must be narrow and explicit.

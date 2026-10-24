@@ -50,6 +50,16 @@ include("../helpers/solution_sets.jl")
         @test all(J -> isapprox(J, first(jacobians); rtol = 1.0e-12), jacobians)
     end
 
+    @testset "any Expression vector builds a System" begin
+        @var x y
+        exprs = [x^2 - 1, y / x - 2]
+        reference = System(exprs)
+        point = ComplexF64[2, 3]
+        for input in (view(exprs, :), Expression[e for e in exprs])
+            @test evaluate(System(input), point) ≈ evaluate(reference, point)
+        end
+    end
+
     @testset "rational system has the expected values and Jacobian" begin
         @var x y u[1:4]
         F = System(

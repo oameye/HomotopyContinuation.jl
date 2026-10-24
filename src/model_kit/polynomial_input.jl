@@ -19,16 +19,13 @@
     return string(Symbol(a)) < string(Symbol(b))
 end
 
-function append_unique!(acc::Vector{V}, items::AbstractVector)::Vector{V} where {V}
+function append_unique!(
+        acc::Vector{V}, seen::Set{V}, items::AbstractVector,
+    )::Vector{V} where {V}
     for v in items
-        found = false
-        for w in acc
-            if w == v
-                found = true
-                break
-            end
-        end
-        found || push!(acc, v)
+        v in seen && continue
+        push!(seen, v)
+        push!(acc, v)
     end
     return acc
 end
@@ -36,8 +33,9 @@ end
 @noinline function collect_variables(polys)
     Base.@nospecialize polys
     all_vars = empty(MP.variables(first(polys)))
+    seen = Set(all_vars)
     for poly in polys
-        append_unique!(all_vars, MP.variables(poly))
+        append_unique!(all_vars, seen, MP.variables(poly))
     end
     stable_sort!(all_vars, lt_variable)
     return all_vars
@@ -55,9 +53,10 @@ end
 @noinline function rational_variables(polys, parameters)
     Base.@nospecialize polys parameters
     all_vars = empty(MP.variables(numerator(first(polys))))
+    seen = Set(all_vars)
     for p in polys
-        append_unique!(all_vars, MP.variables(numerator(p)))
-        append_unique!(all_vars, MP.variables(denominator(p)))
+        append_unique!(all_vars, seen, MP.variables(numerator(p)))
+        append_unique!(all_vars, seen, MP.variables(denominator(p)))
     end
     stable_sort!(all_vars, lt_variable)
     isempty(parameters) && return all_vars

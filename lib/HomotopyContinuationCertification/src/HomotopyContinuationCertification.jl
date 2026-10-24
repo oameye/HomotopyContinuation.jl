@@ -39,7 +39,7 @@ using HomotopyContinuation:
     AbstractCertifiedSolutions, AbstractCertifiedCandidate,
     ResultIterator, selection, restrict, is_success,
     foreach_path, replay_ntasks, path_workers,
-    make_progress,
+    make_progress, make_progress_spinner, ProgressSpinner,
     AddSolutionCode,
     Serial, Threaded
 

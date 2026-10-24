@@ -98,6 +98,16 @@ end
         test_eval_and_jac([x + 0 * y, p + 0 * x], [x, y]; params = [p])
     end
 
+    @testset "extreme finite coefficients normalize coefficient-wise" begin
+        @polyvar x
+        for c in (1.0e300, 1.0e-300, 1.0e-310)
+            F = System([c * x - c, c * x^2 * (x - 2) + c]; variables = [x])
+            @test all(isfinite, equation_scales(F))
+            @test evaluate(F, [2.0 + 0im]) .* equation_scales(F) ≈ [c, c] rtol = 1.0e-12
+            @test jacobian(F, [2.0 + 0im]) .* equation_scales(F) ≈ [c; 4c;;] rtol = 1.0e-12
+        end
+    end
+
     @testset "parameters participate in values but not variable Jacobian columns" begin
         @polyvar x y z a b
         vars = [x, y, z]
@@ -120,6 +130,7 @@ end
         @test_throws ArgumentError System([x^2 + y - 1, x + y^2 - 1]; variables = [x])
         @test_throws ArgumentError System(big; variables = [u1, u2, u3])
         @test_throws ArgumentError System(big; variable_groups = [[u1, u2], [u3]])
+        @test_throws ArgumentError System([x^2 + y - 1]; variables = [x, y], parameters = [y])
     end
 
     @testset "real benchmark systems agree with polynomial ground truth" begin

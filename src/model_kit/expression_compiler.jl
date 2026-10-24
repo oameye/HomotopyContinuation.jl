@@ -3,9 +3,9 @@
 # Front-end glue from `Expression` input to the tape pipeline:
 #   Expression -> SExpr -> CSE -> tape compiler
 #
-# The Jacobian is produced by symbolic differentiation on `Expression`, which
-# covers division, non-integer and negative powers, and the unary functions that
-# `MP.differentiate` cannot express.
+# The Jacobian of a sum of monomials comes from its exponents. Any other input is
+# differentiated symbolically on `Expression`, which covers division, non-integer
+# and negative powers, and the unary functions.
 
 function expression_index_map(values::AbstractVector{Expression})::Dict{Symbol, Int}
     index_map = Dict{Symbol, Int}()
@@ -24,10 +24,13 @@ end
 # separates products the tape compiler would otherwise fuse into a multiply-add. The
 # Jacobian of such a sum comes straight from its exponents.
 
-# Coefficient of the monomial `e`, its exponents added into `exps`; `found` is
+# A monomial as `(symbol, exponent)` pairs in ascending symbol order.
+const SparseMonomial = Vector{Tuple{Int, Int32}}
+
+# Coefficient of the monomial `e`, its exponents pushed onto `exps`; `found` is
 # `false` when `e` is not a monomial in the indexed symbols.
 function monomial_coefficient!(
-        exps::Vector{Int32}, e::Expression, index::Dict{Symbol, Int},
+        exps::SparseMonomial, e::Expression, index::Dict{Symbol, Int},
     )::ExprNumber
     return @match e begin
         SymExpr.ENum(val) => ExprNumber(true, val)
@@ -48,27 +51,38 @@ function monomial_coefficient!(
 end
 
 function add_exponent!(
-        exps::Vector{Int32}, index::Dict{Symbol, Int}, name::Symbol, k::Int,
+        exps::SparseMonomial, index::Dict{Symbol, Int}, name::Symbol, k::Int,
     )::ExprNumber
     i = get(index, name, 0)
     i == 0 && return ExprNumber(false, zero(ComplexF64))
-    exps[i] += Int32(k)
+    push!(exps, (i, Int32(k)))
     return ExprNumber(true, one(ComplexF64))
 end
 
-# The terms of `e` as columns of exponents and their coefficients. `found` is
+function canonical_monomial(exps::SparseMonomial)::SparseMonomial
+    sort!(exps)
+    out = SparseMonomial()
+    for (i, k) in exps
+        if !isempty(out) && out[end][1] == i
+            out[end] = (i, out[end][2] + k)
+        else
+            push!(out, (i, k))
+        end
+    end
+    return out
+end
+
+# The terms of `e` as sparse monomials and their coefficients. `found` is
 # `false` when `e` is not a sum of monomials, possibly scaled by a number.
 struct MonomialSum
     found::Bool
-    exponents::Matrix{Int32}
+    monomials::Vector{SparseMonomial}
     coefficients::Vector{ComplexF64}
 end
 
-not_a_monomial_sum(n::Int)::MonomialSum =
-    MonomialSum(false, Matrix{Int32}(undef, n, 0), ComplexF64[])
+not_a_monomial_sum()::MonomialSum = MonomialSum(false, SparseMonomial[], ComplexF64[])
 
 function monomial_sum(e::Expression, index::Dict{Symbol, Int})::MonomialSum
-    n = length(index)
     # A scaled sum `s * (t₁ + … + tₖ)` distributes its scale over the terms.
     scale = one(ComplexF64)
     body = e
@@ -89,30 +103,28 @@ function monomial_sum(e::Expression, index::Dict{Symbol, Int})::MonomialSum
         scale = one(ComplexF64)
     end
     terms = expression_summands(body)
-    E = zeros(Int32, n, length(terms))
+    monomials = Vector{SparseMonomial}(undef, length(terms))
     c = Vector{ComplexF64}(undef, length(terms))
-    exps = zeros(Int32, n)
+    exps = SparseMonomial()
     for (k, t) in enumerate(terms)
-        fill!(exps, Int32(0))
+        empty!(exps)
         v = monomial_coefficient!(exps, t, index)
-        v.found || return not_a_monomial_sum(n)
-        E[:, k] .= exps
+        v.found || return not_a_monomial_sum()
+        monomials[k] = canonical_monomial(exps)
         c[k] = scale * v.val
     end
-    return MonomialSum(true, E, c)
+    return MonomialSum(true, monomials, c)
 end
 
 # Symbols `1:nvars` are variables, the rest parameters.
-function monomial_sum_sexpr(
-        g::SGraph, E::AbstractMatrix{Int32}, c::Vector{ComplexF64}, nvars::Int,
-    )::Int32
+function monomial_sum_sexpr(g::SGraph, s::MonomialSum, nvars::Int)::Int32
     terms = Int32[]
-    for k in eachindex(c)
-        coeff = c[k]
+    for k in eachindex(s.coefficients)
+        coeff = s.coefficients[k]
         iszero(coeff) && continue
         factors = Int32[]
-        for i in axes(E, 1)
-            e = Int(E[i, k])
+        for (i, e32) in s.monomials[k]
+            e = Int(e32)
             e == 0 && continue
             base = i <= nvars ? svar!(g, i) : sparam!(g, i - nvars)
             push!(factors, e == 1 ? base : spow!(g, base, e))
@@ -146,15 +158,25 @@ function monomial_of(g::SGraph, t::Int32)::Int32
     return t
 end
 
-# Derivative of a sum of monomials in symbol `j`.
-function differentiate_monomials(
-        E::Matrix{Int32}, c::Vector{ComplexF64}, j::Int,
-    )::Tuple{Matrix{Int32}, Vector{ComplexF64}}
-    keep = findall(k -> E[j, k] > 0, eachindex(c))
-    dE = E[:, keep]
-    dc = ComplexF64[c[k] * E[j, k] for k in keep]
-    dE[j, :] .-= Int32(1)
-    return dE, dc
+# Derivatives of a sum of monomials in each of the variables `1:nvars`, from one
+# pass over its terms.
+function differentiate_monomials(s::MonomialSum, nvars::Int)::Vector{MonomialSum}
+    derivatives = MonomialSum[MonomialSum(true, SparseMonomial[], ComplexF64[]) for _ in 1:nvars]
+    for (mono, coeff) in zip(s.monomials, s.coefficients)
+        for (pos, (j, e)) in enumerate(mono)
+            j <= nvars || continue
+            d = derivatives[j]
+            dmono = copy(mono)
+            if e == 1
+                deleteat!(dmono, pos)
+            else
+                dmono[pos] = (j, e - Int32(1))
+            end
+            push!(d.monomials, dmono)
+            push!(d.coefficients, coeff * e)
+        end
+    end
+    return derivatives
 end
 
 function build_instruction_sequence_from_expressions(
@@ -172,6 +194,9 @@ function build_instruction_sequence_from_expressions(
 
     symbol_index = copy(var_to_idx)
     for (name, i) in param_to_idx
+        haskey(var_to_idx, name) && throw(
+            ArgumentError("`$name` is declared both as a variable and as a parameter."),
+        )
         symbol_index[name] = nvars + i
     end
     sums = MonomialSum[monomial_sum(e, symbol_index) for e in exprs]
@@ -180,21 +205,21 @@ function build_instruction_sequence_from_expressions(
     all_exprs = Vector{Int32}(undef, output_dim)
     for i in eachindex(exprs)
         s = sums[i]
-        all_exprs[i] = s.found ?
-            monomial_sum_sexpr(g, s.exponents, s.coefficients, nvars) :
+        all_exprs[i] = s.found ? monomial_sum_sexpr(g, s, nvars) :
             expression_to_sexpr(g, exprs[i], var_to_idx, param_to_idx)
     end
 
     if include_jacobian
+        derivatives = Vector{MonomialSum}[
+            s.found ? differentiate_monomials(s, nvars) : MonomialSum[] for s in sums
+        ]
         # Column-major: all equations for variable 1, then variable 2, ...
         for (j, v) in enumerate(variables)
             sym = Symbol(v)
             for (i, f) in enumerate(exprs)
-                s = sums[i]
                 push!(
-                    all_exprs, if s.found
-                        dE, dc = differentiate_monomials(s.exponents, s.coefficients, j)
-                        monomial_sum_sexpr(g, dE, dc, nvars)
+                    all_exprs, if sums[i].found
+                        monomial_sum_sexpr(g, derivatives[i][j], nvars)
                     else
                         expression_to_sexpr(g, differentiate_expression(f, sym), var_to_idx, param_to_idx)
                     end,

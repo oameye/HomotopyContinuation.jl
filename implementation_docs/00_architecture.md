@@ -28,7 +28,7 @@ DynamicPolynomials ──→ Expression
                    InstructionSequence
 ```
 
-`SExpr` and execution instructions are Moshi tagged unions with concrete storage. Jacobians are differentiated symbolically before lowering. The tape compiler performs instruction selection/fusion, ordering, and register allocation once during setup.
+User `Expression`s and execution instructions are Moshi tagged unions with concrete storage. `SExpr` nodes are interned in one `SGraph` arena and named by `Int32` ids, so CSE equality and hashing are integer operations. A sum of monomials gets its Jacobian from its exponents; any other expression is differentiated symbolically before lowering. The tape compiler performs instruction selection/fusion, ordering, and register allocation once during setup.
 
 ## Evaluation backends
 

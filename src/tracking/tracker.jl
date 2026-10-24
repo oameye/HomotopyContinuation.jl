@@ -479,7 +479,7 @@ Initialize the tracker for tracking a path from `t₁` to `t₀` starting at `x�
 Returns `TrackerCode.TRACKING` on success, or an error code if the start value
 is invalid.
 
-Warm-start kwargs: `ω` and `μ` seed the Newton certificates from a previous
+Warm-start arguments: `ω` and `μ` seed the Newton certificates from a previous
 track of the same point (skipping the initial Newton correction when both are
 given), and `extended_precision = true` starts in extended precision.
 """

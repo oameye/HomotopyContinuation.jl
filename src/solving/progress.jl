@@ -33,27 +33,31 @@ function progress_showvalues(stats::ProgressStats, ntracked::Int)
     )
 end
 
-function make_progress(
-        n::Int, desc::String = "Tracking $n paths... ",
-    )::ProgressMeter.Progress
-    # `barlen` is left unset so ProgressMeter auto-sizes the bar to the terminal
-    # width (avoids depending on the internal `tty_width`).
-    progress = ProgressMeter.Progress(n; dt = 0.2, desc = desc, output = stdout)
-    progress.tlast += 0.3
-    return progress
+# `stdout` is a global of abstract type `IO`, so a meter built with `output = stdout`
+# has the runtime type of whatever stream it is, which inference cannot see. Storing
+# the stream behind `IO` keeps the meter one concrete type.
+const ProgressBar = ProgressMeter.Progress{IO}
+const ProgressSpinner = ProgressMeter.ProgressUnknown{IO}
+
+function stdout_progress_core(desc::String, dt::Float64)::ProgressMeter.ProgressCore{IO}
+    core = ProgressMeter.ProgressCore{IO}(; output = stdout, dt = dt, desc = desc)
+    core.tlast += 0.3
+    return core
 end
 
-function make_many_progress(n::Int)::ProgressMeter.Progress
-    progress = ProgressMeter.Progress(
-        n; dt = 0.2, desc = "Solving for $n targets... ", output = stdout,
-    )
-    progress.tlast += 0.3
-    return progress
-end
+# `barlen` is left unset so ProgressMeter auto-sizes the bar to the terminal width.
+make_progress(n::Int, desc::String = "Tracking $n paths... ")::ProgressBar =
+    ProgressMeter.Progress(n, stdout_progress_core(desc, 0.2))
+
+make_many_progress(n::Int)::ProgressBar =
+    ProgressMeter.Progress(n, stdout_progress_core("Solving for $n targets... ", 0.2))
+
+make_progress_spinner(desc::String, dt::Float64, spinner::Bool)::ProgressSpinner =
+    ProgressMeter.ProgressUnknown(spinner, stdout_progress_core(desc, dt))
 
 @inline update_many_progress!(::Nothing, ::Int, ::Int)::Nothing = nothing
 function update_many_progress!(
-        progress::ProgressMeter.Progress, nsolved::Int, ntracked::Int,
+        progress::ProgressBar, nsolved::Int, ntracked::Int,
     )::Nothing
     ProgressMeter.update!(
         progress, nsolved;
@@ -64,7 +68,7 @@ end
 
 @inline update_progress!(::Nothing, ntracked::Int, ::ProgressStats, ::PathResult)::Nothing = nothing
 function update_progress!(
-        progress::ProgressMeter.Progress, ntracked::Int, stats::ProgressStats, r::PathResult,
+        progress::ProgressBar, ntracked::Int, stats::ProgressStats, r::PathResult,
     )::Nothing
     record!(stats, r)
     ProgressMeter.update!(progress, ntracked; showvalues = progress_showvalues(stats, ntracked))
@@ -72,7 +76,7 @@ function update_progress!(
 end
 
 @inline next_progress!(::Nothing)::Nothing = nothing
-function next_progress!(progress::ProgressMeter.Progress)::Nothing
+function next_progress!(progress::ProgressBar)::Nothing
     ProgressMeter.next!(progress)
     return nothing
 end

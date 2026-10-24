@@ -148,7 +148,8 @@ function System(
         default_variables(exprs, params)
     end
     return System(
-        exprs, params, vars, compile, variable_group_indices(variable_groups, vars),
+        collect(Expression, exprs), params, vars, compile,
+        variable_group_indices(variable_groups, vars),
     )
 end
 
@@ -379,9 +380,27 @@ function normalize_expressions(
     normalized = map(enumerate(exprs)) do (i, e)
         scale = normalization_scale(expression_scale(e))
         scales[i] = scale
-        return e / scale
+        return divide_coefficients(e, scale)
     end
     return normalized, scales
+end
+
+function divide_coefficients(e::Expression, scale::Float64)::Expression
+    isone(scale) && return e
+    terms = @match e begin
+        SymExpr.EAdd(args) => args::Vector{Expression}
+        _ => Expression[e]
+    end
+    return eadd(Expression[divide_coefficient(t, scale) for t in terms])
+end
+
+function divide_coefficient(term::Expression, scale::Float64)::Expression
+    @match term begin
+        SymExpr.ENum(val) => return SymExpr.ENum(val / scale)
+        _ => nothing
+    end
+    base, c = split_coefficient(term)
+    return emul(Expression[SymExpr.ENum(c / scale), base])
 end
 
 ## ── System assembly ─────────────────────────────────────────────────────────

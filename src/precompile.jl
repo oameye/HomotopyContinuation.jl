@@ -34,7 +34,7 @@
                 default_solve, total_degree_serial, polyhedral_threaded,
                 parameter_homotopy_solve, monodromy_threaded,
             )
-            precompile(route, ()) || error("cannot precompile $route")
+            precompile(route, ()) || @warn "cannot precompile $route"
         end
     end
 end

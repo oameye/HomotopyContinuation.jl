@@ -1182,6 +1182,13 @@ function hypersurface_witness_set(
         f::Expression, vars::Vector{Expression}, rng::Random.MersenneTwister,
         alg::Intersection, exec::AbstractExecutor, projective::Bool,
     )::WitnessSet
+    extra = variables(f; parameters = vars)
+    isempty(extra) || throw(
+        ArgumentError(
+            "the hypersurface must be given in the variables of the witness set, " *
+                "but `$(f)` also uses $(join(extra, ", ")).",
+        ),
+    )
     (p, q) = num_den(f)
     (degree(p, vars) < 0 || degree(q, vars) < 0) && throw(
         ArgumentError(

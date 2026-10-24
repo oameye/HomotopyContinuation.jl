@@ -2,7 +2,7 @@ update_progress!(
     progress::Nothing, stats::MonodromyStatistics, queued::Int, solutions::Int, finish::Bool,
 ) = nothing
 function update_progress!(
-        progress::ProgressMeter.ProgressUnknown,
+        progress::ProgressSpinner,
         stats::MonodromyStatistics,
         queued::Int,
         solutions::Int,
@@ -181,15 +181,13 @@ function monodromy_solve!(
 end
 
 
-function make_monodromy_progress(MS::MonodromySolver)::ProgressMeter.ProgressUnknown
+function make_monodromy_progress(MS::MonodromySolver)::ProgressSpinner
     desc = if MS.options.equivalence_classes
         "Solutions (modulo group action) found:"
     else
         "Solutions found:"
     end
-    progress = ProgressMeter.ProgressUnknown(; dt = 0.4, desc = desc, output = stdout)
-    progress.tlast += 0.3
-    return progress
+    return make_progress_spinner(desc, 0.4, false)
 end
 
 @noinline function monodromy_without_progress!(
@@ -532,6 +530,17 @@ function monodromy_solve_body!(
     )
 end
 
+# The three start-data shapes, by dispatch. A parameter-free system is intersected
+# with a subspace, a parameterized one is tracked in parameter space, and `alg`'s
+# `SUBSPACE` parameter says which.
+@noinline function monodromy_start_pair(G, rng::Random.AbstractRNG)
+    start_pair = find_start_pair(G; rng = rng)
+    start_pair.found || error(
+        "Cannot compute a start pair (x, p) using `find_start_pair(F)`." *
+            " You need to explicitly pass a start pair.",
+    )
+    return start_pair
+end
 
 """
     solve(F, alg::Monodromy, exec = Threaded())
@@ -609,18 +618,6 @@ hand to another process as to track.
 * `unique_points_atol` / `unique_points_rtol`: tolerances for the solution
   deduplication.
 """
-# The three start-data shapes, by dispatch. A parameter-free system is intersected
-# with a subspace, a parameterized one is tracked in parameter space, and `alg`'s
-# `SUBSPACE` parameter says which.
-@noinline function monodromy_start_pair(G, rng::Random.AbstractRNG)
-    start_pair = find_start_pair(G; rng = rng)
-    start_pair.found || error(
-        "Cannot compute a start pair (x, p) using `find_start_pair(F)`." *
-            " You need to explicitly pass a start pair.",
-    )
-    return start_pair
-end
-
 function solve(
         F::Union{SystemLike, PolynomialInput},
         alg::Monodromy{MO, V, P, false},
