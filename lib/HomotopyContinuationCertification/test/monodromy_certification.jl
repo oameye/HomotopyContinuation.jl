@@ -4,7 +4,8 @@ using HomotopyContinuation:
     solve, solutions, nsolutions, nresults, results, is_success, is_singular,
     winding_number, slice, parameters, LinearSubspace, PathResult, PathResultCode,
     DuplicateCheck, SubspaceCoords, ncertified_distinct, ndiscarded_uncertified, add!,
-    accuracy, residual, condition_jacobian, path_results
+    accuracy, residual, condition_jacobian, path_results, TrackerOptions
+using Random: Random
 using HomotopyContinuationCertification:
     Certification, certify, ndistinct_certified
 using DynamicPolynomials: differentiate
@@ -73,8 +74,8 @@ certified(; kwargs...) = Monodromy(;
             ComplexF64[1.0], Float64[], 1,
         )
         with_monodromy_solver(
-            F, p;
-            options = MonodromyOptions(; duplicate_check = DuplicateCheck.CERTIFIED),
+            F, p, MonodromyOptions(; duplicate_check = DuplicateCheck.CERTIFIED),
+            TrackerOptions(), Random.default_rng(), Vector{ComplexF64}[],
         ) do MS
             id, added, accepted = add!(MS, singular_endpoint, 1)
             @test added
@@ -101,11 +102,12 @@ certified(; kwargs...) = Monodromy(;
             ComplexF64[100.0], Float64[], 1,
         )
         with_monodromy_solver(
-            F, p;
-            options = MonodromyOptions(;
+            F, p,
+            MonodromyOptions(;
                 duplicate_check = DuplicateCheck.CERTIFIED,
                 certification_refine_solution = false,
             ),
+            TrackerOptions(), Random.default_rng(), Vector{ComplexF64}[],
         ) do MS_raw
             id_far, added_far, _ = add!(MS_raw, far_off, 1)
             @test !added_far

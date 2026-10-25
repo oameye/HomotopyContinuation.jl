@@ -110,6 +110,8 @@ end
     return @inbounds tree.scratch[depth]
 end
 
+lt_first(a::Tuple{Float64, Int}, b::Tuple{Float64, Int})::Bool = isless(first(a), first(b))
+
 function compute_distances!(
         distances::Vector{Tuple{Float64, Int}}, tree::VoronoiTree, node::VTNode, x,
     )::Nothing
@@ -194,7 +196,7 @@ function tree_search_in_radius!(
 
     # Case 3: child recursions used deeper scratch buffers, so this node's
     # distances are still intact and can be sorted now.
-    sort!(view(distances, 1:n); alg = Base.Sort.InsertionSort, by = first)
+    insertion_sort!(distances, 1, n, lt_first)
 
     # Start at 4: the three smallest were already checked.
     for k in 4:n

@@ -13,6 +13,11 @@ expression_summands(e::Expression)::Vector{Expression} = @match e begin
     _ => Expression[e]
 end
 
+expression_factors(e::Expression)::Vector{Expression} = @match e begin
+    SymExpr.EMul(args) => args::Vector{Expression}
+    _ => Expression[e]
+end
+
 function distribute(
         terms::Vector{Expression}, factor::Vector{Expression},
     )::Vector{Expression}
@@ -227,7 +232,7 @@ to_dict(f::Expression, vars::AbstractVector{Expression})::Dict{Vector{Int}, Expr
 # degree is cached per vector rather than resummed on every comparison.
 function sorted_td(exponents::Vector{Vector{Int}})::Vector{Vector{Int}}
     keyed = Tuple{Int, Vector{Int}}[(sum(e; init = 0), e) for e in exponents]
-    sort!(keyed; lt = (a, b) -> a[1] == b[1] ? a[2] > b[2] : a[1] > b[1])
+    stable_sort!(keyed, (a, b) -> a[1] == b[1] ? a[2] > b[2] : a[1] > b[1])
     return Vector{Int}[e for (_, e) in keyed]
 end
 
@@ -362,7 +367,7 @@ function monomial_exponents!(
     return nothing
 end
 
-function monomial_exponents(n::Int, d::Int; affine::Bool)::Vector{Vector{Int}}
+function monomial_exponents(n::Int, d::Int, affine::Bool)::Vector{Vector{Int}}
     E = Vector{Int}[]
     monomial_exponents!(E, zeros(Int, n), 1, d, affine)
     return sorted_td(E)
@@ -404,7 +409,7 @@ function monomials(
         vars::AbstractVector{Expression}, d::Integer;
         homogeneous::Bool = false, affine::Bool = !homogeneous,
     )::Vector{Expression}
-    exponents = monomial_exponents(length(vars), Int(d); affine = affine)
+    exponents = monomial_exponents(length(vars), Int(d), affine)
     return Expression[expression_monomial(vars, e) for e in exponents]
 end
 
@@ -412,7 +417,7 @@ function monomials(
         vars::AbstractVector{Expression}, degrees::AbstractVector{<:Integer},
     )::Vector{Expression}
     out = Expression[]
-    for d in sort(degrees; rev = true)
+    for d in stable_sort!(collect(Int, degrees), isgreater_than)
         append!(out, monomials(vars, d; homogeneous = true))
     end
     return out
@@ -457,7 +462,7 @@ function coeffs_as_dense_poly(
         f::Expression, vars::AbstractVector{Expression}, d::Integer;
         homogeneous::Bool = false,
     )::Vector{ComplexF64}
-    exponents = monomial_exponents(length(vars), Int(d); affine = !homogeneous)
+    exponents = monomial_exponents(length(vars), Int(d), !homogeneous)
     terms = terms_or_throw(f, vars)
     out = zeros(ComplexF64, length(exponents))
     for (i, e) in enumerate(exponents)

@@ -67,7 +67,7 @@ function init!(
         eg::EndgameTracker,
         x₀::AbstractVector{<:Number},
         t₁::ComplexF64 = complex(1.0),
-        t₀::ComplexF64 = complex(0.0);
+        t₀::ComplexF64 = complex(0.0),
         ω::Float64 = NaN,
         μ::Float64 = NaN,
         extended_precision::Bool = false,
@@ -78,12 +78,8 @@ function init!(
     init!(eg.val)
 
     tracker_code = init!(
-        eg.tracker, x₀, t₁, t₀;
-        ω = ω,
-        μ = μ,
-        extended_precision = extended_precision,
-        max_initial_step_size = max_initial_step_size,
-        keep_steps = keep_steps,
+        eg.tracker, x₀, t₁, t₀, ω, μ, extended_precision, max_initial_step_size,
+        keep_steps,
     )
     if tracker_code != TrackerCode.TRACKING
         copyto!(eg.state.solution, eg.tracker.state.x)
@@ -109,8 +105,7 @@ function tracking_stopped!(eg::EndgameTracker)::Nothing
 
     if ts.code == TrackerCode.TRACKER_SUCCESS && state.accuracy > 1.0e-14
         state.accuracy = refine_current_solution!(
-            eg.tracker; min_tol = 1.0e-14,
-            nsteps = opts.refine_steps
+            eg.tracker, 1.0e-14, opts.refine_steps,
         )
     end
 

@@ -70,7 +70,7 @@ end
     @testset "construction and validation" begin
         @polyvar x y v w
         F = System([x * y - 2v * w, x^2 - 4 * v^2]; variable_groups = [[x, v], [y, w]])
-        @test collect(variables(F)) == [x, v, y, w]
+        @test collect(variables(F)) == Expression.([x, v, y, w])
         @test variable_groups(F) == [[1, 2], [3, 4]]
         @test degrees(F) == [2, 2]
 

@@ -106,7 +106,7 @@ end
 
 function track!(
         eg::EndgameTracker,
-        x₀::AbstractVector{<:Number};
+        x₀::AbstractVector{<:Number},
         t₁::ComplexF64 = complex(1.0),
         t₀::ComplexF64 = complex(0.0),
         ω::Float64 = NaN,
@@ -114,8 +114,7 @@ function track!(
         extended_precision::Bool = false,
     )::EndgameCode.T
     code = init!(
-        eg, x₀, t₁, t₀;
-        ω = ω, μ = μ, extended_precision = extended_precision,
+        eg, x₀, t₁, t₀, ω, μ, extended_precision,
     )
     if code != EndgameCode.TRACKING
         return code

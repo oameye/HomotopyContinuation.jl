@@ -33,6 +33,14 @@ function moshi_binding(report)
     return startswith(string(var isa GlobalRef ? var.name : var), "##")
 end
 
+# Every lock's slow path reaches `Base.wait_forever`, the scheduler's last resort,
+# which prints a fatal error through `display_error`. That dispatch belongs to Base
+# and says nothing about the package line that took the lock.
+scheduler_fatal_error(report) = any(report.vst) do frame
+    method = frame.linfo.def
+    method isa Method && method.module === Base && method.name === :wait_forever
+end
+
 report_text(report) = sprint(show, MIME("text/plain"), report)
 
 function test_no_reports(reports)
@@ -68,6 +76,7 @@ function unexempted_dispatch(tt, owners, exemptions, hit = Set{Tuple{Symbol, Str
     return filter(JET.get_reports(JET.report_opt(tt))) do r
         r isa JET.OptimizationFailureReport &&
             package_method(r.vst[end], owners) === nothing && return false
+        scheduler_fatal_error(r) && return false
         site = call_site(r, owners)
         site === nothing && return false
         push!(hit, site)

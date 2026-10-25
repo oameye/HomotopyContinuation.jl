@@ -63,7 +63,7 @@ function trace_step(L::LinearSubspace, results::Vector{PathResult})::Float64
         (isfinite(ν) && ν > 0) && push!(norms, ν)
     end
     isempty(norms) && return 1.0
-    sort!(norms)
+    stable_sort!(norms, isless)
     n = length(norms)
     return isodd(n) ? norms[(n + 1) ÷ 2] : 0.5 * (norms[n ÷ 2] + norms[n ÷ 2 + 1])
 end
@@ -171,7 +171,7 @@ function loops_no_change(stats::MonodromyStatistics, nsolutions::Int)
 end
 
 @noinline function make_showvalues(
-        stats::MonodromyStatistics; queued::Int, solutions::Int,
+        stats::MonodromyStatistics, queued::Int, solutions::Int,
     )
     return [
         ("tracked loops (queued)", "$(stats.tracked_loops[]) ($queued)"),

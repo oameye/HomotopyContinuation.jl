@@ -259,16 +259,15 @@ const PROGRESS_DT = 0.2
 
 # How many passes the refinement needs is not known in advance, so the meter counts
 # paths tracked rather than a fraction of a known total.
-function _iterator_progress(delay::Float64 = 0.3)
-    meter = ProgressMeter.ProgressUnknown(;
-        dt = PROGRESS_DT, desc = "Certifying iterator... ", output = stdout, spinner = true,
-    )
-    meter.tlast += delay
-    return meter
-end
+_iterator_progress()::ProgressSpinner =
+    make_progress_spinner("Certifying iterator... ", PROGRESS_DT, true)
+
+phase_name(phase::IteratorCertificationPhase.T)::String =
+    phase === IteratorCertificationPhase.assignment ? "assignment" :
+    phase === IteratorCertificationPhase.refinement ? "refinement" : "finished"
 
 _showvalues(s::IteratorCertificationStats) = (
-    ("phase", string(s.phase)),
+    ("phase", phase_name(s.phase)),
     ("# paths tracked", s.ntracked),
     ("# certified (not certified)", string(s.certified, " (", s.not_certified, ")")),
     ("# distinct certified", s.distinct),
@@ -430,7 +429,7 @@ struct IteratorCertificationContext{
     # write per entry rather than a walk over every start solution.
     selected::Vector{Int}
     stats::IteratorCertificationStats
-    meter::Union{Nothing, ProgressMeter.ProgressUnknown}
+    meter::Union{Nothing, ProgressSpinner}
 end
 
 # Track every path the iterator selects, certify the successful endpoints, and

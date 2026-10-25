@@ -322,8 +322,7 @@ function use_extended_precision!(tracker::Tracker)::Float64
     for _ in 1:2
         μ = extended_prec_refinement_step!(
             state.x, tracker.corrector, tracker.homotopy, state.x,
-            state.segment.t, state.jacobian, state.norm;
-            simple_newton_step = false,
+            state.segment.t, state.jacobian, state.norm, false,
         )
     end
     state.μ = max(μ, eps())
@@ -349,9 +348,7 @@ function update_precision!(tracker::Tracker, μ_low::Float64)::Bool
 end
 
 function refine_current_solution!(
-        tracker::Tracker;
-        min_tol::Float64 = 4 * eps(),
-        nsteps::Int = 3,
+        tracker::Tracker, min_tol::Float64, nsteps::Int,
     )::Float64
     state = tracker.state
     state.used_extended_prec = true
@@ -359,8 +356,7 @@ function refine_current_solution!(
     μ = state.accuracy
     μ̄ = extended_prec_refinement_step!(
         state.x̄, tracker.corrector, tracker.homotopy, state.x,
-        state.segment.t, state.jacobian, state.norm;
-        simple_newton_step = false,
+        state.segment.t, state.jacobian, state.norm, false,
     )
     if μ̄ < μ
         copyto!(state.x, state.x̄)
@@ -371,7 +367,7 @@ function refine_current_solution!(
     while μ > min_tol && k <= nsteps
         μ̄ = extended_prec_refinement_step!(
             state.x̄, tracker.corrector, tracker.homotopy, state.x,
-            state.segment.t, state.jacobian, state.norm,
+            state.segment.t, state.jacobian, state.norm, true,
         )
         if μ̄ < μ
             copyto!(state.x, state.x̄)
@@ -426,7 +422,7 @@ function step!(tracker::Tracker)::Bool
         state.cond_J_ẋ = pred.cond_H_x
 
         if is_done(state.segment) && opts.extended_precision && state.accuracy > 1.0e-14
-            state.accuracy = refine_current_solution!(tracker; min_tol = 1.0e-14)
+            state.accuracy = refine_current_solution!(tracker, 1.0e-14, 3)
             state.μ = max(state.accuracy, eps())
         end
 
@@ -483,7 +479,7 @@ Initialize the tracker for tracking a path from `t₁` to `t₀` starting at `x�
 Returns `TrackerCode.TRACKING` on success, or an error code if the start value
 is invalid.
 
-Warm-start kwargs: `ω` and `μ` seed the Newton certificates from a previous
+Warm-start arguments: `ω` and `μ` seed the Newton certificates from a previous
 track of the same point (skipping the initial Newton correction when both are
 given), and `extended_precision = true` starts in extended precision.
 """
@@ -491,7 +487,7 @@ function init!(
         tracker::Tracker,
         x₀::AbstractVector{<:Number},
         t₁::ComplexF64 = complex(1.0),
-        t₀::ComplexF64 = complex(0.0);
+        t₀::ComplexF64 = complex(0.0),
         ω::Float64 = NaN,
         μ::Float64 = NaN,
         extended_precision::Bool = false,
@@ -627,13 +623,13 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    track!(tracker::Tracker, x₀; t₁, t₀) -> TrackerCode.T
+    track!(tracker::Tracker, x₀, t₁, t₀) -> TrackerCode.T
 
 Track a path from `t₁` to `t₀` starting at `x₀`. Returns the final tracker code.
 """
 function track!(
         tracker::Tracker,
-        x₀::AbstractVector{ComplexF64};
+        x₀::AbstractVector{ComplexF64},
         t₁::ComplexF64 = complex(1.0),
         t₀::ComplexF64 = complex(0.0),
         ω::Float64 = NaN,
@@ -641,8 +637,7 @@ function track!(
         extended_precision::Bool = false,
     )::TrackerCode.T
     code = init!(
-        tracker, x₀, t₁, t₀;
-        ω = ω, μ = μ, extended_precision = extended_precision,
+        tracker, x₀, t₁, t₀, ω, μ, extended_precision,
     )
     if code != TrackerCode.TRACKING
         return code

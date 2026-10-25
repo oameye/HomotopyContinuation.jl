@@ -33,9 +33,6 @@ in `(x, p)` otherwise. Returns a [`StartPair`](@ref); `pair.found` is `false` if
 no pair could be found in `max_tries` tries. For a parameter-free system the
 returned pair has an empty `p`, so [`is_parameterized`](@ref) is `false`.
 """
-# Dispatches across the three start-pair strategies behind an inference barrier,
-# so a monodromy call compiles the one it uses. The concrete `StartPair` return
-# keeps the barrier invisible to callers.
 function find_start_pair(
         F::System;
         max_tries::Int = 1_000,
@@ -44,15 +41,9 @@ function find_start_pair(
         rng::Random.AbstractRNG = Random.default_rng(),
     )::StartPair
     refine_atol = atol > 0 ? atol : 1.0e-12
-    strategy = nparameters(F) == 0 ?
-        parameter_free_start_pair : parameterized_start_pair
-    # Parameter count is construction-time policy stored as a runtime field.
-    # Prevent inference from traversing both Newton-on-F and parameter-system
-    # construction for every automatic monodromy start.
-    strategy = Base.inferencebarrier(strategy)
-    return dispatch_start_pair_strategy(
-        strategy, F, rng, max_tries, refine_atol, rtol,
-    )
+    nparameters(F) == 0 &&
+        return parameter_free_start_pair(F, rng, max_tries, refine_atol, rtol)
+    return parameterized_start_pair(F, rng, max_tries, refine_atol, rtol)
 end
 
 # A composition keeps no equations, so the symbolic strategies do not apply and
@@ -65,20 +56,9 @@ function find_start_pair(
         rng::Random.AbstractRNG = Random.default_rng(),
     )::StartPair
     refine_atol = atol > 0 ? atol : 1.0e-12
-    strategy = nparameters(C) == 0 ?
-        parameter_free_start_pair : composition_start_pair
-    strategy = Base.inferencebarrier(strategy)
-    return dispatch_start_pair_strategy(
-        strategy, C, rng, max_tries, refine_atol, rtol,
-    )
-end
-
-@noinline function dispatch_start_pair_strategy(
-        strategy::Function, F::SystemLike, rng::Random.AbstractRNG, max_tries::Int,
-        refine_atol::Float64, rtol::Float64,
-    )::StartPair
-    Base.@nospecialize strategy F
-    return strategy(F, rng, max_tries, refine_atol, rtol)
+    nparameters(C) == 0 &&
+        return parameter_free_start_pair(C, rng, max_tries, refine_atol, rtol)
+    return composition_start_pair(C, rng, max_tries, refine_atol, rtol)
 end
 
 @noinline function composition_start_pair(
@@ -144,13 +124,7 @@ end
         pair.found && return pair
     end
 
-    # The joint-Newton fallback is rare and much wider than the linear path.
-    # Cross a hard function barrier so successful linear starts do not compile
-    # it speculatively.
-    fallback = Base.inferencebarrier(joint_newton_start_pair)
-    return dispatch_start_pair_strategy(
-        fallback, F, rng, max_tries, refine_atol, rtol,
-    )
+    return joint_newton_start_pair(F, rng, max_tries, refine_atol, rtol)
 end
 
 @noinline function joint_newton_start_pair(
@@ -189,8 +163,6 @@ end
 function linear_in_params_start_pair(
         F::System, rng::Random.AbstractRNG,
     )::StartPair
-    # The term walk below needs a polynomial representation.
-    eltype(F.polys) <: MP.AbstractPolynomialLike || return StartPair()
     nvars = nvariables(F)
     np = nparameters(F)
     m = length(F.polys)
@@ -199,31 +171,24 @@ function linear_in_params_start_pair(
     x₀ = randn(rng, ComplexF64, nvars)
     vars = collect(F.variables)
     params = collect(F.parameters)
-    pidx = Dict(p => j for (j, p) in enumerate(params))
 
     A = zeros(ComplexF64, m, np)
     b = zeros(ComplexF64, m)
     for (i, f) in enumerate(F.polys)
-        g = MP.subs(f, vars => x₀)
+        g = subs(f, vars => x₀)
+        # Not polynomial in the parameters, or of degree two or more.
+        degree(g, params) == 1 || return StartPair()
+        E, c = exponents_coefficients(g, params)
         has_param_term = false
-        for t in MP.terms(g)
-            mon = MP.monomial(t)
-            d = MP.degree(mon)
+        for k in eachindex(c)
+            iszero(c[k]) && continue
+            d = sum(view(E, :, k))
             if d == 0
-                b[i] -= ComplexF64(MP.coefficient(t))
+                b[i] -= c[k]
             elseif d == 1
-                j = 0
-                for (v, e) in MP.powers(mon)
-                    if e > 0
-                        j = get(pidx, v, 0)
-                        break
-                    end
-                end
-                j == 0 && return StartPair()
-                A[i, j] += ComplexF64(MP.coefficient(t))
+                A[i, findfirst(!iszero, view(E, :, k))] += c[k]
                 has_param_term = true
             else
-                # parameter-degree >= 2 or a term mixing several parameters
                 return StartPair()
             end
         end

@@ -263,7 +263,6 @@ they do in [`System`](@ref); they are ignored when `F` is already a `System`.
 Accepts every [`MonodromyOptions`](@ref) keyword, or a pre-built `options` object.
 There is no `endgame_options`: this route runs no endgame.
 """
-# `SUBSPACE` says which route `solve(F, alg)` takes when given no start data.
 struct Monodromy{
         MO <: MonodromyOptions, V <: AbstractVector, P <: AbstractVector, SUBSPACE,
     } <: AbstractAlgorithm

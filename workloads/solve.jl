@@ -16,6 +16,7 @@ const SOLVE = (
     :multi_homogeneous,
     :singular_endgame,
     :progress_enabled,
+    :default_solve,
     :large_symbolic_interpreted_build,
     :large_symbolic_compiled_all_build,
     :composition_solve,
@@ -68,6 +69,11 @@ end
 
 run(::Val{:progress_enabled}) =
     solve_total_degree(CompileMode.INTERPRETED, Serial(); progress = true)
+
+function run(::Val{:default_solve})
+    @polyvar x y
+    return solve(System([x^2 + y - 1, x * y - 0.5]))
+end
 
 function katsura_system(n, mode)
     @polyvar x[1:(n + 1)]

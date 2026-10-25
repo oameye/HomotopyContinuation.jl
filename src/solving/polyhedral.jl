@@ -156,7 +156,7 @@ function randomize_support(
                 acc[col] = get(acc, col, zero(ComplexF64)) + a * c_j[t]
             end
         end
-        exponents = sort!(collect(keys(acc)))
+        exponents = stable_sort!(collect(keys(acc)), isless)
         new_support[i] = reduce(hcat, exponents)
         new_coeffs[i] = ComplexF64[acc[e] for e in exponents]
     end
@@ -475,8 +475,8 @@ end
 
 function fine_mixed_cells_canonical(
         support::Vector{Matrix{Int32}},
-        lifting_sampler;
-        max_tries::Int = 10,
+        lifting_sampler,
+        max_tries::Int,
     )::Tuple{Vector{MixedSubdivisions.MixedCell}, Vector{Vector{Int32}}}
     lifting = Vector{Int32}[Int32[] for _ in support]
     try
@@ -578,11 +578,8 @@ function CommonSolve.init(
         F::System, alg::Polyhedral,
         exec::E = Threaded(),
     )::PolyhedralSolveCache{E} where {E <: AbstractExecutor}
-    # Dynamic call: specializes the body on the concrete `System` so that
-    # the shape branch resolves against the concrete system.
-    initializer = Base.inferencebarrier(init_polyhedral)
     return with_polyhedral_system(F, alg) do G
-        initializer(G, alg, exec)::PolyhedralSolveCache{E}
+        init_polyhedral(G, alg, exec)
     end
 end
 
@@ -638,7 +635,7 @@ function init_polyhedral(
     # Custom lifting sampler that draws from our local rng for reproducibility.
     default_lifting_sampler(nterms::Int, attempt::Int = 1) =
         rand(rng, Int32(-2^(10 + attempt)):Int32(2^(10 + attempt)), nterms)
-    mixed_cells, lifting = fine_mixed_cells_canonical(support, default_lifting_sampler)
+    mixed_cells, lifting = fine_mixed_cells_canonical(support, default_lifting_sampler, 10)
 
     # 5. Solve binomial systems for each mixed cell. No cell means mixed volume 0, so
     #    there is no path to track and the cache is built empty.
@@ -712,8 +709,7 @@ function init_toric!(
     # Pass ω/μ directly so init! skips init_newton — the toric phase uses
     # empirically-tuned parameters since exact start solutions are known
     return init!(
-        tracker, x₀, t_start, t_end;
-        ω = 20.0, μ = 1.0e-12, max_initial_step_size = 0.2,
+        tracker, x₀, t_start, t_end, 20.0, 1.0e-12, false, 0.2,
     )
 end
 
@@ -765,15 +761,14 @@ function track_toric_phase!(
     saved_ω = tracker.state.ω
     saved_μ = tracker.state.μ
 
-    new_min_w, _ = update_weights!(H, support, lifting, cell; max_weight = 10.0)
+    new_min_w, _ = update_weights!(H, support, lifting, cell, NaN, 10.0)
     t_restart = t₀^(1.0 / new_min_w)
 
     # Re-init tracker from current solution at t_restart to 1.0
     # Pass ω/μ from stage 1, keep step counters
     code = init!(
-        tracker, tracker.state.x, complex(t_restart), complex(1.0);
-        ω = saved_ω, μ = saved_μ,
-        keep_steps = true,
+        tracker, tracker.state.x, complex(t_restart), complex(1.0), saved_ω, saved_μ,
+        false, Inf, true,
     )
 
     if code != TrackerCode.TRACKING
@@ -792,7 +787,7 @@ function track_polyhedral_path!(
         lifting::Vector{Vector{Int32}}, x_buffer::Vector{ComplexF64},
         cell::MixedSubdivisions.MixedCell, x₀::Vector{ComplexF64}, k::Int,
     )::PathResult
-    min_w, max_w = update_weights!(toric_H, support, lifting, cell; min_weight = 1.0)
+    min_w, max_w = update_weights!(toric_H, support, lifting, cell, 1.0, NaN)
 
     code = track_toric_phase!(
         toric_tracker, toric_H, x₀, min_w, max_w, support, lifting, cell,
@@ -809,7 +804,7 @@ function track_polyhedral_path!(
 
     copyto!(x_buffer, toric_tracker.state.x)
 
-    init!(coeff_tracker, x_buffer; μ = toric_tracker.state.μ)
+    init!(coeff_tracker, x_buffer, complex(1.0), complex(0.0), NaN, toric_tracker.state.μ)
     while coeff_tracker.state.code == EndgameCode.TRACKING
         step!(coeff_tracker)
     end

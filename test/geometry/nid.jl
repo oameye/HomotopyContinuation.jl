@@ -169,7 +169,7 @@ rand_poly(vars, d; homogeneous = false) = rand_poly(Float64, vars, d; homogeneou
             @test degree.(solve(Hd, Regeneration(; show_progress = false))) == [2]
         end
 
-        # Mixing the two input front-ends in one `intersect` is rejected.
+        # A hypersurface in variables the witness set does not have is rejected.
         @polyvar a b
         Wp = solve(System([a^2 + b^2 - 1]), Witness(; show_progress = false))
         @test_throws ArgumentError intersect(Wp, x + y)

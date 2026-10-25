@@ -56,12 +56,12 @@ end
 
 @inline function is_unlisted_vertex(
         v::Int32,
-        in_degree::Dict{Int32, Int},
-        out_degree::Dict{Int32, Int},
+        in_degree::Dict{Int32, Int32},
+        out_degree::Dict{Int32, Int32},
         roots::Vector{Int32},
     )::Bool
-    return get(in_degree, v, 0) == 0 &&
-        get(out_degree, v, 0) > 0 &&
+    return get(in_degree, v, Int32(0)) == 0 &&
+        get(out_degree, v, Int32(0)) > 0 &&
         v ∉ roots
 end
 
@@ -85,7 +85,7 @@ end
 
 """Remap a single instruction's inputs/outputs through a Dict, preserving immediate-value inputs."""
 function remap_instruction(
-        instr::Instruction, remap::Dict{Int32, Int32}; output_fallback::Bool = true,
+        instr::Instruction, remap::Dict{Int32, Int32}, output_fallback::Bool,
     )::Instruction
     op = instruction_op(instr)
     input = instruction_input(instr)
@@ -114,8 +114,8 @@ function optimize_instruction_order(
     index_to_instr = Dict{Int32, Instruction}()
     vertices = Set{Int32}()
     vertex_list = Int32[]
-    in_degree = Dict{Int32, Int}()
-    out_degree = Dict{Int32, Int}()
+    in_degree = Dict{Int32, Int32}()
+    out_degree = Dict{Int32, Int32}()
     children = Dict{Int32, Vector{Int32}}()
 
     for instr in instructions
@@ -125,17 +125,17 @@ function optimize_instruction_order(
         index_to_instr[output] = instr
         register_vertex!(vertices, vertex_list, output)
         get!(children, output, Int32[])
-        get!(in_degree, output, 0)
-        get!(out_degree, output, 0)
+        get!(in_degree, output, Int32(0))
+        get!(out_degree, output, Int32(0))
         for k in 1:arity(op)
             should_use_index_not_reference(op, k) && continue
             input_idx = input[k]
             register_vertex!(vertices, vertex_list, input_idx)
             push!(get!(children, output, Int32[]), input_idx)
-            in_degree[input_idx] = get(in_degree, input_idx, 0) + 1
-            out_degree[output] = get(out_degree, output, 0) + 1
-            get!(out_degree, input_idx, 0)
-            get!(in_degree, output, 0)
+            in_degree[input_idx] = get(in_degree, input_idx, Int32(0)) + Int32(1)
+            out_degree[output] = get(out_degree, output, Int32(0)) + Int32(1)
+            get!(out_degree, input_idx, Int32(0))
+            get!(in_degree, output, Int32(0))
         end
     end
 
@@ -143,7 +143,7 @@ function optimize_instruction_order(
     stable_sort!(vertex_list, isless)
     roots = Int32[]
     for v in vertex_list
-        get(in_degree, v, 0) == 0 && push!(roots, v)
+        get(in_degree, v, Int32(0)) == 0 && push!(roots, v)
     end
 
     while !isempty(roots)
@@ -156,18 +156,18 @@ function optimize_instruction_order(
             if u in vertices
                 delete!(vertices, u)
             end
-            out_degree[u] = 0
+            out_degree[u] = Int32(0)
             for v in u_children
-                in_degree[v] = get(in_degree, v, 0) - 1
-                if get(in_degree, v, 0) == 0 && get(out_degree, v, 0) > 0
+                in_degree[v] = get(in_degree, v, Int32(0)) - Int32(1)
+                if get(in_degree, v, Int32(0)) == 0 && get(out_degree, v, Int32(0)) > 0
                     push!(listing, v)
                     if v in vertices
                         delete!(vertices, v)
                     end
                     v_children = get(children, v, Int32[])
-                    out_degree[v] = 0
+                    out_degree[v] = Int32(0)
                     for w in v_children
-                        in_degree[w] = get(in_degree, w, 0) - 1
+                        in_degree[w] = get(in_degree, w, Int32(0)) - Int32(1)
                     end
                 end
             end
@@ -214,7 +214,7 @@ function reduce_space(
     remapped = Vector{Instruction}(undef, length(instructions))
     for i in eachindex(instructions)
         remapped[i] =
-            remap_instruction(instructions[i], index_map; output_fallback = false)
+            remap_instruction(instructions[i], index_map, false)
     end
 
     return remapped, space_needed, updated_scratch_assignments, direct_assignments

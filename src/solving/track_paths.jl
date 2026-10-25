@@ -121,17 +121,9 @@ end
 # `solve!` has one other method, CommonSolve's precompile iterator returning
 # `nothing`, so a caller whose cache type is not inferred names it as a
 # `PathSolveCache` to keep `solve!` inferred as `Result`.
-#
-# The progress variant is chosen behind `Base.inferencebarrier`, so a `solve` call
-# compiles only the one it runs.
 function CommonSolve.solve!(cache::PathSolveCache)::Result
-    runner = cache.show_progress ? track_all_paths_with_progress : track_all_paths
-    return dispatch_solve_policy(Base.inferencebarrier(runner), cache)
-end
-
-@noinline function dispatch_solve_policy(solver::Function, cache)::Result
-    Base.@nospecialize solver cache
-    return solver(cache)
+    cache.show_progress && return track_all_paths_with_progress(cache)
+    return track_all_paths(cache)
 end
 
 @noinline track_all_paths(cache::PathSolveCache)::Result = track_all_paths(cache, nothing)
