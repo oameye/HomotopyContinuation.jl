@@ -262,8 +262,12 @@ const PROGRESS_DT = 0.2
 _iterator_progress()::ProgressSpinner =
     make_progress_spinner("Certifying iterator... ", PROGRESS_DT, true)
 
+phase_name(phase::IteratorCertificationPhase.T)::String =
+    phase === IteratorCertificationPhase.assignment ? "assignment" :
+    phase === IteratorCertificationPhase.refinement ? "refinement" : "finished"
+
 _showvalues(s::IteratorCertificationStats) = (
-    ("phase", string(s.phase)),
+    ("phase", phase_name(s.phase)),
     ("# paths tracked", s.ntracked),
     ("# certified (not certified)", string(s.certified, " (", s.not_certified, ")")),
     ("# distinct certified", s.distinct),

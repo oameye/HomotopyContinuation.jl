@@ -12,6 +12,7 @@ const BOX = "RefValue{Any} box erases a factory or worker"
 const CODEGEN = "builds a RuntimeGeneratedFunction from an expression and erases it behind a FunctionWrapper"
 const PROGRESS = "ProgressMeter writes to `stdout`, an abstractly typed global, through untyped fields"
 const MESSAGE = "formats an error or warning message"
+const TASKS = "OhMyThreads `@tasks` checks its captures and builds its chunking keywords through runtime dispatch (JuliaFolds2/OhMyThreads.jl#179)"
 const VARIABLE_NAME = "names a user variable through its own `string`/`Symbol`"
 
 const EXEMPTIONS = Dict(
@@ -39,6 +40,7 @@ const EXEMPTIONS = Dict(
     (:update_many_progress!, "src/solving/progress.jl") => PROGRESS,
     (:update_progress!, "src/solving/monodromy/solve.jl") => PROGRESS,
     (:solve, "src/solving/regeneration.jl") => PROGRESS,
+    (:threaded_intersection!, "src/solving/regeneration.jl") => TASKS,
     (:support_mixed_volume, "src/solving/polyhedral.jl") => "MixedSubdivisions reports progress through ProgressMeter",
     (:compile_exec_instruction, "src/model_kit/interpreter.jl") => MESSAGE,
     (:monodromy_solve_body!, "src/solving/monodromy/solve.jl") => MESSAGE,

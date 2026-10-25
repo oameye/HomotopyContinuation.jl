@@ -17,12 +17,12 @@ const INTERVAL_TREES = "IntervalTrees' B-tree nodes hold abstractly typed fields
 const CERTIFICATION_EXEMPTIONS = Dict(
     (:_certify_impl, "lib/HomotopyContinuationCertification/src/certification.jl") => PROGRESS,
     (:distinct_certified_solutions!, "lib/HomotopyContinuationCertification/src/certification.jl") => PROGRESS,
-    (:_iterator_progress, "lib/HomotopyContinuationCertification/src/iterator_certification.jl") => PROGRESS,
     (:_draw_progress!, "lib/HomotopyContinuationCertification/src/iterator_certification.jl") => PROGRESS,
     (:_finish_progress!, "lib/HomotopyContinuationCertification/src/iterator_certification.jl") => PROGRESS,
     (:add_certificate!, "lib/HomotopyContinuationCertification/src/certification.jl") => INTERVAL_TREES,
     (:guaranteed_duplicate_certificate, "lib/HomotopyContinuationCertification/src/certification.jl") => INTERVAL_TREES,
     (:show, "lib/HomotopyContinuationCertification/src/certification.jl") => "Arblib formats a ball through a keyword `string`",
+    (:foreach_path, "src/solving/result_iterator.jl") => TASKS,
 )
 
 foreach(name -> CertificationWorkloads.run(Val(name)), CertificationWorkloads.workloads())
